@@ -171,17 +171,21 @@ void Engine::process(TrackState& state, steady::time_point now)
 {
     const SendReason reason = shouldSend(state, now, thresholds_);
     if (reason == SendReason::none) {
-        // A track that is not forwarded is re-checked whenever it has a
-        // position, so it comes back as soon as it is eligible again; at most
-        // once per min_interval_s since its last send, so a track on a filter
-        // boundary cannot flap at the observation rate.
-        if (state.currently_forwarded || !state.latest.lat)
+        if (!state.latest.lat)
             return;
-        if (state.last_sent && now - state.last_sent_at < std::chrono::duration<double>(thresholds_.min_interval_s))
+        // A forwarded track is evaluated on every positioned observation, so
+        // it is dropped as soon as it leaves the area. One that is not
+        // forwarded is re-checked so it comes back as soon as it is eligible
+        // again, at most once per min_interval_s since its last send, so a
+        // track on a filter boundary cannot flap at the observation rate.
+        if (!state.currently_forwarded && state.last_sent &&
+            now - state.last_sent_at < std::chrono::duration<double>(thresholds_.min_interval_s))
             return;
     }
     const FilterResult result = filters_.evaluate(state);
     if (isSend(result.decision)) {
+        if (reason == SendReason::none && state.currently_forwarded)
+            return;  // still eligible; nothing worth sending yet
         const skycue::Track track = toTrack(state, false, result.alt_is_geom);
         forwarder_.sendUpdate(track);
         markSent(state, track, now);
@@ -227,18 +231,17 @@ void Engine::handleConnection(bool up)
     }
     if (!was)
         return;  // already down; the timer from the first loss keeps running
-    LOG_WARN("source lost; forwarded tracks are dropped if it is not back within " << config_.track_timeout_s
+    LOG_WARN("source lost; forwarded tracks are dropped if it is not back within " << track_timeout_.count()
                                                                                     << " s");
     const unsigned gen = ++lost_gen_;
-    lost_timer_.expires_after(std::chrono::duration_cast<steady::duration>(
-        std::chrono::duration<double>(std::max(0.0, config_.track_timeout_s))));
+    lost_timer_.expires_after(track_timeout_);  // the same value expire() uses
     std::weak_ptr<char> alive = alive_;
     lost_timer_.async_wait([this, gen, alive](const error_code& ec) {
         if (ec || alive.expired() || gen != lost_gen_ || stopped_ || source_connected_)
             return;
         size_t n = 0;
         table_.forEach([&](TrackState& s) { n += s.currently_forwarded ? 1 : 0; });
-        LOG_WARN("source still lost after " << config_.track_timeout_s << " s: dropping " << n
+        LOG_WARN("source still lost after " << track_timeout_.count() << " s: dropping " << n
                                             << " forwarded tracks");
         dropAllForwarded(skycue::DropReason::source_lost);
     });

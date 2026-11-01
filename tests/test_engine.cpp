@@ -643,6 +643,12 @@ BOOST_AUTO_TEST_CASE(keyframes_not_recorded_but_updates_are)
         ev.attach(client);
         client.start();
         std::this_thread::sleep_for(3s);  // replay (2.4 s) with several keyframe bursts
+        {
+            std::lock_guard<std::mutex> lk(ev.m);
+            const auto keyframes = std::count_if(ev.updates.begin(), ev.updates.end(),
+                                                 [](const Track& tr) { return tr.keyframe; });
+            BOOST_TEST(keyframes >= 1);  // keyframes were sent, so "not recorded" means something
+        }
         fx.stop();
         BOOST_TEST(ev.waitFor([&] { return ev.dropsWith(DropReason::shutdown) >= 1 || !ev.drops.empty(); }));
         client.stop();
@@ -684,4 +690,60 @@ BOOST_AUTO_TEST_CASE(replay_reads_a_readsb_capture)
     BOOST_TEST(src.recordCount() == parseable);
     BOOST_TEST(got == parseable);
     BOOST_TEST((conns == std::vector<bool>{true, false}));  // the end counts as lost
+}
+
+BOOST_AUTO_TEST_CASE(startup_filter_change_records_list_sizes)
+{
+    TempDir tmp;
+    {
+        std::ofstream(tmp.path + "/block.txt") << "a4f2c1\n";
+        std::ofstream(tmp.path + "/allow.txt") << "N512RG\nab12f0\n";
+    }
+    Config cfg = baseConfig();
+    cfg.block_list_file = tmp.path + "/block.txt";
+    cfg.allow_list_file = tmp.path + "/allow.txt";
+    {
+        EngineFx fx(
+            cfg, [](asio::io_context&) -> std::unique_ptr<ObservationSource> { return std::make_unique<FakeSource>(); },
+            10s, tmp.path);
+        fx.stop();
+    }
+    std::string sent_text;
+    for (const auto& f : filesWithSuffix(tmp.path, ".jsonl"))
+        if (f.find("/sent-") != std::string::npos)
+            sent_text += readAll(f);
+    BOOST_TEST(countOf(sent_text, "\"event\":\"filter_change\"") == 1u);
+    BOOST_TEST(countOf(sent_text, "allow.txt (2 entries)") == 1u);
+    BOOST_TEST(countOf(sent_text, "block.txt (1 entries)") == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(forwarded_track_dropped_on_first_filtered_observation)
+{
+    // With large thresholds shouldSend gives no reason for a small move, yet
+    // leaving the area must drop the track at once.
+    Config cfg = baseConfig();
+    cfg.max_range_nm = 20;
+    cfg.min_interval_s = 5;
+    cfg.max_interval_s = 60;
+    FakeSource* fake = nullptr;
+    EngineFx fx(cfg, [&](asio::io_context&) -> std::unique_ptr<ObservationSource> {
+        auto s = std::make_unique<FakeSource>();
+        fake = s.get();
+        return s;
+    });
+    Events ev;
+    skycue::Client client(clientConfig(fx.port()));
+    ev.attach(client);
+    client.start();
+    std::this_thread::sleep_for(300ms);
+    const TrackId id{0x555555, AddressType::icao};
+    fx.t.call([&] {
+        fake->connection(true);
+        fake->emit(nearbyObservation(id.address, 0.27));  // about 19.2 nm: inside
+    });
+    BOOST_TEST(ev.waitFor([&] { return ev.updatesFor(id) >= 1; }));
+    fx.t.call([&] { fake->emit(nearbyObservation(id.address, 0.30)); });  // about 21 nm: outside, < 5 s later
+    BOOST_TEST(ev.waitFor([&] { return ev.dropped(id, DropReason::filtered); }, 1500ms));
+    std::lock_guard<std::mutex> lk(ev.m);
+    BOOST_TEST(ev.updatesFor(id) == 1u);
 }

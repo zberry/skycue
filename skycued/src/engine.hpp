@@ -4,10 +4,11 @@
 // table, change detection and filters, and records both streams.
 //
 // Per observation: received->writeObservation, table.apply, then
-//   - shouldSend gives a reason (or the track is not forwarded at the moment
-//     and has a position, at most once per MIN_INTERVAL_S since its last
-//     send): filters.evaluate;
-//   - a send decision: Forwarder::sendUpdate(toTrack(state, false,
+//   filters.evaluate when shouldSend gives a reason, or the track has a
+//   position and is forwarded (so leaving the area drops it at once), or is
+//   not forwarded (at most once per MIN_INTERVAL_S since its last send);
+//   - a send decision (with a reason, or for a track not forwarded):
+//     Forwarder::sendUpdate(toTrack(state, false,
 //     result.alt_is_geom)), markSent, sent->writeTrack("update"), forwarded;
 //   - otherwise, if it was forwarded: sendDrop(filtered), writeDrop, no
 //     longer forwarded (it is sent afresh once it is eligible again).
@@ -93,8 +94,9 @@ private:
     Recorder* received_;
     Recorder* sent_;
 
-    FilterSet filters_;
+    // Before filters_: makeFilters() sets them while filters_ is initialised.
     size_t allow_size_ = 0, block_size_ = 0;
+    FilterSet filters_;
     Thresholds thresholds_;
     std::chrono::seconds track_timeout_;
     TrackTable table_;

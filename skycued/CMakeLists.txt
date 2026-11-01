@@ -9,7 +9,10 @@ add_library(skycued_core STATIC
   src/json_lite.cpp
   src/log.cpp
   src/readsb_json_source.cpp
+  src/recorder.cpp
   src/registration.cpp
+  src/replay_source.cpp
+  src/time_util.cpp
   src/track_table.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(skycued_core PUBLIC skycue::skycue Boost::boost Boost::program_options)

@@ -165,6 +165,66 @@ JsonWriter& JsonWriter::add(const char* k, double value)
     return *this;
 }
 
+namespace {
+
+std::string formatPrecision(double value, int precision)
+{
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out.precision(precision);
+    out << value;
+    return out.str();
+}
+
+double parseClassic(const std::string& text)
+{
+    std::istringstream in(text);
+    in.imbue(std::locale::classic());
+    double v = 0;
+    in >> v;
+    return v;
+}
+
+}  // namespace
+
+std::string formatRoundTrip(double value)
+{
+    if (!std::isfinite(value))
+        return "null";
+    for (int p = 15; p < 17; ++p) {
+        std::string text = formatPrecision(value, p);
+        if (parseClassic(text) == value)
+            return text;
+    }
+    return formatPrecision(value, 17);
+}
+
+std::string formatRoundTrip(float value)
+{
+    if (!std::isfinite(value))
+        return "null";
+    for (int p = 6; p < 9; ++p) {
+        std::string text = formatPrecision(static_cast<double>(value), p);
+        if (static_cast<float>(parseClassic(text)) == value)
+            return text;
+    }
+    return formatPrecision(static_cast<double>(value), 9);
+}
+
+JsonWriter& JsonWriter::addExact(const char* k, double value)
+{
+    key(k);
+    body_ += formatRoundTrip(value);
+    return *this;
+}
+
+JsonWriter& JsonWriter::addExact(const char* k, float value)
+{
+    key(k);
+    body_ += formatRoundTrip(value);
+    return *this;
+}
+
 JsonWriter& JsonWriter::add(const char* k, int64_t value)
 {
     key(k);

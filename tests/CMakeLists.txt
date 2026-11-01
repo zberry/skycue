@@ -70,6 +70,16 @@ skycue_set_warnings(test_forwarder)
 add_test(NAME forwarder COMMAND test_forwarder)
 set_tests_properties(forwarder PROPERTIES TIMEOUT 60)
 
+get_filename_component(_skycue_docs_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../docs" ABSOLUTE)
+add_executable(test_recorder test_recorder.cpp)
+target_link_libraries(test_recorder PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_recorder PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+  SKYCUE_DOCS_DIR="${_skycue_docs_dir}")
+skycue_set_warnings(test_recorder)
+add_test(NAME recorder COMMAND test_recorder)
+set_tests_properties(recorder PROPERTIES TIMEOUT 60)
+
 # Builds a tiny consumer against libskycue through add_subdirectory() and
 # through find_package() on an install of it.
 add_test(NAME consumer_smoke

@@ -52,6 +52,10 @@ public:
     JsonWriter& add(const char* key, double value);
     JsonWriter& add(const char* key, int64_t value);
     JsonWriter& add(const char* key, bool value);
+    // Shortest text that reads back as exactly the same value (see
+    // formatRoundTrip); for recordings, where %.7g would lose precision.
+    JsonWriter& addExact(const char* key, double value);
+    JsonWriter& addExact(const char* key, float value);
     std::string str() const;  // "{...}"
 
 private:
@@ -61,5 +65,11 @@ private:
 
 // Appends s to out as a JSON string literal, quotes included.
 void appendJsonString(std::string& out, const std::string& s);
+
+// The shortest %.Ng text (N = 15..17 for double, 6..9 for float) that parses
+// back to exactly `value` (37.887976 stays "37.887976"; 329.67f stays
+// "329.67"). Locale-independent; non-finite values give "null".
+std::string formatRoundTrip(double value);
+std::string formatRoundTrip(float value);
 
 }  // namespace skycued

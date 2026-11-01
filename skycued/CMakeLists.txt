@@ -3,6 +3,7 @@
 add_library(skycued_core STATIC
   src/change_detector.cpp
   src/config.cpp
+  src/filters.cpp
   src/geo.cpp
   src/json_lite.cpp
   src/log.cpp

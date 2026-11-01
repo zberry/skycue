@@ -57,6 +57,12 @@ target_compile_definitions(test_change_detector PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_change_detector)
 add_test(NAME change_detector COMMAND test_change_detector)
 
+add_executable(test_filters test_filters.cpp)
+target_link_libraries(test_filters PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_filters PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_filters)
+add_test(NAME filters COMMAND test_filters)
+
 # Builds a tiny consumer against libskycue through add_subdirectory() and
 # through find_package() on an install of it.
 add_test(NAME consumer_smoke

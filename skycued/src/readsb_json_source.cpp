@@ -1,9 +1,11 @@
 #include "readsb_json_source.hpp"
 
 #include "json_lite.hpp"
+#include "log.hpp"
 
 #include <cmath>
 #include <exception>
+#include <utility>
 
 namespace skycued {
 namespace {
@@ -169,6 +171,47 @@ std::optional<TrackObservation> parseReadsbLine(const std::string& line)
     } catch (const std::exception&) {  // bad_alloc; parsing itself does not throw
         return std::nullopt;
     }
+}
+
+ReadsbJsonSource::ReadsbJsonSource(boost::asio::io_context& io, std::string host, uint16_t port)
+    : client_(io, std::move(host), port, "readsb")
+{
+    client_.onLine([this](const std::string& line) {
+        if (stopped_)
+            return;
+        auto obs = parseReadsbLine(line);
+        if (!obs) {
+            ++bad_;
+            LOG_DEBUG("readsb: skipping a line that does not parse: " << line.substr(0, 200));
+            return;
+        }
+        ++parsed_;
+        if (on_observation_)
+            on_observation_(*obs);
+    });
+    client_.onConnection([this](bool up) {
+        if (!stopped_ && on_connection_)
+            on_connection_(up);
+    });
+}
+
+void ReadsbJsonSource::onObservation(std::function<void(const TrackObservation&)> handler)
+{
+    on_observation_ = std::move(handler);
+}
+
+void ReadsbJsonSource::onConnection(std::function<void(bool)> handler) { on_connection_ = std::move(handler); }
+
+void ReadsbJsonSource::start()
+{
+    if (!stopped_)
+        client_.start();
+}
+
+void ReadsbJsonSource::stop()
+{
+    stopped_ = true;
+    client_.stop();
 }
 
 }  // namespace skycued

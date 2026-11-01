@@ -47,6 +47,11 @@ public:
         for (auto& kv : tracks_)
             f(kv.second);
     }
+    template <class F> void forEach(F f) const
+    {
+        for (const auto& kv : tracks_)
+            f(kv.second);
+    }
 
 private:
     std::unordered_map<skycue::TrackId, TrackState> tracks_;

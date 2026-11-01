@@ -2,6 +2,7 @@
 
 #include "json_lite.hpp"
 #include "log.hpp"
+#include "readsb_json_source.hpp"
 #include "recorder.hpp"
 
 #include <boost/asio/post.hpp>
@@ -47,6 +48,11 @@ ReplaySource::ReplaySource(boost::asio::io_context& io, std::string path, double
                 continue;
             if (type == "obs") {
                 if (auto obs = recording::observationFromRecord(*record)) {
+                    records_.push_back(Record{obs->received_time, std::move(*obs)});
+                    ok = true;
+                }
+            } else if (!record->has("time") && record->getDouble("now")) {
+                if (auto obs = parseReadsbLine(line)) {  // a readsb JSON-port capture
                     records_.push_back(Record{obs->received_time, std::move(*obs)});
                     ok = true;
                 }
@@ -161,5 +167,43 @@ void ReplaySource::emitNext()
     if (!alive.expired())  // the handler may have destroyed us
         scheduleNext();
 }
+
+ReplayObservationSource::ReplayObservationSource(boost::asio::io_context& io, std::string path, double speed,
+                                                 bool loop)
+    : replay_(std::make_unique<ReplaySource>(io, std::move(path), speed, loop)), count_(replay_->recordCount())
+{
+    replay_->onObservation([this](const TrackObservation& obs) {
+        if (on_observation_)
+            on_observation_(obs);
+    });
+    replay_->onEnd([this] {
+        LOG_INFO("replay: end of file");
+        if (on_connection_)
+            on_connection_(false);
+    });
+}
+
+void ReplayObservationSource::onObservation(std::function<void(const TrackObservation&)> handler)
+{
+    on_observation_ = std::move(handler);
+}
+
+void ReplayObservationSource::onConnection(std::function<void(bool)> handler)
+{
+    on_connection_ = std::move(handler);
+}
+
+void ReplayObservationSource::start()
+{
+    if (started_ || !replay_)
+        return;
+    started_ = true;
+    if (on_connection_)
+        on_connection_(true);
+    if (replay_)  // the handler may have stopped us
+        replay_->start();
+}
+
+void ReplayObservationSource::stop() { replay_.reset(); }
 
 }  // namespace skycued

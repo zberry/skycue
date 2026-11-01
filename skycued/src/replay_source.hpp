@@ -9,6 +9,10 @@
 // do not parse, and unknown record types are counted, skipped, and reported
 // in one WARN per file; "uat_uplink" records are skipped silently.
 //
+// A line that is a readsb JSON-port aircraft object (a numeric "now" and no
+// "time", as in tests/fixtures/readsb-sample.jsonl) is read with
+// parseReadsbLine instead, so a capture of readsb's output replays too.
+//
 // Threading: lives on the caller's io_context; call everything from its
 // thread. Destroying the source stops it (pending handlers do nothing).
 
@@ -74,6 +78,30 @@ private:
     std::chrono::steady_clock::time_point start_{};
     bool started_ = false;
     std::shared_ptr<char> alive_ = std::make_shared<char>(0);
+};
+
+// ReplaySource as the Engine's ObservationSource: reports connected at
+// start() and lost when a non-looping replay ends, so the Engine handles a
+// finished replay like a lost readsb (tracks are dropped as source_lost
+// after TRACK_TIMEOUT_S). stop() destroys the ReplaySource.
+class ReplayObservationSource : public ObservationSource {
+public:
+    // Throws as ReplaySource's constructor does.
+    ReplayObservationSource(boost::asio::io_context& io, std::string path, double speed = 1.0, bool loop = false);
+
+    void onObservation(std::function<void(const TrackObservation&)> handler) override;
+    void onConnection(std::function<void(bool)> handler) override;
+    void start() override;
+    void stop() override;
+
+    std::size_t recordCount() const { return count_; }
+
+private:
+    std::unique_ptr<ReplaySource> replay_;
+    std::size_t count_ = 0;
+    std::function<void(const TrackObservation&)> on_observation_;
+    std::function<void(bool)> on_connection_;
+    bool started_ = false;
 };
 
 }  // namespace skycued

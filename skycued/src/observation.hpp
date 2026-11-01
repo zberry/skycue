@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -24,6 +25,20 @@ struct TrackObservation {
     std::optional<uint8_t> nic, nac_p;
     std::optional<double> rssi;
     std::string raw_line;  // kept for the received recording
+};
+
+// Where the Engine gets its observations: readsb's JSON port or a replay.
+// Threading: lives on the Engine's io_context; callbacks run on its thread.
+// Register callbacks before start(). After stop() no callback is invoked.
+class ObservationSource {
+public:
+    virtual ~ObservationSource() = default;
+    virtual void onObservation(std::function<void(const TrackObservation&)> handler) = 0;
+    // true when the source is (re)connected, false when it is lost (a
+    // finished replay counts as lost).
+    virtual void onConnection(std::function<void(bool)> handler) = 0;
+    virtual void start() = 0;
+    virtual void stop() = 0;
 };
 
 }  // namespace skycued

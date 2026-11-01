@@ -434,7 +434,7 @@ BOOST_AUTO_TEST_CASE(udp_targets_receive)
     }));
 
     // Every datagram is exactly one frame of legal size; keyframes arrive.
-    int keyframes = 0, deltas = 0, datagrams = 0;
+    int keyframes = 0, deltas = 0, datagrams = 0, hellos = 0;
     const auto deadline = steady::now() + 1s;
     while (steady::now() < deadline) {
         auto d = raw.next(50ms);
@@ -446,7 +446,11 @@ BOOST_AUTO_TEST_CASE(udp_targets_receive)
         BOOST_REQUIRE(decodeFrame(d->data(), d->size(), f, used) == DecodeStatus::ok);
         BOOST_TEST(used == d->size());
         BOOST_TEST(d->size() <= kHeaderSize + kMaxUdpPayload);
-        BOOST_TEST(static_cast<int>(f.type) != static_cast<int>(FrameType::hello));
+        Hello h;
+        if (decodeHello(f, h)) {
+            ++hellos;
+            BOOST_TEST(h.keyframe_interval_ms == 300u);
+        }
         Track tr;
         if (decodeTrackUpdate(f, tr)) {
             if (tr.keyframe)
@@ -458,7 +462,45 @@ BOOST_AUTO_TEST_CASE(udp_targets_receive)
     BOOST_TEST(datagrams > 0);
     BOOST_TEST(keyframes >= 5);
     BOOST_TEST(deltas == 1);
+    BOOST_TEST(hellos >= 2); // one before each keyframe burst
     BOOST_TEST(fx.clients() == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(udp_client_learns_keyframe_interval)
+{
+    const uint16_t client_port = freeUdpPort();
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 300ms;
+    cfg.heartbeat_interval = 100ms; // keeps the UDP client connected
+    cfg.udp_targets = {{"127.0.0.1", client_port}};
+
+    Config cc;
+    cc.transport = Config::Transport::udp;
+    cc.host = "127.0.0.1";
+    cc.port = client_port;
+    cc.default_keyframe_interval = 10s; // stale only after 20 s unless a Hello says 300 ms
+    Events ev;
+    Client c(cc);
+    ev.attach(c);
+    c.start();
+    std::this_thread::sleep_for(50ms);
+
+    // Track A is in the first two keyframe bursts only.
+    auto calls = std::make_shared<std::atomic<int>>(0);
+    Fx fx(cfg, [calls] {
+        if (++*calls <= 2)
+            return std::vector<Track>{mkTrack(0xA, true)};
+        return std::vector<Track>{};
+    });
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+    const auto t0 = steady::now();
+    BOOST_REQUIRE(ev.waitFor([&] { return !ev.drops.empty(); }, 1500ms));
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - t0).count();
+    BOOST_TEST_MESSAGE("stale drop " << ms << " ms after the last keyframe");
+    std::lock_guard<std::mutex> lk(ev.m);
+    BOOST_TEST(ev.drops.front().first.address == 0xAu);
+    BOOST_TEST(static_cast<int>(ev.drops.front().second) == static_cast<int>(DropReason::stale));
+    BOOST_TEST(ev.conns.size() == 1u); // still connected: not source_lost
 }
 
 BOOST_AUTO_TEST_CASE(heartbeat_when_idle)

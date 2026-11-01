@@ -124,6 +124,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         LOG_INFO("forwarder: listening on TCP port " << port);
 
         resolveTargets();
+        helloToUdp();
 
         const auto now = steady::now();
         last_broadcast = now;
@@ -206,8 +207,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         LOG_INFO("forwarder: TCP client " << s->peer << " connected (" << sessions.size() << " total)");
 
         read(s);
-        enqueue(s, share(skycue::encodeHello(skycue::Hello{toMs32(keyframe_interval), toMs32(heartbeat_interval),
-                                                           cfg.sender_name})));
+        enqueue(s, helloFrame());
         for (const Buf& b : keyframeFrames()) {
             if (s->closed)
                 break;
@@ -349,6 +349,24 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         }
     }
 
+    Buf helloFrame() const
+    {
+        return share(skycue::encodeHello(
+            skycue::Hello{toMs32(keyframe_interval), toMs32(heartbeat_interval), cfg.sender_name}));
+    }
+
+    // UDP has no connection to greet, so every target gets a Hello at start()
+    // and before each keyframe burst. Not a broadcast: TCP clients got theirs
+    // on accept, and it does not hold back the heartbeat.
+    void helloToUdp()
+    {
+        if (targets.empty())
+            return;
+        const Buf b = helloFrame();
+        for (auto& t : targets)
+            sendUdp(t, b);
+    }
+
     std::vector<Buf> keyframeFrames()
     {
         std::vector<Buf> out;
@@ -373,6 +391,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         keyframe_timer.async_wait([self, gen](const error_code& ec) {
             if (ec || self->stopping || gen != self->keyframe_gen)
                 return;
+            self->helloToUdp(); // so UDP receivers know the keyframe interval before the burst
             for (const Buf& b : self->keyframeFrames())
                 self->broadcast(b);
             const auto now = steady::now();

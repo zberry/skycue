@@ -34,7 +34,9 @@ struct ForwarderConfig {
 // TCP: on accept a client gets Hello, then one keyframe of every track the
 // provider returns, then the normal stream. Each client has its own outbound
 // queue; a client whose queue exceeds max_client_queue_bytes is closed.
-// UDP: one datagram per frame per target.
+// UDP: one datagram per frame per target. Each target also gets a Hello at
+// start() and right before every keyframe burst, so a UDP receiver learns the
+// keyframe interval (it has no connection on which to be greeted).
 // Every keyframe_interval all provider tracks are sent with keyframe=true to
 // every destination. When no frame has been broadcast for heartbeat_interval,
 // a Heartbeat is broadcast. "Broadcast" means sent to all TCP clients and UDP

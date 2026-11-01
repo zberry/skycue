@@ -23,3 +23,33 @@ target_link_libraries(skycue PUBLIC Boost::system Threads::Threads)
 if(COMMAND skycue_set_warnings)
   skycue_set_warnings(skycue)
 endif()
+
+# Install and export, so consumers can use find_package(skycue) as well as
+# add_subdirectory(). The version follows the skycue project when built from
+# it; a consumer adding this directory directly gets the fallback.
+if(DEFINED skycue_VERSION)
+  set(SKYCUE_LIB_VERSION "${skycue_VERSION}")
+else()
+  set(SKYCUE_LIB_VERSION 0.1.0)
+endif()
+
+include(CMakePackageConfigHelpers)
+
+install(TARGETS skycue EXPORT skycueTargets
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+  INCLUDES DESTINATION include)
+install(DIRECTORY include/ DESTINATION include)
+install(EXPORT skycueTargets NAMESPACE skycue:: DESTINATION lib/cmake/skycue)
+
+configure_package_config_file(cmake/skycueConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/skycueConfig.cmake"
+  INSTALL_DESTINATION lib/cmake/skycue)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/skycueConfigVersion.cmake"
+  VERSION ${SKYCUE_LIB_VERSION}
+  COMPATIBILITY SameMajorVersion)
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/skycueConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/skycueConfigVersion.cmake"
+  DESTINATION lib/cmake/skycue)

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Builds tests/consumer-smoke against libskycue both ways a consumer can use
+# it, and runs the result:
+#   1. subdir:  add_subdirectory(libskycue); the build is then installed to a
+#               temporary prefix, which also checks the install/export rules;
+#   2. package: find_package(skycue) against that prefix.
+#
+# usage: consumer_smoke.sh <libskycue dir> <consumer-smoke dir> <work dir>
+# Environment: CMAKE (default: cmake), CXX, SKYCUE_SMOKE_PREFIX_PATH and
+# SKYCUE_SMOKE_BOOST_DIR (passed through so Boost is found as in the parent build).
+set -euo pipefail
+
+lib_dir=$1
+consumer_dir=$2
+work_base=$3
+cmake_bin=${CMAKE:-cmake}
+
+mkdir -p "$work_base"
+work=$(mktemp -d "$work_base/consumer-smoke.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+
+common=(-DCMAKE_BUILD_TYPE=Release)
+if [[ -n ${CXX:-} ]]; then common+=("-DCMAKE_CXX_COMPILER=$CXX"); fi
+if [[ -n ${SKYCUE_SMOKE_BOOST_DIR:-} ]]; then common+=("-DBoost_DIR=$SKYCUE_SMOKE_BOOST_DIR"); fi
+prefix_path=$work/prefix
+if [[ -n ${SKYCUE_SMOKE_PREFIX_PATH:-} ]]; then prefix_path="$prefix_path;$SKYCUE_SMOKE_PREFIX_PATH"; fi
+
+echo "== subdir mode"
+"$cmake_bin" -S "$consumer_dir" -B "$work/subdir" "${common[@]}" \
+    -DSKYCUE_CONSUMER_MODE=subdir "-DSKYCUE_LIB_DIR=$lib_dir"
+"$cmake_bin" --build "$work/subdir" -j 4
+"$work/subdir/consumer"
+
+echo "== install libskycue to a temporary prefix"
+"$cmake_bin" --install "$work/subdir" --prefix "$work/prefix"
+test -f "$work/prefix/lib/cmake/skycue/skycueConfig.cmake"
+test -f "$work/prefix/lib/cmake/skycue/skycueConfigVersion.cmake"
+test -f "$work/prefix/include/skycue/client.hpp"
+
+echo "== package mode"
+"$cmake_bin" -S "$consumer_dir" -B "$work/package" "${common[@]}" \
+    -DSKYCUE_CONSUMER_MODE=package "-DCMAKE_PREFIX_PATH=$prefix_path"
+grep -qx "skycue_DIR:PATH=$work/prefix/lib/cmake/skycue" "$work/package/CMakeCache.txt"
+"$cmake_bin" --build "$work/package" -j 4
+"$work/package/consumer"
+
+echo "consumer smoke: both modes ok"

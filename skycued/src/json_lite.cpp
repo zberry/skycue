@@ -9,10 +9,39 @@
 #include <sstream>
 
 namespace skycued {
+namespace {
+
+// PropertyTree's parser recurses once per nesting level, so deep input would
+// overflow the stack (a crash, not an exception). This linear scan finds the
+// maximum {/[ depth outside string literals so such input is refused first.
+bool nestingWithin(const std::string& text, int max_depth)
+{
+    int depth = 0;
+    bool in_string = false;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (in_string) {
+            if (c == '\\')
+                ++i;  // skip the escaped character, so \" does not end the string
+            else if (c == '"')
+                in_string = false;
+        } else if (c == '"') {
+            in_string = true;
+        } else if (c == '{' || c == '[') {
+            if (++depth > max_depth)
+                return false;
+        } else if (c == '}' || c == ']') {
+            --depth;
+        }
+    }
+    return true;
+}
+
+}  // namespace
 
 std::optional<JsonObject> JsonObject::parse(const std::string& text)
 {
-    if (text.empty() || text.size() > kMaxTextBytes)
+    if (text.empty() || text.size() > kMaxTextBytes || !nestingWithin(text, kMaxJsonDepth))
         return std::nullopt;
     boost::property_tree::ptree tree;
     try {
@@ -70,6 +99,8 @@ std::optional<int64_t> JsonObject::getInt(const char* key) const
     if (!node)
         return std::nullopt;
     const std::string& s = node->data();
+    // Only the integer from_chars overload is used: libstdc++ has it since
+    // gcc 8.1 (the floating-point overloads came in gcc 11).
     int64_t value = 0;
     const char* end = s.data() + s.size();
     auto result = std::from_chars(s.data(), end, value);

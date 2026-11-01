@@ -17,9 +17,12 @@ class JsonObject {
 public:
     // Longer input is rejected without parsing (a readsb line is about 500 bytes).
     static constexpr std::size_t kMaxTextBytes = 64 * 1024;
+    // Deeper {/[ nesting is rejected before parsing: PropertyTree's parser
+    // recurses per level and would overflow the stack (readsb nests 2 levels).
+    static constexpr int kMaxJsonDepth = 32;
 
-    // nullopt on a parse error, on input over kMaxTextBytes, or when the top
-    // level is not an object.
+    // nullopt on a parse error, on input over kMaxTextBytes or nested deeper
+    // than kMaxJsonDepth, or when the top level is not an object. Never throws.
     static std::optional<JsonObject> parse(const std::string& text);
 
     // The value's text when it is a scalar (string, number, true/false/null);

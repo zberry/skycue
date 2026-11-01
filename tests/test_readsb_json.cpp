@@ -223,6 +223,66 @@ BOOST_AUTO_TEST_CASE(nested_json_rejected_not_crash)
     BOOST_TEST(!o->getDouble("missing"));
 }
 
+BOOST_AUTO_TEST_CASE(deep_array_nesting_rejected)
+{
+    auto start = std::chrono::steady_clock::now();
+    const std::string deep(60000, '[');
+    BOOST_TEST(!JsonObject::parse(deep));
+    BOOST_TEST(!parseReadsbLine(deep));
+    std::string in_object = R"({"now":1,"hex":"abcdef","x":)" + std::string(30000, '[') + "1" +
+                            std::string(30000, ']') + "}";
+    BOOST_TEST(!parseReadsbLine(in_object));
+    const bool fast = std::chrono::steady_clock::now() - start < std::chrono::seconds(1);
+    BOOST_TEST(fast);
+
+    // At the limit it still parses; brackets inside strings do not count.
+    std::string at_limit = "{\"x\":" + std::string(JsonObject::kMaxJsonDepth - 1, '[') +
+                           std::string(JsonObject::kMaxJsonDepth - 1, ']') + "}";
+    BOOST_TEST(JsonObject::parse(at_limit).has_value());
+    std::string over = "{\"x\":" + std::string(JsonObject::kMaxJsonDepth, '[') +
+                       std::string(JsonObject::kMaxJsonDepth, ']') + "}";
+    BOOST_TEST(!JsonObject::parse(over));
+    auto quoted = JsonObject::parse(R"({"s":"[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[\"{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{"})");
+    BOOST_REQUIRE(quoted);
+    BOOST_TEST(quoted->getString("s").value_or("").size() == 81u);
+}
+
+BOOST_AUTO_TEST_CASE(deep_object_nesting_rejected)
+{
+    auto start = std::chrono::steady_clock::now();
+    std::string deep;
+    for (int i = 0; i < 30000; ++i)
+        deep += "{\"a\":";
+    BOOST_TEST(!JsonObject::parse(deep));
+    BOOST_TEST(!parseReadsbLine(deep));
+    deep += "1";
+    deep += std::string(30000, '}');
+    BOOST_TEST(!parseReadsbLine(deep));
+
+    // 30,000 levels is over the size cap anyway; 12,000 (60,000 bytes) is not,
+    // so this one reaches the depth check.
+    std::string under_cap;
+    for (int i = 0; i < 12000; ++i)
+        under_cap += "{\"a\":";
+    BOOST_REQUIRE(under_cap.size() < JsonObject::kMaxTextBytes);
+    BOOST_TEST(!JsonObject::parse(under_cap));
+    BOOST_TEST(!parseReadsbLine(under_cap));
+    const bool fast = std::chrono::steady_clock::now() - start < std::chrono::seconds(1);
+    BOOST_TEST(fast);
+}
+
+BOOST_AUTO_TEST_CASE(invalid_utf8_rejected_or_ignored)
+{
+    const std::string line = std::string(R"({"now":5,"hex":"abcdef","type":"adsb_icao","flight":"AB)") +
+                             "\xff\xfe" + R"(","lat":38.9,"lon":-77})";
+    std::optional<skycued::TrackObservation> obs;
+    BOOST_CHECK_NO_THROW(obs = parseReadsbLine(line));
+    if (obs) {
+        BOOST_TEST(obs->id.address == 0xabcdefu);
+    }
+    BOOST_CHECK_NO_THROW(JsonObject::parse("{\"\xff\xfe\":1}"));
+}
+
 BOOST_AUTO_TEST_CASE(sample_fixture_parses_fully)
 {
     const std::string path = SKYCUE_FIXTURE_DIR "/readsb-sample.jsonl";

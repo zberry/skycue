@@ -63,6 +63,13 @@ target_compile_definitions(test_filters PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_filters)
 add_test(NAME filters COMMAND test_filters)
 
+add_executable(test_forwarder test_forwarder.cpp)
+target_link_libraries(test_forwarder PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_forwarder PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_forwarder)
+add_test(NAME forwarder COMMAND test_forwarder)
+set_tests_properties(forwarder PROPERTIES TIMEOUT 60)
+
 # Builds a tiny consumer against libskycue through add_subdirectory() and
 # through find_package() on an install of it.
 add_test(NAME consumer_smoke

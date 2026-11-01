@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <exception>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -31,10 +32,6 @@ using error_code = boost::system::error_code;
 using steady = std::chrono::steady_clock;
 
 namespace {
-// Bytes left over after decoding are always less than one frame, and the
-// largest frame is the header plus a u16 length, so anything above this is
-// not a skycue stream.
-constexpr size_t kMaxRxBuffer = kHeaderSize + 0xFFFF;
 constexpr std::chrono::milliseconds kMinKeyframeInterval{10};
 } // namespace
 
@@ -84,11 +81,47 @@ struct Client::Impl {
     steady::time_point last_frame{};
     unsigned conn_gen = 0, reconnect_gen = 0, stale_gen = 0, heartbeat_gen = 0;
 
+    // First exception thrown by a user callback; rethrown from poll() in poll
+    // mode, discarded in thread mode.
+    std::exception_ptr callback_error;
+
     // Owner-side state.
     bool started = false;
     std::atomic<bool> stop_requested{false};
+    // Set by the I/O thread itself, so reading it never races with the
+    // assignment of `thread`. A default id matches no running thread.
+    std::atomic<std::thread::id> io_thread_id{};
 
-    bool onIoThread() const { return thread.joinable() && std::this_thread::get_id() == thread.get_id(); }
+    bool onIoThread() const { return std::this_thread::get_id() == io_thread_id.load(); }
+
+    // ---- user callbacks: the only call sites ------------------------------
+    // A throwing callback must not break the async chains, so every call is
+    // contained here and the caller carries on as if it had returned.
+
+    template <class F> void guarded(F&& f)
+    {
+        try {
+            f();
+        } catch (...) {
+            if (!cfg.run_io_thread && !callback_error)
+                callback_error = std::current_exception();
+        }
+    }
+    void fireUpdate(const Track& t)
+    {
+        if (on_update)
+            guarded([&] { on_update(t); });
+    }
+    void fireDropped(TrackId id, DropReason r)
+    {
+        if (on_dropped)
+            guarded([&] { on_dropped(id, r); });
+    }
+    void fireConnection(bool up)
+    {
+        if (on_connection)
+            guarded([&] { on_connection(up); });
+    }
 
     // ---- I/O thread ------------------------------------------------------
 
@@ -195,11 +228,11 @@ struct Client::Impl {
                 lostTcp();
                 return;
             }
+            // Bounded by construction: what is left is a partial frame, less
+            // than kHeaderSize + 0xFFFF bytes (the u16 length field caps a
+            // frame), so rx never exceeds that plus one read chunk. Garbage
+            // fails the magic/version check as soon as 8 bytes are buffered.
             rx.erase(rx.begin(), rx.begin() + static_cast<std::ptrdiff_t>(offset));
-            if (rx.size() > kMaxRxBuffer) {
-                lostTcp();
-                return;
-            }
             readTcp(gen);
         });
     }
@@ -245,8 +278,12 @@ struct Client::Impl {
             }
             Frame frame;
             size_t used = 0;
-            // Exactly one frame per datagram: drop it unless its size is 8 + length.
-            if (decodeFrame(dgram.data(), n, frame, used) == DecodeStatus::ok && used == n) {
+            // Exactly one frame per datagram: drop it unless its size is
+            // 8 + length. The buffer is one byte larger than the largest legal
+            // datagram, so a longer one arrives truncated to that size and is
+            // caught by the upper bound.
+            if (decodeFrame(dgram.data(), n, frame, used) == DecodeStatus::ok && used == n &&
+                used <= kHeaderSize + kMaxUdpPayload) {
                 last_frame = steady::now();
                 if (!connected) {
                     setConnected(true);
@@ -302,8 +339,7 @@ struct Client::Impl {
                 return;
             tracks.erase(id);
             count = tracks.size();
-            if (on_dropped)
-                on_dropped(id, DropReason::stale);
+            fireDropped(id, DropReason::stale);
         }
     }
 
@@ -312,8 +348,7 @@ struct Client::Impl {
         if (connected == up)
             return;
         connected = up;
-        if (on_connection)
-            on_connection(up);
+        fireConnection(up);
         if (!up)
             dropAll(DropReason::source_lost);
     }
@@ -326,8 +361,7 @@ struct Client::Impl {
         for (const auto& kv : old) {
             if (stopping)
                 return;
-            if (on_dropped)
-                on_dropped(kv.first, reason);
+            fireDropped(kv.first, reason);
         }
     }
 
@@ -359,8 +393,7 @@ struct Client::Impl {
                 if (t.keyframe) // deltas do not refresh the stale clock
                     it->second.last_keyframe = now;
             }
-            if (on_update)
-                on_update(t);
+            fireUpdate(t);
             return;
         }
         case FrameType::track_drop: {
@@ -370,8 +403,7 @@ struct Client::Impl {
             if (tracks.erase(d.id) == 0)
                 return;
             count = tracks.size();
-            if (on_dropped)
-                on_dropped(d.id, d.reason);
+            fireDropped(d.id, d.reason);
             return;
         }
         case FrameType::heartbeat: // liveness only; UDP accounting is done per frame
@@ -418,7 +450,10 @@ void Client::start()
     asio::post(d.io, [&d] { d.begin(); });
     if (d.cfg.run_io_thread) {
         d.guard.emplace(asio::make_work_guard(d.io));
-        d.thread = std::thread([&d] { d.io.run(); });
+        d.thread = std::thread([&d] {
+            d.io_thread_id = std::this_thread::get_id();
+            d.io.run();
+        });
     }
 }
 
@@ -433,7 +468,7 @@ void Client::stop()
         }
         d.guard.reset(); // run() returns once the cancelled handlers have run
     }
-    if (d.thread.joinable() && !d.onIoThread())
+    if (!d.onIoThread() && d.thread.joinable())
         d.thread.join();
 }
 
@@ -445,6 +480,11 @@ void Client::poll()
     if (d.io.stopped())
         d.io.restart();
     d.io.poll();
+    if (d.callback_error) {
+        std::exception_ptr e;
+        std::swap(e, d.callback_error);
+        std::rethrow_exception(e);
+    }
 }
 
 size_t Client::trackCount() const { return impl_->count.load(); }

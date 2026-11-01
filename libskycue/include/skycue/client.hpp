@@ -30,6 +30,13 @@ struct Config {
 // start(). start(), stop() and poll() are called from the owning thread;
 // stop() may also be called from inside a callback. No callback is invoked
 // after stop() returns, and stop() does not invoke any callback itself.
+// Destroying a Client from inside one of its own callbacks is not allowed.
+//
+// Exceptions: a callback that throws does not disturb the client, which
+// carries on as if the callback had returned. In poll mode the first such
+// exception is kept and rethrown from poll() once that call's ready handlers
+// have run (later ones are discarded until it has been rethrown); in thread
+// mode exceptions from callbacks are discarded.
 //
 // Track table: an update stores the track and fires onTrackUpdate; a
 // TrackDrop for a known track erases it and fires onTrackDropped. A track

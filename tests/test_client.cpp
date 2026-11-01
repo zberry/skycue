@@ -16,6 +16,8 @@
 #include <future>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -444,6 +446,144 @@ BOOST_AUTO_TEST_CASE(udp_drops_datagram_with_wrong_size)
         BOOST_TEST(ev.updates.size() == 1u);
     }
     BOOST_TEST(client.trackCount() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(udp_drops_oversized_datagram)
+{
+    const uint16_t port = freeUdpPort();
+    Events ev;
+    Client client(udpConfig(port));
+    ev.attach(client);
+    client.start();
+    UdpSender tx(port);
+
+    const auto deadline = std::chrono::steady_clock::now() + kWait;
+    bool up = false;
+    while (!up && std::chrono::steady_clock::now() < deadline) {
+        tx.send(encodeHeartbeat(Heartbeat{1}));
+        up = ev.waitFor([&] { return !ev.conns.empty(); }, 50ms);
+    }
+    BOOST_REQUIRE(up);
+
+    // 1300 bytes whose header claims 1201 payload bytes: truncated to the
+    // receive buffer (8 + 1200 + 1) it would look like a well-sized frame
+    // with a valid TrackUpdate followed by ignorable trailing bytes.
+    auto big = encodeTrackUpdate(mkTrack(9, true));
+    big[6] = static_cast<uint8_t>(1201 & 0xFF);
+    big[7] = static_cast<uint8_t>(1201 >> 8);
+    big.resize(1300, 0);
+    tx.send(big);
+    tx.send(encodeTrackUpdate(mkTrack(10, true)));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.sawUpdate(10); }));
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.updates.size() == 1u);
+        BOOST_TEST(!ev.sawUpdate(9));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(throwing_callback_does_not_stop_reading)
+{
+    TestTcpServer server;
+    Config cfg = tcpConfig(server.port());
+    cfg.run_io_thread = false;
+    Client client(cfg);
+    int calls = 0;
+    client.onTrackUpdate([&](const Track&) {
+        if (++calls == 1)
+            throw std::runtime_error("callback failure");
+    });
+    client.start();
+
+    const auto deadline = std::chrono::steady_clock::now() + kWait;
+    int thrown = 0;
+    auto pollUntil = [&](std::function<bool()> done) {
+        while (!done() && std::chrono::steady_clock::now() < deadline) {
+            try {
+                client.poll();
+            } catch (const std::runtime_error& e) {
+                BOOST_TEST(std::string(e.what()) == "callback failure");
+                ++thrown;
+            }
+            std::this_thread::sleep_for(5ms);
+        }
+    };
+    pollUntil([&] { return server.waitAcceptedFor(0ms); });
+    BOOST_REQUIRE(server.waitAccepted());
+
+    server.send(encodeTrackUpdate(mkTrack(1, true)));
+    pollUntil([&] { return calls == 1 && thrown == 1; });
+    BOOST_REQUIRE(calls == 1);
+    BOOST_TEST(thrown == 1); // rethrown from poll()
+    BOOST_TEST(client.trackCount() == 1u);
+
+    server.send(encodeTrackUpdate(mkTrack(2, true)));
+    pollUntil([&] { return calls == 2; });
+    BOOST_TEST(calls == 2); // reading continued after the throw
+    BOOST_TEST(thrown == 1);
+    BOOST_TEST(client.trackCount() == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(throwing_callback_in_thread_mode_keeps_connection)
+{
+    TestTcpServer server;
+    Events ev;
+    Client client(tcpConfig(server.port()));
+    ev.attach(client);
+    std::atomic<int> calls{0};
+    client.onTrackUpdate([&](const Track& t) {
+        {
+            std::lock_guard<std::mutex> lk(ev.m);
+            ev.updates.push_back(t);
+            ev.cv.notify_all();
+        }
+        if (++calls == 1)
+            throw std::runtime_error("callback failure");
+    });
+    client.start();
+    BOOST_REQUIRE(server.waitAccepted());
+
+    server.send(encodeTrackUpdate(mkTrack(1, true)));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 1; }));
+    server.send(encodeTrackUpdate(mkTrack(2, true)));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.conns.size() == 1u); // still the first connection
+        BOOST_TEST(ev.drops.empty());
+    }
+    BOOST_TEST(client.trackCount() == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(stop_from_inside_callback_is_safe)
+{
+    TestTcpServer server;
+    Events ev;
+    std::atomic<int> after{0};
+    {
+        Client client(tcpConfig(server.port()));
+        ev.attach(client);
+        client.onTrackUpdate([&](const Track& t) {
+            {
+                std::lock_guard<std::mutex> lk(ev.m);
+                ev.updates.push_back(t);
+            }
+            client.stop(); // on the I/O thread: no self-join
+            ev.cv.notify_all();
+        });
+        client.onTrackDropped([&](TrackId, DropReason) { ++after; });
+        client.start();
+        BOOST_REQUIRE(server.waitAccepted());
+        // Two updates in one read: the second must not surface after stop().
+        server.send(cat({encodeTrackUpdate(mkTrack(1, true)), encodeTrackUpdate(mkTrack(2, true))}));
+        BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() >= 1; }));
+        server.closeClient();
+        std::this_thread::sleep_for(50ms);
+    } // destructor joins the I/O thread
+    std::lock_guard<std::mutex> lk(ev.m);
+    BOOST_TEST(ev.updates.size() == 1u);
+    BOOST_TEST(ev.conns.size() == 1u);
+    BOOST_TEST(after.load() == 0);
 }
 
 BOOST_AUTO_TEST_CASE(poll_mode_runs_callbacks_only_in_poll)

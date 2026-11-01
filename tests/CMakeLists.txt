@@ -1,0 +1,5 @@
+add_executable(test_smoke test_smoke.cpp)
+target_link_libraries(test_smoke PRIVATE Boost::unit_test_framework)
+target_compile_definitions(test_smoke PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_smoke)
+add_test(NAME smoke COMMAND test_smoke)

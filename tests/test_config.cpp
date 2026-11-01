@@ -204,6 +204,69 @@ BOOST_AUTO_TEST_CASE(numeric_errors_name_key_and_line)
     BOOST_TEST(c.min_elevation_deg == -2.5);
 }
 
+BOOST_AUTO_TEST_CASE(range_checks_name_key_and_line)
+{
+    struct Case {
+        const char* text;
+        const char* key;
+    };
+    for (const Case& k : {Case{"KEYFRAME_INTERVAL_S=0.5", "KEYFRAME_INTERVAL_S"},
+                          Case{"KEYFRAME_INTERVAL_S=0", "KEYFRAME_INTERVAL_S"},
+                          Case{"MIN_INTERVAL_S=0.05", "MIN_INTERVAL_S"},
+                          Case{"MIN_INTERVAL_S=-1", "MIN_INTERVAL_S"},
+                          Case{"TRACK_TIMEOUT_S=0.5", "TRACK_TIMEOUT_S"},
+                          Case{"MAX_RANGE_NM=0", "MAX_RANGE_NM"},
+                          Case{"MAX_RANGE_NM=-10", "MAX_RANGE_NM"},
+                          Case{"MIN_ELEVATION_DEG=-90.5", "MIN_ELEVATION_DEG"},
+                          Case{"MIN_ELEVATION_DEG=91", "MIN_ELEVATION_DEG"},
+                          Case{"MAX_INTERVAL_S=0.5", "MAX_INTERVAL_S"}}) {
+        ConfigError e = expectError(std::string(kLatLon) + k.text + "\n");
+        BOOST_TEST(e.line == 3, k.text);
+        BOOST_CHECK_MESSAGE(contains(e.what(), k.key), k.text << ": " << e.what());
+    }
+
+    // MAX_INTERVAL_S below MIN_INTERVAL_S: named on the MAX_INTERVAL_S line.
+    ConfigError e = expectError(std::string(kLatLon) + "MIN_INTERVAL_S=5\nMAX_INTERVAL_S=4\n");
+    BOOST_TEST(e.line == 4);
+    BOOST_TEST(contains(e.what(), "MAX_INTERVAL_S"));
+    BOOST_TEST(contains(e.what(), "MIN_INTERVAL_S"));
+    // Only MIN_INTERVAL_S given, above the default maximum: named on its line.
+    e = expectError(std::string(kLatLon) + "MIN_INTERVAL_S=20\n");
+    BOOST_TEST(e.line == 3);
+    BOOST_TEST(contains(e.what(), "MAX_INTERVAL_S"));
+
+    // Recording with no format.
+    e = expectError(std::string(kLatLon) + "RECORD_DIR=/data/rec\nRECORD_FORMATS=\n");
+    BOOST_TEST(e.line == 4);
+    BOOST_TEST(contains(e.what(), "RECORD_FORMATS"));
+    e = expectError(std::string(kLatLon) + "RECORD_DIR=/data/rec\nRECORD_FORMATS=\"  \"\n");
+    BOOST_TEST(contains(e.what(), "RECORD_FORMATS"));
+    // No formats is fine while recording is off.
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "RECORD_FORMATS=\n", "t").record_formats.empty());
+}
+
+BOOST_AUTO_TEST_CASE(range_checks_accept_boundaries)
+{
+    Config c = parseConfigText(std::string(kLatLon) +
+                                   "KEYFRAME_INTERVAL_S=1\n"
+                                   "MIN_INTERVAL_S=0.1\n"
+                                   "MAX_INTERVAL_S=0.1\n"
+                                   "TRACK_TIMEOUT_S=1\n"
+                                   "MAX_RANGE_NM=0.001\n"
+                                   "MIN_ELEVATION_DEG=-90\n"
+                                   "RECORD_DIR=/data/rec\n"
+                                   "RECORD_FORMATS=csv\n",
+                               "t");
+    BOOST_TEST(c.keyframe_interval_s == 1.0);
+    BOOST_TEST(c.min_interval_s == 0.1);
+    BOOST_TEST(c.max_interval_s == 0.1);
+    BOOST_TEST(c.track_timeout_s == 1.0);
+    BOOST_TEST(c.max_range_nm == 0.001);
+    BOOST_TEST(c.min_elevation_deg == -90.0);
+    c = parseConfigText(std::string(kLatLon) + "MIN_ELEVATION_DEG=90\n", "t");
+    BOOST_TEST(c.min_elevation_deg == 90.0);
+}
+
 BOOST_AUTO_TEST_CASE(udp_targets)
 {
     Config c = parseConfigText(std::string(kLatLon) +

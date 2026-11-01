@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -244,6 +245,32 @@ Config parseConfigText(const std::string& text, const std::string& name)
             c.record_formats.insert(w);
         }
     }
+
+    // Range checks, applied to defaults and file values alike. Each error
+    // names the key (and the line it is on, when it is in the file).
+    auto show = [](double v) {
+        std::ostringstream ss;
+        ss << v;
+        return ss.str();
+    };
+    auto atLeast = [&](const char* key, double v, double min) {
+        if (v < min)
+            conv.fail(key, std::string(key) + " must be at least " + show(min) + ", got " + show(v));
+    };
+    atLeast("KEYFRAME_INTERVAL_S", c.keyframe_interval_s, 1);
+    atLeast("MIN_INTERVAL_S", c.min_interval_s, 0.1);
+    atLeast("TRACK_TIMEOUT_S", c.track_timeout_s, 1);
+    if (c.max_interval_s < c.min_interval_s)
+        conv.fail(conv.find("MAX_INTERVAL_S") ? "MAX_INTERVAL_S" : "MIN_INTERVAL_S",
+                  "MAX_INTERVAL_S (" + show(c.max_interval_s) + ") must be at least MIN_INTERVAL_S (" +
+                      show(c.min_interval_s) + ")");
+    if (!(c.max_range_nm > 0))
+        conv.fail("MAX_RANGE_NM", "MAX_RANGE_NM must be greater than 0, got " + show(c.max_range_nm));
+    if (c.min_elevation_deg < -90 || c.min_elevation_deg > 90)
+        conv.fail("MIN_ELEVATION_DEG", "MIN_ELEVATION_DEG must be in [-90,90], got " + show(c.min_elevation_deg));
+    if (!c.record_dir.empty() && c.record_formats.empty())
+        conv.fail(conv.find("RECORD_FORMATS") ? "RECORD_FORMATS" : "RECORD_DIR",
+                  "RECORD_FORMATS must name at least one of jsonl, csv when RECORD_DIR is set");
     return c;
 }
 

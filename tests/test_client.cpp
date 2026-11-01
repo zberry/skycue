@@ -846,3 +846,77 @@ BOOST_AUTO_TEST_CASE(tcp_listen_rejects_bad_magic_closes_only_that_peer)
     BOOST_TEST(ev.conns.size() == 1u);
     BOOST_TEST(ev.drops.empty());
 }
+
+BOOST_AUTO_TEST_CASE(tcp_dead_peer_detected_by_heartbeat_timeout)
+{
+    TestTcpServer server;
+    Events ev;
+    Config cfg = tcpConfig(server.port());
+    cfg.heartbeat_timeout = 200ms; // less than 3 x the Hello's 150 ms heartbeat, which wins
+    Client client(cfg);
+    ev.attach(client);
+    client.start();
+    BOOST_REQUIRE(server.waitAccepted());
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() == 1; }));
+    server.send(cat({encodeHello(Hello{10000, 150, "test"}), encodeTrackUpdate(mkTrack(1, true)),
+                     encodeTrackUpdate(mkTrack(2, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+
+    // Heartbeats keep the connection alive well past the timeout.
+    for (int i = 0; i < 8; ++i) {
+        server.send(encodeHeartbeat(Heartbeat{static_cast<uint64_t>(i)}));
+        std::this_thread::sleep_for(100ms);
+    }
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.conns.size() == 1u);
+        BOOST_TEST(ev.drops.empty());
+    }
+
+    // The server stops sending without closing: dead after 3 x 150 ms.
+    const auto silent = std::chrono::steady_clock::now();
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() >= 2 && ev.drops.size() == 2; }, 450ms + 1s));
+    const auto elapsed = std::chrono::steady_clock::now() - silent;
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.conns[1] == false);
+        BOOST_TEST(ev.countDrops(DropReason::source_lost) == 2u);
+    }
+    BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() >= 350);
+    BOOST_TEST(client.trackCount() == 0u);
+
+    // And it reconnects (the listener's backlog completes the connect).
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() >= 3; }, 1s));
+    BOOST_TEST(ev.conn(2) == true);
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_silent_peer_closed)
+{
+    Events ev;
+    Config cfg = listenConfig();
+    cfg.heartbeat_timeout = 300ms;
+    Client client(cfg);
+    ev.attach(client);
+    client.start();
+    BOOST_REQUIRE(client.localPort() != 0);
+
+    TcpPeer a(client.localPort()), b(client.localPort());
+    a.send(cat({encodeHello(Hello{10000, 100, "a"}), encodeTrackUpdate(mkTrack(1, true))}));
+    b.send(cat({encodeHello(Hello{10000, 100, "b"}), encodeTrackUpdate(mkTrack(2, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+
+    // a goes silent while b keeps sending heartbeats: a is closed.
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    bool aClosed = false;
+    uint64_t seq = 0;
+    while (!aClosed && std::chrono::steady_clock::now() < deadline) {
+        b.send(encodeHeartbeat(Heartbeat{++seq}));
+        aClosed = a.waitClosedFor(50ms);
+    }
+    BOOST_REQUIRE(aClosed);
+    b.send(encodeTrackUpdate(mkTrack(3, true)));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3; }));
+    std::lock_guard<std::mutex> lk(ev.m);
+    BOOST_TEST(ev.conns.size() == 1u); // b is still connected
+    BOOST_TEST(ev.conns[0] == true);
+}

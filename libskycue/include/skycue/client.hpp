@@ -24,7 +24,9 @@ struct Config {
     uint16_t port = 30500;          // tcp_listen, udp: 0 picks an ephemeral port (tcp_listen: see localPort)
     std::chrono::milliseconds reconnect_interval{2000};
     std::chrono::milliseconds default_keyframe_interval{10000}; // until a Hello says otherwise
-    std::chrono::milliseconds heartbeat_timeout{3000};          // udp: no frame for this long -> source_lost
+    // Liveness (see "Liveness" below): udp: no frame for this long ->
+    // source_lost. tcp, tcp_listen: the minimum per-connection timeout.
+    std::chrono::milliseconds heartbeat_timeout{3000};
     bool run_io_thread = true;
 };
 
@@ -56,6 +58,19 @@ struct Config {
 // first, false (then source_lost for every track) when the last one closes.
 // There is no reconnecting; the listener keeps accepting. If the address
 // cannot be bound, binding is retried every reconnect_interval.
+//
+// Liveness: heartbeats are the liveness signal in every transport; every
+// received frame of any type counts. udp: no datagram for heartbeat_timeout
+// -> onConnectionChange(false), then source_lost for every track. tcp and
+// tcp_listen: each connection has a watchdog with timeout
+// max(heartbeat_timeout, 3 x the heartbeat_interval_ms of that connection's
+// Hello), heartbeat_timeout until a Hello arrives. On expiry a tcp
+// connection is treated exactly like one the peer closed (connection false,
+// source_lost, reconnect after reconnect_interval); a tcp_listen connection
+// is closed on its own. SO_KEEPALIVE is set on every TCP socket as a backstop.
+// In poll mode, poll at least every heartbeat_timeout: frames that arrived
+// but were not yet handled do not count, so a long gap between polls can
+// make a live connection look dead.
 //
 // Raw frames: onFrame (optional, default none) fires for every frame that
 // decodes (TCP: each frame of the stream; UDP: each well-formed datagram),

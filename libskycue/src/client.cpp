@@ -68,6 +68,7 @@ struct Client::Impl {
     asio::steady_timer reconnect_timer{io};
     asio::steady_timer stale_timer{io};
     asio::steady_timer heartbeat_timer{io};
+    asio::steady_timer tcp_watchdog{io}; // tcp: liveness of the connection
 
     std::vector<uint8_t> rx;
     std::array<uint8_t, 4096> chunk{};
@@ -75,10 +76,13 @@ struct Client::Impl {
     // tcp_listen: one Peer per accepted connection, each with its own decoder
     // state. Handlers hold a shared_ptr to their Peer; `open` turns them off.
     struct Peer {
-        Peer(asio::io_context& io, unsigned id_) : sock(io), id(id_) {}
+        Peer(asio::io_context& io, unsigned id_) : sock(io), watchdog(io), id(id_) {}
         tcp::socket sock;
+        asio::steady_timer watchdog; // liveness; see livenessTimeout
         unsigned id;
         bool open = true;
+        steady::time_point last_frame{};
+        std::chrono::milliseconds heartbeat_interval{0}; // from its Hello; 0 before one
         std::vector<uint8_t> rx;
         std::array<uint8_t, 4096> chunk{};
     };
@@ -97,7 +101,8 @@ struct Client::Impl {
     bool connected = false;
     bool stopping = false;
     std::chrono::milliseconds keyframe_interval;
-    steady::time_point last_frame{};
+    steady::time_point last_frame{};                  // tcp, udp: newest frame
+    std::chrono::milliseconds heartbeat_interval{0}; // tcp: from the Hello; 0 before one
     unsigned conn_gen = 0, reconnect_gen = 0, stale_gen = 0, heartbeat_gen = 0;
 
     // First exception thrown by a user callback; rethrown from poll() in poll
@@ -207,9 +212,14 @@ struct Client::Impl {
                                                                return;
                                                            }
                                                            rx.clear();
+                                                           setKeepAlive(tcp_sock);
+                                                           last_frame = steady::now();
+                                                           heartbeat_interval = std::chrono::milliseconds(0);
                                                            setConnected(true);
-                                                           if (!stopping && gen == conn_gen)
-                                                               readTcp(gen);
+                                                           if (stopping || gen != conn_gen)
+                                                               return;
+                                                           armTcpWatchdog(gen, last_frame + livenessTimeout(heartbeat_interval));
+                                                           readTcp(gen);
                                                        });
                                });
     }
@@ -218,7 +228,54 @@ struct Client::Impl {
     {
         error_code ignored;
         tcp_sock.close(ignored);
+        tcp_watchdog.cancel(ignored);
         rx.clear();
+    }
+
+    // ---- liveness ----------------------------------------------------------
+    // Heartbeats are the liveness signal in every transport: a TCP connection
+    // (or tcp_listen peer) that delivers no frame for livenessTimeout is
+    // treated as dead even though the socket is still open, which catches a
+    // peer that hung or vanished without a FIN. SO_KEEPALIVE is set as a
+    // backstop for the kernel's own detection.
+
+    std::chrono::milliseconds livenessTimeout(std::chrono::milliseconds heartbeat) const
+    {
+        return std::max(cfg.heartbeat_timeout, heartbeat * 3);
+    }
+
+    static void setKeepAlive(tcp::socket& sock)
+    {
+        error_code ignored;
+        sock.set_option(asio::socket_base::keep_alive(true), ignored);
+    }
+
+    void armTcpWatchdog(unsigned gen, steady::time_point deadline)
+    {
+        tcp_watchdog.expires_at(deadline);
+        tcp_watchdog.async_wait([this, gen](const error_code& ec) {
+            if (stopping || ec || gen != conn_gen)
+                return;
+            const auto due = last_frame + livenessTimeout(heartbeat_interval);
+            if (steady::now() >= due)
+                lostTcp();
+            else
+                armTcpWatchdog(gen, due);
+        });
+    }
+
+    void armPeerWatchdog(const std::shared_ptr<Peer>& p, steady::time_point deadline)
+    {
+        p->watchdog.expires_at(deadline);
+        p->watchdog.async_wait([this, p](const error_code& ec) {
+            if (stopping || ec || !p->open)
+                return;
+            const auto due = p->last_frame + livenessTimeout(p->heartbeat_interval);
+            if (steady::now() >= due)
+                closePeer(p);
+            else
+                armPeerWatchdog(p, due);
+        });
     }
 
     void lostTcp()
@@ -239,7 +296,7 @@ struct Client::Impl {
                 return;
             }
             rx.insert(rx.end(), chunk.data(), chunk.data() + n);
-            const bool good = consumeFrames(rx, [&] { return !stopping && gen == conn_gen; });
+            const bool good = consumeFrames(rx, [&] { return !stopping && gen == conn_gen; }, nullptr);
             if (stopping || gen != conn_gen) // a callback stopped the client
                 return;
             if (!good) { // bad_magic / bad_version: cannot resynchronise
@@ -254,7 +311,8 @@ struct Client::Impl {
     // reassembly buffer), erasing them. False on a bad magic or version: the
     // stream cannot be resynchronised. `alive` says whether to go on (a
     // callback may have stopped the client or closed the connection).
-    template <class Alive> bool consumeFrames(std::vector<uint8_t>& buf, Alive alive)
+    // `peer`: the tcp_listen connection the stream belongs to, null for tcp.
+    template <class Alive> bool consumeFrames(std::vector<uint8_t>& buf, Alive alive, Peer* peer)
     {
         size_t offset = 0;
         bool good = true;
@@ -269,7 +327,7 @@ struct Client::Impl {
                 break;
             }
             offset += used;
-            handleFrame(frame);
+            handleFrame(frame, peer);
         }
         // Bounded by construction: what is left is a partial frame, less
         // than kHeaderSize + 0xFFFF bytes (the u16 length field caps a
@@ -342,9 +400,13 @@ struct Client::Impl {
                 return;
             }
             peers.emplace(p->id, p);
+            setKeepAlive(p->sock);
+            p->last_frame = steady::now();
             setConnected(true); // fires for the first connection only
             if (stopping)
                 return;
+            if (p->open)
+                armPeerWatchdog(p, p->last_frame + livenessTimeout(p->heartbeat_interval));
             readPeer(p);
             acceptNext();
         });
@@ -360,7 +422,7 @@ struct Client::Impl {
                 return;
             }
             p->rx.insert(p->rx.end(), p->chunk.data(), p->chunk.data() + n);
-            const bool good = consumeFrames(p->rx, [&] { return !stopping && p->open; });
+            const bool good = consumeFrames(p->rx, [&] { return !stopping && p->open; }, p.get());
             if (stopping || !p->open)
                 return;
             if (!good) {
@@ -378,6 +440,7 @@ struct Client::Impl {
         p->open = false;
         error_code ignored;
         p->sock.close(ignored);
+        p->watchdog.cancel(ignored);
         p->rx.clear();
         peers.erase(p->id);
         if (peers.empty())
@@ -440,7 +503,7 @@ struct Client::Impl {
                         armHeartbeat(last_frame + cfg.heartbeat_timeout);
                 }
                 if (!stopping)
-                    handleFrame(frame);
+                    handleFrame(frame, nullptr);
             }
             if (!stopping)
                 receiveUdp();
@@ -514,15 +577,26 @@ struct Client::Impl {
         }
     }
 
-    void handleFrame(const Frame& frame)
+    // `peer`: the tcp_listen connection the frame came from; null for tcp
+    // and udp (one source).
+    void handleFrame(const Frame& frame, Peer* peer)
     {
+        // Every frame counts for liveness, whatever it decodes to.
+        const auto now = steady::now();
+        if (peer)
+            peer->last_frame = now;
+        else
+            last_frame = now;
         fireFrame(frame);
-        if (stopping) // the callback stopped the client
+        if (stopping || (peer && !peer->open)) // the callback stopped the client
             return;
         switch (frame.type) {
         case FrameType::hello: {
             Hello h;
-            if (!decodeHello(frame, h) || h.keyframe_interval_ms == 0)
+            if (!decodeHello(frame, h))
+                return;
+            noteHeartbeatInterval(std::chrono::milliseconds(h.heartbeat_interval_ms), peer);
+            if (h.keyframe_interval_ms == 0)
                 return;
             const auto interval = clampInterval(std::chrono::milliseconds(h.keyframe_interval_ms));
             if (interval != keyframe_interval) {
@@ -535,7 +609,6 @@ struct Client::Impl {
             Track t;
             if (!decodeTrackUpdate(frame, t))
                 return;
-            const auto now = steady::now();
             auto it = tracks.find(t.id);
             if (it == tracks.end()) {
                 tracks.emplace(t.id, Entry{t, now});
@@ -564,6 +637,25 @@ struct Client::Impl {
         }
     }
 
+    // A Hello's heartbeat interval sets the connection's liveness timeout; the
+    // watchdog is re-armed so that a shorter timeout takes effect at once.
+    void noteHeartbeatInterval(std::chrono::milliseconds hb, Peer* peer)
+    {
+        if (peer) {
+            if (hb == peer->heartbeat_interval)
+                return;
+            peer->heartbeat_interval = hb;
+            auto it = peers.find(peer->id);
+            if (it != peers.end())
+                armPeerWatchdog(it->second, peer->last_frame + livenessTimeout(hb));
+            return;
+        }
+        if (cfg.transport != Config::Transport::tcp || hb == heartbeat_interval)
+            return;
+        heartbeat_interval = hb;
+        armTcpWatchdog(conn_gen, last_frame + livenessTimeout(hb));
+    }
+
     void shutdownOnIo()
     {
         stopping = true;
@@ -580,9 +672,11 @@ struct Client::Impl {
         tcp_sock.close(ignored);
         udp_sock.close(ignored);
         acceptor.close(ignored);
+        tcp_watchdog.cancel(ignored);
         for (auto& kv : peers) {
             kv.second->open = false;
             kv.second->sock.close(ignored);
+            kv.second->watchdog.cancel(ignored);
         }
         peers.clear();
         rx.clear();

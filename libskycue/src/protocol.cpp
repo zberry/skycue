@@ -322,6 +322,10 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
     t.keyframe = (flags & kFlagKeyframe) != 0;
     t.on_ground = (flags & kFlagOnGround) != 0;
     t.alt_is_geom = (flags & kFlagAltIsGeom) != 0;
+    // Clamp before converting: a hostile value would overflow the signed
+    // conversion to system_clock::duration.
+    if (ms > kMaxPositionTimeMs)
+        ms = kMaxPositionTimeMs;
     t.position_time = std::chrono::system_clock::time_point(
         std::chrono::duration_cast<std::chrono::system_clock::duration>(
             std::chrono::milliseconds(static_cast<int64_t>(ms))));

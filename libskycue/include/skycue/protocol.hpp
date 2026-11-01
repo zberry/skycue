@@ -22,6 +22,9 @@ constexpr size_t kMaxUdpPayload = 1200;
 constexpr size_t kMaxCallsignLen = 8;
 constexpr size_t kMaxSquawkLen = 4;
 constexpr size_t kMaxRegistrationLen = 16;
+// Decoded TrackUpdate position_time_ms values above this (2100-01-01T00:00:00Z)
+// are clamped to it.
+constexpr uint64_t kMaxPositionTimeMs = 4102444800000ULL;
 // Hello sender is truncated to this on encode.
 constexpr size_t kMaxSenderLen = 255;
 

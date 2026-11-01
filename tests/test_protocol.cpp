@@ -117,6 +117,35 @@ BOOST_AUTO_TEST_CASE(track_roundtrip_all_fields)
     checkEqual(in, out);
 }
 
+BOOST_AUTO_TEST_CASE(track_golden_bytes)
+{
+    // Computed independently from the layout in docs/protocol.md, not from this encoder.
+    const uint8_t expected[] = {
+        0x53, 0x4B, 0x59, 0x43, 0x01, 0x02, 0x43, 0x00, 0xC3, 0xB2, 0xA1, 0x00,
+        0x00, 0x01, 0x07, 0x00, 0x7B, 0x44, 0x8E, 0x99, 0xA1, 0x01, 0x00, 0x00,
+        0x40, 0xAB, 0x2F, 0x17, 0xA8, 0x02, 0x15, 0xD2, 0xFF, 0x03, 0xB8, 0x88,
+        0x00, 0x00, 0x50, 0xFB, 0xFF, 0xFF, 0x00, 0xC0, 0xE1, 0x43, 0x00, 0xA0,
+        0x87, 0x43, 0x00, 0x00, 0xC0, 0xC4, 0x06, 0x55, 0x41, 0x4C, 0x31, 0x32,
+        0x33, 0x04, 0x31, 0x32, 0x30, 0x30, 0x06, 0x4E, 0x31, 0x32, 0x33, 0x34,
+        0x35, 0x08, 0x0A,
+    };
+    std::vector<uint8_t> got = encodeTrackUpdate(fullTrack());
+    std::vector<uint8_t> want(std::begin(expected), std::end(expected));
+    BOOST_TEST(got == want, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(huge_time_clamped_no_ub)
+{
+    Frame f = decodeOne(encodeTrackUpdate(fullTrack()));
+    for (size_t i = 8; i < 16; ++i)
+        f.payload[i] = 0xFF; // position_time_ms = 0xFFFFFFFFFFFFFFFF
+    Track out;
+    BOOST_TEST(decodeTrackUpdate(f, out));
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(out.position_time.time_since_epoch()).count();
+    BOOST_TEST(ms == static_cast<int64_t>(kMaxPositionTimeMs));
+    BOOST_TEST((out.nac_p == std::optional<uint8_t>(10)));
+}
+
 BOOST_AUTO_TEST_CASE(track_roundtrip_minimal)
 {
     Track in;

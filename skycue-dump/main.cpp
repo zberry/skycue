@@ -1,6 +1,12 @@
 // skycue-dump: connects to a skycue stream (TCP or UDP) and prints one line
 // per frame, as text or as JSON. A pure libskycue consumer: everything it
 // shows comes through skycue::Client, so it links nothing from skycued.
+//
+// Frame lines (HELLO, UPDATE, DROP, HB, BAD) show exactly what arrived on the
+// wire: they are decoded here from Client::onFrame, never from the track
+// table. Two kinds of event lines are not frames and do not count towards
+// --count: CONN (connection up/down) and LOCAL-DROP (a drop the client made up
+// itself: stale, or source_lost after the connection went down).
 
 #include <skycue/client.hpp>
 #include <skycue/protocol.hpp>
@@ -8,7 +14,9 @@
 
 #include <boost/program_options.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <clocale>
 #include <cmath>
 #include <csignal>
 #include <cstdint>
@@ -122,6 +130,17 @@ const char* name(DropReason r)
     return "unknown";
 }
 
+const char* frameTypeName(FrameType t)
+{
+    switch (t) {
+    case FrameType::hello: return "hello";
+    case FrameType::track_update: return "update";
+    case FrameType::track_drop: return "drop";
+    case FrameType::heartbeat: return "heartbeat";
+    }
+    return nullptr;
+}
+
 std::string hex(uint32_t address)
 {
     char buf[16];
@@ -153,6 +172,8 @@ public:
         }
         return *this;
     }
+    // Event lines (CONN, LOCAL-DROP) say so in JSON; frame lines carry no flag.
+    Line& uncounted() { return add("counted", "false", ""); }
     std::string str() const { return s_ + (json_ ? "}\n" : "\n"); }
 
 private:
@@ -225,13 +246,19 @@ int main(int argc, char** argv)
     double timeout_s = 0;
     po::options_description desc("usage: skycue-dump [--tcp HOST:PORT | --udp BIND:PORT] [--json] [--count N] "
                                  "[--timeout S]\n"
-                                 "Prints a skycue stream one line per frame (HELLO, UPDATE, DROP, HB, CONN)");
+                                 "Prints a skycue stream one line per wire frame: HELLO, UPDATE, DROP, HB, or\n"
+                                 "BAD <type> <len> for a frame that does not decode. Event lines CONN up|down and\n"
+                                 "LOCAL-DROP <HEX> <reason> (a drop the client made up: stale, source_lost) are\n"
+                                 "printed too but are not frames and do not count towards --count");
     desc.add_options()("help,h", "show this help")(
         "tcp", po::value(&tcp_ep), "connect to a skycued TCP port (default 127.0.0.1:30500)")(
         "udp", po::value(&udp_ep), "bind a UDP port and print the datagrams sent to it")(
         "json", "one JSON object per line instead of text")(
-        "count", po::value(&count), "exit 0 after N lines (every frame kind counts, heartbeats too)")(
-        "timeout", po::value(&timeout_s), "exit after S seconds: 0 if anything was printed, else 3");
+        "count", po::value(&count), "exit 0 after N frame lines (heartbeats and BAD count; CONN and LOCAL-DROP do not)")(
+        "timeout", po::value(&timeout_s), "exit after S seconds (at most 1e6): 0 if any frame arrived, else 3");
+    // Numbers are printed with snprintf, whose decimal point follows
+    // LC_NUMERIC; pin it so the JSON stays valid whatever setlocale callers do.
+    std::setlocale(LC_NUMERIC, "C");
     po::variables_map vm;
     try {
         po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -256,6 +283,7 @@ int main(int argc, char** argv)
         std::cerr << "skycue-dump: --timeout must be a positive number of seconds\n";
         return 2;
     }
+    timeout_s = std::min(timeout_s, 1e6); // keeps the duration_cast below in range
 
     Config cfg;
     cfg.run_io_thread = false; // everything, printing included, on this thread
@@ -270,53 +298,78 @@ int main(int argc, char** argv)
     const bool json = vm.count("json") > 0;
 
     Client client(cfg);
-    unsigned long printed = 0;
+    unsigned long frames = 0; // frame lines printed: what --count and exit 3 look at
     bool done = false;
-    const auto emit = [&](const std::string& line) {
-        if (done)
-            return;
+    const auto print = [&](const std::string& line) {
         std::fwrite(line.data(), 1, line.size(), stdout);
         std::fflush(stdout);
-        if (++printed == count) {
+    };
+    const auto frameLine = [&](const std::string& line) {
+        if (done)
+            return;
+        print(line);
+        if (++frames == count) {
             done = true;
             client.stop();
         }
     };
+    const auto eventLine = [&](const std::string& line) {
+        if (!done)
+            print(line);
+    };
+    // A TrackDrop frame for a track in the client's table makes the client
+    // call onTrackDropped right after onFrame; that call is the wire drop
+    // already printed, not a LOCAL-DROP. Any other frame clears it.
+    std::optional<TrackId> wire_drop;
     client.onFrame([&](const Frame& f) {
+        wire_drop.reset();
+        const char* type = frameTypeName(f.type);
         Hello h;
         Heartbeat hb;
-        if (decodeHello(f, h))
-            emit(Line(json, "hello", "HELLO")
-                     .add("sender", jsonString(h.sender), textWord(h.sender))
-                     .add("keyframe_interval_ms", num(static_cast<long long>(h.keyframe_interval_ms)),
-                          "kf=" + std::to_string(h.keyframe_interval_ms) + "ms")
-                     .add("heartbeat_interval_ms", num(static_cast<long long>(h.heartbeat_interval_ms)),
-                          "hb=" + std::to_string(h.heartbeat_interval_ms) + "ms")
-                     .str());
-        else if (decodeHeartbeat(f, hb))
-            emit(Line(json, "heartbeat", "HB")
-                     .add("sender_time_ms", std::to_string(hb.sender_time_ms), "")
-                     .str());
-        // Updates and drops are printed from the track callbacks below.
+        Track t;
+        TrackDrop d;
+        if (f.type == FrameType::hello && decodeHello(f, h)) {
+            frameLine(Line(json, "hello", "HELLO")
+                          .add("sender", jsonString(h.sender), textWord(h.sender))
+                          .add("keyframe_interval_ms", num(static_cast<long long>(h.keyframe_interval_ms)),
+                               "kf=" + std::to_string(h.keyframe_interval_ms) + "ms")
+                          .add("heartbeat_interval_ms", num(static_cast<long long>(h.heartbeat_interval_ms)),
+                               "hb=" + std::to_string(h.heartbeat_interval_ms) + "ms")
+                          .str());
+        } else if (f.type == FrameType::track_update && decodeTrackUpdate(f, t)) {
+            frameLine(updateLine(json, t));
+        } else if (f.type == FrameType::track_drop && decodeTrackDrop(f, d)) {
+            wire_drop = d.id;
+            const std::string x = hex(d.id.address);
+            frameLine(Line(json, "drop", "DROP")
+                          .add("hex", jsonString(x), x)
+                          .add("addr_type", jsonString(name(d.id.type)), "")
+                          .add("reason", jsonString(name(d.reason)), name(d.reason))
+                          .str());
+        } else if (f.type == FrameType::heartbeat && decodeHeartbeat(f, hb)) {
+            frameLine(Line(json, "heartbeat", "HB").add("sender_time_ms", std::to_string(hb.sender_time_ms), "").str());
+        } else { // malformed payload, or a frame type this version does not know
+            const std::string tn = type ? type : std::to_string(static_cast<unsigned>(f.type));
+            const std::string len = std::to_string(f.payload.size());
+            frameLine(Line(json, "bad", "BAD").add("type", jsonString(tn), tn).add("length", len, len).str());
+        }
     });
-    client.onTrackUpdate([&](const Track& t) { emit(updateLine(json, t)); });
     client.onTrackDropped([&](TrackId id, DropReason r) {
-        const std::string h = hex(id.address);
-        emit(Line(json, "drop", "DROP")
-                 .add("hex", jsonString(h), h)
-                 .add("addr_type", jsonString(name(id.type)), "")
-                 .add("reason", jsonString(name(r)), name(r))
-                 .str());
-    });
-    // The first connect is implied by the HELLO that follows it; later
-    // transitions (loss, reconnect) are shown.
-    bool ever_connected = false;
-    client.onConnectionChange([&](bool up) {
-        if (up && !ever_connected) {
-            ever_connected = true;
+        if (wire_drop && *wire_drop == id) {
+            wire_drop.reset();
             return;
         }
-        emit(Line(json, "conn", "CONN").add("connected", up ? "true" : "false", up ? "up" : "down").str());
+        const std::string x = hex(id.address);
+        eventLine(Line(json, "local_drop", "LOCAL-DROP")
+                      .add("hex", jsonString(x), x)
+                      .add("addr_type", jsonString(name(id.type)), "")
+                      .add("reason", jsonString(name(r)), name(r))
+                      .uncounted()
+                      .str());
+    });
+    client.onConnectionChange([&](bool up) {
+        wire_drop.reset();
+        eventLine(Line(json, "conn", "CONN").add("connected", up ? "true" : "false", up ? "up" : "down").uncounted().str());
     });
 
     std::signal(SIGINT, onSignal);
@@ -340,5 +393,5 @@ int main(int argc, char** argv)
         return 1;
     }
     client.stop();
-    return timed_out && printed == 0 ? 3 : 0;
+    return timed_out && frames == 0 ? 3 : 0;
 }

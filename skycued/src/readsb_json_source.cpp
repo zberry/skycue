@@ -1,0 +1,174 @@
+#include "readsb_json_source.hpp"
+
+#include "json_lite.hpp"
+
+#include <cmath>
+#include <exception>
+
+namespace skycued {
+namespace {
+
+using skycue::AddressType;
+using skycue::Source;
+
+// Upper bound for "now": keeps the conversion to system_clock's nanosecond
+// count far from overflow (1e11 s is past the year 5000).
+constexpr double kMaxEpochSeconds = 1e11;
+
+std::chrono::system_clock::time_point fromEpochSeconds(double seconds)
+{
+    return std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(
+        std::chrono::duration<double>(seconds)));
+}
+
+// readsb writes "%06x", with a leading '~' for non-ICAO addresses.
+bool parseHex(std::string hex, uint32_t& address, bool& non_icao)
+{
+    non_icao = !hex.empty() && hex[0] == '~';
+    if (non_icao)
+        hex.erase(0, 1);
+    if (hex.size() != 6)
+        return false;
+    uint32_t value = 0;
+    for (char c : hex) {
+        uint32_t digit;
+        if (c >= '0' && c <= '9')
+            digit = static_cast<uint32_t>(c - '0');
+        else if (c >= 'a' && c <= 'f')
+            digit = static_cast<uint32_t>(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F')
+            digit = static_cast<uint32_t>(c - 'A' + 10);
+        else
+            return false;
+        value = (value << 4) | digit;
+    }
+    address = value;
+    return true;
+}
+
+Source sourceForType(const std::string& type)
+{
+    if (type == "adsb_icao" || type == "adsb_icao_nt" || type == "adsb_other")
+        return Source::adsb_1090;
+    // readsb ingests dump978's UAT as ADS-R (spec 5.2).
+    if (type == "adsr_icao" || type == "adsr_other")
+        return Source::uat_978;
+    if (type.compare(0, 5, "tisb_") == 0)
+        return Source::tisb;
+    if (type == "mlat")
+        return Source::mlat;
+    return Source::other;  // mode_s, other, adsc, unknown, anything newer
+}
+
+std::optional<std::string> trimmedNonEmpty(std::optional<std::string> s)
+{
+    if (!s)
+        return std::nullopt;
+    auto end = s->find_last_not_of(' ');
+    if (end == std::string::npos)
+        return std::nullopt;
+    s->erase(end + 1);
+    return s;
+}
+
+std::optional<std::string> nonEmpty(std::optional<std::string> s)
+{
+    if (s && s->empty())
+        return std::nullopt;
+    return s;
+}
+
+std::optional<int32_t> feet(const std::optional<double>& v)
+{
+    if (!v || std::fabs(*v) > 1e7)
+        return std::nullopt;
+    return static_cast<int32_t>(std::lround(*v));
+}
+
+std::optional<float> toFloat(const std::optional<double>& v)
+{
+    if (!v || std::fabs(*v) > 1e30)
+        return std::nullopt;
+    return static_cast<float>(*v);
+}
+
+std::optional<uint8_t> toByte(const std::optional<int64_t>& v)
+{
+    if (!v || *v < 0 || *v > 255)
+        return std::nullopt;
+    return static_cast<uint8_t>(*v);
+}
+
+std::optional<TrackObservation> parse(const std::string& line)
+{
+    auto json = JsonObject::parse(line);
+    if (!json)
+        return std::nullopt;
+
+    TrackObservation obs;
+    auto hex = json->getString("hex");
+    bool non_icao = false;
+    if (!hex || !parseHex(*hex, obs.id.address, non_icao))
+        return std::nullopt;
+    auto now = json->getDouble("now");
+    if (!now || *now < 0 || *now > kMaxEpochSeconds)
+        return std::nullopt;
+
+    const std::string type = json->getString("type").value_or("");
+    obs.source = sourceForType(type);
+    if (type == "tisb_trackfile")
+        obs.id.type = AddressType::tisb_trackfile;
+    else if (non_icao)
+        obs.id.type = AddressType::non_icao;
+    else
+        obs.id.type = AddressType::icao;
+
+    obs.received_time = fromEpochSeconds(*now);
+
+    auto lat = json->getDouble("lat");
+    auto lon = json->getDouble("lon");
+    if (lat && lon && std::fabs(*lat) <= 90 && std::fabs(*lon) <= 180) {
+        obs.lat = lat;
+        obs.lon = lon;
+        double position_s = *now;
+        auto seen_pos = json->getDouble("seen_pos");
+        if (seen_pos && *seen_pos >= 0 && *seen_pos <= *now)
+            position_s = *now - *seen_pos;
+        obs.position_time = fromEpochSeconds(position_s);
+    }
+
+    if (json->getString("alt_baro").value_or("") == "ground")
+        obs.on_ground = true;
+    else
+        obs.alt_baro_ft = feet(json->getDouble("alt_baro"));
+    obs.alt_geom_ft = feet(json->getDouble("alt_geom"));
+    obs.gs_kt = toFloat(json->getDouble("gs"));
+    obs.track_deg = toFloat(json->getDouble("track"));
+    obs.baro_rate_fpm = toFloat(json->getDouble("baro_rate"));
+    obs.geom_rate_fpm = toFloat(json->getDouble("geom_rate"));
+
+    obs.callsign = trimmedNonEmpty(json->getString("flight"));
+    obs.registration = trimmedNonEmpty(json->getString("r"));
+    obs.squawk = nonEmpty(json->getString("squawk"));
+    obs.emergency = nonEmpty(json->getString("emergency"));
+    obs.category = nonEmpty(json->getString("category"));
+
+    obs.nic = toByte(json->getInt("nic"));
+    obs.nac_p = toByte(json->getInt("nac_p"));
+    obs.rssi = json->getDouble("rssi");
+    obs.raw_line = line;
+    return obs;
+}
+
+}  // namespace
+
+std::optional<TrackObservation> parseReadsbLine(const std::string& line)
+{
+    try {
+        return parse(line);
+    } catch (const std::exception&) {  // bad_alloc; parsing itself does not throw
+        return std::nullopt;
+    }
+}
+
+}  // namespace skycued

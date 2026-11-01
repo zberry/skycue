@@ -26,6 +26,13 @@ target_compile_definitions(test_config PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_config)
 add_test(NAME config COMMAND test_config)
 
+add_executable(test_readsb_json test_readsb_json.cpp)
+target_link_libraries(test_readsb_json PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_readsb_json PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_readsb_json)
+add_test(NAME readsb_json COMMAND test_readsb_json)
+
 # Builds a tiny consumer against libskycue through add_subdirectory() and
 # through find_package() on an install of it.
 add_test(NAME consumer_smoke

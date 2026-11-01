@@ -2,7 +2,9 @@
 # tests can link it.
 add_library(skycued_core STATIC
   src/config.cpp
-  src/log.cpp)
+  src/json_lite.cpp
+  src/log.cpp
+  src/readsb_json_source.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(skycued_core PUBLIC skycue::skycue Boost::program_options)
+target_link_libraries(skycued_core PUBLIC skycue::skycue Boost::boost Boost::program_options)
 skycue_set_warnings(skycued_core)

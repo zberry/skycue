@@ -96,3 +96,21 @@ string(REPLACE ";" "\\;" _smoke_prefix_path "${CMAKE_PREFIX_PATH}")
 set_tests_properties(consumer_smoke PROPERTIES
   TIMEOUT 300
   ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
+
+add_executable(test_raw_formats test_raw_formats.cpp)
+target_link_libraries(test_raw_formats PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_raw_formats PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_raw_formats)
+add_test(NAME raw_formats COMMAND test_raw_formats)
+
+# skycue-rawrec / skycue-rawplay on the real-data fixtures; the last part
+# feeds a real readsb when one has been built (the superbuild's stage).
+get_filename_component(_skycue_stage_readsb
+  "${PROJECT_SOURCE_DIR}/../build/stage/bin/readsb" ABSOLUTE)
+set(SKYCUE_TEST_READSB "${_skycue_stage_readsb}" CACHE FILEPATH
+  "readsb used by the rawtools full-stack check (skipped when missing)")
+add_test(NAME rawtools
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_rawtools.sh
+    $<TARGET_FILE:skycue-rawrec> $<TARGET_FILE:skycue-rawplay>
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_TEST_READSB})
+set_tests_properties(rawtools PROPERTIES TIMEOUT 120)

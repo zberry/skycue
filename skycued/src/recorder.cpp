@@ -1,10 +1,8 @@
 #include "recorder.hpp"
 
 #include "log.hpp"
+#include "rotating_file.hpp"
 #include "time_util.hpp"
-
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include <cerrno>
 #include <cmath>
@@ -447,35 +445,6 @@ void addJson(JsonWriter& w, const Field& f)
     }
 }
 
-// ---- files ----
-
-bool isDirectory(const std::string& path)
-{
-    struct stat st {};
-    return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-bool exists(const std::string& path)
-{
-    struct stat st {};
-    return ::stat(path.c_str(), &st) == 0;
-}
-
-// mkdir -p; true when `dir` is a directory afterwards.
-bool makeDirs(const std::string& dir)
-{
-    if (dir.empty())
-        return false;
-    for (std::size_t pos = 1; pos <= dir.size(); ++pos) {
-        if (pos == dir.size() || dir[pos] == '/') {
-            const std::string prefix = dir.substr(0, pos);
-            if (::mkdir(prefix.c_str(), 0755) != 0 && errno != EEXIST)
-                return false;
-        }
-    }
-    return isDirectory(dir);
-}
-
 }  // namespace
 
 std::vector<std::string> observationKeys()
@@ -589,18 +558,10 @@ Recorder::~Recorder() { closeFiles(); }
 
 bool Recorder::openFiles()
 {
-    if (!recording::makeDirs(config_.dir))
+    if (!makeDirs(config_.dir))
         return false;
     const std::string base = config_.dir + "/" + stream_ + "-" + formatCompactUtc(std::chrono::system_clock::now());
-    // Within one second, continue numbering after the last name used, so
-    // repeated rotations do not re-probe every earlier suffix.
-    int n = base == last_base_ ? last_suffix_ + 1 : 0;
-    auto stemFor = [&base](int i) { return i == 0 ? base : base + "-" + std::to_string(i); };
-    while (recording::exists(stemFor(n) + ".jsonl") || recording::exists(stemFor(n) + ".csv"))
-        ++n;
-    last_base_ = base;
-    last_suffix_ = n;
-    stem_ = stemFor(n);
+    stem_ = uniqueStem(base, {"jsonl", "csv"}, last_base_, last_suffix_);
     jsonl_bytes_ = csv_bytes_ = 0;
     if (config_.jsonl) {
         jsonl_.open(stem_ + ".jsonl", std::ios::out | std::ios::trunc | std::ios::binary);

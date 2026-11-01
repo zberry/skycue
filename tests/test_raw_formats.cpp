@@ -1,0 +1,282 @@
+#define BOOST_TEST_MODULE skycued_raw_formats
+#include <boost/test/unit_test.hpp>
+
+#include "raw_formats.hpp"
+#include "rotating_file.hpp"
+
+#include <dirent.h>
+#include <ftw.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <vector>
+
+using namespace skycued;
+using beast::Frame;
+using beast::FrameSplitter;
+
+namespace {
+
+std::string bytes(std::initializer_list<int> v)
+{
+    std::string s;
+    for (int b : v)
+        s += static_cast<char>(b);
+    return s;
+}
+
+// A frame as the wire carries it: 0x1a, type, then the body with every
+// 0x1a doubled.
+std::string wire(uint8_t type, const std::string& body)
+{
+    std::string s = bytes({0x1a, type});
+    for (char c : body) {
+        s += c;
+        if (static_cast<uint8_t>(c) == 0x1a)
+            s += c;
+    }
+    return s;
+}
+
+std::string tsBytes(uint64_t ts)
+{
+    std::string s;
+    for (int i = 5; i >= 0; --i)
+        s += static_cast<char>((ts >> (8 * i)) & 0xff);
+    return s;
+}
+
+std::vector<Frame> splitAll(const std::string& stream, std::size_t chunk)
+{
+    FrameSplitter sp;
+    std::vector<Frame> out;
+    for (std::size_t i = 0; i < stream.size(); i += chunk) {
+        std::size_t n = std::min(chunk, stream.size() - i);
+        sp.feed(reinterpret_cast<const uint8_t*>(stream.data() + i), n, out);
+    }
+    return out;
+}
+
+struct TempDir {
+    std::string path;
+    TempDir()
+    {
+        char tmpl[] = "/tmp/skycue-rawfmt-XXXXXX";
+        const char* p = ::mkdtemp(tmpl);
+        BOOST_REQUIRE(p);
+        path = p;
+    }
+    ~TempDir()
+    {
+        ::nftw(path.c_str(), [](const char* f, const struct stat*, int, struct FTW*) { return ::remove(f); }, 8,
+               FTW_DEPTH | FTW_PHYS);
+    }
+    std::vector<std::string> list() const
+    {
+        std::vector<std::string> names;
+        if (DIR* d = ::opendir(path.c_str())) {
+            while (dirent* e = ::readdir(d))
+                if (e->d_name[0] != '.')
+                    names.push_back(e->d_name);
+            ::closedir(d);
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+};
+
+std::string slurp(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(body_lengths)
+{
+    BOOST_TEST(beast::bodyLength('1') == 6u + 1 + 2);
+    BOOST_TEST(beast::bodyLength('2') == 6u + 1 + 7);
+    BOOST_TEST(beast::bodyLength('3') == 6u + 1 + 14);
+    BOOST_TEST(beast::bodyLength('4') == 6u + 1 + 14);
+    BOOST_TEST(beast::bodyLength('5') == 6u + 1 + 14);
+    BOOST_TEST(beast::bodyLength(0xe3) == 8u);
+    BOOST_TEST(beast::bodyLength('6') == 0u);
+    BOOST_TEST(beast::bodyLength(0x1a) == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(splits_frames_with_escapes_at_any_chunking)
+{
+    const std::string b1 = tsBytes(0x1a0000000001) + bytes({0x80, 0x12, 0x34});
+    const std::string b2 = tsBytes(0x00000000ff1a) + bytes({0x1a, 0x5d, 0x4c, 0xa1, 0x1a, 0x1a, 0x00, 0x01});
+    std::string b3 = tsBytes(0x123456789abc) + bytes({0x40});
+    for (int i = 0; i < 14; ++i)
+        b3 += static_cast<char>(i == 13 ? 0x1a : 0x8d + i);
+    const std::string stream = wire('1', b1) + wire('2', b2) + wire('3', b3);
+    for (std::size_t chunk : {std::size_t{1}, std::size_t{2}, std::size_t{5}, stream.size()}) {
+        BOOST_TEST_CONTEXT("chunk " << chunk)
+        {
+            auto frames = splitAll(stream, chunk);
+            BOOST_REQUIRE(frames.size() == 3u);
+            BOOST_TEST(frames[0].type == '1');
+            BOOST_TEST(frames[0].timestamp == 0x1a0000000001u);
+            BOOST_TEST(frames[0].body == b1);
+            BOOST_TEST(frames[0].raw == wire('1', b1));
+            BOOST_TEST(frames[0].start == 0u);
+            BOOST_TEST(frames[1].type == '2');
+            BOOST_TEST(frames[1].timestamp == 0xff1au);
+            BOOST_TEST(frames[1].body == b2);
+            BOOST_TEST(frames[1].raw == wire('2', b2));
+            BOOST_TEST(frames[1].start == wire('1', b1).size());
+            BOOST_TEST(frames[2].type == '3');
+            BOOST_TEST(frames[2].body == b3);
+            BOOST_TEST(frames[0].raw + frames[1].raw + frames[2].raw == stream);
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(skips_garbage_unknown_types_and_cut_frames)
+{
+    const std::string good = wire('2', tsBytes(42) + bytes({0x10, 1, 2, 3, 4, 5, 6, 7}));
+    FrameSplitter sp;
+    std::vector<Frame> out;
+    // garbage, an unknown type, a doubled escape outside a frame, a cut-short
+    // long frame (a new frame starts inside it), then a good frame.
+    const std::string cut = wire('3', tsBytes(7) + bytes({0x10, 1, 2}));
+    const std::string stream = bytes({0x00, 0x41}) + bytes({0x1a, 'x'}) + bytes({0x1a, 0x1a}) + cut + good;
+    sp.feed(reinterpret_cast<const uint8_t*>(stream.data()), stream.size(), out);
+    BOOST_REQUIRE(out.size() == 1u);
+    BOOST_TEST(out[0].raw == good);
+    BOOST_TEST(out[0].timestamp == 42u);
+    BOOST_TEST(out[0].start == stream.size() - good.size());
+    BOOST_TEST(sp.skippedBytes() == stream.size() - good.size());
+    BOOST_TEST(sp.fed() == stream.size());
+}
+
+BOOST_AUTO_TEST_CASE(receiver_id_prefix_is_its_own_frame)
+{
+    const std::string id = wire(0xe3, bytes({1, 2, 3, 0x1a, 5, 6, 7, 8}));
+    const std::string f = wire('1', tsBytes(9) + bytes({0x20, 0x0a, 0x0b}));
+    auto frames = splitAll(id + f, 3);
+    BOOST_REQUIRE(frames.size() == 2u);
+    BOOST_TEST(frames[0].type == 0xe3);
+    BOOST_TEST(frames[0].timestamp == 0u);
+    BOOST_TEST(frames[0].raw == id);
+    BOOST_TEST(frames[1].timestamp == 9u);
+}
+
+BOOST_AUTO_TEST_CASE(timestamp_rewrite_and_delta)
+{
+    const std::string body = tsBytes(5) + bytes({0x1a, 0x5d, 1, 2, 3, 4, 5, 6});
+    auto frames = splitAll(wire('2', body), 64);
+    BOOST_REQUIRE(frames.size() == 1u);
+    const uint64_t ts = 0x001a1a00001a;
+    const std::string want = wire('2', tsBytes(ts) + body.substr(6));
+    BOOST_TEST(beast::withTimestamp(frames[0], ts) == want);
+    BOOST_TEST(beast::withTimestamp(frames[0], ts + (uint64_t{1} << 48)) == want);  // masked to 48 bits
+    auto again = splitAll(want, 1);
+    BOOST_REQUIRE(again.size() == 1u);
+    BOOST_TEST(again[0].timestamp == ts);
+
+    BOOST_TEST(beast::timestampDelta(100, 250) == 150);
+    BOOST_TEST(beast::timestampDelta(250, 100) == -150);
+    BOOST_TEST(beast::timestampDelta(beast::kTimestampMask - 9, 5) == 15);  // wrapped
+    BOOST_TEST(beast::timestampDelta(5, beast::kTimestampMask - 9) == -15);
+}
+
+BOOST_AUTO_TEST_CASE(csv_lines)
+{
+    auto m = parseCsvMessage("1783963099.005369,5f406a936f50f0");
+    BOOST_REQUIRE(m.has_value());
+    BOOST_TEST(m->epoch_ns == 1783963099005369000LL);
+    BOOST_TEST(m->hex == "5F406A936F50F0");
+    m = parseCsvMessage("1783963099.005369,A00007318DB436F0A80000A7959E\r");
+    BOOST_REQUIRE(m.has_value());
+    BOOST_TEST(m->hex.size() == 28u);
+    m = parseCsvMessage("12,5F406A936F50F0");
+    BOOST_REQUIRE(m.has_value());
+    BOOST_TEST(m->epoch_ns == 12000000000LL);
+    m = parseCsvMessage("1.1234567891,5F406A936F50F0");  // beyond ns: truncated
+    BOOST_REQUIRE(m.has_value());
+    BOOST_TEST(m->epoch_ns == 1123456789LL);
+    for (const char* bad : {"", "# c", "timestamp,hex", "1.5,", ",5F406A936F50F0", "1.5,5F406A936F50F",
+                            "1.5,5F406A936F50FG", "1.5;5F406A936F50F0", "-1.5,5F406A936F50F0", "1..5,5F406A936F50F0",
+                            "1.5,5F406A936F50F0,x"})
+        BOOST_TEST(!parseCsvMessage(bad).has_value(), "accepted: " << bad);
+}
+
+BOOST_AUTO_TEST_CASE(avr_lines)
+{
+    // 1 s = 12e6 ticks = 0xB71B00
+    BOOST_TEST(avrLine(1000000000LL, "5F406A936F50F0") == "@000000B71B005F406A936F50F0;");
+    // (1783963099.005369 * 12e6) mod 2^48
+    const uint64_t ticks = (static_cast<uint64_t>(1783963099005369LL) * 12u) % (uint64_t{1} << 48);
+    char want[16];
+    std::snprintf(want, sizeof want, "%012llX", static_cast<unsigned long long>(ticks));
+    BOOST_TEST(avrLine(1783963099005369000LL, "AB") == std::string("@") + want + "AB;");
+}
+
+BOOST_AUTO_TEST_CASE(uat_lines)
+{
+    auto u = parseUatLine("-00a66ef135445d525a0c0519119021204800;\n");
+    BOOST_REQUIRE(u.has_value());
+    BOOST_TEST(!u->epoch_ms.has_value());
+    BOOST_TEST(u->text == "-00a66ef135445d525a0c0519119021204800;");
+    u = parseUatLine("1793536496789 +3514c952;rs=3;\r\n");
+    BOOST_REQUIRE(u.has_value());
+    BOOST_TEST(*u->epoch_ms == 1793536496789LL);
+    BOOST_TEST(u->text == "+3514c952;rs=3;");
+    for (const char* bad : {"", "\n", "# comment", "123 x;", "123", "123 ", "abc -00;", " -00;", "12a -00;"})
+        BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+}
+
+BOOST_AUTO_TEST_CASE(rotating_file_names_and_rotation)
+{
+    TempDir tmp;
+    RotatingFileConfig cfg;
+    cfg.dir = tmp.path + "/a/b";
+    cfg.stream = "beast";
+    cfg.ext = "bin";
+    cfg.rotate_bytes = 10;
+    RotatingFile f(cfg);
+    BOOST_TEST(f.currentPath().empty());  // nothing written yet: no file
+    BOOST_TEST(!f.rotationDue());
+    BOOST_REQUIRE(f.write("0123456789", 10));
+    const std::string first = f.currentPath();
+    BOOST_TEST(first.find(cfg.dir + "/beast-") == 0u);
+    BOOST_TEST(first.size() == (cfg.dir + "/beast-YYYYMMDD-HHMMSS.bin").size());
+    BOOST_TEST(f.rotationDue());
+    f.rotate();
+    BOOST_REQUIRE(f.write("abc", 3));
+    BOOST_TEST(f.currentPath() != first);
+    BOOST_TEST(!f.rotationDue());
+    BOOST_REQUIRE(f.flush());
+    BOOST_TEST(slurp(first) == "0123456789");
+    BOOST_TEST(slurp(f.currentPath()) == "abc");
+    BOOST_TEST(f.bytes() == 3u);
+}
+
+BOOST_AUTO_TEST_CASE(unique_stem_numbers_within_a_second)
+{
+    TempDir tmp;
+    const std::string base = tmp.path + "/x-20261101-000000";
+    std::string last;
+    int suffix = 0;
+    BOOST_TEST(uniqueStem(base, {"bin"}, last, suffix) == base);
+    std::ofstream(base + ".bin").put('x');
+    BOOST_TEST(uniqueStem(base, {"bin"}, last, suffix) == base + "-1");
+    BOOST_TEST(uniqueStem(base, {"bin", "txt"}, last, suffix) == base + "-2");  // continues after the last used
+    std::string last2;
+    int suffix2 = 0;
+    BOOST_TEST(uniqueStem(base, {"jsonl", "txt"}, last2, suffix2) == base);  // only base.bin exists
+    std::ofstream(base + ".txt").put('x');
+    std::ofstream(base + "-1.txt").put('x');
+    std::string last3;
+    int suffix3 = 0;
+    BOOST_TEST(uniqueStem(base, {"jsonl", "txt"}, last3, suffix3) == base + "-2");
+}

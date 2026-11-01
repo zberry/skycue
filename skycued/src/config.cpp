@@ -24,6 +24,7 @@ const std::vector<std::string>& knownConfigKeys()
         "CUE_TCP_PORT",    "CUE_UDP_TARGETS",   "RECORD_DIR",        "RECORD_FORMATS",
         "MAX_RANGE_NM",    "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE",   "BLOCK_LIST_FILE",
         "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
+        "RECORD_RAW",  // used by skycue-start.sh only (it launches skycue-rawrec)
     };
     return keys;
 }

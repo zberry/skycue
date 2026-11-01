@@ -49,6 +49,7 @@ struct Client::Impl {
     struct Entry {
         Track track;
         steady::time_point last_keyframe; // or first appearance
+        unsigned owner = 0;               // tcp_listen: id of the Peer it last came from; 0 otherwise
     };
 
     Config cfg;
@@ -74,12 +75,18 @@ struct Client::Impl {
     std::array<uint8_t, 4096> chunk{};
 
     // tcp_listen: one Peer per accepted connection, each with its own decoder
-    // state. Handlers hold a shared_ptr to their Peer; `open` turns them off.
+    // state, keyframe interval and liveness watchdog. Each track is owned by
+    // the Peer it last came from. Handlers hold a shared_ptr to their Peer;
+    // `open` turns them off.
     struct Peer {
-        Peer(asio::io_context& io, unsigned id_) : sock(io), watchdog(io), id(id_) {}
+        Peer(asio::io_context& io, unsigned id_, std::chrono::milliseconds keyframe)
+            : sock(io), watchdog(io), id(id_), keyframe_interval(keyframe)
+        {
+        }
         tcp::socket sock;
         asio::steady_timer watchdog; // liveness; see livenessTimeout
         unsigned id;
+        std::chrono::milliseconds keyframe_interval; // from its Hello; the default before one
         bool open = true;
         steady::time_point last_frame{};
         std::chrono::milliseconds heartbeat_interval{0}; // from its Hello; 0 before one
@@ -100,7 +107,8 @@ struct Client::Impl {
     // to a cancelled operation or a closed connection and does nothing.
     bool connected = false;
     bool stopping = false;
-    std::chrono::milliseconds keyframe_interval;
+    std::chrono::milliseconds keyframe_interval; // tcp, udp (tcp_listen: per Peer)
+    bool hello_seen = false;                     // udp: no stale drops before the first Hello
     steady::time_point last_frame{};                  // tcp, udp: newest frame
     std::chrono::milliseconds heartbeat_interval{0}; // tcp: from the Hello; 0 before one
     unsigned conn_gen = 0, reconnect_gen = 0, stale_gen = 0, heartbeat_gen = 0;
@@ -388,7 +396,7 @@ struct Client::Impl {
 
     void acceptNext()
     {
-        auto p = std::make_shared<Peer>(io, ++next_peer);
+        auto p = std::make_shared<Peer>(io, ++next_peer, clampInterval(cfg.default_keyframe_interval));
         const unsigned gen = ++accept_gen;
         acceptor.async_accept(p->sock, [this, p, gen](const error_code& ec) {
             if (stopping || gen != accept_gen)
@@ -443,8 +451,25 @@ struct Client::Impl {
         p->watchdog.cancel(ignored);
         p->rx.clear();
         peers.erase(p->id);
-        if (peers.empty())
-            setConnected(false); // the last source is gone: source_lost
+        if (peers.empty()) {
+            setConnected(false); // the last source is gone: source_lost for all
+            return;
+        }
+        // Its tracks are lost with it; the other connections' are not.
+        std::vector<TrackId> lost;
+        for (const auto& kv : tracks)
+            if (kv.second.owner == p->id)
+                lost.push_back(kv.first);
+        for (const auto& id : lost) {
+            if (stopping)
+                return;
+            if (tracks.erase(id) == 0)
+                continue;
+            count = tracks.size();
+            fireDropped(id, DropReason::source_lost);
+        }
+        if (!stopping)
+            armStale(); // its keyframe interval no longer counts
     }
 
     // ---- udp ---------------------------------------------------------------
@@ -525,10 +550,34 @@ struct Client::Impl {
         });
     }
 
+    // The keyframe interval that applies to a track: its owner's in
+    // tcp_listen, the stream's otherwise.
+    std::chrono::milliseconds intervalOf(const Entry& e) const
+    {
+        if (e.owner != 0) {
+            auto it = peers.find(e.owner);
+            if (it != peers.end())
+                return it->second->keyframe_interval;
+        }
+        return keyframe_interval;
+    }
+
+    // How often to look for stale tracks: often enough for the shortest
+    // interval in use.
+    std::chrono::milliseconds staleTick() const
+    {
+        if (cfg.transport != Config::Transport::tcp_listen || peers.empty())
+            return keyframe_interval;
+        auto shortest = peers.begin()->second->keyframe_interval;
+        for (const auto& kv : peers)
+            shortest = std::min(shortest, kv.second->keyframe_interval);
+        return shortest;
+    }
+
     void armStale()
     {
         const unsigned gen = ++stale_gen;
-        stale_timer.expires_after(keyframe_interval * 3 / 2);
+        stale_timer.expires_after(staleTick() * 3 / 2);
         stale_timer.async_wait([this, gen](const error_code& ec) {
             if (stopping || ec || gen != stale_gen)
                 return;
@@ -540,11 +589,14 @@ struct Client::Impl {
 
     void dropStale()
     {
+        // udp: until a Hello has said what the keyframe interval is, the
+        // default may be far too short for the sender; do not guess.
+        if (cfg.transport == Config::Transport::udp && !hello_seen)
+            return;
         const auto now = steady::now();
-        const auto limit = keyframe_interval * 2;
         std::vector<TrackId> stale;
         for (const auto& kv : tracks)
-            if (now - kv.second.last_keyframe > limit)
+            if (now - kv.second.last_keyframe > intervalOf(kv.second) * 2)
                 stale.push_back(kv.first);
         for (const auto& id : stale) {
             if (stopping)
@@ -560,6 +612,8 @@ struct Client::Impl {
         if (connected == up)
             return;
         connected = up;
+        if (!up)
+            hello_seen = false; // a new source must announce itself again
         fireConnection(up);
         if (!up)
             dropAll(DropReason::source_lost);
@@ -598,9 +652,12 @@ struct Client::Impl {
             noteHeartbeatInterval(std::chrono::milliseconds(h.heartbeat_interval_ms), peer);
             if (h.keyframe_interval_ms == 0)
                 return;
+            if (!peer)
+                hello_seen = true;
             const auto interval = clampInterval(std::chrono::milliseconds(h.keyframe_interval_ms));
-            if (interval != keyframe_interval) {
-                keyframe_interval = interval;
+            auto& current = peer ? peer->keyframe_interval : keyframe_interval;
+            if (interval != current) {
+                current = interval;
                 armStale();
             }
             return;
@@ -609,12 +666,14 @@ struct Client::Impl {
             Track t;
             if (!decodeTrackUpdate(frame, t))
                 return;
+            const unsigned owner = peer ? peer->id : 0;
             auto it = tracks.find(t.id);
             if (it == tracks.end()) {
-                tracks.emplace(t.id, Entry{t, now});
+                tracks.emplace(t.id, Entry{t, now, owner});
                 count = tracks.size();
             } else {
                 it->second.track = t;
+                it->second.owner = owner; // an update from another peer takes the track over
                 if (t.keyframe) // deltas do not refresh the stale clock
                     it->second.last_keyframe = now;
             }
@@ -625,8 +684,12 @@ struct Client::Impl {
             TrackDrop d;
             if (!decodeTrackDrop(frame, d))
                 return;
-            if (tracks.erase(d.id) == 0)
+            auto it = tracks.find(d.id);
+            // tcp_listen: only the owner may drop a track; another peer's
+            // drop means that skycued stopped forwarding it, not that it is gone.
+            if (it == tracks.end() || it->second.owner != (peer ? peer->id : 0))
                 return;
+            tracks.erase(it);
             count = tracks.size();
             fireDropped(d.id, d.reason);
             return;

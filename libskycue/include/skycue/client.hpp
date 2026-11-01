@@ -50,14 +50,26 @@ struct Config {
 // intervals is dropped as stale. When the connection goes down,
 // onConnectionChange(false) fires, then source_lost for every track.
 //
-// tcp_listen: every accepted connection has its own stream decoder; frames
-// from all of them feed the one track table (an update from any connection is
-// authoritative, a Hello from any sets the keyframe interval). A connection
-// that sends a frame with a bad magic or version is closed on its own. The
-// client is "connected" while at least one connection is open: true on the
-// first, false (then source_lost for every track) when the last one closes.
-// There is no reconnecting; the listener keeps accepting. If the address
-// cannot be bound, binding is retried every reconnect_interval.
+// tcp and udp are single-source: one stream, one keyframe interval (the
+// latest Hello's). udp: datagrams from any sender feed the one table as if
+// they came from one source, so one skycued per udp port; and since a UDP
+// receiver may start mid-stream, no track is dropped as stale until the first
+// Hello (sent before every keyframe burst) has said what the interval is.
+//
+// tcp_listen: every accepted connection (peer) has its own stream decoder,
+// keyframe interval (from its own Hello, default_keyframe_interval before
+// one) and liveness watchdog; frames from all of them feed the one track
+// table. Each track is owned by the peer it last came from: an update from a
+// different peer takes it over, the stale check uses the owner's keyframe
+// interval, and a TrackDrop is honoured only from the owner (another peer
+// dropping it means that skycued stopped forwarding it, not that it is gone).
+// A peer that sends a frame with a bad magic or version, or falls silent
+// (see Liveness), is closed on its own. When a peer closes, the tracks it
+// owns are dropped as source_lost. The client is "connected" while at least
+// one peer is open: true on the first, false (then source_lost for every
+// remaining track) when the last one closes. There is no reconnecting; the
+// listener keeps accepting. If the address cannot be bound, binding is
+// retried every reconnect_interval.
 //
 // Liveness: heartbeats are the liveness signal in every transport; every
 // received frame of any type counts. udp: no datagram for heartbeat_timeout

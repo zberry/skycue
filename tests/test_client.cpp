@@ -795,23 +795,26 @@ BOOST_AUTO_TEST_CASE(tcp_listen_two_connections_merge_into_one_table)
     BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
     BOOST_TEST(client.trackCount() == 2u);
 
-    // One source going away is not a lost source: nothing is dropped.
+    // One source going away takes only its own tracks; the client stays connected.
     a.close();
-    std::this_thread::sleep_for(300ms);
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.drops.size() == 1; }));
+    std::this_thread::sleep_for(100ms);
     {
         std::lock_guard<std::mutex> lk(ev.m);
         BOOST_TEST(ev.conns.size() == 1u);
-        BOOST_TEST(ev.drops.empty());
+        BOOST_TEST(ev.drops.size() == 1u);
+        BOOST_TEST(ev.drops[0].first.address == 1u);
     }
-    BOOST_TEST(client.trackCount() == 2u);
+    BOOST_TEST(client.trackCount() == 1u);
 
-    // The last one going away is.
+    // The last one going away is a lost source.
     b.close();
     BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() == 2 && ev.drops.size() == 2; }));
     {
         std::lock_guard<std::mutex> lk(ev.m);
         BOOST_TEST(ev.conns[0] == true);
         BOOST_TEST(ev.conns[1] == false);
+        BOOST_TEST(ev.drops[1].first.address == 2u);
         BOOST_TEST(ev.countDrops(DropReason::source_lost) == 2u);
     }
     BOOST_TEST(client.trackCount() == 0u);
@@ -840,11 +843,12 @@ BOOST_AUTO_TEST_CASE(tcp_listen_rejects_bad_magic_closes_only_that_peer)
     BOOST_REQUIRE(bad.waitClosedFor(kWait));
 
     good.send(encodeTrackUpdate(mkTrack(3, true)));
-    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3; }));
-    BOOST_TEST(client.trackCount() == 3u);
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3 && ev.drops.size() == 1; }));
+    BOOST_TEST(client.trackCount() == 2u); // the bad peer's track went with it
     std::lock_guard<std::mutex> lk(ev.m);
     BOOST_TEST(ev.conns.size() == 1u);
-    BOOST_TEST(ev.drops.empty());
+    BOOST_TEST(ev.drops[0].first.address == 1u);
+    BOOST_TEST(static_cast<int>(ev.drops[0].second) == static_cast<int>(DropReason::source_lost));
 }
 
 BOOST_AUTO_TEST_CASE(tcp_dead_peer_detected_by_heartbeat_timeout)
@@ -915,8 +919,166 @@ BOOST_AUTO_TEST_CASE(tcp_listen_silent_peer_closed)
     }
     BOOST_REQUIRE(aClosed);
     b.send(encodeTrackUpdate(mkTrack(3, true)));
-    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3; }));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3 && ev.drops.size() == 1; }));
+    BOOST_TEST(client.trackCount() == 2u);
     std::lock_guard<std::mutex> lk(ev.m);
     BOOST_TEST(ev.conns.size() == 1u); // b is still connected
     BOOST_TEST(ev.conns[0] == true);
+    BOOST_TEST(ev.drops[0].first.address == 1u); // a's track went with a
+    BOOST_TEST(static_cast<int>(ev.drops[0].second) == static_cast<int>(DropReason::source_lost));
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_peer_close_drops_only_its_tracks_source_lost)
+{
+    Events ev;
+    Client client(listenConfig());
+    ev.attach(client);
+    client.start();
+    BOOST_REQUIRE(client.localPort() != 0);
+
+    TcpPeer a(client.localPort()), b(client.localPort());
+    a.send(cat({hello(10000), encodeTrackUpdate(mkTrack(1, true)), encodeTrackUpdate(mkTrack(2, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+    // b sends 3, and an update for 2, which takes 2 over from a.
+    b.send(cat({hello(10000), encodeTrackUpdate(mkTrack(3, true)), encodeTrackUpdate(mkTrack(2, false))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 4; }));
+    BOOST_TEST(client.trackCount() == 3u);
+
+    a.close();
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.drops.size() == 1; }));
+    std::this_thread::sleep_for(100ms);
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.drops.size() == 1u);
+        BOOST_TEST(ev.drops[0].first.address == 1u);
+        BOOST_TEST(static_cast<int>(ev.drops[0].second) == static_cast<int>(DropReason::source_lost));
+        BOOST_TEST(ev.conns.size() == 1u); // still connected through b
+    }
+    BOOST_TEST(client.trackCount() == 2u);
+
+    b.close();
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() == 2 && ev.drops.size() == 3; }));
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.conns[1] == false);
+        BOOST_TEST(ev.countDrops(DropReason::source_lost) == 3u);
+    }
+    BOOST_TEST(client.trackCount() == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_drop_from_non_owner_ignored)
+{
+    Events ev;
+    Client client(listenConfig());
+    ev.attach(client);
+    client.start();
+    BOOST_REQUIRE(client.localPort() != 0);
+
+    TcpPeer a(client.localPort()), b(client.localPort());
+    a.send(cat({hello(10000), encodeTrackUpdate(mkTrack(1, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 1; }));
+
+    // b drops a's track (that skycued filtered it), then sends 5: by the time
+    // 5 arrives the drop has been handled, and ignored.
+    b.send(cat({hello(10000), encodeTrackDrop(TrackDrop{TrackId{1, AddressType::icao}, DropReason::filtered}),
+                encodeTrackUpdate(mkTrack(5, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.sawUpdate(5); }));
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.drops.empty());
+    }
+    BOOST_TEST(client.trackCount() == 2u);
+
+    // The owner's drop is honoured.
+    a.send(encodeTrackDrop(TrackDrop{TrackId{1, AddressType::icao}, DropReason::filtered}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.drops.size() == 1; }));
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.drops[0].first.address == 1u);
+        BOOST_TEST(static_cast<int>(ev.drops[0].second) == static_cast<int>(DropReason::filtered));
+    }
+    BOOST_TEST(client.trackCount() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_per_peer_keyframe_interval)
+{
+    Events ev;
+    Client client(listenConfig()); // heartbeat_timeout 3 s: the test ends before it matters
+    ev.attach(client);
+    client.start();
+    BOOST_REQUIRE(client.localPort() != 0);
+
+    // a keyframes every 200 ms, b every 10 s; b's Hello comes last and must
+    // not lengthen a's interval.
+    TcpPeer a(client.localPort()), b(client.localPort());
+    a.send(cat({hello(200), encodeTrackUpdate(mkTrack(1, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 1; }));
+    b.send(cat({hello(10000), encodeTrackUpdate(mkTrack(2, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+
+    // Only deltas from now on: a's track goes stale after two of its
+    // intervals, b's (two of b's intervals = 20 s) does not.
+    const auto start = std::chrono::steady_clock::now();
+    bool dropped = false;
+    while (!dropped && std::chrono::steady_clock::now() < start + 3s) {
+        a.send(encodeTrackUpdate(mkTrack(1, false)));
+        b.send(encodeTrackUpdate(mkTrack(2, false)));
+        dropped = ev.waitFor([&] { return !ev.drops.empty(); }, 100ms);
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    BOOST_REQUIRE(dropped);
+    BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() >= 300);
+    std::this_thread::sleep_for(300ms);
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_REQUIRE(ev.drops.size() == 1u);
+        BOOST_TEST(ev.drops[0].first.address == 1u);
+        BOOST_TEST(static_cast<int>(ev.drops[0].second) == static_cast<int>(DropReason::stale));
+    }
+    BOOST_TEST(client.trackCount() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(udp_no_stale_drop_before_hello)
+{
+    const uint16_t port = freeUdpPort();
+    Events ev;
+    Config cfg = udpConfig(port);
+    cfg.default_keyframe_interval = 100ms; // would make A stale within ~350 ms
+    cfg.heartbeat_timeout = 2000ms;
+    Client client(cfg);
+    ev.attach(client);
+    client.start();
+    UdpSender tx(port);
+
+    const auto deadline = std::chrono::steady_clock::now() + kWait;
+    bool have = false;
+    while (!have && std::chrono::steady_clock::now() < deadline) {
+        tx.send(encodeTrackUpdate(mkTrack(0xA, true)));
+        have = ev.waitFor([&] { return ev.sawUpdate(0xA); }, 100ms);
+    }
+    BOOST_REQUIRE(have);
+
+    // No Hello yet: deltas and heartbeats only, for well over 2 x 100 ms.
+    for (int i = 0; i < 8; ++i) {
+        tx.send(encodeTrackUpdate(mkTrack(0xA, false)));
+        tx.send(encodeHeartbeat(Heartbeat{static_cast<uint64_t>(i)}));
+        std::this_thread::sleep_for(100ms);
+    }
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.drops.empty());
+    }
+    BOOST_TEST(client.trackCount() == 1u);
+
+    // Once a Hello has announced the interval, staleness applies.
+    bool dropped = false;
+    const auto start = std::chrono::steady_clock::now();
+    while (!dropped && std::chrono::steady_clock::now() < start + 3s) {
+        tx.send(hello(100));
+        dropped = ev.waitFor([&] { return !ev.drops.empty(); }, 100ms);
+    }
+    BOOST_REQUIRE(dropped);
+    std::lock_guard<std::mutex> lk(ev.m);
+    BOOST_TEST(ev.drops[0].first.address == 0xAu);
+    BOOST_TEST(static_cast<int>(ev.drops[0].second) == static_cast<int>(DropReason::stale));
 }

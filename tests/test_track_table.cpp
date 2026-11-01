@@ -79,6 +79,29 @@ BOOST_AUTO_TEST_CASE(merge_keeps_last_known_optional)
     BOOST_TEST((s2.last_position_time == kT0 + 8s));
 }
 
+BOOST_AUTO_TEST_CASE(on_ground_kept_when_alt_baro_absent)
+{
+    TrackTable table;
+    auto ground = obs(0xABC124, kT0, true);
+    ground.on_ground = true; // alt_baro "ground"
+    BOOST_TEST(table.apply(ground).latest.on_ground);
+
+    // No alt_baro at all: says nothing about on_ground, which stays true.
+    auto silent = obs(0xABC124, kT0 + 1s, true);
+    BOOST_TEST(table.apply(silent).latest.on_ground);
+
+    // A numeric alt_baro means airborne.
+    auto airborne = obs(0xABC124, kT0 + 2s, true);
+    airborne.alt_baro_ft = 1200;
+    BOOST_TEST(!table.apply(airborne).latest.on_ground);
+
+    // And again absent alt_baro keeps it airborne; "ground" flips it back.
+    BOOST_TEST(!table.apply(obs(0xABC124, kT0 + 3s, true)).latest.on_ground);
+    auto back = obs(0xABC124, kT0 + 4s, true);
+    back.on_ground = true;
+    BOOST_TEST(table.apply(back).latest.on_ground);
+}
+
 BOOST_AUTO_TEST_CASE(new_track_fields)
 {
     TrackTable table;

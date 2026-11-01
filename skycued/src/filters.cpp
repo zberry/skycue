@@ -135,8 +135,11 @@ FilterResult FilterSet::evaluate(const TrackState& t) const
     FilterResult r{Decision::send, nan, nan, false};
 
     const bool has_position = o.lat && o.lon;
+    // An airborne target that reports no altitude at all has no usable
+    // elevation: the elevation filter is not applied to it (elevation NaN).
+    const bool elevation_known = o.on_ground || o.alt_geom_ft || o.alt_baro_ft;
     if (has_position) {
-        double tgt_alt_m = rx_.alt_m;  // on the ground, or no altitude reported
+        double tgt_alt_m = rx_.alt_m;  // on the ground
         if (!o.on_ground) {
             if (o.alt_geom_ft) {
                 tgt_alt_m = geo::ftToM(*o.alt_geom_ft);
@@ -146,7 +149,8 @@ FilterResult FilterSet::evaluate(const TrackState& t) const
             }
         }
         r.range_nm = geo::greatCircleNm(rx_.lat, rx_.lon, *o.lat, *o.lon);
-        r.elevation_deg = geo::elevationDeg(rx_.lat, rx_.lon, rx_.alt_m, *o.lat, *o.lon, tgt_alt_m);
+        if (elevation_known)
+            r.elevation_deg = geo::elevationDeg(rx_.lat, rx_.lon, rx_.alt_m, *o.lat, *o.lon, tgt_alt_m);
     }
 
     // 1. no position: never forwarded, whatever the lists say
@@ -170,7 +174,7 @@ FilterResult FilterSet::evaluate(const TrackState& t) const
         return r;
     }
     // 5. elevation
-    if (r.elevation_deg < config_.min_elevation_deg) {
+    if (elevation_known && r.elevation_deg < config_.min_elevation_deg) {
         r.decision = Decision::below_elevation;
         return r;
     }

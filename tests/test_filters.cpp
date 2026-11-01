@@ -122,6 +122,26 @@ BOOST_AUTO_TEST_CASE(elevation_filter)
     BOOST_TEST(g.elevation_deg < 0.0);
 }
 
+BOOST_AUTO_TEST_CASE(airborne_no_altitude_passes_elevation)
+{
+    // A high minimum elevation that any target at the receiver altitude fails.
+    auto fs = filters(250.0, 10.0);
+    FilterResult r = fs.evaluate(track(0x444444, 20.0, std::nullopt, std::nullopt));
+    BOOST_TEST(static_cast<int>(r.decision) == static_cast<int>(Decision::send));
+    BOOST_TEST(r.range_nm == 20.0, boost::test_tools::tolerance(1e-6));
+    BOOST_TEST(std::isnan(r.elevation_deg));
+    BOOST_TEST(!r.alt_is_geom);
+
+    // Range still applies.
+    FilterResult far = fs.evaluate(track(0x444444, 300.0, std::nullopt, std::nullopt));
+    BOOST_TEST(static_cast<int>(far.decision) == static_cast<int>(Decision::out_of_range));
+
+    // On the ground without altitude the receiver altitude is still used.
+    TrackState ground = track(0x444444, 20.0, std::nullopt, std::nullopt);
+    ground.latest.on_ground = true;
+    BOOST_TEST(static_cast<int>(fs.evaluate(ground).decision) == static_cast<int>(Decision::below_elevation));
+}
+
 BOOST_AUTO_TEST_CASE(no_position)
 {
     auto fs = filters(150.0, 0.0);

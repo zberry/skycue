@@ -20,6 +20,7 @@
 #include <array>
 #include <deque>
 #include <map>
+#include <optional>
 #include <stdexcept>
 
 namespace skycued {
@@ -36,6 +37,9 @@ constexpr std::chrono::milliseconds kMinInterval{10};
 constexpr std::chrono::seconds kUdpErrorLogEvery{60};
 constexpr std::chrono::seconds kStopDrainLimit{2};
 constexpr std::chrono::milliseconds kAcceptRetry{100};
+// A persistent accept failure (EMFILE, say) retries every kAcceptRetry; it
+// is logged at most this often, with a count of the failures in between.
+constexpr std::chrono::seconds kAcceptWarnEvery{10};
 constexpr std::chrono::milliseconds kDialBackoffMin{500};
 constexpr std::chrono::milliseconds kDialBackoffMax{10000};
 
@@ -120,6 +124,8 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
 
     bool started = false, stopping = false, dead = false;
     unsigned keyframe_gen = 0, heartbeat_gen = 0, accept_gen = 0;
+    std::optional<steady::time_point> last_accept_warn;
+    unsigned accept_failures_unlogged = 0;
     steady::time_point next_keyframe{}, last_broadcast{};
     uint64_t frames_sent = 0;
     uint16_t port = 0;
@@ -230,7 +236,18 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         if (ec) {
             if (ec == asio::error::operation_aborted)
                 return;
-            LOG_WARN("forwarder: accept failed: " << ec.message());
+            const auto now = steady::now();
+            if (!last_accept_warn || now - *last_accept_warn >= kAcceptWarnEvery) {
+                if (accept_failures_unlogged > 0)
+                    LOG_WARN("forwarder: accept failed: " << ec.message() << " (and " << accept_failures_unlogged
+                                                          << " more times since the last report)");
+                else
+                    LOG_WARN("forwarder: accept failed: " << ec.message());
+                last_accept_warn = now;
+                accept_failures_unlogged = 0;
+            } else {
+                ++accept_failures_unlogged;
+            }
             auto self = shared_from_this();
             accept_retry_timer.expires_after(kAcceptRetry);
             accept_retry_timer.async_wait([self, gen](const error_code& tec) {

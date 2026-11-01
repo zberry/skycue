@@ -61,7 +61,7 @@ enum class Decision { send, blocked, allow_listed, out_of_range, below_elevation
 struct FilterResult {
     Decision decision;
     double range_nm;       // NaN without a position
-    double elevation_deg;  // NaN without a position
+    double elevation_deg;  // NaN without a position, or airborne without any altitude
     bool alt_is_geom;      // the elevation used geometric altitude
 };
 
@@ -76,8 +76,11 @@ inline bool isSend(Decision d) { return d == Decision::send || d == Decision::al
 // shows them).
 //
 // Target altitude for the elevation: geometric if reported (alt_is_geom),
-// else barometric; a target on the ground, or an airborne target with no
-// altitude at all, is taken to be at the receiver altitude and still evaluated.
+// else barometric; a target on the ground is taken to be at the receiver
+// altitude. An airborne target with a position but no altitude at all has no
+// usable elevation: elevation_deg is NaN and the elevation filter is not
+// applied (the decision proceeds as if it had passed), since dropping it would
+// hide real aircraft whose altitude simply has not been decoded yet.
 class FilterSet {
 public:
     FilterSet(ReceiverPosition rx, FilterConfig config, IdList allow, IdList block);

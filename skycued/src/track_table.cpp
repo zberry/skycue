@@ -31,7 +31,11 @@ TrackState& TrackTable::apply(const TrackObservation& obs)
     s.source = obs.source;
     l.source = obs.source;
     l.received_time = obs.received_time;
-    l.on_ground = obs.on_ground;
+    // on_ground comes from the alt_baro field ("ground" or a number): an
+    // observation without it says nothing about whether the target is on
+    // the ground, so the last known value is kept.
+    if (obs.on_ground || obs.alt_baro_ft)
+        l.on_ground = obs.on_ground;
     l.raw_line = obs.raw_line;
 
     if (hasPosition(obs)) {

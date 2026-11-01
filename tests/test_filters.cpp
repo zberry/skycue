@@ -134,10 +134,19 @@ BOOST_AUTO_TEST_CASE(no_position)
     BOOST_TEST(std::isnan(r.range_nm));
     BOOST_TEST(std::isnan(r.elevation_deg));
 
-    // Block is checked first, even without a position.
+    // A track without a position is never forwarded: no_position is decided
+    // before the curated lists, so an allow-listed track is not allow_listed.
+    auto allowing = filters(150.0, 0.0, IdList::parse("333333"));
+    FilterResult a = allowing.evaluate(t);
+    BOOST_TEST(static_cast<int>(a.decision) == static_cast<int>(Decision::no_position));
+    BOOST_TEST(!skycued::isSend(a.decision));
+    BOOST_TEST(std::isnan(a.range_nm));
+    BOOST_TEST(std::isnan(a.elevation_deg));
+
+    // Likewise for a blocked track.
     auto blocking = filters(150.0, 0.0, IdList{}, IdList::parse("333333"));
     FilterResult b = blocking.evaluate(t);
-    BOOST_TEST(static_cast<int>(b.decision) == static_cast<int>(Decision::blocked));
+    BOOST_TEST(static_cast<int>(b.decision) == static_cast<int>(Decision::no_position));
     BOOST_TEST(std::isnan(b.range_nm));
 }
 

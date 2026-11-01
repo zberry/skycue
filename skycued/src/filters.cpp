@@ -149,31 +149,32 @@ FilterResult FilterSet::evaluate(const TrackState& t) const
         r.elevation_deg = geo::elevationDeg(rx_.lat, rx_.lon, rx_.alt_m, *o.lat, *o.lon, tgt_alt_m);
     }
 
-    // 1. block list
-    if (block_.contains(t.id, o.registration)) {
-        r.decision = Decision::blocked;
-        return r;
-    }
-    // 2. allow list
-    if (allow_.contains(t.id, o.registration)) {
-        r.decision = Decision::allow_listed;
-        return r;
-    }
-    // 3. range (needs a position)
+    // 1. no position: never forwarded, whatever the lists say
     if (!has_position) {
         r.decision = Decision::no_position;
         return r;
     }
+    // 2. block list
+    if (block_.contains(t.id, o.registration)) {
+        r.decision = Decision::blocked;
+        return r;
+    }
+    // 3. allow list
+    if (allow_.contains(t.id, o.registration)) {
+        r.decision = Decision::allow_listed;
+        return r;
+    }
+    // 4. range
     if (r.range_nm > config_.max_range_nm) {
         r.decision = Decision::out_of_range;
         return r;
     }
-    // 4. elevation
+    // 5. elevation
     if (r.elevation_deg < config_.min_elevation_deg) {
         r.decision = Decision::below_elevation;
         return r;
     }
-    // 5. send
+    // 6. send
     r.decision = Decision::send;
     return r;
 }

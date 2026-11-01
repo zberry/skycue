@@ -69,10 +69,11 @@ inline bool isSend(Decision d) { return d == Decision::send || d == Decision::al
 
 // Decides whether a track is forwarded. No I/O.
 //
-// Order of evaluation: block list -> allow list -> range -> elevation -> send.
-// Range/elevation are computed whenever the track has a position, including
-// for blocked and allow-listed tracks (the UI shows them). A track without a
-// position that is on neither list is no_position.
+// Order of evaluation: no_position -> block list -> allow list -> range ->
+// elevation -> send. A track without a position is never forwarded, so it is
+// no_position even when it is on a list. Range/elevation are computed for
+// every positioned track, including blocked and allow-listed ones (the UI
+// shows them).
 //
 // Target altitude for the elevation: geometric if reported (alt_is_geom),
 // else barometric; a target on the ground, or an airborne target with no

@@ -53,6 +53,10 @@ struct RecorderConfig {
 class Recorder {
 public:
     static constexpr std::size_t kFlushEveryRecords = 100;
+    // After a write or open failure (a full disk, say), records are dropped
+    // and new files are tried at most this often, so a persistent failure
+    // neither floods the log nor creates files without limit.
+    static constexpr std::chrono::seconds kReopenInterval{5};
 
     // stream_name is "received" or "sent" (it picks the CSV columns);
     // anything else throws std::invalid_argument. Throws std::runtime_error
@@ -67,6 +71,7 @@ public:
     void writeUplink(std::chrono::system_clock::time_point when, const std::string& hex);  // "type":"uat_uplink"
 
     // Sent stream; "time" is the wall clock at the call.
+    // Any other event than "update" or "keyframe" throws std::invalid_argument.
     void writeTrack(const skycue::Track& track, const char* event /* "update" | "keyframe" */);
     void writeDrop(skycue::TrackId id, skycue::DropReason reason);
     void writeFilterChange(const std::string& description);
@@ -76,7 +81,16 @@ public:
     // is accepted); "" when that format is disabled.
     std::string currentPath(const char* ext) const;
 
+    // Records not written because the files could not be created or written
+    // (records still in the write buffer when a failure hits are not counted).
+    uint64_t droppedRecords() const { return dropped_; }
+    // Test seam: while set, every write and flush fails as on a full disk.
+    void setFailWritesForTest(bool fail) { fail_writes_for_test_ = fail; }
+
 private:
+    void fail(const std::string& what);  // starts or extends a failure streak; closes the files
+    bool streamsGood() const;
+    void flushStreams();
     void write(const std::vector<recording::Field>& record);
     bool openFiles();  // new files with a fresh name; false (errno set) on failure
     void closeFiles();
@@ -91,7 +105,14 @@ private:
     uint64_t jsonl_bytes_ = 0, csv_bytes_ = 0;
     std::chrono::steady_clock::time_point opened_{};
     std::size_t unflushed_ = 0;
-    bool error_logged_ = false;  // one ERROR per failure streak
+    std::string last_base_;  // name stem without suffix, and the suffix used last
+    int last_suffix_ = 0;
+
+    // Failure streak: one ERROR when it starts, one INFO when a flush succeeds again.
+    bool failing_ = false;
+    std::chrono::steady_clock::time_point next_reopen_{};
+    uint64_t dropped_ = 0, streak_start_dropped_ = 0;
+    bool fail_writes_for_test_ = false;
 };
 
 // The record format, shared with ReplaySource.

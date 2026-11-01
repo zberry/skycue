@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -621,4 +622,101 @@ BOOST_AUTO_TEST_CASE(doc_lists_every_key)
         BOOST_TEST(doc.find("| `" + key + "` |") != std::string::npos, key);
     BOOST_TEST(doc.find(kReceivedHeader) != std::string::npos);
     BOOST_TEST(doc.find(kSentHeader) != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(write_failure_does_not_spawn_files)
+{
+    TempDir tmp;
+    Recorder rec(RecorderConfig{tmp.path, true, true, 1ull << 30, 3600s}, "received");
+    rec.writeObservation(minimalObservation(sys_clock::now()));
+    rec.flush();
+    const std::string first = rec.currentPath("jsonl");
+
+    rec.setFailWritesForTest(true);
+    const auto failed_at = steady::now();
+    for (int i = 0; i < 500; ++i) {
+        rec.writeObservation(minimalObservation(sys_clock::now()));
+        if (i % 50 == 0)
+            rec.flush();
+        std::this_thread::sleep_for(2ms);
+    }
+    BOOST_TEST(rec.droppedRecords() == 500u);
+    BOOST_TEST(filesWithSuffix(tmp.path, ".jsonl").size() <= 2u);
+    BOOST_TEST(filesWithSuffix(tmp.path, ".csv").size() <= 2u);
+    BOOST_TEST(readLines(first).size() == 1u);
+
+    // Healthy again, but no new files before the reopen interval has passed.
+    rec.setFailWritesForTest(false);
+    if (steady::now() - failed_at < Recorder::kReopenInterval - 500ms) {
+        rec.writeObservation(minimalObservation(sys_clock::now()));
+        BOOST_TEST(rec.droppedRecords() == 501u);
+    }
+    std::this_thread::sleep_until(failed_at + Recorder::kReopenInterval + 100ms);
+    const auto before = rec.droppedRecords();
+    rec.writeObservation(minimalObservation(sys_clock::now()));
+    BOOST_TEST(rec.droppedRecords() == before);
+    const std::string recovered = rec.currentPath("jsonl");
+    BOOST_TEST(!recovered.empty());
+    BOOST_TEST(recovered != first);
+    BOOST_TEST(readLines(recovered).size() == 1u);  // flushed at once while recovering
+    BOOST_TEST(filesWithSuffix(tmp.path, ".jsonl").size() == 2u);
+    BOOST_TEST(filesWithSuffix(tmp.path, ".csv").size() == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(non_finite_numbers_are_left_out)
+{
+    TempDir tmp;
+    Recorder rec(RecorderConfig{tmp.path, true, true, 1ull << 20, 3600s}, "received");
+    auto obs = minimalObservation(sys_clock::now());
+    obs.rssi = std::numeric_limits<double>::quiet_NaN();
+    obs.gs_kt = std::numeric_limits<float>::infinity();
+    obs.track_deg = 12.5f;
+    rec.writeObservation(obs);
+    rec.flush();
+    auto row = splitCsv(readLines(rec.currentPath("csv")).at(1));
+    BOOST_TEST(row[column(kReceivedHeader, "rssi")] == "");
+    BOOST_TEST(row[column(kReceivedHeader, "gs_kt")] == "");
+    BOOST_TEST(row[column(kReceivedHeader, "track_deg")] == "12.5");
+    auto line = readLines(rec.currentPath("jsonl")).at(0);
+    BOOST_TEST(line.find("null") == std::string::npos);
+    auto j = skycued::JsonObject::parse(line);
+    BOOST_REQUIRE(j);
+    BOOST_TEST(!j->has("rssi"));
+    BOOST_TEST(!j->has("gs_kt"));
+}
+
+BOOST_AUTO_TEST_CASE(write_track_rejects_unknown_event)
+{
+    TempDir tmp;
+    Recorder sent(RecorderConfig{tmp.path, true, true, 1ull << 20, 3600s}, "sent");
+    skycue::Track t;
+    BOOST_CHECK_THROW(sent.writeTrack(t, "drop"), std::invalid_argument);
+    BOOST_CHECK_THROW(sent.writeTrack(t, nullptr), std::invalid_argument);
+    sent.writeTrack(t, "update");
+    sent.flush();
+    BOOST_TEST(readLines(sent.currentPath("jsonl")).size() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(replay_loop_shift_uses_full_time_range)
+{
+    TempDir tmp;
+    const auto t0 = roundMs(sys_clock::now());
+    std::vector<TrackObservation> recorded;
+    for (int s : {0, 1, 2, 10, 3})  // out of order: the last record is not the latest
+        recorded.push_back(minimalObservation(t0 + std::chrono::seconds(s)));
+    const std::string path = recordObservations(tmp.path, recorded);
+    boost::asio::io_context io;
+    ReplaySource replay(io, path, 0, true);
+    std::vector<TrackObservation> got;
+    replay.onObservation([&](const TrackObservation& o) {
+        got.push_back(o);
+        if (got.size() == 6)
+            io.stop();
+    });
+    replay.start();
+    io.run();
+    BOOST_REQUIRE(got.size() == 6u);
+    // Span max - min = 10 s, median gap 1 s.
+    BOOST_TEST((got[5].received_time == t0 + 11s));
+    BOOST_TEST((got[5].received_time > got[3].received_time));
 }

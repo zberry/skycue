@@ -70,7 +70,10 @@ ReplaySource::ReplaySource(boost::asio::io_context& io, std::string path, double
             median = gaps[gaps.size() / 2];
         }
         const auto min_gap = std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::milliseconds(1));
-        const auto span = std::max(records_.back().time - records_.front().time, std::chrono::system_clock::duration{});
+        // max - min, not back - front: a hand-edited file need not be in order.
+        const auto by_time = [](const Record& a, const Record& b) { return a.time < b.time; };
+        const auto range = std::minmax_element(records_.begin(), records_.end(), by_time);
+        const auto span = range.second->time - range.first->time;
         loop_shift_ = span + std::max(median, min_gap);
     }
 }

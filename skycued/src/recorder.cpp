@@ -7,6 +7,8 @@
 #include <sys/types.h>
 
 #include <cerrno>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -515,6 +517,16 @@ Record observationRecord(const TrackObservation& obs)
     return r;
 }
 
+// A non-finite number counts as absent: omitted from JSONL, empty in CSV.
+bool writable(const Field& f)
+{
+    if (f.kind == Kind::real)
+        return std::isfinite(f.real);
+    if (f.kind == Kind::real_float)
+        return std::isfinite(f.real_float);
+    return true;
+}
+
 std::string csvRow(const std::vector<const char*>& columns, const Record& r)
 {
     std::string line;
@@ -523,7 +535,8 @@ std::string csvRow(const std::vector<const char*>& columns, const Record& r)
             line += ',';
         for (const auto& f : r)
             if (std::strcmp(f.key, columns[i]) == 0) {
-                line += csvValue(f);
+                if (writable(f))
+                    line += csvValue(f);
                 break;
             }
     }
@@ -535,7 +548,8 @@ std::string jsonLine(const Record& r)
 {
     JsonWriter w;
     for (const auto& f : r)
-        addJson(w, f);
+        if (writable(f))
+            addJson(w, f);
     return w.str() + '\n';
 }
 
@@ -578,10 +592,15 @@ bool Recorder::openFiles()
     if (!recording::makeDirs(config_.dir))
         return false;
     const std::string base = config_.dir + "/" + stream_ + "-" + formatCompactUtc(std::chrono::system_clock::now());
-    std::string stem = base;
-    for (int n = 1; recording::exists(stem + ".jsonl") || recording::exists(stem + ".csv"); ++n)
-        stem = base + "-" + std::to_string(n);
-    stem_ = stem;
+    // Within one second, continue numbering after the last name used, so
+    // repeated rotations do not re-probe every earlier suffix.
+    int n = base == last_base_ ? last_suffix_ + 1 : 0;
+    auto stemFor = [&base](int i) { return i == 0 ? base : base + "-" + std::to_string(i); };
+    while (recording::exists(stemFor(n) + ".jsonl") || recording::exists(stemFor(n) + ".csv"))
+        ++n;
+    last_base_ = base;
+    last_suffix_ = n;
+    stem_ = stemFor(n);
     jsonl_bytes_ = csv_bytes_ = 0;
     if (config_.jsonl) {
         jsonl_.open(stem_ + ".jsonl", std::ios::out | std::ios::trunc | std::ios::binary);
@@ -591,7 +610,12 @@ bool Recorder::openFiles()
     if (config_.csv) {
         csv_.open(stem_ + ".csv", std::ios::out | std::ios::trunc | std::ios::binary);
         if (!csv_) {
-            jsonl_.close();
+            const int err = errno;
+            if (jsonl_.is_open()) {
+                jsonl_.close();
+                std::remove((stem_ + ".jsonl").c_str());  // leave no half pair behind
+            }
+            errno = err;
             return false;
         }
         const std::string head = (sent_ ? recording::sentCsvHeader() : recording::receivedCsvHeader()) + "\n";
@@ -622,22 +646,44 @@ bool Recorder::rotationDue() const
     return config_.rotate_after.count() > 0 && std::chrono::steady_clock::now() - opened_ >= config_.rotate_after;
 }
 
+void Recorder::fail(const std::string& what)
+{
+    closeFiles();
+    next_reopen_ = std::chrono::steady_clock::now() + kReopenInterval;
+    if (failing_)
+        return;
+    failing_ = true;
+    streak_start_dropped_ = dropped_;
+    LOG_ERROR("recorder: " << what << "; dropping " << stream_ << " records, retrying every "
+                           << kReopenInterval.count() << " s");
+}
+
+bool Recorder::streamsGood() const
+{
+    return !fail_writes_for_test_ && (!config_.jsonl || jsonl_) && (!config_.csv || csv_);
+}
+
 void Recorder::write(const Record& record)
 {
     if (!config_.jsonl && !config_.csv)
         return;
+    if (failing_ && std::chrono::steady_clock::now() < next_reopen_) {
+        ++dropped_;
+        return;
+    }
     if (!open_ || rotationDue()) {
         closeFiles();
         if (!openFiles()) {
             const int err = errno;
-            closeFiles();
-            if (!error_logged_)
-                LOG_ERROR("recorder: cannot create " << stream_ << " files under \"" << config_.dir
-                                                     << "\": " << std::strerror(err) << "; dropping records");
-            error_logged_ = true;
+            fail("cannot create files under \"" + config_.dir + "\": " + std::strerror(err));
+            ++dropped_;
             return;
         }
-        error_logged_ = false;
+    }
+    if (fail_writes_for_test_) {
+        fail("writing " + stem_ + " failed (test)");
+        ++dropped_;
+        return;
     }
     if (config_.jsonl) {
         const std::string line = recording::jsonLine(record);
@@ -650,14 +696,29 @@ void Recorder::write(const Record& record)
         csv_ << line;
         csv_bytes_ += line.size();
     }
-    if (++unflushed_ >= kFlushEveryRecords)
-        flush();
-    if ((config_.jsonl && !jsonl_) || (config_.csv && !csv_)) {
-        if (!error_logged_)
-            LOG_ERROR("recorder: writing " << stem_ << " failed; starting new files with the next record");
-        error_logged_ = true;
-        closeFiles();
+    // While recovering, flush every record: the streak ends only once a
+    // flush has really reached the files.
+    if (++unflushed_ >= kFlushEveryRecords || failing_)
+        flushStreams();
+    if (!streamsGood()) {
+        fail("writing " + stem_ + " failed: " + std::strerror(errno));
+        ++dropped_;
+        return;
     }
+    if (failing_ && unflushed_ == 0) {
+        failing_ = false;
+        LOG_INFO("recorder: writing " << stream_ << " records again (" << stem_ << "); dropped "
+                                      << dropped_ - streak_start_dropped_ << " meanwhile");
+    }
+}
+
+void Recorder::flushStreams()
+{
+    if (jsonl_.is_open())
+        jsonl_.flush();
+    if (csv_.is_open())
+        csv_.flush();
+    unflushed_ = 0;
 }
 
 void Recorder::writeObservation(const TrackObservation& obs)
@@ -672,7 +733,10 @@ void Recorder::writeUplink(std::chrono::system_clock::time_point when, const std
 
 void Recorder::writeTrack(const skycue::Track& track, const char* event)
 {
-    write(withHead(now8601(), "event", event ? event : "update", recording::trackRecord(track)));
+    if (!event || (std::strcmp(event, "update") != 0 && std::strcmp(event, "keyframe") != 0))
+        throw std::invalid_argument(std::string("recorder: track event must be \"update\" or \"keyframe\", not \"") +
+                                    (event ? event : "(null)") + "\"");
+    write(withHead(now8601(), "event", event, recording::trackRecord(track)));
 }
 
 void Recorder::writeDrop(skycue::TrackId id, skycue::DropReason reason)
@@ -691,11 +755,11 @@ void Recorder::writeFilterChange(const std::string& description)
 
 void Recorder::flush()
 {
-    if (jsonl_.is_open())
-        jsonl_.flush();
-    if (csv_.is_open())
-        csv_.flush();
-    unflushed_ = 0;
+    if (!open_)
+        return;
+    flushStreams();
+    if (!streamsGood())
+        fail("flushing " + stem_ + " failed: " + std::strerror(errno));
 }
 
 std::string Recorder::currentPath(const char* ext) const

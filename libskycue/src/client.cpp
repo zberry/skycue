@@ -52,6 +52,7 @@ struct Client::Impl {
     std::function<void(const Track&)> on_update;
     std::function<void(TrackId, DropReason)> on_dropped;
     std::function<void(bool)> on_connection;
+    std::function<void(const Frame&)> on_frame;
 
     // Declared first so it is destroyed last, after every I/O object.
     asio::io_context io;
@@ -121,6 +122,11 @@ struct Client::Impl {
     {
         if (on_connection)
             guarded([&] { on_connection(up); });
+    }
+    void fireFrame(const Frame& f)
+    {
+        if (on_frame)
+            guarded([&] { on_frame(f); });
     }
 
     // ---- I/O thread ------------------------------------------------------
@@ -367,6 +373,9 @@ struct Client::Impl {
 
     void handleFrame(const Frame& frame)
     {
+        fireFrame(frame);
+        if (stopping) // the callback stopped the client
+            return;
         switch (frame.type) {
         case FrameType::hello: {
             Hello h;
@@ -440,6 +449,7 @@ Client::~Client() { stop(); }
 void Client::onTrackUpdate(std::function<void(const Track&)> cb) { impl_->on_update = std::move(cb); }
 void Client::onTrackDropped(std::function<void(TrackId, DropReason)> cb) { impl_->on_dropped = std::move(cb); }
 void Client::onConnectionChange(std::function<void(bool)> cb) { impl_->on_connection = std::move(cb); }
+void Client::onFrame(std::function<void(const Frame&)> cb) { impl_->on_frame = std::move(cb); }
 
 void Client::start()
 {

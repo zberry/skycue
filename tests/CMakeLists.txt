@@ -122,3 +122,9 @@ target_compile_definitions(test_engine PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_engine)
 add_test(NAME engine COMMAND test_engine)
 set_tests_properties(engine PROPERTIES TIMEOUT 120)
+
+# skycue-dump against a skycued replaying the readsb JSON fixture, TCP and UDP.
+add_test(NAME dump
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_dump.sh
+    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-dump> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(dump PROPERTIES TIMEOUT 60)

@@ -3,6 +3,7 @@
 // skycue client: receives the skycue wire protocol over TCP or UDP and keeps
 // a table of live tracks.
 
+#include <skycue/protocol.hpp>
 #include <skycue/types.hpp>
 
 #include <chrono>
@@ -43,6 +44,13 @@ struct Config {
 // whose last keyframe update (or first appearance) is older than two keyframe
 // intervals is dropped as stale. When the connection goes down,
 // onConnectionChange(false) fires, then source_lost for every track.
+//
+// Raw frames: onFrame (optional, default none) fires for every frame that
+// decodes (TCP: each frame of the stream; UDP: each well-formed datagram),
+// before the client acts on it, so it sees Hello and Heartbeat frames too,
+// and an update's frame before onTrackUpdate. It reports what arrived, not
+// what the client accepted: payloads may still fail their decoder, and
+// `type` may be unknown. Same thread and exception rules as the others.
 class Client {
 public:
     explicit Client(Config config);
@@ -53,6 +61,7 @@ public:
     void onTrackUpdate(std::function<void(const Track&)> cb);
     void onTrackDropped(std::function<void(TrackId, DropReason)> cb);
     void onConnectionChange(std::function<void(bool connected)> cb);
+    void onFrame(std::function<void(const Frame&)> cb);
 
     // start() is effective once; later calls, and calls after stop(), do nothing.
     void start();

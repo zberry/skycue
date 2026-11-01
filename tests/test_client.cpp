@@ -677,3 +677,37 @@ BOOST_AUTO_TEST_CASE(stop_is_idempotent_and_no_callbacks_after_stop)
         BOOST_TEST(ev.total() == seen);
     }
 }
+
+BOOST_AUTO_TEST_CASE(on_frame_sees_hello_and_heartbeat)
+{
+    TestTcpServer server;
+    Events ev;
+    std::vector<FrameType> types;
+    std::vector<Hello> hellos;
+    Client client(tcpConfig(server.port()));
+    ev.attach(client);
+    client.onFrame([&](const Frame& f) {
+        std::lock_guard<std::mutex> lk(ev.m);
+        types.push_back(f.type);
+        Hello h;
+        if (decodeHello(f, h))
+            hellos.push_back(h);
+        ev.cv.notify_all();
+    });
+    client.start();
+    BOOST_REQUIRE(server.waitAccepted());
+
+    server.send(cat({hello(10000), encodeHeartbeat(Heartbeat{42}), encodeTrackUpdate(mkTrack(1, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 1; }));
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_REQUIRE(types.size() == 3u);
+        BOOST_TEST(static_cast<int>(types[0]) == static_cast<int>(FrameType::hello));
+        BOOST_TEST(static_cast<int>(types[1]) == static_cast<int>(FrameType::heartbeat));
+        BOOST_TEST(static_cast<int>(types[2]) == static_cast<int>(FrameType::track_update));
+        BOOST_REQUIRE(hellos.size() == 1u);
+        BOOST_TEST(hellos[0].sender == "test");
+        BOOST_TEST(hellos[0].keyframe_interval_ms == 10000u);
+    }
+    client.stop();
+}

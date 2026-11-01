@@ -21,7 +21,8 @@ const std::vector<std::string>& knownConfigKeys()
         "RECEIVER_LAT",    "RECEIVER_LON",      "RECEIVER_ALT_M",    "ANTENNA_HEIGHT_M",
         "SDR_1090_SERIAL", "SDR_978_SERIAL",    "GAIN_1090",         "GAIN_978",
         "DUMP978_RAW_PORT", "DUMP978_JSON_PORT", "READSB_JSON_PORT", "WEB_PORT",
-        "CUE_TCP_PORT",    "CUE_UDP_TARGETS",   "RECORD_DIR",        "RECORD_FORMATS",
+        "CUE_TCP_PORT",    "CUE_TCP_CONNECT",   "CUE_UDP_TARGETS",   "RECORD_DIR",
+        "RECORD_FORMATS",
         "MAX_RANGE_NM",    "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE",   "BLOCK_LIST_FILE",
         "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
         "RECORD_RAW",  // used by skycue-start.sh only (it launches skycue-rawrec)
@@ -126,22 +127,38 @@ public:
         out = d;
     }
 
-    static bool parsePort(const std::string& v, uint16_t& out)
+    static bool parsePort(const std::string& v, uint16_t& out, unsigned long min = 1)
     {
         if (v.empty() || v.size() > 5 || !std::all_of(v.begin(), v.end(), isDigit))
             return false;
         unsigned long n = std::stoul(v);
-        if (n < 1 || n > 65535)
+        if (n < min || n > 65535)
             return false;
         out = static_cast<uint16_t>(n);
         return true;
     }
 
-    void port(const std::string& key, uint16_t& out) const
+    // allow_zero: 0 is accepted too (it means "off" for that key).
+    void port(const std::string& key, uint16_t& out, bool allow_zero = false) const
     {
         auto e = find(key);
-        if (e && !parsePort(e->value, out))
-            fail(key, key + " must be a port number 1-65535, got '" + e->value + "'");
+        if (e && !parsePort(e->value, out, allow_zero ? 0 : 1))
+            fail(key, key + " must be a port number " + (allow_zero ? "0" : "1") + "-65535, got '" + e->value + "'");
+    }
+
+    // "host:port host:port ..."; empty for none.
+    void endpoints(const std::string& key, std::vector<std::pair<std::string, uint16_t>>& out) const
+    {
+        auto e = find(key);
+        if (!e)
+            return;
+        for (const auto& w : words(e->value)) {
+            size_t colon = w.rfind(':');
+            uint16_t p = 0;
+            if (colon == std::string::npos || colon == 0 || !parsePort(w.substr(colon + 1), p))
+                fail(key, key + " entries must be host:port, got '" + w + "'");
+            out.emplace_back(w.substr(0, colon), p);
+        }
     }
 
 private:
@@ -202,7 +219,7 @@ Config parseConfigText(const std::string& text, const std::string& name)
     conv.port("DUMP978_JSON_PORT", c.dump978_json_port);
     conv.port("READSB_JSON_PORT", c.readsb_json_port);
     conv.port("WEB_PORT", c.web_port);
-    conv.port("CUE_TCP_PORT", c.cue_tcp_port);
+    conv.port("CUE_TCP_PORT", c.cue_tcp_port, true);
     conv.str("RECORD_DIR", c.record_dir);
     conv.num("MAX_RANGE_NM", c.max_range_nm);
     conv.num("MIN_ELEVATION_DEG", c.min_elevation_deg);
@@ -217,15 +234,8 @@ Config parseConfigText(const std::string& text, const std::string& name)
     conv.str("GAIN_1090", c.gain_1090);
     conv.str("GAIN_978", c.gain_978);
 
-    if (auto e = conv.find("CUE_UDP_TARGETS")) {
-        for (const auto& w : words(e->value)) {
-            size_t colon = w.rfind(':');
-            uint16_t p = 0;
-            if (colon == std::string::npos || colon == 0 || !Converter::parsePort(w.substr(colon + 1), p))
-                conv.fail("CUE_UDP_TARGETS", "CUE_UDP_TARGETS entries must be host:port, got '" + w + "'");
-            c.cue_udp_targets.emplace_back(w.substr(0, colon), p);
-        }
-    }
+    conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
+    conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);
     if (auto e = conv.find("RECORD_FORMATS")) {
         c.record_formats.clear();
         for (const auto& w : words(e->value)) {

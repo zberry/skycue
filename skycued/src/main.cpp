@@ -70,7 +70,7 @@ int main(int argc, char** argv)
         "readsb-host", po::value(&readsb_host)->default_value("127.0.0.1"), "host of readsb's JSON port")(
         "dump978-host", po::value(&dump978_host)->default_value("127.0.0.1"), "host of dump978's raw port")(
         "no-uat", "do not connect to dump978")(
-        "cue-tcp-port", po::value(&cue_tcp_port), "override CUE_TCP_PORT")(
+        "cue-tcp-port", po::value(&cue_tcp_port), "override CUE_TCP_PORT (0: no listener)")(
         "log-level", po::value(&log_level)->default_value("info"), "debug, info, warn or error");
     po::variables_map vm;
     try {
@@ -122,6 +122,7 @@ int main(int argc, char** argv)
 
     ForwarderConfig fc;
     fc.tcp_port = config.cue_tcp_port;
+    fc.tcp_connect_targets = config.cue_tcp_connect_targets;
     fc.udp_targets = config.cue_udp_targets;
     fc.keyframe_interval =
         std::chrono::milliseconds(std::max<long long>(1, std::llround(config.keyframe_interval_s * 1000)));
@@ -170,8 +171,14 @@ int main(int argc, char** argv)
         LOG_ERROR("cannot start: " << e.what());
         return 1;
     }
-    LOG_INFO(kVersion << " forwarding on TCP port " << forwarder.tcpPort()
+    LOG_INFO(kVersion << " forwarding"
+                      << (forwarder.tcpPort() ? " on TCP port " + std::to_string(forwarder.tcpPort())
+                                              : std::string(" with no TCP listener"))
+                      << ", " << config.cue_tcp_connect_targets.size() << " TCP target(s), "
+                      << config.cue_udp_targets.size() << " UDP target(s)"
                       << (replaying ? " (replaying " + replay_path + ")" : std::string()));
+    if (config.cue_tcp_port == 0 && config.cue_tcp_connect_targets.empty() && config.cue_udp_targets.empty())
+        LOG_WARN("nowhere to forward to: CUE_TCP_PORT is 0 and CUE_TCP_CONNECT and CUE_UDP_TARGETS are empty");
 
     boost::asio::signal_set signals(io, SIGINT, SIGTERM);
     boost::asio::steady_timer exit_timer(io);

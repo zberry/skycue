@@ -1,6 +1,8 @@
 // skycue client. Everything below the owner-side functions (start, stop,
-// poll, trackCount) runs on the I/O thread only: the thread start() spawns, or
-// the thread calling poll(). Asio API kept to what Boost 1.66 offers.
+// poll, trackCount, localPort) runs on the I/O thread only: the thread start()
+// spawns, or the thread calling poll(). The one exception is the first
+// tcp_listen bind, which start() does before there is an I/O thread, so that
+// localPort() is known when it returns. Asio API kept to what Boost 1.66 offers.
 
 #include <skycue/client.hpp>
 #include <skycue/protocol.hpp>
@@ -17,6 +19,7 @@
 #include <array>
 #include <atomic>
 #include <exception>
+#include <map>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -68,6 +71,21 @@ struct Client::Impl {
 
     std::vector<uint8_t> rx;
     std::array<uint8_t, 4096> chunk{};
+
+    // tcp_listen: one Peer per accepted connection, each with its own decoder
+    // state. Handlers hold a shared_ptr to their Peer; `open` turns them off.
+    struct Peer {
+        Peer(asio::io_context& io, unsigned id_) : sock(io), id(id_) {}
+        tcp::socket sock;
+        unsigned id;
+        bool open = true;
+        std::vector<uint8_t> rx;
+        std::array<uint8_t, 4096> chunk{};
+    };
+    tcp::acceptor acceptor{io};
+    std::map<unsigned, std::shared_ptr<Peer>> peers;
+    unsigned next_peer = 0, accept_gen = 0;
+    std::atomic<uint16_t> local_port{0};
     std::array<uint8_t, kHeaderSize + kMaxUdpPayload + 1> dgram{}; // +1 so an oversized datagram shows
     udp::endpoint from;
 
@@ -141,10 +159,18 @@ struct Client::Impl {
 
     void openTransport()
     {
-        if (cfg.transport == Config::Transport::tcp)
+        switch (cfg.transport) {
+        case Config::Transport::tcp:
             connectTcp();
-        else
+            return;
+        case Config::Transport::tcp_listen:
+            listenTcp();
+            return;
+        case Config::Transport::udp:
+        default:
             bindUdp();
+            return;
+        }
     }
 
     void scheduleReconnect()
@@ -213,35 +239,152 @@ struct Client::Impl {
                 return;
             }
             rx.insert(rx.end(), chunk.data(), chunk.data() + n);
-            size_t offset = 0;
-            bool bad = false;
-            while (!stopping && gen == conn_gen) {
-                Frame frame;
-                size_t used = 0;
-                const DecodeStatus st = decodeFrame(rx.data() + offset, rx.size() - offset, frame, used);
-                if (st == DecodeStatus::need_more)
-                    break;
-                if (st != DecodeStatus::ok) { // bad_magic / bad_version: cannot resynchronise
-                    bad = true;
-                    break;
-                }
-                offset += used;
-                handleFrame(frame);
-            }
+            const bool good = consumeFrames(rx, [&] { return !stopping && gen == conn_gen; });
             if (stopping || gen != conn_gen) // a callback stopped the client
                 return;
-            if (bad) {
+            if (!good) { // bad_magic / bad_version: cannot resynchronise
                 lostTcp();
                 return;
             }
-            // Bounded by construction: what is left is a partial frame, less
-            // than kHeaderSize + 0xFFFF bytes (the u16 length field caps a
-            // frame), so rx never exceeds that plus one read chunk. Garbage
-            // fails the magic/version check as soon as 8 bytes are buffered.
-            rx.erase(rx.begin(), rx.begin() + static_cast<std::ptrdiff_t>(offset));
             readTcp(gen);
         });
     }
+
+    // Consumes the decodable frames at the front of `buf` (a stream's
+    // reassembly buffer), erasing them. False on a bad magic or version: the
+    // stream cannot be resynchronised. `alive` says whether to go on (a
+    // callback may have stopped the client or closed the connection).
+    template <class Alive> bool consumeFrames(std::vector<uint8_t>& buf, Alive alive)
+    {
+        size_t offset = 0;
+        bool good = true;
+        while (alive()) {
+            Frame frame;
+            size_t used = 0;
+            const DecodeStatus st = decodeFrame(buf.data() + offset, buf.size() - offset, frame, used);
+            if (st == DecodeStatus::need_more)
+                break;
+            if (st != DecodeStatus::ok) {
+                good = false;
+                break;
+            }
+            offset += used;
+            handleFrame(frame);
+        }
+        // Bounded by construction: what is left is a partial frame, less
+        // than kHeaderSize + 0xFFFF bytes (the u16 length field caps a
+        // frame), so a buffer never exceeds that plus one read chunk. Garbage
+        // fails the magic/version check as soon as 8 bytes are buffered.
+        if (good && alive())
+            buf.erase(buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(offset));
+        return good;
+    }
+
+    // ---- tcp_listen --------------------------------------------------------
+
+    // Binds and listens if not already listening. Called once from start()
+    // (owner thread, before the I/O thread exists) and on the I/O thread for
+    // retries.
+    bool openListener()
+    {
+        if (acceptor.is_open())
+            return true;
+        error_code ec;
+        tcp::endpoint ep;
+        const auto addr = asio::ip::make_address(cfg.host, ec);
+        if (!ec) {
+            ep = tcp::endpoint(addr, cfg.port);
+        } else {
+            tcp::resolver r(io);
+            const auto results = r.resolve(cfg.host, std::to_string(cfg.port), ec);
+            if (ec || results.empty())
+                return false;
+            ep = *results.begin();
+        }
+        acceptor.open(ep.protocol(), ec);
+        if (!ec)
+            acceptor.set_option(tcp::acceptor::reuse_address(true), ec);
+        if (!ec)
+            acceptor.bind(ep, ec);
+        if (!ec)
+            acceptor.listen(asio::socket_base::max_listen_connections, ec);
+        if (!ec)
+            local_port = acceptor.local_endpoint(ec).port();
+        if (ec) {
+            error_code ignored;
+            acceptor.close(ignored);
+            local_port = 0;
+            return false;
+        }
+        return true;
+    }
+
+    void listenTcp()
+    {
+        if (!openListener()) {
+            scheduleReconnect(); // retry the bind
+            return;
+        }
+        acceptNext();
+    }
+
+    void acceptNext()
+    {
+        auto p = std::make_shared<Peer>(io, ++next_peer);
+        const unsigned gen = ++accept_gen;
+        acceptor.async_accept(p->sock, [this, p, gen](const error_code& ec) {
+            if (stopping || gen != accept_gen)
+                return;
+            if (ec) {
+                // EMFILE and the like: keep the listener, try again later.
+                if (ec != asio::error::operation_aborted)
+                    scheduleReconnect();
+                return;
+            }
+            peers.emplace(p->id, p);
+            setConnected(true); // fires for the first connection only
+            if (stopping)
+                return;
+            readPeer(p);
+            acceptNext();
+        });
+    }
+
+    void readPeer(const std::shared_ptr<Peer>& p)
+    {
+        p->sock.async_read_some(asio::buffer(p->chunk), [this, p](const error_code& ec, size_t n) {
+            if (stopping || !p->open)
+                return;
+            if (ec) {
+                closePeer(p);
+                return;
+            }
+            p->rx.insert(p->rx.end(), p->chunk.data(), p->chunk.data() + n);
+            const bool good = consumeFrames(p->rx, [&] { return !stopping && p->open; });
+            if (stopping || !p->open)
+                return;
+            if (!good) {
+                closePeer(p);
+                return;
+            }
+            readPeer(p);
+        });
+    }
+
+    void closePeer(const std::shared_ptr<Peer>& p)
+    {
+        if (!p->open)
+            return;
+        p->open = false;
+        error_code ignored;
+        p->sock.close(ignored);
+        p->rx.clear();
+        peers.erase(p->id);
+        if (peers.empty())
+            setConnected(false); // the last source is gone: source_lost
+    }
+
+    // ---- udp ---------------------------------------------------------------
 
     void bindUdp()
     {
@@ -428,6 +571,7 @@ struct Client::Impl {
         ++reconnect_gen;
         ++stale_gen;
         ++heartbeat_gen;
+        ++accept_gen;
         reconnect_timer.cancel();
         stale_timer.cancel();
         heartbeat_timer.cancel();
@@ -435,6 +579,12 @@ struct Client::Impl {
         error_code ignored;
         tcp_sock.close(ignored);
         udp_sock.close(ignored);
+        acceptor.close(ignored);
+        for (auto& kv : peers) {
+            kv.second->open = false;
+            kv.second->sock.close(ignored);
+        }
+        peers.clear();
         rx.clear();
         tracks.clear();
         count = 0;
@@ -457,6 +607,8 @@ void Client::start()
     if (d.started || d.stop_requested)
         return;
     d.started = true;
+    if (d.cfg.transport == Config::Transport::tcp_listen)
+        d.openListener(); // no I/O thread yet; on failure begin() retries
     asio::post(d.io, [&d] { d.begin(); });
     if (d.cfg.run_io_thread) {
         d.guard.emplace(asio::make_work_guard(d.io));
@@ -498,5 +650,7 @@ void Client::poll()
 }
 
 size_t Client::trackCount() const { return impl_->count.load(); }
+
+uint16_t Client::localPort() const { return impl_->local_port.load(); }
 
 } // namespace skycue

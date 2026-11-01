@@ -1,7 +1,8 @@
 #pragma once
 
-// skycue client: receives the skycue wire protocol over TCP or UDP and keeps
-// a table of live tracks.
+// skycue client: receives the skycue wire protocol over TCP (connecting to
+// skycued, or listening for skycued to connect) or UDP and keeps a table of
+// live tracks.
 
 #include <skycue/protocol.hpp>
 #include <skycue/types.hpp>
@@ -16,9 +17,11 @@
 namespace skycue {
 
 struct Config {
-    enum class Transport { tcp, udp } transport = Transport::tcp;
-    std::string host = "127.0.0.1"; // tcp: server to connect to; udp: local bind address
-    uint16_t port = 30500;
+    // tcp: connect to skycued; tcp_listen: accept connections from any number
+    // of skycued instances (CUE_TCP_CONNECT); udp: bind and receive datagrams.
+    enum class Transport { tcp, udp, tcp_listen } transport = Transport::tcp;
+    std::string host = "127.0.0.1"; // tcp: server to connect to; udp, tcp_listen: local bind address
+    uint16_t port = 30500;          // tcp_listen, udp: 0 picks an ephemeral port (tcp_listen: see localPort)
     std::chrono::milliseconds reconnect_interval{2000};
     std::chrono::milliseconds default_keyframe_interval{10000}; // until a Hello says otherwise
     std::chrono::milliseconds heartbeat_timeout{3000};          // udp: no frame for this long -> source_lost
@@ -44,6 +47,15 @@ struct Config {
 // whose last keyframe update (or first appearance) is older than two keyframe
 // intervals is dropped as stale. When the connection goes down,
 // onConnectionChange(false) fires, then source_lost for every track.
+//
+// tcp_listen: every accepted connection has its own stream decoder; frames
+// from all of them feed the one track table (an update from any connection is
+// authoritative, a Hello from any sets the keyframe interval). A connection
+// that sends a frame with a bad magic or version is closed on its own. The
+// client is "connected" while at least one connection is open: true on the
+// first, false (then source_lost for every track) when the last one closes.
+// There is no reconnecting; the listener keeps accepting. If the address
+// cannot be bound, binding is retried every reconnect_interval.
 //
 // Raw frames: onFrame (optional, default none) fires for every frame that
 // decodes (TCP: each frame of the stream; UDP: each well-formed datagram),
@@ -71,6 +83,10 @@ public:
     // nothing in thread mode or once stopped.
     void poll();
     size_t trackCount() const; // for tests and diagnostics; safe from any thread
+    // tcp_listen: the port listened on (useful with port 0) once bound; start()
+    // binds before it returns, unless the bind fails. 0 otherwise. Safe from
+    // any thread.
+    uint16_t localPort() const;
 
 private:
     struct Impl;

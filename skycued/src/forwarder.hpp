@@ -1,7 +1,8 @@
 #pragma once
 
-// Forwarder: sends skycue frames to TCP clients (a listening server) and to a
-// fixed list of UDP targets, with periodic keyframe bursts and heartbeats.
+// Forwarder: sends skycue frames to TCP clients (those that connect to its
+// listening port, and those it connects to itself) and to a fixed list of UDP
+// targets, with periodic keyframe bursts and heartbeats.
 
 #include <skycue/types.hpp>
 
@@ -19,7 +20,9 @@
 namespace skycued {
 
 struct ForwarderConfig {
-    uint16_t tcp_port = 30500; // 0 picks an ephemeral port (see Forwarder::tcpPort)
+    uint16_t tcp_port = 30500; // TCP port to listen on; 0: no listener
+    bool tcp_listen_ephemeral = false; // listen on a port the OS picks, ignoring tcp_port (tests; see tcpPort)
+    std::vector<std::pair<std::string, uint16_t>> tcp_connect_targets; // host, port: dialled, kept connected
     std::vector<std::pair<std::string, uint16_t>> udp_targets; // numeric host (or resolvable name), port
     std::chrono::milliseconds keyframe_interval{10000};
     std::chrono::milliseconds heartbeat_interval{1000};
@@ -34,6 +37,11 @@ struct ForwarderConfig {
 // TCP: on accept a client gets Hello, then one keyframe of every track the
 // provider returns, then the normal stream. Each client has its own outbound
 // queue; a client whose queue exceeds max_client_queue_bytes is closed.
+// Each of tcp_connect_targets is dialled at start(); once connected it is
+// treated exactly like an accepted client (Hello, keyframe, queue limit,
+// counted by tcpClientCount). A failed dial, or the connection closing for
+// any reason, dials again after a delay that starts at 0.5 s and doubles to
+// at most 10 s, back to 0.5 s after every successful connect.
 // UDP: one datagram per frame per target. Each target also gets a Hello at
 // start() and right before every keyframe burst, so a UDP receiver learns the
 // keyframe interval (it has no connection on which to be greeted).
@@ -50,12 +58,13 @@ public:
     Forwarder(const Forwarder&) = delete;
     Forwarder& operator=(const Forwarder&) = delete;
 
-    // Listens and starts the timers. Throws std::runtime_error if the TCP
-    // port cannot be bound. Effective once; does nothing after stop().
+    // Listens (unless tcp_port is 0), starts dialling the connect targets and
+    // starts the timers. Throws std::runtime_error if the TCP port cannot be
+    // bound. Effective once; does nothing after stop().
     void start();
     // Broadcasts TrackDrop(shutdown) for every track the provider returns,
-    // stops accepting and the timers, and closes every socket once its queued
-    // data is written (at most ~2 s later). Idempotent.
+    // stops accepting, dialling and the timers, and closes every socket once
+    // its queued data is written (at most ~2 s later). Idempotent.
     void stop();
 
     // To all TCP clients and UDP targets. The caller sets keyframe=false.
@@ -67,10 +76,11 @@ public:
     // keyframe=true. Set before start().
     void setKeyframeProvider(KeyframeProvider provider);
 
-    size_t tcpClientCount() const;
+    size_t tcpClientCount() const; // accepted and outbound connections
     // Frames handed to a destination: one per frame per TCP client or UDP target.
     uint64_t framesSent() const;
-    // Port the TCP server listens on (useful with tcp_port 0); 0 before start().
+    // Port the TCP server listens on (useful with tcp_listen_ephemeral); 0
+    // before start() or with no listener.
     uint16_t tcpPort() const;
 
 private:

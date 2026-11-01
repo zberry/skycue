@@ -226,6 +226,48 @@ BOOST_AUTO_TEST_CASE(udp_targets)
     }
 }
 
+BOOST_AUTO_TEST_CASE(cue_tcp_connect_parsed)
+{
+    std::string text = readExample();
+    replaceOnce(text, "\nRECEIVER_LAT=\n", "\nRECEIVER_LAT=51.5\n");
+    replaceOnce(text, "\nRECEIVER_LON=\n", "\nRECEIVER_LON=-0.12\n");
+    BOOST_TEST(parseConfigText(text, "skycue.conf.example").cue_tcp_connect_targets.empty());
+
+    Config c = parseConfigText(std::string(kLatLon) +
+                                   "CUE_TCP_CONNECT=\"10.0.0.5:4000 cuehost:4001\"\n",
+                               "t");
+    BOOST_REQUIRE_EQUAL(c.cue_tcp_connect_targets.size(), 2u);
+    BOOST_TEST(c.cue_tcp_connect_targets[0].first == "10.0.0.5");
+    BOOST_TEST(c.cue_tcp_connect_targets[0].second == 4000);
+    BOOST_TEST(c.cue_tcp_connect_targets[1].first == "cuehost");
+    BOOST_TEST(c.cue_tcp_connect_targets[1].second == 4001);
+    BOOST_TEST(c.cue_tcp_port == 30500);  // the listener stays on: both roles at once
+
+    c = parseConfigText(std::string(kLatLon) + "CUE_TCP_CONNECT=\n", "t");
+    BOOST_TEST(c.cue_tcp_connect_targets.empty());
+
+    for (const char* v : {"\"x\"", "x", ":4000", "h:", "h:0", "h:65536", "h:12a"}) {
+        ConfigError e = expectError(std::string(kLatLon) + "CUE_TCP_CONNECT=" + v + "\n");
+        BOOST_TEST(e.line == 3, v);
+        BOOST_TEST(contains(e.what(), "CUE_TCP_CONNECT"), v);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(cue_tcp_port_zero_allowed)
+{
+    Config c = parseConfigText(std::string(kLatLon) + "CUE_TCP_PORT=0\n", "t");
+    BOOST_TEST(c.cue_tcp_port == 0);  // no listener
+
+    for (const char* v : {"65536", "-1", "x", ""}) {
+        ConfigError e = expectError(std::string(kLatLon) + "CUE_TCP_PORT=" + v + "\n");
+        BOOST_TEST(e.line == 3, v);
+        BOOST_TEST(contains(e.what(), "CUE_TCP_PORT"), v);
+    }
+    // Other ports still need 1-65535.
+    ConfigError e = expectError(std::string(kLatLon) + "WEB_PORT=0\n");
+    BOOST_TEST(contains(e.what(), "WEB_PORT"));
+}
+
 BOOST_AUTO_TEST_CASE(known_keys_match_example)
 {
     std::string text = readExample();

@@ -10,6 +10,7 @@
 
 #include <skycue/protocol.hpp>
 
+#include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -35,6 +36,8 @@ constexpr std::chrono::milliseconds kMinInterval{10};
 constexpr std::chrono::seconds kUdpErrorLogEvery{60};
 constexpr std::chrono::seconds kStopDrainLimit{2};
 constexpr std::chrono::milliseconds kAcceptRetry{100};
+constexpr std::chrono::milliseconds kDialBackoffMin{500};
+constexpr std::chrono::milliseconds kDialBackoffMax{10000};
 
 std::chrono::milliseconds clampInterval(std::chrono::milliseconds ms) { return std::max(ms, kMinInterval); }
 
@@ -54,17 +57,39 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
     {
     }
 
+    struct OutboundLink;
+
     struct Session {
         explicit Session(asio::io_context& io, uint64_t id_) : sock(io), id(id_) {}
         tcp::socket sock;
         uint64_t id;
         std::string peer;
+        std::string kind = "TCP client";     // for the log: "TCP client" or "TCP target"
+        std::shared_ptr<OutboundLink> link; // set for a connection we dialled
         std::deque<Buf> queue;          // not yet handed to async_write
         std::vector<Buf> inflight;      // being written now
         size_t queued_bytes = 0;        // queue + inflight
         bool closed = false;
         bool close_when_drained = false; // stop(): close once everything is written
         std::array<uint8_t, 512> rx{};  // clients send nothing; read only to see EOF
+    };
+
+    // One of cfg.tcp_connect_targets: dials, and dials again whenever the
+    // connection fails or closes. `gen` turns off a cancelled attempt.
+    struct OutboundLink {
+        OutboundLink(asio::io_context& io, std::string h, uint16_t p)
+            : host(std::move(h)), port(p), name(host + ":" + std::to_string(port)), resolver(io), timer(io)
+        {
+        }
+        std::string host;
+        uint16_t port;
+        std::string name;
+        tcp::resolver resolver;
+        asio::steady_timer timer;
+        std::shared_ptr<Session> dialling; // socket being connected
+        std::chrono::milliseconds backoff = kDialBackoffMin;
+        unsigned gen = 0;
+        bool failure_logged = false; // warn once per outage, not per attempt
     };
 
     struct UdpTarget {
@@ -89,6 +114,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
 
     std::map<uint64_t, std::shared_ptr<Session>> sessions;
     std::vector<UdpTarget> targets;
+    std::vector<std::shared_ptr<OutboundLink>> links;
     uint64_t next_session_id = 1;
     size_t udp_inflight = 0;
 
@@ -104,8 +130,34 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
     {
         if (started || stopping)
             return;
+        const bool listening = cfg.tcp_listen_ephemeral || cfg.tcp_port != 0;
+        if (listening)
+            listen();
+        started = true;
+        if (!listening)
+            LOG_INFO("forwarder: TCP listener disabled (CUE_TCP_PORT=0)");
+
+        resolveTargets();
+        helloToUdp();
+
+        const auto now = steady::now();
+        last_broadcast = now;
+        next_keyframe = now + keyframe_interval;
+        armKeyframe();
+        armHeartbeat();
+        if (listening)
+            accept();
+        for (const auto& t : cfg.tcp_connect_targets) {
+            links.push_back(std::make_shared<OutboundLink>(io, t.first, t.second));
+            LOG_INFO("forwarder: TCP target " << links.back()->name);
+            dial(links.back());
+        }
+    }
+
+    void listen()
+    {
         error_code ec;
-        const tcp::endpoint ep(tcp::v4(), cfg.tcp_port);
+        const tcp::endpoint ep(tcp::v4(), cfg.tcp_listen_ephemeral ? uint16_t{0} : cfg.tcp_port);
         acceptor.open(ep.protocol(), ec);
         if (!ec)
             acceptor.set_option(tcp::acceptor::reuse_address(true), ec);
@@ -120,18 +172,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
                                      ec.message());
         }
         port = acceptor.local_endpoint(ec).port();
-        started = true;
         LOG_INFO("forwarder: listening on TCP port " << port);
-
-        resolveTargets();
-        helloToUdp();
-
-        const auto now = steady::now();
-        last_broadcast = now;
-        next_keyframe = now + keyframe_interval;
-        armKeyframe();
-        armHeartbeat();
-        accept();
     }
 
     void resolveTargets()
@@ -201,10 +242,18 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         error_code pec;
         const auto remote = s->sock.remote_endpoint(pec);
         s->peer = pec ? std::string("?") : remote.address().to_string() + ":" + std::to_string(remote.port());
+        addSession(s);
+        accept();
+    }
+
+    // A connected socket, accepted or dialled: greet it and add it to the
+    // broadcast set.
+    void addSession(const std::shared_ptr<Session>& s)
+    {
         error_code ignored;
         s->sock.set_option(tcp::no_delay(true), ignored);
         sessions.emplace(s->id, s);
-        LOG_INFO("forwarder: TCP client " << s->peer << " connected (" << sessions.size() << " total)");
+        LOG_INFO("forwarder: " << s->kind << " " << s->peer << " connected (" << sessions.size() << " total)");
 
         read(s);
         enqueue(s, helloFrame());
@@ -213,7 +262,86 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
                 break;
             enqueue(s, b);
         }
-        accept();
+    }
+
+    // ---- TCP outbound ------------------------------------------------------
+
+    void dial(const std::shared_ptr<OutboundLink>& l)
+    {
+        if (stopping)
+            return;
+        const unsigned gen = ++l->gen;
+        auto self = shared_from_this();
+        l->resolver.async_resolve(
+            l->host, std::to_string(l->port),
+            [self, l, gen](const error_code& ec, tcp::resolver::results_type results) {
+                if (self->stopping || gen != l->gen)
+                    return;
+                if (ec) {
+                    self->dialFailed(l, ec);
+                    return;
+                }
+                auto s = std::make_shared<Session>(self->io, self->next_session_id++);
+                s->kind = "TCP target";
+                s->peer = l->name;
+                s->link = l;
+                l->dialling = s;
+                asio::async_connect(s->sock, results, [self, l, s, gen](const error_code& cec, const tcp::endpoint&) {
+                    if (l->dialling == s)
+                        l->dialling.reset();
+                    if (self->stopping || gen != l->gen)
+                        return;
+                    if (cec) {
+                        error_code ignored;
+                        s->sock.close(ignored);
+                        self->dialFailed(l, cec);
+                        return;
+                    }
+                    l->backoff = kDialBackoffMin;
+                    l->failure_logged = false;
+                    self->addSession(s);
+                });
+            });
+    }
+
+    void dialFailed(const std::shared_ptr<OutboundLink>& l, const error_code& ec)
+    {
+        if (!l->failure_logged) {
+            LOG_WARN("forwarder: TCP target " << l->name << ": " << ec.message() << "; retrying");
+            l->failure_logged = true;
+        } else {
+            LOG_DEBUG("forwarder: TCP target " << l->name << ": " << ec.message());
+        }
+        redial(l);
+    }
+
+    // Dials again after the current backoff, then doubles it.
+    void redial(const std::shared_ptr<OutboundLink>& l)
+    {
+        if (stopping)
+            return;
+        const unsigned gen = ++l->gen;
+        auto self = shared_from_this();
+        l->timer.expires_after(l->backoff);
+        l->timer.async_wait([self, l, gen](const error_code& ec) {
+            if (!ec && !self->stopping && gen == l->gen)
+                self->dial(l);
+        });
+        l->backoff = std::min(l->backoff * 2, kDialBackoffMax);
+    }
+
+    void cancelLinks()
+    {
+        error_code ignored;
+        for (const auto& l : links) {
+            ++l->gen;
+            l->timer.cancel();
+            l->resolver.cancel();
+            if (l->dialling) {
+                l->dialling->sock.close(ignored);
+                l->dialling.reset();
+            }
+        }
     }
 
     void read(const std::shared_ptr<Session>& s)
@@ -290,9 +418,11 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         s->queued_bytes = 0;
         sessions.erase(s->id);
         if (warn)
-            LOG_WARN("forwarder: TCP client " << s->peer << " closed: " << why);
+            LOG_WARN("forwarder: " << s->kind << " " << s->peer << " closed: " << why);
         else
-            LOG_INFO("forwarder: TCP client " << s->peer << " " << why << " (" << sessions.size() << " left)");
+            LOG_INFO("forwarder: " << s->kind << " " << s->peer << " " << why << " (" << sessions.size() << " left)");
+        if (s->link && !stopping)
+            redial(s->link);
         maybeFinishStop();
     }
 
@@ -435,6 +565,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         heartbeat_timer.cancel();
         accept_retry_timer.cancel();
         acceptor.close(ignored);
+        cancelLinks();
         if (!was_started)
             return;
 
@@ -453,6 +584,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
                 write(s); // nothing in flight: closes now
         }
         // Bound the flush: a client that does not read must not hold up exit.
+        // (Outbound connections drain the same way and are not redialled.)
         auto self = shared_from_this();
         stop_timer.expires_after(kStopDrainLimit);
         stop_timer.async_wait([self](const error_code& ec) {
@@ -486,6 +618,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         accept_retry_timer.cancel();
         stop_timer.cancel();
         acceptor.close(ignored);
+        cancelLinks();
         udp_sock.close(ignored);
         std::vector<std::shared_ptr<Session>> all;
         for (const auto& kv : sessions)

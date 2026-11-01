@@ -230,6 +230,54 @@ Config udpConfig(uint16_t port)
 
 std::vector<uint8_t> hello(uint32_t keyframe_ms) { return encodeHello(Hello{keyframe_ms, 1000, "test"}); }
 
+Config listenConfig()
+{
+    Config c;
+    c.transport = Config::Transport::tcp_listen;
+    c.host = "127.0.0.1";
+    c.port = 0; // ephemeral; see Client::localPort
+    return c;
+}
+
+// A "skycued" that connects to a listening Client: blocking connect and
+// writes, and a non-blocking wait for the Client to hang up.
+class TcpPeer {
+public:
+    explicit TcpPeer(uint16_t port)
+    {
+        sock_.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
+    }
+
+    void send(const std::vector<uint8_t>& bytes) { asio::write(sock_, asio::buffer(bytes)); }
+
+    void close()
+    {
+        boost::system::error_code ec;
+        sock_.close(ec);
+    }
+
+    // True once the other end has closed the connection (EOF or reset).
+    bool waitClosedFor(std::chrono::milliseconds timeout)
+    {
+        sock_.non_blocking(true);
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        for (;;) {
+            uint8_t buf[256];
+            boost::system::error_code ec;
+            sock_.read_some(asio::buffer(buf), ec);
+            if (ec && ec != asio::error::would_block)
+                return true;
+            if (std::chrono::steady_clock::now() >= deadline)
+                return false;
+            std::this_thread::sleep_for(5ms);
+        }
+    }
+
+private:
+    asio::io_context io_;
+    tcp::socket sock_{io_};
+};
+
 } // namespace
 
 BOOST_AUTO_TEST_CASE(tcp_receives_updates_and_drops)
@@ -710,4 +758,91 @@ BOOST_AUTO_TEST_CASE(on_frame_sees_hello_and_heartbeat)
         BOOST_TEST(hellos[0].keyframe_interval_ms == 10000u);
     }
     client.stop();
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_accepts_server_connection)
+{
+    Events ev;
+    Client client(listenConfig());
+    ev.attach(client);
+    client.start();
+    const uint16_t port = client.localPort();
+    BOOST_REQUIRE(port != 0);
+
+    TcpPeer peer(port);
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() == 1; }));
+    BOOST_TEST(ev.conn(0) == true);
+    peer.send(cat({hello(10000), encodeTrackUpdate(mkTrack(1, true)), encodeTrackUpdate(mkTrack(2, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+    BOOST_TEST(client.trackCount() == 2u);
+    std::lock_guard<std::mutex> lk(ev.m);
+    BOOST_TEST(ev.updates[0].id.address == 1u);
+    BOOST_TEST(ev.updates[1].id.address == 2u);
+    BOOST_TEST(ev.drops.empty());
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_two_connections_merge_into_one_table)
+{
+    Events ev;
+    Client client(listenConfig());
+    ev.attach(client);
+    client.start();
+    BOOST_REQUIRE(client.localPort() != 0);
+
+    TcpPeer a(client.localPort()), b(client.localPort());
+    a.send(cat({hello(10000), encodeTrackUpdate(mkTrack(1, true))}));
+    b.send(cat({hello(10000), encodeTrackUpdate(mkTrack(2, true))}));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+    BOOST_TEST(client.trackCount() == 2u);
+
+    // One source going away is not a lost source: nothing is dropped.
+    a.close();
+    std::this_thread::sleep_for(300ms);
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.conns.size() == 1u);
+        BOOST_TEST(ev.drops.empty());
+    }
+    BOOST_TEST(client.trackCount() == 2u);
+
+    // The last one going away is.
+    b.close();
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() == 2 && ev.drops.size() == 2; }));
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_TEST(ev.conns[0] == true);
+        BOOST_TEST(ev.conns[1] == false);
+        BOOST_TEST(ev.countDrops(DropReason::source_lost) == 2u);
+    }
+    BOOST_TEST(client.trackCount() == 0u);
+
+    // The listener keeps accepting.
+    TcpPeer c(client.localPort());
+    c.send(encodeTrackUpdate(mkTrack(3, true)));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3 && ev.conns.size() == 3; }));
+    BOOST_TEST(ev.conn(2) == true);
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_rejects_bad_magic_closes_only_that_peer)
+{
+    Events ev;
+    Client client(listenConfig());
+    ev.attach(client);
+    client.start();
+    BOOST_REQUIRE(client.localPort() != 0);
+
+    TcpPeer bad(client.localPort()), good(client.localPort());
+    bad.send(encodeTrackUpdate(mkTrack(1, true)));
+    good.send(encodeTrackUpdate(mkTrack(2, true)));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+
+    bad.send(std::vector<uint8_t>{'X', 'X', 'X', 'X', 1, 2, 0, 0});
+    BOOST_REQUIRE(bad.waitClosedFor(kWait));
+
+    good.send(encodeTrackUpdate(mkTrack(3, true)));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3; }));
+    BOOST_TEST(client.trackCount() == 3u);
+    std::lock_guard<std::mutex> lk(ev.m);
+    BOOST_TEST(ev.conns.size() == 1u);
+    BOOST_TEST(ev.drops.empty());
 }

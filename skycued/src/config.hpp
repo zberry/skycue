@@ -15,7 +15,8 @@ namespace skycued {
 struct Config {
     double receiver_lat = NAN, receiver_lon = NAN, receiver_alt_m = 0, antenna_height_m = 0;
     uint16_t dump978_raw_port = 30978, dump978_json_port = 30979, readsb_json_port = 30047,
-             web_port = 8080, cue_tcp_port = 30500;
+             web_port = 8080, cue_tcp_port = 30500;  // cue_tcp_port 0: no listener
+    std::vector<std::pair<std::string, uint16_t>> cue_tcp_connect_targets;  // from "host:port host:port"
     std::vector<std::pair<std::string, uint16_t>> cue_udp_targets;  // from "host:port host:port"
     std::string record_dir;
     std::set<std::string> record_formats{"jsonl", "csv"};

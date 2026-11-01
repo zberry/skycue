@@ -3,7 +3,9 @@
 # and --json over TCP, text over UDP), exit 3 when nothing arrives before
 # --timeout, and against a python peer that sends hand-made frames: heartbeats,
 # a malformed TrackUpdate (BAD), a drop for an unknown track, then a hang-up
-# (CONN down, LOCAL-DROP), with only frame lines counting towards --count.
+# (CONN down, LOCAL-DROP), with only frame lines counting towards --count;
+# and --tcp-listen with a second skycued that has no listener (CUE_TCP_PORT=0)
+# and connects out to the dump (CUE_TCP_CONNECT).
 # usage: test_dump.sh SKYCUED SKYCUE_DUMP FIXTURE_DIR
 set -u
 skycued=$1 dump=$2 fixtures=$3
@@ -187,5 +189,31 @@ assert o[5]["alt_baro_ft"] == 35000 and o[5]["keyframe"] is True
 assert o[9]["connected"] is False and o[9]["counted"] is False
 assert o[10] == {**o[10], "hex": "ABC124", "reason": "source_lost", "counted": False}
 assert all("counted" not in x for x in o[1:9])' < "$tmp/e3.out" || { cat "$tmp/e3.out"; fail "(e3) JSON check"; }
+
+# ---- (f) --tcp-listen: a skycued with no listener connects out to the dump -----
+listen_port=$(free_port tcp)
+cat > "$tmp/skycue-out.conf" <<EOF
+RECEIVER_LAT=38.9
+RECEIVER_LON=-77.0
+CUE_TCP_PORT=0
+CUE_TCP_CONNECT=127.0.0.1:$listen_port
+KEYFRAME_INTERVAL_S=2
+EOF
+timeout 30 "$dump" --tcp-listen "127.0.0.1:$listen_port" --count 10 --timeout 15 >"$tmp/f.out" 2>"$tmp/f.err" &
+dump_pid=$!
+"$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue-out.conf" \
+  >"$tmp/skycued-out.log" 2>&1 &
+bg_pids+=($!)
+wait "$dump_pid"
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$tmp/f.err"; tail -n 20 "$tmp/skycued-out.log"; fail "(f) exit $rc"; }
+check_lines "$tmp/f.out" "(f)"
+n=$(frames "$tmp/f.out" | wc -l)
+[ "$n" -eq 10 ] || { cat "$tmp/f.out"; fail "(f) $n frame lines, want 10"; }
+head -n 1 "$tmp/f.out" | grep -qE "${ts}CONN up$" || fail "(f) first line is not CONN up"
+frames "$tmp/f.out" | head -n 1 | grep -qE "${ts}HELLO skycued kf=2000ms hb=[0-9]+ms$" ||
+  fail "(f) first frame is not HELLO: $(frames "$tmp/f.out" | head -n 1)"
+grep -qE "$update_re" "$tmp/f.out" || { cat "$tmp/f.out"; fail "(f) no UPDATE line"; }
+grep -q 'TCP listener disabled' "$tmp/skycued-out.log" || { cat "$tmp/skycued-out.log"; fail "(f) skycued listened"; }
 
 echo "PASS"

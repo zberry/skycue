@@ -241,17 +241,19 @@ bool parseEndpoint(const std::string& s, std::string& host, uint16_t& port)
 
 int main(int argc, char** argv)
 {
-    std::string tcp_ep, udp_ep;
+    std::string tcp_ep, udp_ep, listen_ep;
     unsigned long count = 0;
     double timeout_s = 0;
-    po::options_description desc("usage: skycue-dump [--tcp HOST:PORT | --udp BIND:PORT] [--json] [--count N] "
-                                 "[--timeout S]\n"
+    po::options_description desc("usage: skycue-dump [--tcp HOST:PORT | --tcp-listen BIND:PORT | --udp BIND:PORT]\n"
+                                 "                   [--json] [--count N] [--timeout S]\n"
                                  "Prints a skycue stream one line per wire frame: HELLO, UPDATE, DROP, HB, or\n"
                                  "BAD <type> <len> for a frame that does not decode. Event lines CONN up|down and\n"
                                  "LOCAL-DROP <HEX> <reason> (a drop the client made up: stale, source_lost) are\n"
                                  "printed too but are not frames and do not count towards --count");
     desc.add_options()("help,h", "show this help")(
         "tcp", po::value(&tcp_ep), "connect to a skycued TCP port (default 127.0.0.1:30500)")(
+        "tcp-listen", po::value(&listen_ep), "listen on a TCP port for skycued to connect (CUE_TCP_CONNECT); "
+                                             "any number of connections")(
         "udp", po::value(&udp_ep), "bind a UDP port and print the datagrams sent to it")(
         "json", "one JSON object per line instead of text")(
         "count", po::value(&count), "exit 0 after N frame lines (heartbeats and BAD count; CONN and LOCAL-DROP do not)")(
@@ -271,8 +273,8 @@ int main(int argc, char** argv)
         std::cout << desc << "\n";
         return 0;
     }
-    if (vm.count("tcp") && vm.count("udp")) {
-        std::cerr << "skycue-dump: --tcp and --udp are mutually exclusive\n";
+    if (vm.count("tcp") + vm.count("tcp-listen") + vm.count("udp") > 1) {
+        std::cerr << "skycue-dump: --tcp, --tcp-listen and --udp are mutually exclusive\n";
         return 2;
     }
     if (vm.count("count") && count == 0) {
@@ -288,9 +290,15 @@ int main(int argc, char** argv)
     Config cfg;
     cfg.run_io_thread = false; // everything, printing included, on this thread
     cfg.reconnect_interval = std::chrono::milliseconds(500);
-    const bool udp = vm.count("udp") > 0;
-    cfg.transport = udp ? Config::Transport::udp : Config::Transport::tcp;
-    const std::string ep = udp ? udp_ep : (vm.count("tcp") ? tcp_ep : std::string("127.0.0.1:30500"));
+    std::string ep = vm.count("tcp") ? tcp_ep : std::string("127.0.0.1:30500");
+    cfg.transport = Config::Transport::tcp;
+    if (vm.count("udp")) {
+        cfg.transport = Config::Transport::udp;
+        ep = udp_ep;
+    } else if (vm.count("tcp-listen")) {
+        cfg.transport = Config::Transport::tcp_listen;
+        ep = listen_ep;
+    }
     if (!parseEndpoint(ep, cfg.host, cfg.port)) {
         std::cerr << "skycue-dump: expected HOST:PORT, got '" << ep << "'\n";
         return 2;
@@ -379,6 +387,10 @@ int main(int argc, char** argv)
                                                std::chrono::duration<double>(timeout_s));
     bool timed_out = false;
     client.start();
+    if (cfg.transport == Config::Transport::tcp_listen && client.localPort() == 0) {
+        std::cerr << "skycue-dump: cannot listen on " << ep << "\n";
+        return 1;
+    }
     try {
         while (!done && !g_signalled) {
             client.poll();

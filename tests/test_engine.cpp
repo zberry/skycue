@@ -267,7 +267,7 @@ struct EngineFx {
     {
         t.call([&] {
             ForwarderConfig fc;
-            fc.tcp_port = 0;
+            fc.tcp_listen_ephemeral = true;
             fc.keyframe_interval = keyframe_interval;
             fwd = std::make_unique<Forwarder>(t.io, fc);
             if (!record_dir.empty()) {

@@ -101,7 +101,7 @@ struct Fx {
 
     explicit Fx(ForwarderConfig cfg, Forwarder::KeyframeProvider provider = {})
     {
-        cfg.tcp_port = 0;
+        cfg.tcp_listen_ephemeral = true; // listen, on a port of the OS's choosing
         t.call([&] {
             fwd = std::make_unique<Forwarder>(t.io, cfg);
             if (provider)
@@ -619,4 +619,159 @@ BOOST_AUTO_TEST_CASE(start_throws_when_port_in_use)
     cfg.tcp_port = taken.local_endpoint().port();
     Forwarder f(io, cfg);
     BOOST_CHECK_THROW(f.start(), std::runtime_error);
+}
+
+namespace {
+
+// A Client that listens for the Forwarder to connect to it.
+Config listenConfig(uint16_t port = 0)
+{
+    Config c;
+    c.transport = Config::Transport::tcp_listen;
+    c.host = "127.0.0.1";
+    c.port = port;
+    return c;
+}
+
+// Records the type of every frame a Client sees, under ev.m.
+void recordFrames(Client& c, Events& ev, std::vector<FrameType>& types)
+{
+    c.onFrame([&ev, &types](const Frame& f) {
+        std::lock_guard<std::mutex> lk(ev.m);
+        types.push_back(f.type);
+        ev.cv.notify_all();
+    });
+}
+
+template <class Pred> bool waitUntil(Pred p, std::chrono::milliseconds timeout = kWait)
+{
+    const auto deadline = steady::now() + timeout;
+    while (!p()) {
+        if (steady::now() >= deadline)
+            return false;
+        std::this_thread::sleep_for(10ms);
+    }
+    return true;
+}
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(tcp_connect_target_receives_hello_keyframe_and_deltas)
+{
+    Events ev;
+    std::vector<FrameType> types;
+    Client target(listenConfig());
+    ev.attach(target);
+    recordFrames(target, ev, types);
+    target.start();
+    BOOST_REQUIRE(target.localPort() != 0);
+
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.tcp_connect_targets = {{"127.0.0.1", target.localPort()}};
+    Fx fx(cfg, [] { return mkTracks(200); });
+
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 200; }));
+    BOOST_TEST(target.trackCount() == 200u);
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_REQUIRE(types.size() == 201u);
+        BOOST_TEST(static_cast<int>(types.front()) == static_cast<int>(FrameType::hello));
+        for (const auto& tr : ev.updates)
+            BOOST_TEST(tr.keyframe);
+        BOOST_TEST(ev.conns.size() == 1u);
+    }
+    BOOST_TEST(fx.clients() == 1u); // the outbound connection counts as a client
+
+    Track d = mkTrack(7, false);
+    d.alt_baro_ft = 12000;
+    fx.update(d);
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 201; }));
+    std::lock_guard<std::mutex> lk(ev.m);
+    BOOST_TEST((ev.updates.back().id == d.id));
+    BOOST_TEST(!ev.updates.back().keyframe);
+    BOOST_TEST(*ev.updates.back().alt_baro_ft == 12000);
+}
+
+BOOST_AUTO_TEST_CASE(tcp_connect_reconnects_after_target_restart)
+{
+    // The target is not up yet: the Forwarder keeps dialling.
+    uint16_t port = 0;
+    {
+        asio::io_context io;
+        tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+        port = a.local_endpoint().port();
+    }
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.tcp_connect_targets = {{"127.0.0.1", port}};
+    Fx fx(cfg, [] { return mkTracks(3); });
+    std::this_thread::sleep_for(700ms); // at least one refused attempt
+    BOOST_TEST(fx.clients() == 0u);
+
+    Events ev1;
+    std::vector<FrameType> types1;
+    auto first = std::make_unique<Client>(listenConfig(port));
+    ev1.attach(*first);
+    recordFrames(*first, ev1, types1);
+    first->start();
+    BOOST_REQUIRE(first->localPort() == port);
+    BOOST_REQUIRE(ev1.waitFor([&] { return ev1.updates.size() == 3; }));
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+
+    // Restart the target on the same port: Hello and keyframe again.
+    first.reset();
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 0; }));
+    Events ev2;
+    std::vector<FrameType> types2;
+    Client second(listenConfig(port));
+    ev2.attach(second);
+    recordFrames(second, ev2, types2);
+    second.start();
+    BOOST_REQUIRE(second.localPort() == port);
+    BOOST_REQUIRE(ev2.waitFor([&] { return ev2.updates.size() == 3; }));
+    {
+        std::lock_guard<std::mutex> lk(ev2.m);
+        BOOST_REQUIRE(!types2.empty());
+        BOOST_TEST(static_cast<int>(types2.front()) == static_cast<int>(FrameType::hello));
+    }
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+    fx.update(mkTrack(9, false));
+    BOOST_REQUIRE(ev2.waitFor([&] { return ev2.updates.size() == 4; }));
+}
+
+BOOST_AUTO_TEST_CASE(tcp_port_zero_disables_listener)
+{
+    Events ev;
+    Client target(listenConfig());
+    ev.attach(target);
+    target.start();
+    BOOST_REQUIRE(target.localPort() != 0);
+
+    IoThread t;
+    std::unique_ptr<Forwarder> fwd;
+    ForwarderConfig cfg;
+    cfg.tcp_port = 0;
+    cfg.tcp_connect_targets = {{"127.0.0.1", target.localPort()}};
+    t.call([&] {
+        fwd = std::make_unique<Forwarder>(t.io, cfg);
+        fwd->setKeyframeProvider([] { return mkTracks(2); });
+        fwd->start(); // no listener: nothing to bind, nothing to throw
+    });
+    BOOST_TEST(t.call([&] { return fwd->tcpPort(); }) == 0u);
+
+    // Connecting to the configured port fails: nothing listens there.
+    {
+        asio::io_context io;
+        tcp::socket s(io);
+        boost::system::error_code ec;
+        s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), cfg.tcp_port), ec);
+        BOOST_TEST(static_cast<bool>(ec));
+    }
+
+    // Pure outbound still works.
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+    BOOST_TEST(t.call([&] { return fwd->tcpClientCount(); }) == 1u);
+    t.call([&] { fwd.reset(); });
+    t.join();
 }

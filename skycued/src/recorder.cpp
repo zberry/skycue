@@ -4,6 +4,9 @@
 #include "rotating_file.hpp"
 #include "time_util.hpp"
 
+#include <sys/stat.h>
+
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
@@ -556,32 +559,72 @@ Recorder::Recorder(RecorderConfig config, std::string stream_name)
 
 Recorder::~Recorder() { closeFiles(); }
 
-bool Recorder::openFiles()
+namespace {
+
+// Size of an existing file, and whether it ends in a partial line (its last
+// byte is not '\n'); 0 / false when it does not exist.
+uint64_t existingSize(const std::string& path, bool& partial_line)
+{
+    partial_line = false;
+    struct stat st{};
+    if (::stat(path.c_str(), &st) != 0 || st.st_size <= 0)
+        return 0;
+    std::ifstream in(path, std::ios::binary);
+    char last = '\n';
+    if (in.seekg(-1, std::ios::end))
+        in.get(last);
+    partial_line = last != '\n';
+    return static_cast<uint64_t>(st.st_size);
+}
+
+// Opens `path` for writing: truncated, or appended to with `reuse`. A reused
+// file that ends mid-line (a write cut short by the failure) gets a newline
+// first, so the next record starts on a line of its own. Sets `bytes` to the
+// file's size.
+bool openStream(std::ofstream& f, const std::string& path, bool reuse, uint64_t& bytes)
+{
+    bool partial = false;
+    bytes = reuse ? existingSize(path, partial) : 0;
+    f.open(path, std::ios::out | std::ios::binary | (reuse ? std::ios::app : std::ios::trunc));
+    if (!f)
+        return false;
+    if (partial) {
+        f << '\n';
+        ++bytes;
+    }
+    return true;
+}
+
+}  // namespace
+
+bool Recorder::openFiles(bool reuse)
 {
     if (!makeDirs(config_.dir))
         return false;
-    const std::string base = config_.dir + "/" + stream_ + "-" + formatCompactUtc(std::chrono::system_clock::now());
-    stem_ = uniqueStem(base, {"jsonl", "csv"}, last_base_, last_suffix_);
-    jsonl_bytes_ = csv_bytes_ = 0;
-    if (config_.jsonl) {
-        jsonl_.open(stem_ + ".jsonl", std::ios::out | std::ios::trunc | std::ios::binary);
-        if (!jsonl_)
-            return false;
+    if (!reuse || stem_.empty()) {
+        reuse = false;
+        const std::string base = config_.dir + "/" + stream_ + "-" + formatCompactUtc(std::chrono::system_clock::now());
+        stem_ = uniqueStem(base, {"jsonl", "csv"}, last_base_, last_suffix_);
     }
+    jsonl_bytes_ = csv_bytes_ = 0;
+    if (config_.jsonl && !openStream(jsonl_, stem_ + ".jsonl", reuse, jsonl_bytes_))
+        return false;
     if (config_.csv) {
-        csv_.open(stem_ + ".csv", std::ios::out | std::ios::trunc | std::ios::binary);
-        if (!csv_) {
+        if (!openStream(csv_, stem_ + ".csv", reuse, csv_bytes_)) {
             const int err = errno;
             if (jsonl_.is_open()) {
                 jsonl_.close();
-                std::remove((stem_ + ".jsonl").c_str());  // leave no half pair behind
+                if (!reuse)
+                    std::remove((stem_ + ".jsonl").c_str());  // leave no half pair behind
             }
             errno = err;
             return false;
         }
-        const std::string head = (sent_ ? recording::sentCsvHeader() : recording::receivedCsvHeader()) + "\n";
-        csv_ << head;
-        csv_bytes_ = head.size();
+        if (csv_bytes_ == 0) {
+            const std::string head = (sent_ ? recording::sentCsvHeader() : recording::receivedCsvHeader()) + "\n";
+            csv_ << head;
+            csv_bytes_ = head.size();
+        }
     }
     opened_ = std::chrono::steady_clock::now();
     open_ = true;
@@ -610,13 +653,17 @@ bool Recorder::rotationDue() const
 void Recorder::fail(const std::string& what)
 {
     closeFiles();
-    next_reopen_ = std::chrono::steady_clock::now() + kReopenInterval;
+    const auto initial = std::max(config_.reopen_initial, std::chrono::milliseconds(1));
+    const auto max = std::max(config_.reopen_max, initial);
+    reopen_delay_ = failing_ ? std::min(reopen_delay_ * 2, max) : initial;
+    next_reopen_ = std::chrono::steady_clock::now() + reopen_delay_;
     if (failing_)
         return;
     failing_ = true;
     streak_start_dropped_ = dropped_;
-    LOG_ERROR("recorder: " << what << "; dropping " << stream_ << " records, retrying every "
-                           << kReopenInterval.count() << " s");
+    LOG_ERROR("recorder: " << what << "; dropping " << stream_ << " records, retrying in "
+                           << std::chrono::duration<double>(initial).count() << " s, backing off to "
+                           << std::chrono::duration<double>(max).count() << " s");
 }
 
 bool Recorder::streamsGood() const
@@ -634,8 +681,14 @@ void Recorder::write(const Record& record)
     }
     if (!open_ || rotationDue()) {
         closeFiles();
-        if (!openFiles()) {
-            const int err = errno;
+        // Within a failure streak, reopen the streak's pair rather than
+        // starting yet another one.
+        const bool reuse = failing_ && streak_has_stem_;
+        const bool opened = openFiles(reuse);
+        const int err = errno;
+        if (failing_ || !opened)
+            streak_has_stem_ = true;  // this pair is the one to retry
+        if (!opened) {
             fail("cannot create files under \"" + config_.dir + "\": " + std::strerror(err));
             ++dropped_;
             return;
@@ -668,6 +721,8 @@ void Recorder::write(const Record& record)
     }
     if (failing_ && unflushed_ == 0) {
         failing_ = false;
+        streak_has_stem_ = false;
+        reopen_delay_ = std::chrono::milliseconds(0);
         LOG_INFO("recorder: writing " << stream_ << " records again (" << stem_ << "); dropped "
                                       << dropped_ - streak_start_dropped_ << " meanwhile");
     }

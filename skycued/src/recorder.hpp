@@ -48,15 +48,24 @@ struct RecorderConfig {
     // new pair is started. 0 disables that check.
     uint64_t rotate_bytes = 256ull << 20;
     std::chrono::seconds rotate_after{3600};
+    // Reopen backoff after a failure; see Recorder. Settable for tests.
+    std::chrono::milliseconds reopen_initial{5000};
+    std::chrono::milliseconds reopen_max{300000};
 };
 
 class Recorder {
 public:
     static constexpr std::size_t kFlushEveryRecords = 100;
     // After a write or open failure (a full disk, say), records are dropped
-    // and new files are tried at most this often, so a persistent failure
-    // neither floods the log nor creates files without limit.
-    static constexpr std::chrono::seconds kReopenInterval{5};
+    // until a reopen is due: RecorderConfig::reopen_initial (5 s) after the
+    // failure, doubling after each failed reopen up to reopen_max (300 s);
+    // a successful flush ends the streak and resets the delay. The first
+    // reopen of a streak starts a fresh file pair (unless the streak began
+    // with a pair that could not be opened, which is then retried); every
+    // later reopen in the streak appends to that same pair, so a persistent
+    // failure neither floods the log nor creates files without limit: at most
+    // one extra pair per stream.
+    static constexpr std::chrono::seconds kReopenInterval{5};  // default reopen_initial
 
     // stream_name is "received" or "sent" (it picks the CSV columns);
     // anything else throws std::invalid_argument. Throws std::runtime_error
@@ -84,6 +93,8 @@ public:
     // Records not written because the files could not be created or written
     // (records still in the write buffer when a failure hits are not counted).
     uint64_t droppedRecords() const { return dropped_; }
+    // The current reopen delay during a failure streak; 0 when not failing.
+    std::chrono::milliseconds reopenDelay() const { return failing_ ? reopen_delay_ : std::chrono::milliseconds(0); }
     // Test seam: while set, every write and flush fails as on a full disk.
     void setFailWritesForTest(bool fail) { fail_writes_for_test_ = fail; }
 
@@ -92,7 +103,9 @@ private:
     bool streamsGood() const;
     void flushStreams();
     void write(const std::vector<recording::Field>& record);
-    bool openFiles();  // new files with a fresh name; false (errno set) on failure
+    // New files with a fresh name, or (reuse) stem_ again, appended to; false
+    // (errno set) on failure.
+    bool openFiles(bool reuse = false);
     void closeFiles();
     bool rotationDue() const;
 
@@ -111,6 +124,8 @@ private:
     // Failure streak: one ERROR when it starts, one INFO when a flush succeeds again.
     bool failing_ = false;
     std::chrono::steady_clock::time_point next_reopen_{};
+    std::chrono::milliseconds reopen_delay_{0};
+    bool streak_has_stem_ = false;  // later reopens in this streak reuse stem_
     uint64_t dropped_ = 0, streak_start_dropped_ = 0;
     bool fail_writes_for_test_ = false;
 };

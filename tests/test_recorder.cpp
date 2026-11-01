@@ -663,6 +663,69 @@ BOOST_AUTO_TEST_CASE(write_failure_does_not_spawn_files)
     BOOST_TEST(filesWithSuffix(tmp.path, ".csv").size() == 2u);
 }
 
+BOOST_AUTO_TEST_CASE(write_failure_backs_off_and_reuses_name)
+{
+    TempDir tmp;
+    RecorderConfig cfg{tmp.path, true, true, 1ull << 30, 3600s};
+    cfg.reopen_initial = 40ms;
+    cfg.reopen_max = 200ms;
+    Recorder rec(cfg, "received");
+    rec.writeObservation(minimalObservation(sys_clock::now()));
+    rec.flush();
+    const std::string first = rec.currentPath("jsonl");
+    BOOST_TEST(rec.reopenDelay().count() == 0);
+
+    // A persistent failure: every reopen fails again. Note each change of
+    // the reopen delay and when it happened (= when a reopen failed).
+    rec.setFailWritesForTest(true);
+    std::vector<std::pair<steady::time_point, std::chrono::milliseconds>> changes;
+    const auto until = steady::now() + 1200ms;
+    while (steady::now() < until) {
+        rec.writeObservation(minimalObservation(sys_clock::now()));
+        if (changes.empty() || rec.reopenDelay() != changes.back().second)
+            changes.emplace_back(steady::now(), rec.reopenDelay());
+        std::this_thread::sleep_for(1ms);
+    }
+    BOOST_REQUIRE(changes.size() == 4u);  // 40, 80, 160, then capped at 200
+    BOOST_TEST(changes[0].second.count() == 40);
+    BOOST_TEST(changes[1].second.count() == 80);
+    BOOST_TEST(changes[2].second.count() == 160);
+    BOOST_TEST(changes[3].second.count() == 200);
+    for (std::size_t i = 1; i < changes.size(); ++i) {
+        const auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(changes[i].first - changes[i - 1].first);
+        BOOST_CHECK_MESSAGE(gap.count() >= changes[i - 1].second.count() - 5,
+                            "attempt " << i << " after " << gap.count() << " ms");
+    }
+
+    // Reopens at 40+80+160+200+200... ms: several, yet one extra pair only.
+    const auto jsonl = filesWithSuffix(tmp.path, ".jsonl");
+    BOOST_REQUIRE(jsonl.size() == 2u);
+    BOOST_TEST(filesWithSuffix(tmp.path, ".csv").size() == 2u);
+    const std::string second = jsonl[0] == first ? jsonl[1] : jsonl[0];
+    BOOST_TEST(readLines(first).size() == 1u);
+
+    // Recovery: the next due reopen appends to the streak's pair (the CSV
+    // header is not repeated) and resets the backoff.
+    rec.setFailWritesForTest(false);
+    std::this_thread::sleep_for(250ms);
+    rec.writeObservation(minimalObservation(sys_clock::now()));
+    BOOST_TEST(rec.reopenDelay().count() == 0);
+    BOOST_TEST(rec.currentPath("jsonl") == second);
+    rec.writeObservation(minimalObservation(sys_clock::now()));
+    rec.flush();
+    BOOST_TEST(readLines(second).size() == 2u);
+    const std::string second_csv = second.substr(0, second.size() - 6) + ".csv";
+    const auto csv_lines = readLines(second_csv);
+    BOOST_REQUIRE(csv_lines.size() == 3u);
+    BOOST_TEST(csv_lines[0] == kReceivedHeader);
+    BOOST_TEST(csv_lines[1] != kReceivedHeader);
+
+    // A new streak starts again from the initial delay.
+    rec.setFailWritesForTest(true);
+    rec.writeObservation(minimalObservation(sys_clock::now()));
+    BOOST_TEST(rec.reopenDelay().count() == 40);
+}
+
 BOOST_AUTO_TEST_CASE(non_finite_numbers_are_left_out)
 {
     TempDir tmp;

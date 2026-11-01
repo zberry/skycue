@@ -1,6 +1,13 @@
 # libskycue: track types, the wire-protocol codec and the client.
 # Usable on its own through add_subdirectory(): it finds its own dependencies
 # when the enclosing tree has not.
+#
+# Options:
+#   SKYCUE_INSTALL (ON): install and export libskycue. A consumer using
+#     add_subdirectory() can turn it off to keep libskycue out of its own
+#     install.
+
+option(SKYCUE_INSTALL "Install libskycue" ON)
 
 if(NOT TARGET Boost::system)
   find_package(Boost 1.66 REQUIRED COMPONENTS system)
@@ -13,6 +20,9 @@ add_library(skycue STATIC
   src/protocol.cpp
   src/client.cpp)
 add_library(skycue::skycue ALIAS skycue)
+# Static, but position-independent so it can be linked into a consumer's
+# shared library (a plugin, say).
+set_target_properties(skycue PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(skycue PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -27,6 +37,10 @@ endif()
 # Install and export, so consumers can use find_package(skycue) as well as
 # add_subdirectory(). The version follows the skycue project when built from
 # it; a consumer adding this directory directly gets the fallback.
+if(NOT SKYCUE_INSTALL)
+  return()
+endif()
+
 if(DEFINED skycue_VERSION)
   set(SKYCUE_LIB_VERSION "${skycue_VERSION}")
 else()

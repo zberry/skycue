@@ -80,8 +80,9 @@ skycue_set_warnings(test_recorder)
 add_test(NAME recorder COMMAND test_recorder)
 set_tests_properties(recorder PROPERTIES TIMEOUT 60)
 
-# Builds a tiny consumer against libskycue through add_subdirectory() and
-# through find_package() on an install of it.
+# Builds a tiny consumer against libskycue through add_subdirectory(),
+# through find_package() on an install of it, and linked into a shared
+# library with SKYCUE_INSTALL=OFF.
 add_test(NAME consumer_smoke
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/consumer_smoke.sh
     ${PROJECT_SOURCE_DIR}/libskycue

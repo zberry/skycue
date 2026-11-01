@@ -3,7 +3,10 @@
 # it, and runs the result:
 #   1. subdir:  add_subdirectory(libskycue); the build is then installed to a
 #               temporary prefix, which also checks the install/export rules;
-#   2. package: find_package(skycue) against that prefix.
+#   2. package: find_package(skycue) against that prefix;
+#   3. shared:  add_subdirectory with SKYCUE_INSTALL=OFF, libskycue linked
+#               into a SHARED library (proves it is position-independent);
+#               installing that build must not install libskycue.
 #
 # usage: consumer_smoke.sh <libskycue dir> <consumer-smoke dir> <work dir>
 # Environment: CMAKE (default: cmake), CXX, SKYCUE_SMOKE_PREFIX_PATH and
@@ -44,4 +47,16 @@ grep -qx "skycue_DIR:PATH=$work/prefix/lib/cmake/skycue" "$work/package/CMakeCac
 "$cmake_bin" --build "$work/package" -j 4
 "$work/package/consumer"
 
-echo "consumer smoke: both modes ok"
+echo "== shared mode (SKYCUE_INSTALL=OFF)"
+"$cmake_bin" -S "$consumer_dir" -B "$work/shared" "${common[@]}" \
+    -DSKYCUE_CONSUMER_MODE=shared "-DSKYCUE_LIB_DIR=$lib_dir" -DSKYCUE_INSTALL=OFF
+"$cmake_bin" --build "$work/shared" -j 4
+"$work/shared/consumer"
+"$cmake_bin" --install "$work/shared" --prefix "$work/shared-prefix"
+test -x "$work/shared-prefix/bin/consumer"
+if [[ -e $work/shared-prefix/include/skycue || -e $work/shared-prefix/lib/cmake/skycue ]]; then
+    echo "SKYCUE_INSTALL=OFF still installed libskycue" >&2
+    exit 1
+fi
+
+echo "consumer smoke: all three modes ok"

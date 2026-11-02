@@ -451,6 +451,31 @@ BOOST_AUTO_TEST_CASE(watch_detects_conf_edit_within_2s)
     BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().max_range_nm; }) == 98.0);
 }
 
+BOOST_AUTO_TEST_CASE(conf_edit_overridden_by_overlay_warns)
+{
+    RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\nMIN_ELEVATION_DEG=0\n");
+    f.start(true);
+    Overlay d;
+    d.max_range_nm = 40;
+    f.applyUi(d);
+    StderrCapture err(f.path("stderr.txt"));
+    // Both edited; only MAX_RANGE_NM is in the overlay.
+    writeFile(f.conf, std::string(kConfHead) + "MAX_RANGE_NM=99\nMIN_ELEVATION_DEG=2\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 2.0; }, 2600ms));
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "MAX_RANGE_NM edited"); }, 500ms));
+    // The overlay keeps winning: the behaviour is unchanged.
+    BOOST_TEST(f.filters().max_range_nm == 40.0);
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().max_range_nm; }) == 40.0);
+    // Another edit of a key the overlay does not hold: no warning for it.
+    writeFile(f.conf, std::string(kConfHead) + "MAX_RANGE_NM=99\nMIN_ELEVATION_DEG=3\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 3.0; }, 2600ms));
+    err.restore();
+    const std::string text = err.text();
+    BOOST_TEST(countOf(text, "WARN  runtime: MAX_RANGE_NM edited in skycue.conf but overridden by "
+                             "skycue.runtime.json (use the UI or \"save as baseline\")") == 1u);
+    BOOST_TEST(!has(text, "MIN_ELEVATION_DEG edited"));
+}
+
 BOOST_AUTO_TEST_CASE(watch_ignores_own_writes)
 {
     RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\n");

@@ -743,6 +743,17 @@ void RuntimeConfig::reloadConf()
             keys += (keys.empty() ? "" : ", ") + k;
         LOG_WARN(conf_path_ << ": " << keys << " differ from the running values; requires restart");
     }
+    // A filter value edited by hand that the overlay replaces changes nothing
+    // the Engine runs with: say so, or the edit looks ignored.
+    const std::pair<const char*, bool> overridden[] = {
+        {"MAX_RANGE_NM", c.max_range_nm != file_conf_.max_range_nm && overlay_.max_range_nm.has_value()},
+        {"MIN_ELEVATION_DEG",
+         c.min_elevation_deg != file_conf_.min_elevation_deg && overlay_.min_elevation_deg.has_value()},
+    };
+    for (const auto& o : overridden)
+        if (o.second)
+            LOG_WARN("runtime: " << o.first << " edited in skycue.conf but overridden by " << kOverlayName
+                                 << " (use the UI or \"save as baseline\")");
     const Config old = file_conf_;
     file_conf_ = c;
     running_.max_range_nm = c.max_range_nm;

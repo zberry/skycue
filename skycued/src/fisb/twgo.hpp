@@ -68,5 +68,11 @@ struct TwgoParsed {
 // circles become one shape per vertex (reference §6.4). Never throws.
 std::optional<TwgoParsed> parseTwgo(const ApduHeader& h, const uint8_t* p, std::size_t n, TimePoint ref);
 
+// The end of validity in a NOTAM's text: the second half of its first
+// "yymmddhhmm-yymmddhhmm" group (an "EST" suffix is ignored; years are
+// 20yy), as fisb-decode's NOTAM_TIMES_RE reads it. nullopt for "-PERM", no
+// group, or an impossible date.
+std::optional<TimePoint> notamTextEnd(const std::string& text);
+
 }  // namespace fisb
 }  // namespace skycued

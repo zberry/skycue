@@ -73,7 +73,8 @@ struct TextRecord {
     Kind kind = other;
     std::string station;  // first 3-4 character station token after the type; may be empty
     std::string text;     // the report, trailing whitespace and the LF/RS terminator removed
-    TimePoint issued{};   // the report's ddhhmmZ group, else the APDU time
+    TimePoint issued{};   // the report's ddhhmmZ group, else the APDU time (winds: always the APDU time)
+    std::optional<TimePoint> valid;  // winds only: the forecast valid time (the report's ddhhmmZ group)
     TimePoint expires{};  // left for the store (Task 4) to set from its expiry rules
     std::optional<uint8_t> period_h;  // winds only: forecast period 6, 12 or 24 h (FD WIND_MATRIX)
 };

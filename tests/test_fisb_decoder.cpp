@@ -4,6 +4,7 @@
 #define BOOST_TEST_MODULE fisb_decoder
 #include <boost/test/unit_test.hpp>
 
+#include "gz_line_reader.hpp"
 #include "fisb/fisb_decoder.hpp"
 #include "fisb/fisb_json.hpp"
 #include "fisb/fisb_store.hpp"
@@ -15,7 +16,6 @@
 
 #include "engine_test_support.hpp"
 
-#include <zlib.h>
 
 #include <algorithm>
 #include <chrono>
@@ -50,23 +50,12 @@ TimePoint iso(const std::string& s)
 std::vector<std::string> readLines(const std::string& path)
 {
     std::vector<std::string> lines;
-    gzFile f = gzopen(path.c_str(), "rb");
-    BOOST_REQUIRE_MESSAGE(f != nullptr, "cannot open " << path);
-    char buf[4096];
-    std::string cur;
-    while (gzgets(f, buf, sizeof buf) != nullptr) {
-        cur += buf;
-        if (!cur.empty() && cur.back() == '\n') {
+    skycued::GzLineReader in(path);  // throws on a missing file or a truncated gzip stream
+    for (std::string cur; in.getline(cur);) {
+        if (!cur.empty() && cur.back() == '\r')
             cur.pop_back();
-            if (!cur.empty() && cur.back() == '\r')
-                cur.pop_back();
-            lines.push_back(cur);
-            cur.clear();
-        }
-    }
-    if (!cur.empty())
         lines.push_back(cur);
-    gzclose(f);
+    }
     return lines;
 }
 

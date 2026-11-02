@@ -17,8 +17,6 @@ for f in "$fisb" "$sample" "$tg30" "$golden" "$received"; do [ -e "$f" ] || fail
 
 # section FILE TITLE: the lines of one "== TITLE..." section, header excluded.
 section() { awk -v t="== $2" 'index($0, t) == 1 { on = 1; next } /^== / { on = 0 } on' "$1"; }
-# The golden comparison ignores "received" (and "last_received") stamps.
-normalise() { sed -E 's/"(last_)?received":"[^"]*",?//g' "$1"; }
 
 # ---- (a) --summary on the 2015 sample ----------------------------------------
 "$fisb" --ref-date 2015-01-24 "$sample" >"$tmp/a.out" 2>"$tmp/a.err" || { cat "$tmp/a.err"; fail "(a) exit $?"; }
@@ -54,10 +52,9 @@ cmp -s "$tmp/a.out" "$tmp/b.out" || { diff "$tmp/a.out" "$tmp/b.out"; fail "(b) 
 "$fisb" --json "$tg30" >"$tmp/c2.jsonl" 2>"$tmp/c2.err" || fail "(c) exit without --ref-date"
 cmp -s "$tmp/c1.jsonl" "$tmp/c2.jsonl" || fail "(c) output differs between runs (or --ref-date changed t= lines)"
 [ -s "$tmp/c2.err" ] && { cat "$tmp/c2.err"; fail "(c) warned with every line timed"; }
-normalise "$tmp/c1.jsonl" >"$tmp/c1.norm"
-normalise "$golden" >"$tmp/golden.norm"
-cmp -s "$tmp/c1.norm" "$tmp/golden.norm" ||
-  { diff "$tmp/golden.norm" "$tmp/c1.norm" | head -c 4000; fail "(c) --json differs from tg30.golden.jsonl"; }
+# Every time in the output (received included) derives from the t= stamps: exact comparison.
+cmp -s "$tmp/c1.jsonl" "$golden" ||
+  { diff "$golden" "$tmp/c1.jsonl" | head -c 4000; fail "(c) --json differs from tg30.golden.jsonl"; }
 python3 -I -c 'import json,sys
 n = 0
 for line in sys.stdin:
@@ -92,6 +89,34 @@ grep -qE 'uat-x\.txt +rawrec +704 lines: 704 uplinks, 0 downlinks, 0 other$' "$t
   { section "$tmp/e4.out" "Inputs"; fail "(e) rawrec input line"; }
 grep -qE 'tg30\.978\.gz +dump978-t +1048 lines: 963 uplinks, 0 downlinks, 85 other$' "$tmp/e4.out" ||
   { section "$tmp/e4.out" "Inputs"; fail "(e) tg30 input line"; }
+
+# ---- (g) undated input without radar: anchored on the median product-413 time ----
+# Keep the sample uplinks whose products are only product 413 (no global blocks).
+gzip -dc "$sample" | grep '^+' >"$tmp/up.txt"
+: >"$tmp/text-only.txt"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >"$tmp/one.txt"
+  "$fisb" --ref-date 2015-01-24 "$tmp/one.txt" >"$tmp/one.out" 2>/dev/null || continue
+  ids=$(section "$tmp/one.out" "Products by ID" | awk 'NF { print $1 }' | sort -u | tr '\n' ' ')
+  [ "$ids" = "413 " ] && printf '%s\n' "$line" >>"$tmp/text-only.txt"
+done <"$tmp/up.txt"
+n=$(wc -l <"$tmp/text-only.txt")
+[ "$n" -ge 5 ] || fail "(g) only $n text-only uplinks in the sample"
+"$fisb" --ref-date 2015-01-24 "$tmp/text-only.txt" >"$tmp/g.out" 2>"$tmp/g.err" || { cat "$tmp/g.err"; fail "(g) exit"; }
+grep -qE '^  undated taken as   2015-01-2[34]T[0-9:.]+Z \(the median product-413 time on --ref-date 2015-01-24\)$' "$tmp/g.out" ||
+  { section "$tmp/g.out" "Uplinks"; fail "(g) not anchored on the median 413 time"; }
+[ -z "$(section "$tmp/g.out" "Global blocks" | grep messages)" ] || fail "(g) global blocks in the text-only file"
+grep -qE '^  metar +decoded +[1-9]' "$tmp/g.out" || { section "$tmp/g.out" "Text records"; fail "(g) no METARs"; }
+
+# ---- (h) a truncated .gz is an error ------------------------------------------
+size=$(wc -c <"$sample")
+head -c $((size / 2)) "$sample" >"$tmp/half.txt.gz"
+"$fisb" --ref-date 2015-01-24 "$tmp/half.txt.gz" >/dev/null 2>"$tmp/h.err"; rc=$?
+[ $rc -eq 1 ] || fail "(h) truncated .gz: exit $rc, want 1"
+grep -q 'unexpected end of gzip stream' "$tmp/h.err" || { cat "$tmp/h.err"; fail "(h) message"; }
+head -c $((size - 4)) "$sample" >"$tmp/trailer.txt.gz"  # only the CRC/length trailer missing
+"$fisb" --json --ref-date 2015-01-24 "$tmp/trailer.txt.gz" >/dev/null 2>&1; rc=$?
+[ $rc -eq 1 ] || fail "(h) .gz without its trailer: exit $rc, want 1"
 
 # ---- (f) exit codes ------------------------------------------------------------
 "$fisb" >/dev/null 2>&1; rc=$?; [ $rc -eq 2 ] || fail "(f) no FILE: exit $rc, want 2"

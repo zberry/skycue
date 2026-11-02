@@ -133,6 +133,8 @@ std::string textRecordJson(const TextRecord& r)
     w.add("kind", textKindName(r.kind));
     w.add("station", r.station);
     w.add("issued", iso(r.issued));
+    if (r.valid)
+        w.add("valid", iso(*r.valid));
     w.add("expires", iso(r.expires));
     if (r.period_h)
         w.add("period_h", static_cast<int64_t>(*r.period_h));
@@ -183,8 +185,10 @@ std::string twgoRecordJson(const TwgoRecord& r)
     w.add("cancelled", r.cancelled);
     if (r.start)
         w.add("start", iso(*r.start));
-    if (r.end)
-        w.add("end", iso(*r.end));
+    if (r.graphics_end)
+        w.add("graphics_end", iso(*r.graphics_end));
+    if (r.text_end)
+        w.add("text_end", iso(*r.text_end));
     w.add("received", iso(r.received));
     w.add("last_received", iso(r.last_received));
     w.add("expires", iso(r.expires));

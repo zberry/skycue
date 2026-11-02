@@ -160,7 +160,14 @@ std::vector<TextRecord> parseTextProduct(const ApduHeader& h, const uint8_t* p, 
                     rec.period_h = windsPeriod(h.hours, hh * 100 + mm);
             }
         }
-        rec.issued = issued ? *issued : apdu_t.value_or(ref);
+        if (rec.kind == TextRecord::winds) {
+            // "WINDS SFO 301800Z": the group is the forecast valid time; the
+            // product's issue time is the APDU time (reference §4).
+            rec.valid = issued;
+            rec.issued = apdu_t.value_or(ref);
+        } else {
+            rec.issued = issued ? *issued : apdu_t.value_or(ref);
+        }
         out.push_back(std::move(rec));
     }
     return out;

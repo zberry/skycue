@@ -409,5 +409,33 @@ std::optional<TwgoParsed> parseTwgo(const ApduHeader& h, const uint8_t* p, std::
     return out;
 }
 
+std::optional<TimePoint> notamTextEnd(const std::string& text)
+{
+    auto digits = [&](std::size_t at, std::size_t n) {
+        if (at + n > text.size())
+            return false;
+        for (std::size_t i = at; i < at + n; ++i)
+            if (text[i] < '0' || text[i] > '9')
+                return false;
+        return true;
+    };
+    auto num = [&](std::size_t at) { return static_cast<unsigned>((text[at] - '0') * 10 + (text[at + 1] - '0')); };
+    for (std::size_t i = 0; i + 11 <= text.size(); ++i) {
+        // A 10-digit group not inside a longer run of digits, then '-'.
+        if ((i > 0 && text[i - 1] >= '0' && text[i - 1] <= '9') || !digits(i, 10) || text[i + 10] != '-')
+            continue;
+        const std::size_t e = i + 11;
+        if (text.compare(e, 4, "PERM") == 0)
+            return std::nullopt;
+        if (!digits(e, 10) || (e + 10 < text.size() && text[e + 10] >= '0' && text[e + 10] <= '9'))
+            continue;
+        const unsigned mo = num(e + 2), dd = num(e + 4), hh = num(e + 6), mi = num(e + 8);
+        if (mo < 1 || mo > 12 || hh > 23 || mi > 59)
+            return std::nullopt;
+        return detail::makeUtc(2000 + num(e), mo, dd, hh, mi);
+    }
+    return std::nullopt;
+}
+
 }  // namespace fisb
 }  // namespace skycued

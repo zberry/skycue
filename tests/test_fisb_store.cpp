@@ -560,6 +560,12 @@ BOOST_AUTO_TEST_CASE(expiry_table_values)
     BOOST_TEST((textExpiry(text(TextRecord::metar, "KSFO", issued, "METAR")) == issued + 120min));
     BOOST_TEST((textExpiry(text(TextRecord::pirep, "SFO", issued, "PIREP")) == issued + 120min));
     BOOST_TEST((textExpiry(text(TextRecord::winds, "SFO", issued, "WINDS", uint8_t{6})) == issued + 12h));
+    {
+        // Winds: 12 h from the forecast valid time, not from the APDU issue time.
+        TextRecord w = text(TextRecord::winds, "SFO", issued, "WINDS SFO 241800Z", uint8_t{12});
+        w.valid = iso("2015-01-24T18:00:00Z");
+        BOOST_TEST((textExpiry(w) == iso("2015-01-25T06:00:00Z")));
+    }
     BOOST_TEST((textExpiry(text(TextRecord::taf, "KSFO", issued, "TAF KSFO 240340Z 2406/2512 27010KT")) ==
                 iso("2015-01-25T12:00:00Z")));
     BOOST_TEST((textExpiry(text(TextRecord::taf, "KSFO", issued, "TAF KSFO 240340Z 2406/2424 27010KT")) ==
@@ -588,6 +594,52 @@ BOOST_AUTO_TEST_CASE(expiry_table_values)
     }
     BOOST_TEST(expiry::kCancelled.count() == 30);
     BOOST_TEST(expiry::kTwgoUnmatched.count() == 720);
+}
+
+BOOST_AUTO_TEST_CASE(twgo_expiry_uses_latest_end_time)
+{
+    BOOST_TEST((notamTextEnd("!EYE 10/028 EYE RWY 03/21 CLSD 2011010100-2011011100") == iso("2020-11-01T11:00:00Z")));
+    BOOST_TEST((notamTextEnd("!CVG 0/3733 ODP 2010162111-2107162111EST") == iso("2021-07-16T21:11:00Z")));
+    BOOST_TEST(!notamTextEnd("!FDC 0/1 ZOB AIRSPACE 2010162111-PERM").has_value());
+    BOOST_TEST(!notamTextEnd("NOTAM-D a").has_value());
+    BOOST_TEST(!notamTextEnd("ASN 12345678901-2107162111").has_value());  // 11 digits: no group
+
+    FisbStore st;
+    const std::string body = "NOTAM-FDC KCVG.0/3733 Z !FDC 0/3733 CVG ODP 1501162111-1507162111";
+    // Text end (2015-07-16) later than the graphics end (2015-01-24 05:00): the text wins.
+    auto ev = st.apply(twgoText(8, 3733, body, kT0), kT0);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].twgo->text_end == iso("2015-07-16T21:11:00Z")));
+    BOOST_TEST((ev[0].expires == iso("2015-07-16T21:11:00Z")));
+    const TimePoint g_end = iso("2015-01-24T05:00:00Z");
+    ev = st.apply(twgoGraphics(8, 3733, {square(39, -84)}, kT0 + 10s, 15, g_end), kT0 + 10s);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].kind == FisbEvent::Kind::twgo));
+    BOOST_TEST((ev[0].twgo->graphics_end == g_end));
+    BOOST_TEST((ev[0].twgo->expires == iso("2015-07-16T21:11:00Z")));
+    BOOST_TEST(st.sweep(g_end + 1min).empty());  // still held after the graphics end
+
+    // A graphics end later than the text end wins.
+    ev = st.apply(twgoText(8, 1, "NOTAM-D !X 1/1 X RWY CLSD 1501240400-1501240500", kT0), kT0);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].expires == iso("2015-01-24T05:00:00Z")));
+    ev = st.apply(twgoGraphics(8, 1, {square(1, 1)}, kT0, 15, iso("2015-01-24T08:00:00Z")), kT0);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].twgo->expires == iso("2015-01-24T08:00:00Z")));
+
+    // No end at all (PERM, non-NOTAM text): 70 min after the last reception.
+    ev = st.apply(twgoText(8, 2, "NOTAM-FDC !FDC 0/2 AIRSPACE 1501240400-PERM", kT0), kT0);
+    BOOST_TEST((ev.at(0).expires == kT0 + 70min));
+    BOOST_TEST(!ev[0].twgo->text_end.has_value());
+    // The text end is read for NOTAM products only.
+    ev = st.apply(twgoText(11, 4, "AIRMET 1501240400-1501250400", kT0), kT0);
+    BOOST_TEST((ev.at(0).expires == kT0 + 70min));
+
+    auto j = skycued::JsonObject::parse(twgoRecordJson(*findTwgo(st.snapshot(), 3733)));
+    BOOST_REQUIRE(j.has_value());
+    BOOST_TEST(*j->getString("text_end") == "2015-07-16T21:11:00.000Z");
+    BOOST_TEST(*j->getString("graphics_end") == "2015-01-24T05:00:00.000Z");
+    BOOST_TEST(!j->getString("end").has_value());
 }
 
 BOOST_AUTO_TEST_CASE(summary_and_json_fields)
@@ -633,4 +685,14 @@ BOOST_AUTO_TEST_CASE(summary_and_json_fields)
     BOOST_TEST(*tj->getString("kind") == "metar");
     BOOST_TEST(*tj->getString("text") == "METAR KSFO \"q\"");
     BOOST_TEST(*tj->getString("key") == "metar:KSFO");
+    BOOST_TEST(!tj->getString("valid").has_value());
+
+    TextRecord wr = text(TextRecord::winds, "SFO", iso("2015-01-24T02:06:00Z"), "WINDS SFO 250000Z", uint8_t{24});
+    wr.valid = iso("2015-01-25T00:00:00Z");
+    wr.expires = textExpiry(wr);
+    auto wj = skycued::JsonObject::parse(textRecordJson(wr));
+    BOOST_REQUIRE(wj.has_value());
+    BOOST_TEST(*wj->getString("issued") == "2015-01-24T02:06:00.000Z");
+    BOOST_TEST(*wj->getString("valid") == "2015-01-25T00:00:00.000Z");
+    BOOST_TEST(*wj->getString("expires") == "2015-01-25T12:00:00.000Z");
 }

@@ -120,7 +120,7 @@ TimePoint textExpiry(const TextRecord& r)
                 if (*t > r.issued)
                     return *t;
         return r.issued + expiry::kTafFallback;
-    case TextRecord::winds: return r.issued + expiry::kWindsFallback;
+    case TextRecord::winds: return r.valid.value_or(r.issued) + expiry::kWindsFallback;
     case TextRecord::pirep:
     case TextRecord::other: break;
     }
@@ -220,7 +220,8 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
         r.shapes.clear();
         r.has_graphics = false;
         r.start.reset();
-        r.end.reset();
+        r.graphics_end.reset();
+        r.text_end.reset();
         r.expires = now + expiry::kCancelled;
         ++stats_.cancelled;
         s.published = true;  // listed (flagged cancelled) until it expires
@@ -235,17 +236,20 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
             r.shapes.clear();
             r.has_graphics = false;
             r.start.reset();
-            r.end.reset();
+            r.graphics_end.reset();
         }
         r.text = t.text;
+        r.text_end.reset();
+        if (p.id == 8 || p.id == 16 || p.id == 17)
+            r.text_end = notamTextEnd(*r.text);
         changed = true;
     }
     if (t.has_graphics &&
-        (!r.has_graphics || !sameShapes(r.shapes, t.shapes) || r.start != t.start || r.end != t.end)) {
+        (!r.has_graphics || !sameShapes(r.shapes, t.shapes) || r.start != t.start || r.graphics_end != t.end)) {
         r.shapes = t.shapes;
         r.has_graphics = true;
         r.start = t.start;
-        r.end = t.end;
+        r.graphics_end = t.end;
         changed = true;
     }
     if (!t.location.empty())
@@ -256,11 +260,17 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
     const bool was_complete = r.complete;
     r.complete = p.id == 14 ? r.has_graphics : (r.text && !r.text->empty());
     if (r.complete) {
-        r.expires = r.end ? *r.end : now + expiry::kTwgo;
+        // The latest end time the record carries (fisb-decode uses the NOTAM
+        // text's; a graphics end can be earlier), else 70 min after the last
+        // reception.
+        std::optional<TimePoint> end = r.text_end;
+        if (r.graphics_end && (!end || *r.graphics_end > *end))
+            end = r.graphics_end;
+        r.expires = end ? *end : now + expiry::kTwgo;
     } else {
         r.expires = now + expiry::kTwgoUnmatched;
-        if (r.end && *r.end < r.expires)
-            r.expires = *r.end;
+        if (r.graphics_end && *r.graphics_end < r.expires)
+            r.expires = *r.graphics_end;
     }
     if (r.expires <= now) {
         ++stats_.stale;

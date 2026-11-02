@@ -21,6 +21,7 @@
 // shifted forward by the length of one pass. Without --loop it exits 0 once
 // everything is sent.
 
+#include "gz_line_reader.hpp"
 #include "log.hpp"
 #include "raw_formats.hpp"
 
@@ -116,56 +117,8 @@ const char* kindName(Kind k)
     return "?";
 }
 
-// A plain or gzip file (zlib reads both).
-class Reader {
-public:
-    explicit Reader(const std::string& path) : path_(path), f_(gzopen(path.c_str(), "rb"))
-    {
-        if (!f_)
-            throw std::runtime_error("cannot open " + path + ": " + std::strerror(errno));
-        gzbuffer(f_, 256 * 1024);
-    }
-    ~Reader() { gzclose(f_); }
-    Reader(const Reader&) = delete;
-    Reader& operator=(const Reader&) = delete;
-
-    // Up to n bytes; 0 at the end. Throws on a read error.
-    std::size_t read(uint8_t* buf, std::size_t n)
-    {
-        const int got = gzread(f_, buf, static_cast<unsigned>(n));
-        if (got < 0)
-            fail();
-        return static_cast<std::size_t>(got);
-    }
-    // One line without its '\n'; false at the end.
-    bool getline(std::string& line)
-    {
-        line.clear();
-        char buf[8192];
-        while (gzgets(f_, buf, sizeof buf)) {
-            line += buf;
-            if (!line.empty() && line.back() == '\n') {
-                line.pop_back();
-                return true;
-            }
-        }
-        int err = 0;
-        gzerror(f_, &err);
-        if (err != Z_OK && err != Z_BUF_ERROR)
-            fail();
-        return !line.empty();
-    }
-
-private:
-    [[noreturn]] void fail()
-    {
-        int err = 0;
-        const char* msg = gzerror(f_, &err);
-        throw std::runtime_error("reading " + path_ + ": " + (err == Z_ERRNO ? std::strerror(errno) : msg));
-    }
-    std::string path_;
-    gzFile f_;
-};
+// A plain or gzip file (zlib reads both); a truncated gzip stream throws.
+using Reader = GzLineReader;
 
 // Where one stream goes: a connection to readsb (client), or the client that
 // connected to our listening port (server). Blocking; used by one thread.

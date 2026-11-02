@@ -78,6 +78,12 @@ grep -qx 'Aircraft: 12' "$tmp/d.out" || { cat "$tmp/d.out"; fail "(d) .gz: no 'A
 # Apart from the file name, the same report as the plain file.
 diff <(grep -v 'records$' "$tmp/a.out") <(grep -v 'records$' "$tmp/d.out") >/dev/null ||
   { diff "$tmp/a.out" "$tmp/d.out"; fail "(d) .gz report differs"; }
+# A truncated .gz is an error (exit 1), not a shorter file.
+gz_size=$(wc -c <"$tmp/sample.jsonl.gz")
+head -c $((gz_size / 2)) "$tmp/sample.jsonl.gz" >"$tmp/half.jsonl.gz"
+"$stats" --lat 38.9 --lon -77.0 "$tmp/half.jsonl.gz" >/dev/null 2>"$tmp/d2.err"; rc=$?
+[ "$rc" -eq 1 ] || fail "(d) truncated .gz: exit $rc, want 1"
+grep -q 'unexpected end of gzip stream' "$tmp/d2.err" || { cat "$tmp/d2.err"; fail "(d) truncated .gz message"; }
 
 # ---- (e) no receiver position; then --config ----------------------------------
 "$stats" "$sample" >"$tmp/e.out" 2>&1 || fail "(e) exit"

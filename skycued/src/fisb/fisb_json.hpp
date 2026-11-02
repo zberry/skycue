@@ -24,12 +24,12 @@ const char* shapeGeomName(Shape::Geom geom);
 // [[value,count],...] covering the 128 bins in order.
 std::string rleJson(const std::array<uint8_t, 128>& bins);
 
-// {"key","kind","station","issued","expires","period_h"?,"text"}
+// {"key","kind","station","issued","valid"?,"expires","period_h"?,"text"}
 std::string textRecordJson(const TextRecord& r);
 // {"geom","points":[[lat,lon],...],"radius_nm"?,"alt_low_ft"?,"alt_high_ft"?,"agl"}
 std::string shapeJson(const Shape& s);
 // {"key","product","name","report","location","label"?,"text"?,"has_graphics","complete",
-//  "cancelled","start"?,"end"?,"received","last_received","expires","shapes":[...]}
+//  "cancelled","start"?,"graphics_end"?,"text_end"?,"received","last_received","expires","shapes":[...]}
 std::string twgoRecordJson(const TwgoRecord& r);
 // {"key","product","name","altitude_code"?,"scale","product_time","updated","published"?,"expires",
 //  "bins_per_block":128,"block_count","evicted",

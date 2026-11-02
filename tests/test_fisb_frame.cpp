@@ -1,13 +1,13 @@
 #define BOOST_TEST_MODULE skycued_fisb_frame
 #include <boost/test/unit_test.hpp>
 
+#include "gz_line_reader.hpp"
 #include "fisb/apdu.hpp"
 #include "fisb/bit_reader.hpp"
 #include "fisb/dlac.hpp"
 #include "fisb/products.hpp"
 #include "fisb/uplink_frame.hpp"
 
-#include <zlib.h>
 
 #include <algorithm>
 #include <cmath>
@@ -32,23 +32,12 @@ const std::string kFixtures = SKYCUE_FIXTURE_DIR;
 std::vector<std::string> readLines(const std::string& path)
 {
     std::vector<std::string> lines;
-    gzFile f = gzopen(path.c_str(), "rb");
-    BOOST_REQUIRE_MESSAGE(f != nullptr, "cannot open " << path);
-    char buf[4096];
-    std::string cur;
-    while (gzgets(f, buf, sizeof buf) != nullptr) {
-        cur += buf;
-        if (!cur.empty() && cur.back() == '\n') {
+    skycued::GzLineReader in(path);  // throws on a missing file or a truncated gzip stream
+    for (std::string cur; in.getline(cur);) {
+        if (!cur.empty() && cur.back() == '\r')
             cur.pop_back();
-            if (!cur.empty() && cur.back() == '\r')
-                cur.pop_back();
-            lines.push_back(cur);
-            cur.clear();
-        }
-    }
-    if (!cur.empty())
         lines.push_back(cur);
-    gzclose(f);
+    }
     return lines;
 }
 

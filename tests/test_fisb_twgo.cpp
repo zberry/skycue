@@ -1,6 +1,7 @@
 #define BOOST_TEST_MODULE skycued_fisb_twgo
 #include <boost/test/unit_test.hpp>
 
+#include "gz_line_reader.hpp"
 #include "fisb/apdu.hpp"
 #include "fisb/fisb_time.hpp"
 #include "fisb/products.hpp"
@@ -10,7 +11,6 @@
 #include "fisb/uplink_frame.hpp"
 #include "time_util.hpp"
 
-#include <zlib.h>
 
 #include <algorithm>
 #include <chrono>
@@ -47,23 +47,12 @@ TimePoint tg30Ref() { return iso("2020-10-30T08:55:00Z"); }
 std::vector<std::string> readLines(const std::string& path)
 {
     std::vector<std::string> lines;
-    gzFile f = gzopen(path.c_str(), "rb");
-    BOOST_REQUIRE_MESSAGE(f != nullptr, "cannot open " << path);
-    char buf[4096];
-    std::string cur;
-    while (gzgets(f, buf, sizeof buf) != nullptr) {
-        cur += buf;
-        if (!cur.empty() && cur.back() == '\n') {
+    skycued::GzLineReader in(path);  // throws on a missing file or a truncated gzip stream
+    for (std::string cur; in.getline(cur);) {
+        if (!cur.empty() && cur.back() == '\r')
             cur.pop_back();
-            if (!cur.empty() && cur.back() == '\r')
-                cur.pop_back();
-            lines.push_back(cur);
-            cur.clear();
-        }
-    }
-    if (!cur.empty())
         lines.push_back(cur);
-    gzclose(f);
+    }
     return lines;
 }
 
@@ -881,6 +870,7 @@ BOOST_AUTO_TEST_CASE(winds_period_parsed)
             for (const auto& r : parseTextProduct(a.h, a.payload.data(), a.payload.size(), w.ref)) {
                 if (r.kind != TextRecord::winds) {
                     BOOST_TEST(!r.period_h.has_value());
+                    BOOST_TEST(!r.valid.has_value());
                     continue;
                 }
                 BOOST_REQUIRE_MESSAGE(r.period_h, "no period: " << r.text.substr(0, 40));
@@ -888,7 +878,10 @@ BOOST_AUTO_TEST_CASE(winds_period_parsed)
                 BOOST_TEST(r.station.size() == 3u);
                 if (r.text.rfind("WINDS BCE 250000Z", 0) == 0) {
                     BOOST_TEST(*r.period_h == 24u);
-                    BOOST_TEST(skycued::formatIso8601Ms(r.issued) == "2015-01-25T00:00:00.000Z");
+                    // The group is the valid time; issued is the APDU time (02:06).
+                    BOOST_REQUIRE(r.valid.has_value());
+                    BOOST_TEST(skycued::formatIso8601Ms(*r.valid) == "2015-01-25T00:00:00.000Z");
+                    BOOST_TEST(skycued::formatIso8601Ms(r.issued) == "2015-01-24T02:06:00.000Z");
                     ++seen["BCE"];
                 }
                 if (r.text.rfind("WINDS TUL 301800Z", 0) == 0) {

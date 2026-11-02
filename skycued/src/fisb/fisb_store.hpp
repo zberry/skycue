@@ -39,9 +39,10 @@
 // NEXRAD 63/64 and lightning 103 75 min from product time (reference §7);
 // other rasters (70/71/84/90/91) 105 min from product time; METAR 120 min from issued; TAF at the end of its ddhh/ddhh validity
 // (else 120 min from issued); PIREP 120 min from issued; winds 12 h from
-// issued unless replaced by the next issue first; TWGO 70 min after the last
-// reception, or the record's end time when it has one; an unmatched half
-// 720 min after its last reception (or its end time if earlier);
+// their valid time unless replaced by the next issue first; TWGO at the
+// latest of its end times (the NOTAM text's end of validity, the graphics
+// end) when it has one, else 70 min after the last reception; an unmatched
+// half 720 min after its last reception (or its graphics end if earlier);
 // cancelled 30 min after the cancel. A product already expired when it
 // arrives is not stored (counted as stale). Every removal of a published
 // item yields an expired event with reason "expired".
@@ -93,7 +94,8 @@ struct TwgoRecord {
     bool has_graphics = false;
     bool complete = false;   // text present (product 14: graphics present)
     bool cancelled = false;
-    std::optional<TimePoint> start, end;  // graphics applicability
+    std::optional<TimePoint> start, graphics_end;  // graphics applicability
+    std::optional<TimePoint> text_end;  // NOTAM text "yymmddhhmm-yymmddhhmm" end of validity (not PERM)
     std::string location, label;
     TimePoint received{}, last_received{}, expires{};
 };

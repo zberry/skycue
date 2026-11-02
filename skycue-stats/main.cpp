@@ -14,6 +14,7 @@
 // 2 usage error.
 
 #include "config.hpp"
+#include "gz_line_reader.hpp"
 #include "recording_reader.hpp"
 #include "stats_report.hpp"
 
@@ -35,42 +36,8 @@ using namespace skycued;
 
 namespace {
 
-// A plain or gzip file (zlib reads both), line by line.
-class Reader {
-public:
-    explicit Reader(const std::string& path) : path_(path), f_(gzopen(path.c_str(), "rb"))
-    {
-        if (!f_)
-            throw std::runtime_error("cannot open " + path + ": " + std::strerror(errno ? errno : ENOENT));
-        gzbuffer(f_, 256 * 1024);
-    }
-    ~Reader() { gzclose(f_); }
-    Reader(const Reader&) = delete;
-    Reader& operator=(const Reader&) = delete;
-
-    // One line without its '\n'; false at the end. Throws on a read error.
-    bool getline(std::string& line)
-    {
-        line.clear();
-        char buf[8192];
-        while (gzgets(f_, buf, sizeof buf)) {
-            line += buf;
-            if (!line.empty() && line.back() == '\n') {
-                line.pop_back();
-                return true;
-            }
-        }
-        int err = 0;
-        const char* msg = gzerror(f_, &err);
-        if (err != Z_OK && err != Z_BUF_ERROR)
-            throw std::runtime_error("reading " + path_ + ": " + (err == Z_ERRNO ? std::strerror(errno) : msg));
-        return !line.empty();
-    }
-
-private:
-    std::string path_;
-    gzFile f_;
-};
+// A plain or gzip file, line by line; a truncated gzip stream throws.
+using Reader = GzLineReader;
 
 const char* lineKindName(LineKind k)
 {

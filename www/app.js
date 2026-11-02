@@ -43,11 +43,13 @@
   }
 
   // ---- HTTP ------------------------------------------------------------------
+  // A PUT or POST always carries a JSON body and Content-Type: skycued
+  // answers 415 without it (docs/web-api.md, Security).
   function request(method, path, body) {
     var init = { method: method, headers: {} };
-    if (body !== undefined) {
+    if (method === 'PUT' || method === 'POST') {
       init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(body);
+      init.body = JSON.stringify(body === undefined ? {} : body);
     }
     return fetch(path, init).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {

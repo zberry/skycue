@@ -4,6 +4,7 @@
 #include "engine_test_support.hpp"
 
 #include "runtime_config.hpp"
+#include "web_api.hpp"
 #include "web_server.hpp"
 
 #include <boost/beast/core.hpp>
@@ -22,6 +23,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <map>
 #include <regex>
 
 extern char** environ;
@@ -122,6 +124,37 @@ Reply request(uint16_t port, http::verb verb, const std::string& target, const s
 }
 
 Reply get(uint16_t port, const std::string& target) { return request(port, http::verb::get, target); }
+
+// A request with exactly these headers (besides Host, unless given, and
+// Content-Length).
+Reply requestWith(uint16_t port, http::verb verb, const std::string& target, const std::string& body,
+                  const std::vector<std::pair<std::string, std::string>>& headers)
+{
+    asio::io_context io;
+    tcp::socket s(io);
+    s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
+    setRecvTimeout(s, 10);
+    http::request<http::string_body> req{verb, target, 11};
+    bool host = false;
+    for (const auto& h : headers) {
+        req.set(h.first, h.second);
+        host = host || h.first == "Host";
+    }
+    if (!host)
+        req.set(http::field::host, "127.0.0.1:" + std::to_string(port));
+    req.body() = body;
+    req.keep_alive(false);
+    req.prepare_payload();
+    http::write(s, req);
+    beast::flat_buffer buf;
+    http::response<http::string_body> res;
+    http::read(s, buf, res);
+    Reply r;
+    r.status = res.result_int();
+    r.body = res.body();
+    r.content_type = std::string(res[http::field::content_type]);
+    return r;
+}
 
 // ---- a minimal WebSocket client: a thread collects every text message ----
 
@@ -873,6 +906,110 @@ BOOST_AUTO_TEST_CASE(bad_json_400)
     // Still serving.
     BOOST_TEST(request(f.port, http::verb::put, "/api/filters", "{\"min_elevation_deg\":2.5}").body ==
                "{\"max_range_nm\":150,\"min_elevation_deg\":2.5,\"overlay_active\":true}");
+}
+
+using Headers = std::vector<std::pair<std::string, std::string>>;
+
+BOOST_AUTO_TEST_CASE(put_without_json_content_type_415)
+{
+    WebFx f;
+    const std::string body = "{\"max_range_nm\":20}";
+    for (const Headers& h : {Headers{}, Headers{{"Content-Type", "text/plain;charset=UTF-8"}},
+                             Headers{{"Content-Type", "application/x-www-form-urlencoded"}},
+                             Headers{{"Content-Type", "multipart/form-data; boundary=x"}}}) {
+        const Reply r = requestWith(f.port, http::verb::put, "/api/filters", body, h);
+        BOOST_TEST(r.status == 415u);
+        BOOST_TEST(r.body == "{\"error\":\"content-type must be application/json\"}");
+    }
+    for (const char* target : {"/api/lists/block", "/api/filters/save-baseline"})
+        BOOST_TEST(requestWith(f.port, http::verb::post, target, "{\"add\":[\"abc001\"]}",
+                               {{"Content-Type", "text/plain"}})
+                       .status == 415u,
+                   target);
+    // Nothing changed.
+    BOOST_TEST(get(f.port, "/api/filters").body == "{\"max_range_nm\":150,\"min_elevation_deg\":0,\"overlay_active\":false}");
+    BOOST_TEST(get(f.port, "/api/lists").body == "{\"allow\":[],\"block\":[],\"overlay_active\":false}");
+    BOOST_TEST(!exists(f.tmp.path + "/skycue.runtime.json"));
+    // With a charset parameter (and in any case) it is accepted; GET needs none.
+    BOOST_TEST(requestWith(f.port, http::verb::put, "/api/filters", body,
+                           {{"Content-Type", "Application/JSON; charset=utf-8"}})
+                   .status == 200u);
+    BOOST_TEST(requestWith(f.port, http::verb::get, "/api/filters", "", {}).status == 200u);
+    // A wrong method is still a 405, not a 415.
+    BOOST_TEST(requestWith(f.port, http::verb::post, "/api/filters", body, {}).status == 405u);
+}
+
+BOOST_AUTO_TEST_CASE(post_with_foreign_origin_403)
+{
+    WebFx f;
+    const std::string json = "application/json";
+    const std::string host = "127.0.0.1:" + std::to_string(f.port);
+    for (const std::string& origin : {std::string("http://evil.example"), std::string("http://evil.example:") +
+                                      std::to_string(f.port), std::string("http://127.0.0.1:1"),
+                                      std::string("null"), std::string("http://127.0.0.1:") + std::to_string(f.port) +
+                                      ".evil.example"}) {
+        Reply r = requestWith(f.port, http::verb::post, "/api/lists/block", "{\"add\":[\"abc001\"]}",
+                              {{"Content-Type", json}, {"Origin", origin}});
+        BOOST_TEST(r.status == 403u, origin);
+        BOOST_TEST(r.body == "{\"error\":\"cross-origin request rejected\"}", origin);
+        r = requestWith(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":20}",
+                        {{"Content-Type", json}, {"Origin", origin}});
+        BOOST_TEST(r.status == 403u, origin);
+    }
+    BOOST_TEST(requestWith(f.port, http::verb::post, "/api/filters/save-baseline", "{}",
+                           {{"Content-Type", json}, {"Origin", "http://evil.example"}})
+                   .status == 403u);
+    // An Origin with no Host to compare with is rejected too.
+    BOOST_TEST(requestWith(f.port, http::verb::post, "/api/lists/block", "{\"add\":[\"abc001\"]}",
+                           {{"Content-Type", json}, {"Origin", "http://" + host}, {"Host", ""}})
+                   .status == 403u);
+    BOOST_TEST(get(f.port, "/api/lists").body == "{\"allow\":[],\"block\":[],\"overlay_active\":false}");
+    BOOST_TEST(get(f.port, "/api/filters").body == "{\"max_range_nm\":150,\"min_elevation_deg\":0,\"overlay_active\":false}");
+    // GET is never refused for its Origin.
+    BOOST_TEST(requestWith(f.port, http::verb::get, "/api/state", "", {{"Origin", "http://evil.example"}}).status ==
+               200u);
+}
+
+BOOST_AUTO_TEST_CASE(same_origin_ok)
+{
+    WebFx f;
+    const std::string json = "application/json";
+    const std::string port = std::to_string(f.port);
+    // The page's own origin, as a browser sends it (case of the host ignored).
+    Reply r = requestWith(f.port, http::verb::post, "/api/lists/block", "{\"add\":[\"abc001\"]}",
+                          {{"Content-Type", json}, {"Origin", "http://127.0.0.1:" + port}});
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "{\"allow\":[],\"block\":[\"abc001\"],\"overlay_active\":true}");
+    r = requestWith(f.port, http::verb::post, "/api/lists/block", "{\"remove\":[\"abc001\"]}",
+                    {{"Content-Type", json}, {"Origin", "http://LocalHost:" + port}, {"Host", "localhost:" + port}});
+    BOOST_TEST(r.status == 200u);
+    // A default port may be left out of either.
+    r = requestWith(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":30}",
+                    {{"Content-Type", json}, {"Origin", "http://skycue.example"}, {"Host", "skycue.example:80"}});
+    BOOST_TEST(r.status == 200u);
+    // No Origin (curl, the skycue tools): allowed.
+    r = requestWith(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":null}", {{"Content-Type", json}});
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "{\"max_range_nm\":150,\"min_elevation_deg\":0,\"overlay_active\":false}");
+    r = requestWith(f.port, http::verb::post, "/api/filters/save-baseline", "{}",
+                    {{"Content-Type", json}, {"Origin", "http://[::1]:" + port}, {"Host", "[::1]:" + port}});
+    BOOST_TEST(r.status == 200u);
+}
+
+BOOST_AUTO_TEST_CASE(query_params_parsed)
+{
+    using skycued::webapi::queryParams;
+    using Map = std::map<std::string, std::string>;
+    BOOST_TEST((queryParams("") == Map{}));
+    BOOST_TEST((queryParams("a=1&b=two") == Map{{"a", "1"}, {"b", "two"}}));
+    BOOST_TEST((queryParams("q=x%20y+z&%41=%2f&flag&&e=") == Map{{"q", "x y z"}, {"A", "/"}, {"flag", ""}, {"e", ""}}));
+    BOOST_TEST((queryParams("a=1&a=2") == Map{{"a", "2"}}));
+    BOOST_TEST((queryParams("bad=%zz%4") == Map{{"bad", "%zz%4"}}));
+    BOOST_TEST((queryParams("eq=a=b") == Map{{"eq", "a=b"}}));
+    // The server hands the query over and still routes by the path alone.
+    WebFx f;
+    BOOST_TEST(get(f.port, "/api/filters?x=1&y=%20").body ==
+               "{\"max_range_nm\":150,\"min_elevation_deg\":0,\"overlay_active\":false}");
 }
 
 BOOST_AUTO_TEST_CASE(web_port_zero_disabled)

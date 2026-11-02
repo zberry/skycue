@@ -173,7 +173,8 @@ test('range_change_moves_ring_and_drops', async ({ page }) => {
     return far >= 5 && bad === 0;
   }, { timeout: 5000 }).toBe(true);
   // Back to the baseline value.
-  const res = await api('/api/filters', { method: 'PUT', body: JSON.stringify({ max_range_nm: null }) });
+  const res = await api('/api/filters', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_range_nm: null }) });
   expect(res.status).toBe(200);
   await expect.poll(() => page.evaluate(() => window.skycueApp.rangeRingRadius())).toBeCloseTo(r0, 0);
   await expect(page.locator('#max-range')).toHaveValue(String(r0 / 1852));

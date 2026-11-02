@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -154,25 +155,25 @@ void putTrack(JsonWriter& w, const TrackSnapshot& ts)
     addFinite(w, "rssi", ts.rssi);
 }
 
-Response json(unsigned status, std::string body)
+ApiResponse json(unsigned status, std::string body)
 {
-    Response r;
+    ApiResponse r;
     r.status = status;
     r.body = std::move(body);
     return r;
 }
 
-Response error(unsigned status, const std::string& message) { return json(status, errorJson(message)); }
+ApiResponse error(unsigned status, const std::string& message) { return json(status, errorJson(message)); }
 
-Response notAllowed(const char* allow)
+ApiResponse notAllowed(const char* allow)
 {
-    Response r = error(405, "method not allowed");
+    ApiResponse r = error(405, "method not allowed");
     r.allow = allow;
     return r;
 }
 
 // Applies `delta` from the UI; the reply is `ok()` or the error.
-template <class Ok> Response apply(RuntimeConfig& rc, const Overlay& delta, Ok ok)
+template <class Ok> ApiResponse apply(RuntimeConfig& rc, const Overlay& delta, Ok ok)
 {
     try {
         rc.applyUi(delta, "ui");
@@ -186,7 +187,7 @@ template <class Ok> Response apply(RuntimeConfig& rc, const Overlay& delta, Ok o
     return json(200, ok());
 }
 
-Response putFiltersRoute(const std::string& body, RuntimeConfig& rc)
+ApiResponse putFiltersRoute(const std::string& body, RuntimeConfig& rc)
 {
     const auto obj = JsonObject::parse(body);
     if (!obj)
@@ -213,7 +214,7 @@ Response putFiltersRoute(const std::string& body, RuntimeConfig& rc)
     return apply(rc, delta, [&] { return filtersJson(rc); });
 }
 
-Response postListRoute(ListKind kind, const std::string& body, const Engine& e, RuntimeConfig& rc)
+ApiResponse postListRoute(ListKind kind, const std::string& body, const Engine& e, RuntimeConfig& rc)
 {
     const auto obj = JsonObject::parse(body);
     if (!obj)
@@ -273,7 +274,91 @@ int hexValue(char c)
     return -1;
 }
 
+std::string lower(std::string s)
+{
+    for (auto& ch : s)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return s;
+}
+
+std::string header(const ApiRequest& req, const char* name)
+{
+    const auto it = req.headers.find(name);
+    return it == req.headers.end() ? std::string() : it->second;
+}
+
+// "host[:port]" lower-cased, without the scheme's default port.
+std::string normaliseAuthority(std::string authority, const std::string& scheme)
+{
+    authority = lower(authority);
+    const std::string default_port = scheme == "https" ? ":443" : scheme == "http" ? ":80" : "";
+    if (!default_port.empty() && authority.size() > default_port.size() &&
+        authority.compare(authority.size() - default_port.size(), default_port.size(), default_port) == 0)
+        authority.erase(authority.size() - default_port.size());
+    return authority;
+}
+
+// Origin "<scheme>://<host>[:<port>]" names the same host:port as Host.
+bool sameOrigin(const std::string& origin, const std::string& host)
+{
+    const size_t sep = origin.find("://");
+    if (sep == std::string::npos || host.empty())
+        return false;  // "null" (an opaque origin) or no Host to compare with
+    const std::string scheme = lower(origin.substr(0, sep));
+    std::string authority = origin.substr(sep + 3);
+    if (authority.empty() || authority.find_first_of("/?#@") != std::string::npos)
+        return false;
+    return normaliseAuthority(authority, scheme) == normaliseAuthority(host, scheme);
+}
+
+// The checks on a state-changing request (PUT, POST): an error, or nullopt.
+std::optional<ApiResponse> rejectUnsafe(const ApiRequest& req)
+{
+    const std::string type = lower(header(req, "content-type"));
+    if (type.compare(0, 16, "application/json") != 0)
+        return error(415, "content-type must be application/json");
+    const auto origin = req.headers.find("origin");
+    if (origin != req.headers.end() && !sameOrigin(origin->second, header(req, "host")))
+        return error(403, "cross-origin request rejected");
+    return std::nullopt;
+}
+
 }  // namespace
+
+std::map<std::string, std::string> queryParams(const std::string& query)
+{
+    auto decode = [](const std::string& s) {
+        std::string out;
+        out.reserve(s.size());
+        for (size_t i = 0; i < s.size(); ++i) {
+            const char c = s[i];
+            if (c == '+') {
+                out += ' ';
+            } else if (c == '%' && i + 2 < s.size() && hexValue(s[i + 1]) >= 0 && hexValue(s[i + 2]) >= 0) {
+                out += static_cast<char>(hexValue(s[i + 1]) * 16 + hexValue(s[i + 2]));
+                i += 2;
+            } else {
+                out += c;
+            }
+        }
+        return out;
+    };
+    std::map<std::string, std::string> out;
+    size_t pos = 0;
+    while (pos <= query.size()) {
+        const size_t amp = std::min(query.find('&', pos), query.size());
+        const std::string part = query.substr(pos, amp - pos);
+        if (!part.empty()) {
+            const size_t eq = part.find('=');
+            if (eq == std::string::npos)
+                out[decode(part)] = "";
+            else
+                out[decode(part.substr(0, eq))] = decode(part.substr(eq + 1));
+        }
+        pos = amp + 1;
+    }
+    return out;
+}
 
 std::string stateJson(const Engine& engine, const RuntimeConfig& runtime, const char* type)
 {
@@ -400,9 +485,14 @@ std::string errorJson(const std::string& message) { return JsonWriter().add("err
 
 bool isApiPath(const std::string& path) { return path == "/api" || path.compare(0, 5, "/api/") == 0; }
 
-Response handleApi(const std::string& method, const std::string& path, const std::string& body, Engine& engine,
-                   RuntimeConfig& runtime, const std::string& www_dir)
+ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
 {
+    const std::string& method = request.method;
+    const std::string& path = request.path;
+    const std::string& body = request.body;
+    Engine& engine = context.engine;
+    RuntimeConfig& runtime = context.runtime;
+    const std::string& www_dir = context.www_dir;
     try {
         const bool get = method == "GET";
         if (path == "/api/state")
@@ -412,11 +502,17 @@ Response handleApi(const std::string& method, const std::string& path, const std
         if (path == "/api/filters") {
             if (get)
                 return json(200, filtersJson(runtime));
-            return method == "PUT" ? putFiltersRoute(body, runtime) : notAllowed("GET, PUT");
+            if (method != "PUT")
+                return notAllowed("GET, PUT");
+            if (auto rejected = rejectUnsafe(request))
+                return *rejected;
+            return putFiltersRoute(body, runtime);
         }
         if (path == "/api/filters/save-baseline") {
             if (method != "POST")
                 return notAllowed("POST");
+            if (auto rejected = rejectUnsafe(request))
+                return *rejected;
             try {
                 const std::string unsaved = runtime.promoteToBaseline();
                 return json(200, JsonWriter().add("ok", true).add("unsaved", unsaved).str());
@@ -429,6 +525,8 @@ Response handleApi(const std::string& method, const std::string& path, const std
         if (path == "/api/lists/allow" || path == "/api/lists/block") {
             if (method != "POST")
                 return notAllowed("POST");
+            if (auto rejected = rejectUnsafe(request))
+                return *rejected;
             return postListRoute(path == "/api/lists/allow" ? ListKind::allow : ListKind::block, body, engine,
                                  runtime);
         }

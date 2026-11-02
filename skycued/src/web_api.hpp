@@ -11,6 +11,7 @@
 
 #include <skycue/types.hpp>
 
+#include <map>
 #include <optional>
 #include <string>
 
@@ -37,20 +38,43 @@ std::string errorJson(const std::string& message);  // {"error":"..."}
 // listsJson).
 std::string eventJson(const EngineEvent& event);
 
-struct Response {
+struct ApiResponse {
     unsigned status = 200;
     std::string body;
     std::string content_type = "application/json";
     std::string allow;  // the Allow header of a 405
 };
 
+// One HTTP request as the API sees it.
+struct ApiRequest {
+    std::string method;                         // "GET", "PUT", ...
+    std::string path;                           // the target without the query
+    std::string query;                          // after '?' (without it), "" when none
+    std::map<std::string, std::string> headers;  // names lower-cased
+    std::string body;
+};
+
+// What the routes work on.
+struct ApiContext {
+    Engine& engine;
+    RuntimeConfig& runtime;
+    std::string www_dir;
+};
+
 // True for "/api" and every path under "/api/".
 bool isApiPath(const std::string& path);
 
-// Answers one /api/* request (`path` without the query). Changes go through
+// The query string "a=1&b=x%20y" as {a: "1", b: "x y"}: '+' is a space,
+// %XX escapes are decoded (a malformed one is kept as written); a key
+// without '=' has the value ""; of a repeated key the last wins.
+std::map<std::string, std::string> queryParams(const std::string& query);
+
+// Answers one /api/* request. A PUT or POST must have a Content-Type of
+// application/json (else 415) and, when it has an Origin header, one whose
+// host:port is the Host header's (else 403): a page from another site
+// cannot change the filters through a browser. Changes go through
 // RuntimeConfig::applyUi with origin "ui". Never throws.
-Response handleApi(const std::string& method, const std::string& path, const std::string& body, Engine& engine,
-                   RuntimeConfig& runtime, const std::string& www_dir);
+ApiResponse handleApi(const ApiRequest& request, ApiContext& context);
 
 // The file path under the www directory that a request target names: the
 // query is dropped, %XX escapes are decoded, "/" becomes "/index.html".

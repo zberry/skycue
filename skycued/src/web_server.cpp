@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -100,6 +101,13 @@ std::string endpointText(const tcp::socket& s)
 }
 
 template <class S> std::string toString(const S& view) { return std::string(view.data(), view.size()); }
+
+std::string lowerCase(std::string s)
+{
+    for (auto& ch : s)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return s;
+}
 
 }  // namespace
 
@@ -219,7 +227,18 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
             return;
         }
         if (webapi::isApiPath(path)) {
-            const auto r = webapi::handleApi(method, path, req.body(), srv->engine, srv->runtime, srv->cfg.www_dir);
+            webapi::ApiRequest api;
+            api.method = method;
+            api.path = path;
+            const std::string no_fragment = target.substr(0, target.find('#'));
+            const size_t q = no_fragment.find('?');
+            if (q != std::string::npos)
+                api.query = no_fragment.substr(q + 1);
+            for (const auto& field : req)
+                api.headers[lowerCase(toString(field.name_string()))] = toString(field.value());
+            api.body = std::move(req.body());
+            webapi::ApiContext ctx{srv->engine, srv->runtime, srv->cfg.www_dir};
+            const auto r = webapi::handleApi(api, ctx);
             if (r.status >= 500)
                 LOG_ERROR("web: " << method << " " << path << ": " << r.body);
             else if (method != "GET")

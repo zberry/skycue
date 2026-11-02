@@ -822,6 +822,14 @@ BOOST_AUTO_TEST_CASE(sigmet_text_only_stale_issuance_rejected)
     BOOST_TEST(st.apply(twgoText(11, 3, "AIRMET KCHI 010000 X", kT0 + 1min), kT0 + 1min).empty());
     BOOST_TEST(st.stats().stale_start == 3u);
     BOOST_TEST(*findTwgo(st.snapshot(), 3)->text == "AIRMET TANGO");
+
+    // Accept side across month and year ends: 312330 is an hour before the
+    // clock, in the previous month or year.
+    const TimePoint feb1 = iso("2015-02-01T00:30:00Z"), jan1 = iso("2015-01-01T00:30:00Z");
+    FisbStore m;
+    BOOST_TEST(m.apply(twgoText(12, 1, "WST KMKC 312330 CONVECTIVE SIGMET 1C", feb1), feb1).size() == 1u);
+    BOOST_TEST(m.apply(twgoText(12, 2, "WST KMKC 312330 CONVECTIVE SIGMET 2C", jan1), jan1).size() == 1u);
+    BOOST_TEST(m.stats().stale_start == 0u);
 }
 
 BOOST_AUTO_TEST_CASE(gairmet_start_hours_ahead_not_rejected)

@@ -4,6 +4,7 @@
 // snapshot of every track, and the events it emits as things happen.
 
 #include "filters.hpp"
+#include "fisb/fisb_store.hpp"
 
 #include <skycue/types.hpp>
 
@@ -25,6 +26,12 @@ struct EngineStats {
     uint64_t drops_timeout = 0, drops_filtered = 0, drops_source_lost = 0;
     uint64_t recorder_dropped_received = 0, recorder_dropped_sent = 0;  // Recorder::droppedRecords()
     uint32_t web_clients = 0;  // as set by Engine::setWebClientCount
+    // FIS-B (all 0 with FISB_ENABLE=no): uplinks fed to the decoder, products
+    // it decoded, uplinks that were not valid hex or not 432 bytes (or whose
+    // information frames overran), segment sets awaiting segments, and raster
+    // blocks held across every mosaic.
+    uint64_t fisb_uplinks = 0, fisb_products = 0, fisb_bad_frames = 0, fisb_segments_open = 0,
+             fisb_mosaic_blocks = 0;
 };
 
 // One track as the Engine sees it now.
@@ -47,22 +54,51 @@ struct Snapshot {
     FilterConfig filters{0, 0};
     size_t allow_entries = 0, block_entries = 0;
     EngineStats stats;
+    fisb::FisbSummary fisb;  // counts only; Engine::fisbSnapshot() has the products
 };
 
-enum class EventKind { update, observed, drop, expired, stats, filters_changed, lists_changed };
+enum class EventKind {
+    update,
+    observed,
+    drop,
+    expired,
+    stats,
+    filters_changed,
+    lists_changed,
+    fisb_text,     // a 413 text record, or a TWGO record without graphics, new or changed
+    fisb_shape,    // a TWGO record with graphics, new or changed
+    fisb_radar,    // a NEXRAD (63/64) mosaic was published
+    fisb_raster,   // another raster layer (70/71/84/90/91/103) was published
+    fisb_expired,  // a FIS-B item left the store, or a TWGO record was cancelled
+};
+
+// What a fisb_* event carries. Radar and raster events are notifications:
+// product, key, product time and block count, never the blocks (they are in
+// Engine::fisbSnapshot() and the fisb recording).
+struct FisbNotice {
+    uint16_t product = 0;
+    std::string key;  // the store key (fisb::textKey, TwgoKey::str(), Mosaic::key())
+    std::optional<std::chrono::system_clock::time_point> product_time;  // radar/raster; text: issued
+    std::size_t block_count = 0;                                        // radar/raster
+    std::string reason;  // fisb_expired: "expired" | "cancelled"
+    std::optional<std::chrono::system_clock::time_point> expires;  // the item's expiry (fisb_expired: when due)
+    std::optional<fisb::TextRecord> text;  // fisb_text from product 413
+    std::optional<fisb::TwgoRecord> twgo;  // fisb_text / fisb_shape from TWGO; fisb_expired "cancelled"
+};
 
 // update: `track` (the track just sent). observed: `track` (after an
 // observation with a position, whatever the decision: every track, forwarded
 // or not). drop: `id` and `reason` (any reason but shutdown). expired: `id`
 // (a track that was not being forwarded left the table: no drop is sent for
 // it, but an observer showing it should remove it). stats: `stats`.
-// filters_changed, lists_changed: nothing set.
+// filters_changed, lists_changed: nothing set. fisb_*: `fisb`.
 struct EngineEvent {
     EventKind kind = EventKind::stats;
     std::optional<TrackSnapshot> track;
     std::optional<skycue::TrackId> id;
     std::optional<skycue::DropReason> reason;
     std::optional<EngineStats> stats;
+    std::optional<FisbNotice> fisb;
 };
 
 }  // namespace skycued

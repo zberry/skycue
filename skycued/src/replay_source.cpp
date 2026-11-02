@@ -33,11 +33,15 @@ ReplaySource::ReplaySource(boost::asio::io_context& io, std::string path, double
         ++line_no;
         RecordingRecord record;
         const LineKind kind = parseRecordingLine(line, record);
-        if (kind == LineKind::ignore || (kind == LineKind::received && record.kind == RecordKind::uat_uplink))
+        if (kind == LineKind::ignore ||
+            (kind == LineKind::received && record.kind == RecordKind::uat_uplink && record.uplink_hex.empty()))
             continue;
         const bool ok = kind == LineKind::received || kind == LineKind::readsb_raw;
-        if (ok)
+        if (ok) {
+            if (record.kind != RecordKind::uat_uplink)
+                ++observations_;
             records_.push_back(std::move(record));
+        }
         if (!ok && ++skipped_ == 1)
             first_bad = line_no;
     }
@@ -69,6 +73,12 @@ ReplaySource::~ReplaySource() = default;  // alive_ goes first, so pending handl
 void ReplaySource::onObservation(std::function<void(const TrackObservation&)> handler)
 {
     on_observation_ = std::move(handler);
+}
+
+void ReplaySource::onUplink(
+    std::function<void(std::chrono::system_clock::time_point, const std::string& hex)> handler)
+{
+    on_uplink_ = std::move(handler);
 }
 
 void ReplaySource::onEnd(std::function<void()> handler) { on_end_ = std::move(handler); }
@@ -132,7 +142,10 @@ void ReplaySource::emitNext()
 {
     const RecordingRecord& record = records_[next_++];
     std::weak_ptr<char> alive = alive_;
-    if (on_observation_) {
+    if (record.kind == RecordKind::uat_uplink) {
+        if (on_uplink_)
+            on_uplink_(record.time + loop_shift_ * static_cast<int64_t>(pass_), record.uplink_hex);
+    } else if (on_observation_) {
         if (pass_ == 0) {
             on_observation_(record.obs);
         } else {
@@ -156,6 +169,10 @@ ReplayObservationSource::ReplayObservationSource(boost::asio::io_context& io, st
         if (on_observation_)
             on_observation_(obs);
     });
+    replay_->onUplink([this](std::chrono::system_clock::time_point when, const std::string& hex) {
+        if (on_uplink_)
+            on_uplink_(when, hex);
+    });
     replay_->onEnd([this] {
         LOG_INFO("replay: end of file");
         if (on_connection_)
@@ -171,6 +188,12 @@ void ReplayObservationSource::onObservation(std::function<void(const TrackObserv
 void ReplayObservationSource::onConnection(std::function<void(bool)> handler)
 {
     on_connection_ = std::move(handler);
+}
+
+void ReplayObservationSource::onUplink(
+    std::function<void(std::chrono::system_clock::time_point, const std::string& hex)> handler)
+{
+    on_uplink_ = std::move(handler);
 }
 
 void ReplayObservationSource::start()

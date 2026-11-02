@@ -1,7 +1,8 @@
 #pragma once
 
 // Reassembly of segmented APDUs (docs/fisb-reference.md §2.1; design §10.4).
-// A set is keyed on (product ID, product file ID). Segments may arrive in
+// A set is keyed on (ground station, product ID, product file ID): file IDs
+// are per station, so two stations' sets never mix. Segments may arrive in
 // any order and over several broadcast cycles; a repeated segment is
 // ignored. When every slot is filled the payloads are joined: segment 1
 // whole, then each later segment minus its first 6 bytes when the product
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -40,7 +42,10 @@ public:
     // count 0, or a TWGO segment > 1 shorter than the repeated header).
     // A segment whose count differs from its open set's restarts the set.
     // When a new set would exceed the cap, the oldest open set is evicted.
-    std::optional<Done> add(const ApduHeader& h, const uint8_t* p, std::size_t n, TimePoint now);
+    // station identifies the sending ground station (any stable value, e.g.
+    // FisbDecoder's stationKey(); 0 when unknown).
+    std::optional<Done> add(const ApduHeader& h, const uint8_t* p, std::size_t n, TimePoint now,
+                            uint64_t station = 0);
 
     // Drops sets whose first segment arrived more than timeout before now.
     // Returns how many were dropped (also added to timedOut()).
@@ -60,7 +65,7 @@ private:
         std::vector<std::optional<std::vector<uint8_t>>> slots;
         std::size_t filled = 0;
     };
-    using Key = std::pair<uint16_t, uint16_t>;  // (product_id, file id)
+    using Key = std::tuple<uint64_t, uint16_t, uint16_t>;  // (station, product_id, file id)
 
     void evictOldest();
 

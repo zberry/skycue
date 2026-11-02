@@ -28,6 +28,7 @@ const std::vector<std::string>& knownConfigKeys()
         "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
         "RECORD_RAW",  // used by skycue-start.sh only (it launches skycue-rawrec)
         "WEB_BIND",        "RECORD_MAX_GB",     "TRAIL_SECONDS",
+        "FISB_ENABLE",     "FISB_EXPERIMENTAL",
     };
     return keys;
 }
@@ -140,6 +141,19 @@ public:
         return true;
     }
 
+    void yesNo(const std::string& key, bool& out) const
+    {
+        auto e = find(key);
+        if (!e)
+            return;
+        if (e->value == "yes")
+            out = true;
+        else if (e->value == "no")
+            out = false;
+        else
+            fail(key, key + " must be yes or no, got '" + e->value + "'");
+    }
+
     // allow_zero: 0 is accepted too (it means "off" for that key).
     void port(const std::string& key, uint16_t& out, bool allow_zero = false) const
     {
@@ -247,6 +261,9 @@ Config parseConfigText(const std::string& text, const std::string& name)
                                            conv.find("TRAIL_SECONDS")->value + "'");
         c.trail_seconds = static_cast<int>(trail);
     }
+
+    conv.yesNo("FISB_ENABLE", c.fisb_enable);
+    conv.yesNo("FISB_EXPERIMENTAL", c.fisb_experimental);
 
     conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
     conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);

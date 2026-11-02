@@ -212,3 +212,20 @@ target_compile_definitions(test_fisb_blocks PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_fisb_blocks)
 add_test(NAME fisb_blocks COMMAND test_fisb_blocks)
+
+# FisbStore on a fake clock (design §10).
+add_executable(test_fisb_store test_fisb_store.cpp)
+target_link_libraries(test_fisb_store PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_fisb_store PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_fisb_store)
+add_test(NAME fisb_store COMMAND test_fisb_store)
+
+# FisbDecoder end to end, Engine/Recorder/replay integration.
+add_executable(test_fisb_decoder test_fisb_decoder.cpp)
+target_link_libraries(test_fisb_decoder PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB
+  Threads::Threads)
+target_compile_definitions(test_fisb_decoder PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_fisb_decoder)
+add_test(NAME fisb_decoder COMMAND test_fisb_decoder)
+set_tests_properties(fisb_decoder PROPERTIES TIMEOUT 120)

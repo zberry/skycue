@@ -57,13 +57,14 @@ const char* listName(ListKind list) { return list == ListKind::allow ? "allow" :
 
 EngineEvent kindEvent(EventKind kind)
 {
-    return EngineEvent{kind, std::nullopt, std::nullopt, std::nullopt, std::nullopt};
+    return EngineEvent{kind, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt};
 }
 
 }  // namespace
 
 Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_ptr<ObservationSource> source,
-               std::unique_ptr<Dump978RawSource> uat, Forwarder& forwarder, Recorder* received, Recorder* sent)
+               std::unique_ptr<Dump978RawSource> uat, Forwarder& forwarder, Recorder* received, Recorder* sent,
+               Recorder* fisb)
     : io_(io),
       config_(config),
       source_(std::move(source)),
@@ -71,6 +72,7 @@ Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_pt
       forwarder_(forwarder),
       received_(received),
       sent_(sent),
+      fisb_rec_(fisb),
       filters_(makeFilters(config_)),
       thresholds_(makeThresholds(config_)),
       track_timeout_(std::max<long long>(1, std::llround(config_.track_timeout_s))),
@@ -82,10 +84,19 @@ Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_pt
         throw std::invalid_argument("Engine: a source is required");
     source_->onObservation([this](const TrackObservation& obs) { handleObservation(obs); });
     source_->onConnection([this](bool up) { handleConnection(up); });
+    if (config_.fisb_enable) {
+        fisb_decoder_ = std::make_unique<fisb::FisbDecoder>(config_.fisb_experimental);
+        fisb_decoder_->onProduct([this](const fisb::FisbProduct& p) {
+            auto events = fisb_store_.apply(p, dataNow());
+            handleFisbEvents(events);
+        });
+    }
+    source_->onUplink([this](std::chrono::system_clock::time_point when, const std::string& hex) {
+        handleUplink(when, hex);
+    });
     if (uat_) {
         uat_->onUplink([this](std::chrono::system_clock::time_point when, const std::string& hex) {
-            if (!stopped_ && received_)
-                received_->writeUplink(when, hex);
+            handleUplink(when, hex);
         });
         uat_->onConnection([this](bool up) { uat_connected_ = up; });
     }
@@ -169,6 +180,8 @@ void Engine::stop()
         received_->flush();
     if (sent_)
         sent_->flush();
+    if (fisb_rec_)
+        fisb_rec_->flush();
     LOG_INFO("stopping: " << shutdown_drops << " shutdown drops; " << statsLine());
 }
 
@@ -183,6 +196,69 @@ void Engine::handleObservation(const TrackObservation& obs)
     if (received_)
         received_->writeObservation(obs);
     process(table_.apply(obs), last_obs_steady_, obs.lat.has_value());
+}
+
+void Engine::handleUplink(std::chrono::system_clock::time_point when, const std::string& hex)
+{
+    if (stopped_)
+        return;
+    if (received_)
+        received_->writeUplink(when, hex);
+    if (!fisb_decoder_)
+        return;
+    // An uplink moves the data clock forward (never back), so a recording of
+    // uplinks alone still has its own clock.
+    if (!have_data_clock_ || when > dataNow()) {
+        have_data_clock_ = true;
+        last_obs_time_ = when;
+        last_obs_steady_ = steady::now();
+    }
+    fisb_decoder_->feed(when, hex);
+}
+
+void Engine::handleFisbEvents(std::vector<fisb::FisbEvent>& events)
+{
+    if (events.empty() || stopped_)
+        return;
+    const auto now = dataNow();
+    for (const auto& e : events) {
+        if (fisb_rec_)
+            fisb_rec_->writeFisb(e, now);
+        if (!sink_)
+            continue;
+        FisbNotice n;
+        n.product = e.product;
+        n.key = e.key;
+        n.reason = e.reason;
+        n.expires = e.expires;
+        EventKind kind = EventKind::fisb_expired;
+        switch (e.kind) {
+        case fisb::FisbEvent::Kind::text:
+            kind = EventKind::fisb_text;
+            n.text = e.text;
+            if (e.text)
+                n.product_time = e.text->issued;
+            break;
+        case fisb::FisbEvent::Kind::twgo:
+            kind = e.twgo && e.twgo->has_graphics ? EventKind::fisb_shape : EventKind::fisb_text;
+            n.twgo = e.twgo;
+            break;
+        case fisb::FisbEvent::Kind::radar:
+        case fisb::FisbEvent::Kind::raster:
+            kind = e.kind == fisb::FisbEvent::Kind::radar ? EventKind::fisb_radar : EventKind::fisb_raster;
+            if (e.mosaic) {
+                n.product_time = e.mosaic->product_time;
+                n.block_count = e.mosaic->blocks.size();
+            }
+            break;
+        case fisb::FisbEvent::Kind::expired:
+            n.twgo = e.twgo;
+            break;
+        }
+        EngineEvent ev = kindEvent(kind);
+        ev.fisb = std::move(n);
+        emit(ev);
+    }
 }
 
 void Engine::process(TrackState& state, steady::time_point now, bool positioned)
@@ -409,10 +485,18 @@ void Engine::tick()
             emitDrop(id, reason);
         }
     }
+    if (fisb_decoder_ && have_data_clock_) {
+        const auto now = dataNow();
+        fisb_decoder_->sweep(now);
+        auto events = fisb_store_.sweep(now);
+        handleFisbEvents(events);
+    }
     if (received_)
         received_->flush();
     if (sent_)
         sent_->flush();
+    if (fisb_rec_)
+        fisb_rec_->flush();
     if (sink_) {
         EngineEvent ev = kindEvent(EventKind::stats);
         ev.stats = stats();
@@ -474,6 +558,14 @@ EngineStats Engine::stats() const
     s.recorder_dropped_received = received_ ? received_->droppedRecords() : 0;
     s.recorder_dropped_sent = sent_ ? sent_->droppedRecords() : 0;
     s.web_clients = web_clients_;
+    if (fisb_decoder_) {
+        const auto& c = fisb_decoder_->counters();
+        s.fisb_uplinks = c.uplinks;
+        s.fisb_products = c.products;
+        s.fisb_bad_frames = c.bad_hex + c.bad_frames;
+        s.fisb_segments_open = c.segments_open;
+        s.fisb_mosaic_blocks = fisb_store_.mosaicBlocks();
+    }
     return s;
 }
 
@@ -503,7 +595,14 @@ Snapshot Engine::snapshot() const
     s.allow_entries = filters_.allow().size();
     s.block_entries = filters_.block().size();
     s.stats = stats();
+    if (fisb_decoder_)
+        s.fisb = fisb_store_.summary(s.now);
     return s;
+}
+
+fisb::FisbSnapshot Engine::fisbSnapshot() const
+{
+    return fisb_decoder_ ? fisb_store_.snapshot() : fisb::FisbSnapshot{};
 }
 
 std::string Engine::statsLine() const

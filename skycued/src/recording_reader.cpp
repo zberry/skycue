@@ -38,6 +38,7 @@ LineKind parseRecordingLine(const std::string& line, RecordingRecord& out)
         out = RecordingRecord{};
         out.time = *time;
         out.kind = RecordKind::uat_uplink;
+        out.uplink_hex = record->getString("uplink_hex").value_or("");
         return LineKind::received;
     }
     if (type == "obs") {

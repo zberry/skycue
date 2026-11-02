@@ -37,6 +37,9 @@ public:
     // true when the source is (re)connected, false when it is lost (a
     // finished replay counts as lost).
     virtual void onConnection(std::function<void(bool)> handler) = 0;
+    // UAT uplinks the source carries (a replay's "uat_uplink" records), with
+    // their receive time and payload hex. Most sources have none.
+    virtual void onUplink(std::function<void(std::chrono::system_clock::time_point, const std::string& hex)>) {}
     virtual void start() = 0;
     virtual void stop() = 0;
 };

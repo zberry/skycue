@@ -35,3 +35,19 @@
 The 2015 dump978 sample (`+hex;` / `-hex;` lines, no timestamps; 704 uplinks
 from one ground station) is `../raw/uat-sample.txt.gz`. See
 `docs/fisb-reference.md` §9.
+
+## received-with-uplinks.jsonl
+
+- **What it is:** a received-stream recording with FIS-B, for replay tests
+  (`test_fisb_decoder/replay_decodes_uplinks_on_recording_clock`,
+  `recording_fisb_stream_written`) and the later UI tests. 1065 lines,
+  about 820 kB: the 704 uplinks of `../raw/uat-sample.txt.gz` as
+  `"type":"uat_uplink"` records at 1 Hz from `2015-01-24T04:12:00.000Z`
+  (the sample's NEXRAD is from 04:10 and its METARs from about 03:53 that
+  day, so everything stays inside its lifetime for the whole file), and the
+  first 30 s of `../readsb-sample.jsonl` (361 readsb JSON-port lines,
+  unchanged except their `"now"`, moved onto the same 2015 clock), in time
+  order.
+- **How it is made:** `python3 gen_received_with_uplinks.py` (deterministic,
+  no arguments; rerun it after changing either input). Derived from the
+  BSD-2-Clause dump978 sample and the repository's own synthetic readsb data.

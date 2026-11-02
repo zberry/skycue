@@ -41,6 +41,16 @@
 // after a live change is applied and recorded but before the drops and
 // updates it causes. Fired synchronously on the io thread; never after stop().
 //
+// FIS-B (FISB_ENABLE=yes, the default): every uplink, from dump978's raw port
+// or from a replay's "uat_uplink" records, is recorded in the received
+// stream, moves the data clock forward when it is newer, and is fed to a
+// FisbDecoder with its own receive time as the reference time; the products
+// go to a FisbStore at the data clock. The 1 s tick sweeps both on the data
+// clock (so a replay of 2015 uplinks keeps 2015 products for their 2015
+// lifetimes). Each FisbEvent becomes one fisb-stream record (Recorder::
+// writeFisb, "time" = the data clock) and one fisb_text / fisb_shape /
+// fisb_radar / fisb_raster / fisb_expired event (FisbNotice).
+//
 // Threading: lives on the caller's io_context; call everything (including
 // every method below) from its thread. The Forwarder and the recorders must
 // outlive the Engine.
@@ -55,6 +65,8 @@
 #include "track_table.hpp"
 
 #include "change_detector.hpp"
+#include "fisb/fisb_decoder.hpp"
+#include "fisb/fisb_store.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -71,9 +83,11 @@ class Engine {
 public:
     // Loads the allow/block lists named in the config: throws
     // std::runtime_error when one cannot be read or parsed, or when the
-    // receiver position is missing. `uat` may be null; so may the recorders.
+    // receiver position is missing. `uat` may be null; so may the recorders
+    // (`fisb` is the "fisb" stream).
     Engine(boost::asio::io_context& io, const Config& config, std::unique_ptr<ObservationSource> source,
-           std::unique_ptr<Dump978RawSource> uat, Forwarder& forwarder, Recorder* received, Recorder* sent);
+           std::unique_ptr<Dump978RawSource> uat, Forwarder& forwarder, Recorder* received, Recorder* sent,
+           Recorder* fisb = nullptr);
     ~Engine();
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
@@ -95,6 +109,8 @@ public:
     // Every track in the table with its filter decision now, the filters and
     // the stats. Changes nothing.
     Snapshot snapshot() const;
+    // The current FIS-B products (empty with FISB_ENABLE=no).
+    fisb::FisbSnapshot fisbSnapshot() const;
 
     // Live changes (see the top of this file). `origin` names who made the
     // change in the record ("ui", say). Ignored after stop().
@@ -119,6 +135,8 @@ public:
 private:
     void handleObservation(const TrackObservation& obs);
     void handleConnection(bool up);
+    void handleUplink(std::chrono::system_clock::time_point when, const std::string& hex);
+    void handleFisbEvents(std::vector<fisb::FisbEvent>& events);
     // `positioned`: the observation carried a position (an observed event follows).
     void process(TrackState& state, std::chrono::steady_clock::time_point now, bool positioned);
     void decide(TrackState& state, std::chrono::steady_clock::time_point now);
@@ -144,6 +162,9 @@ private:
     Forwarder& forwarder_;
     Recorder* received_;
     Recorder* sent_;
+    Recorder* fisb_rec_;
+    std::unique_ptr<fisb::FisbDecoder> fisb_decoder_;  // null with FISB_ENABLE=no
+    fisb::FisbStore fisb_store_;
 
     FilterSet filters_;
     Thresholds thresholds_;

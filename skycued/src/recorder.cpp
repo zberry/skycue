@@ -1,5 +1,8 @@
 #include "recorder.hpp"
 
+#include "fisb/fisb_json.hpp"
+#include "fisb/fisb_store.hpp"
+
 #include "log.hpp"
 #include "retention.hpp"
 #include "rotating_file.hpp"
@@ -648,9 +651,12 @@ Recorder::Recorder(RecorderConfig config, std::string stream_name)
     : config_(std::move(config)), stream_(std::move(stream_name)),
       backoff_(config_.reopen_initial, config_.reopen_max)
 {
-    if (stream_ != "received" && stream_ != "sent")
-        throw std::invalid_argument("recorder: stream must be \"received\" or \"sent\", not \"" + stream_ + "\"");
+    if (stream_ != "received" && stream_ != "sent" && stream_ != "fisb")
+        throw std::invalid_argument("recorder: stream must be \"received\", \"sent\" or \"fisb\", not \"" +
+                                    stream_ + "\"");
     sent_ = stream_ == "sent";
+    if (stream_ == "fisb")
+        config_.csv = false;  // FIS-B is recorded as JSONL only
     if ((config_.jsonl || config_.csv) && !openFiles())
         throw std::runtime_error("recorder: cannot create " + stream_ + " files under \"" + config_.dir +
                                  "\": " + std::strerror(errno));
@@ -781,11 +787,41 @@ bool Recorder::streamsGood() const
 
 void Recorder::write(const Record& record)
 {
-    if (!config_.jsonl && !config_.csv)
+    if (!beginWrite())
         return;
+    if (config_.jsonl) {
+        const std::string line = recording::jsonLine(record);
+        jsonl_ << line;
+        jsonl_bytes_ += line.size();
+    }
+    if (config_.csv) {
+        const std::string line = recording::csvRow(sent_ ? recording::sentColumns() : recording::receivedColumns(),
+                                                   record);
+        csv_ << line;
+        csv_bytes_ += line.size();
+    }
+    endWrite();
+}
+
+void Recorder::writeFisb(const fisb::FisbEvent& event, std::chrono::system_clock::time_point time)
+{
+    if (!beginWrite())
+        return;
+    if (config_.jsonl) {
+        const std::string line = fisb::eventRecordJson(event, time) + '\n';
+        jsonl_ << line;
+        jsonl_bytes_ += line.size();
+    }
+    endWrite();
+}
+
+bool Recorder::beginWrite()
+{
+    if (!config_.jsonl && !config_.csv)
+        return false;
     if (backoff_.waiting()) {
         ++dropped_;
-        return;
+        return false;
     }
     if (!open_ || rotationDue()) {
         closeFiles();
@@ -798,7 +834,7 @@ void Recorder::write(const Record& record)
         if (!opened) {
             fail("cannot create files under \"" + config_.dir + "\": " + std::strerror(err));
             ++dropped_;
-            return;
+            return false;
         }
         if (!reuse)
             enforceRetention();
@@ -806,19 +842,13 @@ void Recorder::write(const Record& record)
     if (fail_writes_for_test_) {
         fail("writing " + stem_ + " failed (test)");
         ++dropped_;
-        return;
+        return false;
     }
-    if (config_.jsonl) {
-        const std::string line = recording::jsonLine(record);
-        jsonl_ << line;
-        jsonl_bytes_ += line.size();
-    }
-    if (config_.csv) {
-        const std::string line = recording::csvRow(sent_ ? recording::sentColumns() : recording::receivedColumns(),
-                                                   record);
-        csv_ << line;
-        csv_bytes_ += line.size();
-    }
+    return true;
+}
+
+void Recorder::endWrite()
+{
     // While recovering, flush every record: the streak ends only once a
     // flush has really reached the files.
     if (++unflushed_ >= kFlushEveryRecords || backoff_.failing())

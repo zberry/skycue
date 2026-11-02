@@ -28,6 +28,10 @@
 
 namespace skycued {
 
+namespace fisb {
+struct FisbEvent;
+}
+
 namespace recording {
 // One present value of a record (absent optionals produce no Field).
 struct Field {
@@ -74,8 +78,9 @@ public:
     // one extra pair per stream.
     static constexpr std::chrono::seconds kReopenInterval{5};  // default reopen_initial
 
-    // stream_name is "received" or "sent" (it picks the CSV columns);
-    // anything else throws std::invalid_argument. Throws std::runtime_error
+    // stream_name is "received" or "sent" (it picks the CSV columns), or
+    // "fisb" (JSONL only: config.csv is ignored); anything else throws
+    // std::invalid_argument. Throws std::runtime_error
     // when the directory cannot be created or a file cannot be opened.
     Recorder(RecorderConfig config, std::string stream_name);
     ~Recorder();
@@ -91,6 +96,11 @@ public:
     void writeTrack(const skycue::Track& track, const char* event /* "update" | "keyframe" */);
     void writeDrop(skycue::TrackId id, skycue::DropReason reason);
     void writeFilterChange(const std::string& description);
+
+    // FIS-B stream: one record per published mosaic, text record, TWGO record
+    // and expiry/cancel (fisb::eventRecordJson; docs/recording-format.md).
+    // `time` is the Engine's data clock.
+    void writeFisb(const fisb::FisbEvent& event, std::chrono::system_clock::time_point time);
 
     void flush();
     // Path of the file currently written for "jsonl" or "csv" (a leading '.'
@@ -111,6 +121,8 @@ private:
     bool streamsGood() const;
     void flushStreams();
     void write(const std::vector<recording::Field>& record);
+    bool beginWrite();  // false: the record is dropped (counted) or nothing is recorded
+    void endWrite();
     // New files with a fresh name, or (reuse) stem_ again, appended to; false
     // (errno set) on failure.
     bool openFiles(bool reuse = false);

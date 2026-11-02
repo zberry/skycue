@@ -450,6 +450,12 @@ std::string eventJson(const EngineEvent& event)
     case EventKind::filters_changed:
     case EventKind::lists_changed:
         break;
+    case EventKind::fisb_text:  // FIS-B on /ws comes with the FIS-B routes (phase 4, Task 6)
+    case EventKind::fisb_shape:
+    case EventKind::fisb_radar:
+    case EventKind::fisb_raster:
+    case EventKind::fisb_expired:
+        break;
     }
     return std::string();
 }

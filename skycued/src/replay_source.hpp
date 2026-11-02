@@ -7,7 +7,9 @@
 // The whole file is read at construction (recordings are bounded by the
 // recorder's rotation). Lines that are not JSON objects, "obs" records that
 // do not parse, and unknown record types are counted, skipped, and reported
-// in one WARN per file; "uat_uplink" records are skipped silently.
+// in one WARN per file. "uat_uplink" records are played too, paced with the
+// observations, through onUplink with their recorded "time" (shifted like
+// observations in loop mode); one without "uplink_hex" is skipped silently.
 //
 // A line that is a readsb JSON-port aircraft object (a numeric "now" and no
 // "time", as in tests/fixtures/readsb-sample.jsonl) is read with
@@ -47,10 +49,12 @@ public:
     ReplaySource& operator=(const ReplaySource&) = delete;
 
     void onObservation(std::function<void(const TrackObservation&)> handler);
+    void onUplink(std::function<void(std::chrono::system_clock::time_point, const std::string& hex)> handler);
     void onEnd(std::function<void()> handler);  // only when loop == false
     void start();                               // once
 
-    std::size_t recordCount() const { return records_.size(); }  // observations loaded
+    std::size_t recordCount() const { return observations_; }    // observations loaded
+    std::size_t uplinkCount() const { return records_.size() - observations_; }  // uplinks loaded
     std::size_t skippedLines() const { return skipped_; }        // bad lines (not uplinks or blanks)
 
 private:
@@ -62,11 +66,13 @@ private:
     std::string path_;
     double speed_;
     bool loop_;
-    std::vector<RecordingRecord> records_;  // obs records only
+    std::vector<RecordingRecord> records_;  // obs and uat_uplink records, in file order
+    std::size_t observations_ = 0;
     std::size_t skipped_ = 0;
     std::chrono::system_clock::duration loop_shift_{};  // added per completed pass
 
     std::function<void(const TrackObservation&)> on_observation_;
+    std::function<void(std::chrono::system_clock::time_point, const std::string&)> on_uplink_;
     std::function<void()> on_end_;
 
     std::size_t next_ = 0;   // index into records_
@@ -87,6 +93,7 @@ public:
 
     void onObservation(std::function<void(const TrackObservation&)> handler) override;
     void onConnection(std::function<void(bool)> handler) override;
+    void onUplink(std::function<void(std::chrono::system_clock::time_point, const std::string& hex)> handler) override;
     void start() override;
     void stop() override;
 
@@ -97,6 +104,7 @@ private:
     std::size_t count_ = 0;
     std::function<void(const TrackObservation&)> on_observation_;
     std::function<void(bool)> on_connection_;
+    std::function<void(std::chrono::system_clock::time_point, const std::string&)> on_uplink_;
     bool started_ = false;
 };
 

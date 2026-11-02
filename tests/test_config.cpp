@@ -357,6 +357,21 @@ BOOST_AUTO_TEST_CASE(web_bind_record_max_gb_trail_seconds)
     BOOST_TEST(contains(e.what(), "WEB_BIND"));
 }
 
+BOOST_AUTO_TEST_CASE(fisb_enable_and_experimental)
+{
+    Config c = parseConfigText(kLatLon, "t");
+    BOOST_TEST(c.fisb_enable);
+    BOOST_TEST(!c.fisb_experimental);
+    c = parseConfigText(std::string(kLatLon) + "FISB_ENABLE=no\nFISB_EXPERIMENTAL=yes\n", "t");
+    BOOST_TEST(!c.fisb_enable);
+    BOOST_TEST(c.fisb_experimental);
+    for (const char* line : {"FISB_ENABLE=1", "FISB_ENABLE=", "FISB_EXPERIMENTAL=true"}) {
+        ConfigError e = expectError(std::string(kLatLon) + line + "\n");
+        BOOST_TEST(e.line == 3, line);
+        BOOST_TEST(contains(e.what(), "yes or no"), line);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(known_keys_match_example)
 {
     std::string text = readExample();

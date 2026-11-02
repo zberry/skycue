@@ -169,7 +169,7 @@ int main(int argc, char** argv)
         std::chrono::milliseconds(std::max<long long>(1, std::llround(config.keyframe_interval_s * 1000)));
     Forwarder forwarder(io, fc);
 
-    std::unique_ptr<Recorder> received, sent;
+    std::unique_ptr<Recorder> received, sent, fisb;
     if (!config.record_dir.empty()) {
         RecorderConfig rc;
         rc.dir = config.record_dir;
@@ -182,6 +182,8 @@ int main(int argc, char** argv)
         try {
             received = std::make_unique<Recorder>(rc, "received");
             sent = std::make_unique<Recorder>(rc, "sent");
+            if (config.fisb_enable && rc.jsonl)  // FIS-B is recorded as JSONL only
+                fisb = std::make_unique<Recorder>(rc, "fisb");
         } catch (const std::exception& e) {
             std::cerr << "skycued: recording: " << e.what() << "\n";
             return 1;
@@ -205,7 +207,7 @@ int main(int argc, char** argv)
     std::unique_ptr<Engine> engine;
     try {
         engine = std::make_unique<Engine>(io, config, std::move(source), std::move(uat), forwarder, received.get(),
-                                          sent.get());
+                                          sent.get(), fisb.get());
     } catch (const std::exception& e) {
         std::cerr << "skycued: " << config_path << ": " << e.what() << "\n";
         return 2;
@@ -287,5 +289,7 @@ int main(int argc, char** argv)
         received->flush();
     if (sent)
         sent->flush();
+    if (fisb)
+        fisb->flush();
     return 0;
 }

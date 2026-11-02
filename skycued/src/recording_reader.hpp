@@ -35,6 +35,7 @@ struct RecordingRecord {
     bool keyframe_flag = false;      // update/keyframe: "keyframe"
     std::string drop_reason;         // drop: one of the DropReason names
     std::string note;                // filter_change: "note"
+    std::string uplink_hex;          // uat_uplink: "uplink_hex" (empty when absent)
     std::size_t file = 0;            // index of the input file; set by the reader of the files
 };
 

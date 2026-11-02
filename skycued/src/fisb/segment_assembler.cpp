@@ -4,7 +4,7 @@ namespace skycued {
 namespace fisb {
 
 std::optional<SegmentAssembler::Done> SegmentAssembler::add(const ApduHeader& h, const uint8_t* p, std::size_t n,
-                                                            TimePoint now)
+                                                            TimePoint now, uint64_t station)
 {
     if (!p)
         n = 0;
@@ -18,7 +18,7 @@ std::optional<SegmentAssembler::Done> SegmentAssembler::add(const ApduHeader& h,
         return std::nullopt;
     }
 
-    const Key key{h.product_id, h.apdu_number};
+    const Key key{station, h.product_id, h.apdu_number};
     auto it = sets_.find(key);
     if (it != sets_.end() && it->second.slots.size() != h.segment_count) {
         sets_.erase(it);  // the product file changed shape: start again

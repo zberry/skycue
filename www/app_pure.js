@@ -133,6 +133,21 @@
 
   function graticuleStep(zoom) { return zoom < 6 ? 5 : 1; }
 
+  // Map tiles: the ancestor `n` levels up of XYZ tile z/x/y (n >= 1, at
+  // most z), and where the child sits in it. Drawn `scale` times its size
+  // and shifted by (-offsetX, -offsetY) child tiles, the parent covers
+  // exactly the child's square. null when there is no such ancestor.
+  // x wraps around the world as Leaflet's tile coordinates may not.
+  function parentTile(z, x, y, n) {
+    if (!(n >= 1) || n > z || n !== Math.floor(n) || z !== Math.floor(z)) return null;
+    var size = Math.pow(2, z);
+    if (y < 0 || y >= size) return null;
+    x = ((x % size) + size) % size;
+    var scale = Math.pow(2, n);
+    var px = Math.floor(x / scale), py = Math.floor(y / scale);
+    return { z: z - n, x: px, y: py, scale: scale, offsetX: x - px * scale, offsetY: y - py * scale };
+  }
+
   // A drop for `filtered` only stops forwarding: the aircraft is still
   // observed (and shown, recoloured). Any other reason ends the track.
   function dropRemovesMarker(reason) { return reason !== 'filtered'; }
@@ -301,7 +316,8 @@
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
     decisionColor: decisionColor, formatAlt: formatAlt, formatNum: formatNum, formatAge: formatAge,
     thousands: thousands, trackKey: trackKey, markerLabel: markerLabel, listHas: listHas,
-    sortTracks: sortTracks, graticuleStep: graticuleStep, dropRemovesMarker: dropRemovesMarker,
+    sortTracks: sortTracks, graticuleStep: graticuleStep, parentTile: parentTile,
+    dropRemovesMarker: dropRemovesMarker,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,

@@ -67,6 +67,64 @@
   var RX_SVG = '<svg width="18" height="18" viewBox="-9 -9 18 18" aria-hidden="true">' +
     '<circle r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><circle r="2" fill="currentColor"/></svg>';
 
+  // Offline tiles may come from several make-tiles.sh regions with different
+  // zoom ranges (a coarse whole world, finer areas). Where the zoom shown
+  // has no tile, this layer shows the nearest lower-zoom ancestor that
+  // exists, enlarged and cropped to the square (P.parentTile), instead of a
+  // blank one. Each tile is a div clipping one img; URLs that failed are
+  // remembered, so later tiles go straight to a level that has them.
+  var tileLayer = null;
+  var tileMissing = new Set();
+  var tileCounts = { loaded: 0, fallback: 0, failed: 0 };
+  var FallbackTileLayer = L.TileLayer.extend({
+    createTile: function (coords, done) {
+      var layer = this;
+      var size = this.getTileSize();
+      var minZ = this.options.fallbackMinZoom || 0;
+      var tile = document.createElement('div');
+      var img = document.createElement('img');
+      tile.style.overflow = 'hidden';
+      tile.complete = false; // Leaflet's _abortLoading drops tiles not yet complete
+      img.alt = '';
+      img.setAttribute('role', 'presentation');
+      img.style.position = 'absolute';
+      tile.appendChild(img);
+      function finish(err, p) {
+        tile.complete = true;
+        if (err) {
+          tileCounts.failed++;
+        } else if (p.scale > 1) {
+          tileCounts.fallback++;
+          tile.classList.add('tile-fallback');
+          tile.setAttribute('data-fallback-zoom', String(p.z));
+        } else {
+          tileCounts.loaded++;
+        }
+        done(err, tile);
+      }
+      function tryLevel(n) {
+        var p = n === 0 ? { z: coords.z, x: coords.x, y: coords.y, scale: 1, offsetX: 0, offsetY: 0 }
+          : P.parentTile(coords.z, coords.x, coords.y, n);
+        if (!p || p.z < minZ) {
+          // Asynchronously: Leaflet registers the tile after createTile returns.
+          setTimeout(function () { finish(new Error('no tile at or below zoom ' + coords.z)); }, 0);
+          return;
+        }
+        var url = L.Util.template(layer._url, { z: p.z, x: p.x, y: p.y });
+        if (tileMissing.has(url)) { tryLevel(n + 1); return; }
+        img.style.width = size.x * p.scale + 'px';
+        img.style.height = size.y * p.scale + 'px';
+        img.style.left = -p.offsetX * size.x + 'px';
+        img.style.top = -p.offsetY * size.y + 'px';
+        img.onload = function () { finish(null, p); };
+        img.onerror = function () { tileMissing.add(url); tryLevel(n + 1); };
+        img.src = url;
+      }
+      tryLevel(0);
+      return tile;
+    }
+  });
+
   function initMap(tiles) {
     haveTiles = !!(tiles && tiles.tiles);
     map = L.map('map', {
@@ -77,8 +135,12 @@
       worldCopyJump: false
     }).setView([0, 0], 3);
     if (haveTiles) {
-      L.tileLayer('tiles/{z}/{x}/{y}.png', {
-        minZoom: typeof tiles.minZoom === 'number' ? tiles.minZoom : 0,
+      var tileMinZoom = typeof tiles.minZoom === 'number' ? tiles.minZoom : 0;
+      tileLayer = new FallbackTileLayer('tiles/{z}/{x}/{y}.png', {
+        minZoom: tileMinZoom,
+        fallbackMinZoom: tileMinZoom,
+        // The overall top zoom of all regions; elsewhere FallbackTileLayer
+        // enlarges the region tiles below it.
         maxNativeZoom: typeof tiles.maxZoom === 'number' ? tiles.maxZoom : 10,
         maxZoom: 14,
         attribution: 'Made with Natural Earth' // scripts/make-tiles.sh
@@ -1483,6 +1545,12 @@
       return out;
     },
     radarBounds: function (w) { return radar[w] && radar[w].drawn ? radar[w].drawn.bounds : null; },
+    // Map tiles: how many showed their own image, an enlarged ancestor
+    // (fallback) or nothing; null without tiles.
+    tileCounts: function () {
+      return tileLayer ? { loaded: tileCounts.loaded, fallback: tileCounts.fallback, failed: tileCounts.failed,
+        missing: tileMissing.size } : null;
+    },
     // Moves the page's data clock to `iso` (until skycued's next newer time)
     // and redraws the radar ages; returns each drawing's opacity and fade.
     setDataClock: function (iso) {

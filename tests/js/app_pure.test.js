@@ -131,6 +131,32 @@ test('graticuleStep: 5 deg below zoom 6, 1 deg from 6', () => {
   assert.strictEqual(P.graticuleStep(12), 1);
 });
 
+test('parentTile: one level up halves x/y, scale 2, offset the child quadrant', () => {
+  assert.deepStrictEqual(P.parentTile(9, 150, 187, 1), { z: 8, x: 75, y: 93, scale: 2, offsetX: 0, offsetY: 1 });
+  assert.deepStrictEqual(P.parentTile(1, 1, 1, 1), { z: 0, x: 0, y: 0, scale: 2, offsetX: 1, offsetY: 1 });
+});
+test('parentTile: several levels up, down to z0', () => {
+  assert.deepStrictEqual(P.parentTile(9, 150, 187, 4), { z: 5, x: 9, y: 11, scale: 16, offsetX: 6, offsetY: 11 });
+  assert.deepStrictEqual(P.parentTile(3, 7, 5, 3), { z: 0, x: 0, y: 0, scale: 8, offsetX: 7, offsetY: 5 });
+  // The parent's square, scaled, contains the child's exactly.
+  const c = { z: 7, x: 37, y: 101 };
+  for (let n = 1; n <= 7; n++) {
+    const p = P.parentTile(c.z, c.x, c.y, n);
+    assert.strictEqual(p.x * p.scale + p.offsetX, c.x);
+    assert.strictEqual(p.y * p.scale + p.offsetY, c.y);
+    assert.ok(p.offsetX >= 0 && p.offsetX < p.scale && p.offsetY >= 0 && p.offsetY < p.scale);
+  }
+});
+test('parentTile: x wraps around the world, y off the world and bad n give null', () => {
+  assert.deepStrictEqual(P.parentTile(2, -1, 1, 1), { z: 1, x: 1, y: 0, scale: 2, offsetX: 1, offsetY: 1 });
+  assert.deepStrictEqual(P.parentTile(2, 5, 1, 1), { z: 1, x: 0, y: 0, scale: 2, offsetX: 1, offsetY: 1 });
+  assert.strictEqual(P.parentTile(2, 1, -1, 1), null);
+  assert.strictEqual(P.parentTile(2, 1, 4, 1), null);
+  assert.strictEqual(P.parentTile(2, 1, 1, 0), null);
+  assert.strictEqual(P.parentTile(2, 1, 1, 3), null);
+  assert.strictEqual(P.parentTile(2, 1, 1, 1.5), null);
+});
+
 test('dropRemovesMarker: only filtered drops keep the marker', () => {
   assert.strictEqual(P.dropRemovesMarker('filtered'), false);
   for (const r of ['timeout', 'source_lost', 'shutdown', 'stale']) assert.strictEqual(P.dropRemovesMarker(r), true, r);

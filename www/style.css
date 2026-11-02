@@ -221,3 +221,7 @@ table.kv td { padding: 2px 0; word-break: break-word; }
   #details { width: 300px; }
   #stats { gap: 2px 12px; font-size: 12px; }
 }
+
+/* "Hide filtered": a view option kept in this browser only. */
+label.check { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+label.check input { width: auto; margin: 0; }

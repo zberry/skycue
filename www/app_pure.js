@@ -72,6 +72,23 @@
     return Object.prototype.hasOwnProperty.call(DECISION_CLASS, decision) ? DECISION_CLASS[decision] : 'unknown';
   }
 
+  // "Hide filtered": only sent and allow-listed tracks stay drawn. Takes skycued's
+  // decision strings (send, allow_listed) or the page's colour classes.
+  function trackVisible(decision, hideFiltered) {
+    return !hideFiltered || decision === 'send' || decision === 'allow_listed' ||
+      decision === 'sent' || decision === 'allow';
+  }
+  // How many tracks the toggle hides. no_position tracks are never drawn, so
+  // they do not count. `tracks` is an array of track objects.
+  function hiddenCount(tracks, hideFiltered) {
+    if (!hideFiltered) return 0;
+    var n = 0;
+    tracks.forEach(function (t) {
+      if (t.decision !== 'no_position' && !trackVisible(t.decision, true)) n++;
+    });
+    return n;
+  }
+
   function thousands(n) {
     return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
@@ -289,7 +306,8 @@
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,
     RADAR_FADE_MS: RADAR_FADE_MS, radarFaded: radarFaded, radarOpacity: radarOpacity,
     CLOCK_SKEW_WARN_S: CLOCK_SKEW_WARN_S, skewWarning: skewWarning, radarNeedsFetch: radarNeedsFetch,
-    mercY: mercY, mosaicCanvasSize: mosaicCanvasSize, stationMatches: stationMatches
+    mercY: mercY, mosaicCanvasSize: mosaicCanvasSize, stationMatches: stationMatches,
+    trackVisible: trackVisible, hiddenCount: hiddenCount
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

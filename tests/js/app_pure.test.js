@@ -341,5 +341,25 @@ test('stationMatches: case-insensitive prefix', () => {
   assert.strictEqual(P.stationMatches('', 'K'), false);
 });
 
+test('trackVisible: only sent and allow-listed survive hide filtered', () => {
+  const all = ['send', 'allow_listed', 'out_of_range', 'below_elevation', 'blocked', 'no_position', 'weird', undefined];
+  const keep = new Set(['send', 'allow_listed']);
+  all.forEach((d) => {
+    assert.strictEqual(P.trackVisible(d, false), true, 'off shows ' + d);
+    assert.strictEqual(P.trackVisible(d, true), keep.has(d), 'on: ' + d);
+  });
+  assert.strictEqual(P.trackVisible('sent', true), true);   // colour-class spelling
+  assert.strictEqual(P.trackVisible('allow', true), true);
+});
+
+test('hiddenCount counts drawn-but-filtered tracks only when on', () => {
+  const ts = ['send', 'allow_listed', 'out_of_range', 'below_elevation', 'blocked', 'no_position', 'weird']
+    .map((decision) => ({ decision }));
+  assert.strictEqual(P.hiddenCount(ts, false), 0);
+  assert.strictEqual(P.hiddenCount(ts, true), 4);           // no_position is never drawn
+  assert.strictEqual(P.hiddenCount([], true), 0);
+  assert.strictEqual(P.hiddenCount(ts.slice(0, 2), true), 0);
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

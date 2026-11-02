@@ -30,6 +30,7 @@
   var tableDirty = true;
   var editing = {};                 // filter key -> the input holds an uncommitted edit
   var actionsSig = '';
+  var hideFiltered = false;         // view option, kept in localStorage; never sent to skycued
 
   var $ = function (id) { return document.getElementById(id); };
   function dataNow() { return Date.now() + clockOffsetMs; }
@@ -202,6 +203,49 @@
     e.trail = L.polyline([], { className: 'trail', weight: 1.5, opacity: 0.6, interactive: false }).addTo(map);
   }
 
+  function dropLayers(e) {
+    if (e.marker) map.removeLayer(e.marker);
+    if (e.trail) map.removeLayer(e.trail);
+    e.marker = null;
+    e.trail = null;
+  }
+
+  // Draws or removes one entry's marker and trail according to its drawability
+  // and the "Hide filtered" option. `observed`: add the position to the trail.
+  function renderEntry(e, observed) {
+    var t = e.t;
+    var drawable = typeof t.lat === 'number' && typeof t.lon === 'number' && P.decisionColor(t.decision) !== null;
+    if (!drawable || !map) return;
+    if (observed) {
+      var ts = Date.parse(t.position_time);
+      e.pts.push({ ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon] });
+      pruneTrail(e);
+    }
+    if (!P.trackVisible(t.decision, hideFiltered)) {
+      dropLayers(e);
+      if (e.key === selectedKey) deselect();
+      return;
+    }
+    var fresh = !e.marker;
+    ensureMarker(e);
+    if (observed || fresh) e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
+    styleMarker(e);
+  }
+
+  function updateHiddenCount() {
+    var n = P.hiddenCount(Array.from(tracks.values()).map(function (e) { return e.t; }), hideFiltered);
+    $('hidden-count').textContent = hideFiltered && n > 0 ? n + ' hidden' : '';
+    return n;
+  }
+
+  function setHideFiltered(on) {
+    hideFiltered = !!on;
+    $('hide-filtered').checked = hideFiltered;
+    try { window.localStorage.setItem('skycue.hideFiltered', hideFiltered ? '1' : '0'); } catch (err) { /* private window */ }
+    tracks.forEach(function (e) { renderEntry(e, false); });
+    updateHiddenCount();
+  }
+
   function pruneTrail(e) {
     var cutoff = dataNow() - cfg.trailSeconds * 1000;
     var i = 0;
@@ -239,17 +283,7 @@
     }
     e.t = t;
     if (observed) e.seenWall = Date.now();
-    var drawable = typeof t.lat === 'number' && typeof t.lon === 'number' && P.decisionColor(t.decision) !== null;
-    if (drawable && map) {
-      ensureMarker(e);
-      if (observed) {
-        var ts = Date.parse(t.position_time);
-        e.pts.push({ ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon] });
-        pruneTrail(e);
-        e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
-      }
-      styleMarker(e);
-    }
+    renderEntry(e, observed);
     if (key === selectedKey) renderDetails();
     tableDirty = true;
     return e;
@@ -1315,6 +1349,10 @@
 
   // ---- wiring -------------------------------------------------------------------
   function wire() {
+    var stored = null;
+    try { stored = window.localStorage.getItem('skycue.hideFiltered'); } catch (err) { /* no storage */ }
+    if (stored === '1') setHideFiltered(true);
+    $('hide-filtered').addEventListener('change', function () { setHideFiltered($('hide-filtered').checked); });
     var sel = $('ring-alt');
     RING_ALTS_FT.forEach(function (ft) {
       var o = document.createElement('option');
@@ -1393,6 +1431,7 @@
     var ticks = 0;
     setInterval(function () {
       if (selectedKey) renderDetails(); // ages
+      updateHiddenCount();
       if (tableDirty) renderTable();
       if (map) radarAgeTick();
       if (++ticks % 15 === 0) fisb.wxDirty = true; // ages and age classes
@@ -1419,6 +1458,9 @@
       return e ? e.t.hex : null;
     },
     connected: function () { return connected; },
+    setHideFiltered: setHideFiltered,
+    getHideFiltered: function () { return hideFiltered; },
+    hiddenCount: updateHiddenCount,
     // Adds a marker skycued does not know (the reconnect test checks it goes).
     injectTestMarker: function (t) { onTrack(t, true); },
     dataNow: dataNow,

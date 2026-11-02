@@ -204,6 +204,68 @@ test('range_change_moves_ring_and_drops', async ({ page }) => {
   await expect(page.locator('#max-range')).toHaveValue(String(r0 / 1852));
 });
 
+test('hide_filtered_removes_filtered_markers', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 10);
+  const snap = async () => JSON.stringify([(await api('/api/filters')).body, (await api('/api/lists')).body]);
+  const recStats = async () => {
+    const s = (await api('/api/stats')).body;
+    return [s.recorder_dropped_received, s.recorder_dropped_sent];
+  };
+  const filtersBefore = await snap();
+  const recBefore = await recStats();
+  expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(false);
+
+  // One synchronous evaluate, so the replay cannot move the counts in between.
+  const r = await page.evaluate(() => {
+    const keep = (m) => m.decision === 'sent' || m.decision === 'allow_listed';
+    const before = window.skycueApp.markers();
+    window.skycueApp.setHideFiltered(true);
+    const after = window.skycueApp.markers();
+    return { before: before.length, filtered: before.filter((m) => !keep(m)).length, after: after.length,
+      leftover: after.filter((m) => !keep(m)).length, hidden: window.skycueApp.hiddenCount(),
+      text: document.getElementById('hidden-count').textContent,
+      domFiltered: document.querySelectorAll('.ac-marker:not(.decision-sent):not(.decision-allow_listed)').length,
+      domTrails: document.querySelectorAll('path.trail').length };
+  });
+  expect(r.filtered, 'fixture has filtered-out aircraft').toBeGreaterThan(0);
+  expect(r.leftover).toBe(0);
+  expect(r.domFiltered).toBe(0);
+  expect(r.hidden).toBe(r.filtered);
+  expect(r.before - r.after).toBe(r.filtered);
+  expect(r.text).toBe(r.filtered + ' hidden');
+  expect(r.domTrails).toBe(r.after);
+  expect(await page.evaluate(() => localStorage.getItem('skycue.hideFiltered'))).toBe('1');
+
+  // A selected track that becomes hidden is deselected and the panel closes.
+  await page.evaluate(() => window.skycueApp.setHideFiltered(false));
+  const panel = await selectTarget(page);
+  await panel.getByRole('button', { name: 'Add to block list', exact: true }).click();
+  await expect.poll(async () => (await markerOf(page, TARGET) || {}).decision, { timeout: 3000 }).toBe('blocked');
+  await page.evaluate(() => window.skycueApp.setHideFiltered(true));
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe(null);
+  await expect(page.locator('#details')).toBeHidden();
+  await page.evaluate(() => window.skycueApp.setHideFiltered(false));
+  await panel.waitFor({ state: 'hidden' });
+  await page.locator('#list-block li', { hasText: TARGET }).getByRole('button').click();
+  await expect.poll(async () => (await api('/api/lists')).body.block.map((e) => e.toLowerCase()),
+    { timeout: 3000 }).not.toContain(TARGET);
+
+  // Off again: the markers return; nothing server-side changed.
+  const r2 = await page.evaluate(() => {
+    window.skycueApp.setHideFiltered(true);
+    const hidden = window.skycueApp.markers().length;
+    window.skycueApp.setHideFiltered(false);
+    return { hidden, shown: window.skycueApp.markers().length, text: document.getElementById('hidden-count').textContent };
+  });
+  expect(r2.shown).toBeGreaterThan(r2.hidden);
+  expect(r2.text).toBe('');
+  expect(await page.evaluate(() => localStorage.getItem('skycue.hideFiltered'))).toBe('0');
+  await expect.poll(snap, { timeout: 5000 }).toBe(filtersBefore);
+  expect(await recStats()).toEqual(recBefore);
+  expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(false);
+});
+
 test('save_baseline_confirms_and_clears_overlay', async ({ page }) => {
   await openPage(page);
   const cur = (await api('/api/filters')).body.max_range_nm;

@@ -3,8 +3,13 @@
 // FIS-B product catalogue (docs/fisb-reference.md §3) and the decoder's
 // counters.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace skycued {
 namespace fisb {
@@ -58,6 +63,31 @@ constexpr const char* productName(uint16_t id)
     default: return "other";
     }
 }
+
+using TimePoint = std::chrono::system_clock::time_point;
+
+// One report from a product-413 APDU (reference §3, §4; design §10.5).
+struct TextRecord {
+    enum Kind { metar, taf, pirep, winds, other };
+    Kind kind = other;
+    std::string station;  // first 3-4 character station token after the type; may be empty
+    std::string text;     // the report, trailing whitespace and the LF/RS terminator removed
+    TimePoint issued{};   // the report's ddhhmmZ group, else the APDU time
+    TimePoint expires{};  // left for the store (Task 4) to set from its expiry rules
+    std::optional<uint8_t> period_h;  // winds only: forecast period 6, 12 or 24 h (FD WIND_MATRIX)
+};
+
+// One TWGO graphic (reference §6.3, §6.4). points are (lat, lon) degrees.
+struct Shape {
+    // polyline is not in the design's list; G-AIRMET (product 14) sends
+    // geometries 11/12, freezing-level contours.
+    enum Geom { polygon, polyline, point, circle, prism };
+    Geom geom = polygon;
+    std::vector<std::pair<double, double>> points;
+    double radius_nm = 0;  // circle and prism
+    std::optional<int> alt_low_ft, alt_high_ft;
+    bool agl = false;  // altitudes above ground (geometries 4, 8, 9, 12) rather than MSL
+};
 
 // Running totals kept by the decoder (one instance per decoder).
 struct FisbCounters {

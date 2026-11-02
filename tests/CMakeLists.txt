@@ -194,3 +194,12 @@ target_compile_definitions(test_fisb_frame PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_fisb_frame)
 add_test(NAME fisb_frame COMMAND test_fisb_frame)
+
+# FIS-B segment reassembly, TWGO records and product-413 text, on hand-built
+# vectors and both uplink fixtures.
+add_executable(test_fisb_twgo test_fisb_twgo.cpp)
+target_link_libraries(test_fisb_twgo PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
+target_compile_definitions(test_fisb_twgo PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_fisb_twgo)
+add_test(NAME fisb_twgo COMMAND test_fisb_twgo)

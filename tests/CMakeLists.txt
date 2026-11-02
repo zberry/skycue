@@ -104,6 +104,18 @@ set_tests_properties(consumer_smoke PROPERTIES
   TIMEOUT 300
   ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
 
+# examples/parent-project (a separate project using add_subdirectory on the
+# whole skycue/ directory) built against a copy of skycue/ in a temp dir.
+# Skipped (77) when cmake is not on PATH.
+add_test(NAME parent_project
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_parent_project.sh
+    ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/parent-project-work
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(parent_project PROPERTIES
+  TIMEOUT 300
+  SKIP_RETURN_CODE 77
+  ENVIRONMENT "CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
+
 add_executable(test_raw_formats test_raw_formats.cpp)
 target_link_libraries(test_raw_formats PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_raw_formats PRIVATE BOOST_TEST_DYN_LINK)

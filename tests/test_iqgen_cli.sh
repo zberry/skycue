@@ -43,7 +43,7 @@ start=$(date +%s%N)
 expect_exit 0 a "$iqgen" modes "$modes" --duration 1 -o "$tmp/a.1090.cu8"
 elapsed_ms=$((($(date +%s%N) - start) / 1000000))
 [ "$elapsed_ms" -lt 6000 ] || fail "modes --duration 1 took ${elapsed_ms} ms (>= 6 s)"
-grep -qE '^frames=[0-9]+ expected=[0-9]+ overlaps=[0-9]+ clipped=[0-9]+ skipped=0 seconds=1\.[0-9]{3} bytes=[0-9]+$' \
+grep -qE '^frames=[0-9]+ expected=[0-9]+ overlaps=[0-9]+ clipped=[0-9]+ skipped=0 seconds=1\.[0-9]{3} bytes=[0-9]+ skipped_seconds=0\.000$' \
   "$tmp/a.out" || { cat "$tmp/a.out"; fail "modes summary line"; }
 [ "$(wc -l <"$tmp/a.out")" -eq 1 ] || { cat "$tmp/a.out"; fail "modes: stdout is not one line"; }
 frames=$(field a frames) bytes=$(field a bytes)
@@ -58,6 +58,29 @@ awk 'NR > 1 && $1 < prev { bad = 1 } { prev = $1 } END { exit bad }' "$side" || 
 [ "$(grep -c ' expected' "$side")" -eq "$(field a expected)" ] || fail "sidecar expected count != summary"
 [ "$(grep -c ' expected overlap$' "$side")" -eq 0 ] || fail "an overlapped frame is marked expected"
 [ "$(awk 'NR == 1 { print $1 }' "$side")" -eq 120000 ] || fail "first frame not at the 50 ms pad (sample 120000)"
+[ "$(field a overlaps)" -gt 0 ] || fail "the fixture's first second should have overlaps"
+grep -q "^skycue-iqgen: warning: $(field a overlaps) pairs of frames overlap; overlapped frames are marked optional" "$tmp/a.err" ||
+  { cat "$tmp/a.err"; fail "no overlap warning"; }
+ls "$tmp" | grep -q 'tmp' && { ls "$tmp"; fail "temporary output files left behind"; }
+
+# ---- --skip-seconds: the first second dropped, --duration counts from the next frame ----
+expect_exit 0 skip "$iqgen" modes "$modes" --skip-seconds 1 --duration 1 -o "$tmp/s.cu8"
+grep -qE ' skipped_seconds=1\.000$' "$tmp/skip.out" || { cat "$tmp/skip.out"; fail "skipped_seconds not in the summary"; }
+skip_frames=$(field skip frames)
+[ "$skip_frames" -ne "$frames" ] || fail "--skip-seconds 1: still $frames frames"
+first_a=$(awk 'NR == 1 { print $2 }' "$side") first_s=$(awk 'NR == 1 { print $2 }' "$tmp/s.frames.txt")
+[ "$first_a" != "$first_s" ] || fail "--skip-seconds 1: same first frame $first_a"
+# Cross-check on the fixture itself (in time order, ties in file order): the
+# first frame at least 1 s after the earliest, and the frames in the second after it.
+want=$(zcat "$modes" | awk -F, '{ t[NR] = $1; h[NR] = $2; if (NR == 1 || $1 < t0) t0 = $1 }
+  END { for (i = 1; i <= NR; i++) if (t[i] - t0 >= 1 && (!s || t[i] < t1)) { t1 = t[i]; s = i }
+        for (i = 1; i <= NR; i++) if (t[i] - t0 >= 1 && t[i] - t1 < 1) n++
+        print h[s], n }')
+[ "$want" = "$first_s $skip_frames" ] || fail "--skip-seconds 1: got '$first_s $skip_frames', the fixture says '$want'"
+[ "$(awk 'NR == 1 { print $1 }' "$tmp/s.frames.txt")" -eq 120000 ] || fail "--skip-seconds: first kept frame not at the pad"
+echo "skip-seconds: frames $frames -> $skip_frames, first frame $first_a -> $first_s"
+rm -f "$tmp/s.cu8" "$tmp/s.frames.txt"
+expect_exit 2 skip_neg "$iqgen" modes "$modes" --skip-seconds -1 -o "$tmp/s.cu8"
 
 # ---- determinism ---------------------------------------------------------------
 expect_exit 0 b "$iqgen" modes "$modes" --duration 1 -o "$tmp/b.cu8"
@@ -109,8 +132,9 @@ rm -f "$tmp/five.1090.cu8" "$tmp/five.1090.frames.txt"
 
 # ---- uat ---------------------------------------------------------------------------------
 expect_exit 0 u "$iqgen" uat "$uat" --limit 20 -o "$tmp/u.978.cu8"
-grep -qE '^frames=20 expected=20 overlaps=0 clipped=[0-9]+ skipped=0 seconds=[0-9]+\.[0-9]{3} bytes=[0-9]+$' "$tmp/u.out" ||
+grep -qE '^frames=20 expected=20 overlaps=0 clipped=[0-9]+ skipped=0 seconds=[0-9]+\.[0-9]{3} bytes=[0-9]+ skipped_seconds=0\.000$' "$tmp/u.out" ||
   { cat "$tmp/u.out"; fail "uat summary"; }
+grep -q 'overlap' "$tmp/u.err" && { cat "$tmp/u.err"; fail "uat: overlap warning without overlaps"; }
 us="$tmp/u.978.frames.txt"
 [ "$(wc -l <"$us")" -eq 20 ] || fail "uat sidecar lines"
 bad=$(grep -cvE '^[0-9]+ [0-9a-f]+ expected$' "$us")
@@ -171,9 +195,29 @@ done
 expect_exit 2 nf_uat "$iqgen" uat "$tmp/comments.txt" -o "$tmp/nf.cu8"
 grep -q 'no frames in the input' "$tmp/nf_uat.err" || fail "uat comments-only: no 'no frames' message"
 
+# ---- mixed timed and untimed lines: placed untimed, with a warning ----------------------
+printf '@000000000000%s;\n*%s;\n' "$df17" "$df17" >"$tmp/mixed.avr"
+expect_exit 0 mixed "$iqgen" modes "$tmp/mixed.avr" -o "$tmp/mixed.cu8"
+grep -q 'warning: .*mixed.avr: 1 of 2 lines untimed' "$tmp/mixed.err" || { cat "$tmp/mixed.err"; fail "no untimed warning"; }
+[ "$(awk 'NR == 2 { print $1 }' "$tmp/mixed.frames.txt")" -eq $((120000 + 4800)) ] || fail "mixed file not placed untimed"
+rm -f "$tmp/mixed.cu8"
+
 # ---- write failure ----------------------------------------------------------------------
 expect_exit 1 full "$iqgen" modes "$modes" --duration 0.1 -o /dev/full
 grep -q '^skycue-iqgen: writing /dev/full: ' "$tmp/full.err" || { cat "$tmp/full.err"; fail "/dev/full: error not named"; }
 test -c /dev/full || fail "/dev/full is no longer a character device"
+
+# A file limit (SIGXFSZ ignored, so write() fails with EFBIG): nothing is left
+# behind, and a file that was already there is untouched.
+( trap '' XFSZ; ulimit -f 100; "$iqgen" modes "$modes" --duration 1 -o "$tmp/lim.cu8" ) >"$tmp/xfsz.out" 2>"$tmp/xfsz.err"
+rc=$?
+[ "$rc" -eq 1 ] || { cat "$tmp/xfsz.err"; fail "file limit: exit $rc, want 1"; }
+grep -q '^skycue-iqgen: writing .*lim.cu8: ' "$tmp/xfsz.err" || { cat "$tmp/xfsz.err"; fail "file limit: error not named"; }
+ls "$tmp" | grep -q '^lim\.' && { ls "$tmp"; fail "file limit: output or temporary file left behind"; }
+echo keep >"$tmp/old.cu8"
+( trap '' XFSZ; ulimit -f 100; "$iqgen" modes "$modes" --duration 1 -o "$tmp/old.cu8" ) >"$tmp/xfsz.out" 2>"$tmp/xfsz.err"
+[ $? -eq 1 ] || fail "file limit over an existing file: not exit 1"
+[ "$(cat "$tmp/old.cu8")" = keep ] || fail "a failed run changed the existing output"
+ls "$tmp" | grep -qE '^old\.(frames|cu8\.tmp)' && { ls "$tmp"; fail "file limit: files left next to old.cu8"; }
 
 echo "iqgen_cli: all checks passed"

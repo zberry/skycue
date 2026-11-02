@@ -58,14 +58,19 @@ std::vector<uint8_t> hexBytes(const std::string& hex)
     return out;
 }
 
-// Accumulates 48-bit counter values into an unwrapped time.
+// Accumulates 48-bit counter values into an unwrapped time. Throws
+// InputError (naming where) if the sum would leave int64_t, which takes
+// 2^15 or more consecutive near-maximal steps in one direction.
 class Unwrapper {
 public:
-    int64_t next(uint64_t counter)
+    int64_t next(uint64_t counter, const std::string& where)
     {
-        if (have_)
-            time_ += skycued::beast::timestampDelta(last_, counter);
-        else
+        if (have_) {
+            const int64_t d = skycued::beast::timestampDelta(last_, counter);
+            if ((d > 0 && time_ > INT64_MAX - d) || (d < 0 && time_ < INT64_MIN - d))
+                throw InputError(where + ": timestamps run out of range (the 48-bit counter unwraps past 2^63)");
+            time_ += d;
+        } else
             time_ = static_cast<int64_t>(counter);
         have_ = true;
         last_ = counter;
@@ -96,9 +101,9 @@ std::vector<TimedFrame> readBeast(const std::string& path, InputStats& stats)
                 continue;
             }
             TimedFrame t;
-            t.time = clock.next(f.timestamp);
-            t.payload.assign(f.body.begin() + 7, f.body.end());
             t.where = path + "@" + std::to_string(f.start);
+            t.time = clock.next(f.timestamp, t.where);
+            t.payload.assign(f.body.begin() + 7, f.body.end());
             out.push_back(std::move(t));
         }
     }
@@ -141,10 +146,10 @@ std::vector<TimedFrame> readAvr(const std::string& path, InputStats& stats)
             continue;
         }
         TimedFrame t;
-        if (m->ticks)
-            t.time = clock.next(*m->ticks);
-        t.payload = hexBytes(m->hex);
         t.where = path + ":" + std::to_string(no);
+        if (m->ticks)
+            t.time = clock.next(*m->ticks, t.where);
+        t.payload = hexBytes(m->hex);
         out.push_back(std::move(t));
     }
     return out;

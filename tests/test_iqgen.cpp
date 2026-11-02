@@ -20,6 +20,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -989,5 +990,28 @@ BOOST_AUTO_TEST_CASE(readers_skip_count_and_reject)
         BOOST_FAIL("a 20-byte payload was accepted");
     } catch (const InputError& e) {
         BOOST_TEST(std::string(e.what()).find(bad + ":1") != std::string::npos, e.what());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(unwrap_overflow_is_an_input_error)
+{
+    // Every step is 2^47 - 1 ticks forward (the largest the signed 48-bit
+    // delta allows), so the unwrapped time passes 2^63 after 65 536 lines.
+    TempDir dir;
+    std::string avr;
+    const uint64_t step = (uint64_t{1} << 47) - 1;
+    char line[64];
+    for (uint64_t k = 0; k < 65540; ++k) {
+        std::snprintf(line, sizeof line, "@%012llX5F406A936F50F0;\n",
+                      static_cast<unsigned long long>((k * step) & ((uint64_t{1} << 48) - 1)));
+        avr += line;
+    }
+    const std::string path = dir.write("far.avr", avr);
+    InputStats st;
+    try {
+        readModesFile(path, st);
+        BOOST_FAIL("an unwrapped time past 2^63 was accepted");
+    } catch (const InputError& e) {
+        BOOST_TEST(std::string(e.what()).find(path + ":") != std::string::npos, e.what());
     }
 }

@@ -57,7 +57,8 @@ constexpr const char* kOverview =
     "  uat    978 MHz UAT at 2 083 333 S/s from dump978 raw lines (.txt/.log)\n"
     "  resample  converts a CU8 file between sample rates\n"
     "  info   prints a CU8 file's sample count, duration, magnitude and DC\n"
-    "Inputs may be gzip-compressed (.gz after the suffix). The generators also\n"
+    "--skip-seconds S drops the first S seconds of each timed input, --duration S\n"
+    "keeps the next S. Inputs may be gzip-compressed (.gz after the suffix). The generators also\n"
     "write OUT.frames.txt listing every frame: '<sample> <hex> <expected|optional>[ overlap]'.\n"
     "'skycue-iqgen COMMAND --help' lists a command's options.\n";
 
@@ -82,21 +83,43 @@ std::string fmt3(double v)
     return buf;
 }
 
-// An output file; discard() removes it only when this run created it as a
-// regular file (never a device, a pipe or a file that was already there).
+// An output file. A regular file (or a new one) is written to a temporary
+// file in the same directory and renamed over the target by commit(), so a
+// failed run leaves the target as it was and removes the temporary file.
+// Anything else (a device such as /dev/full, a FIFO) is written directly and
+// never removed.
 class OutFile {
 public:
     explicit OutFile(std::string path) : path_(std::move(path)) {}
+    ~OutFile() { discard(); }
+    OutFile(const OutFile&) = delete;
+    OutFile& operator=(const OutFile&) = delete;
 
+    // False with errno set on failure.
     bool open()
     {
         struct stat st;
-        const bool existed = ::stat(path_.c_str(), &st) == 0;
         errno = 0;
-        os_.open(path_, std::ios::binary | std::ios::trunc);
-        if (!os_)
+        if (::stat(path_.c_str(), &st) == 0 && !S_ISREG(st.st_mode)) {
+            os_.open(path_, std::ios::binary);
+            return static_cast<bool>(os_);
+        }
+        std::string tmpl = path_ + ".tmpXXXXXX";
+        const int fd = ::mkstemp(&tmpl[0]);
+        if (fd < 0)
             return false;
-        created_ = !existed && ::stat(path_.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+        const mode_t mask = ::umask(0);
+        ::umask(mask);
+        ::fchmod(fd, 0666 & ~mask);  // as a plain open() would have created it
+        ::close(fd);
+        tmp_ = tmpl;
+        os_.open(tmp_, std::ios::binary | std::ios::trunc);
+        if (!os_) {
+            const int e = errno;
+            discard();
+            errno = e;
+            return false;
+        }
         return true;
     }
 
@@ -108,13 +131,26 @@ public:
         return !os_.fail();
     }
 
+    // Renames the temporary file over the target (nothing to do for a
+    // direct write); false with errno set on failure.
+    bool commit()
+    {
+        if (tmp_.empty())
+            return true;
+        if (::rename(tmp_.c_str(), path_.c_str()) != 0)
+            return false;
+        tmp_.clear();
+        return true;
+    }
+
+    // Closes and removes the temporary file, if any.
     void discard()
     {
         if (os_.is_open())
             os_.close();
-        if (created_)
-            ::unlink(path_.c_str());
-        created_ = false;
+        if (!tmp_.empty())
+            ::unlink(tmp_.c_str());
+        tmp_.clear();
     }
 
     std::ostream& stream() { return os_; }
@@ -122,8 +158,8 @@ public:
 
 private:
     std::string path_;
+    std::string tmp_;  // empty: writing path_ directly (or nothing open)
     std::ofstream os_;
-    bool created_ = false;
 };
 
 std::string errnoText()
@@ -169,7 +205,7 @@ int generate(bool uat, int argc, char** argv)
 {
     std::vector<std::string> inputs;
     std::string out_path, snr_arg;
-    double spacing_us = 0, level = -12, cfo = 0, pad_ms = 50, duration_s = 0;
+    double spacing_us = 0, level = -12, cfo = 0, pad_ms = 50, duration_s = 0, skip_s = 0;
     uint64_t seed = 1, max_mb = 2048;
     std::size_t limit = 0;
     po::options_description desc(std::string(kUsage) + (uat ? "uat: 978 MHz UAT from dump978 raw lines (.txt/.log)"
@@ -182,7 +218,9 @@ int generate(bool uat, int argc, char** argv)
         "cfo", po::value(&cfo)->default_value(0), "carrier frequency offset in Hz")(
         "seed", po::value(&seed)->default_value(1), "noise generator seed")(
         "limit", po::value(&limit), "keep only the first N frames")(
-        "duration", po::value(&duration_s), "keep only frames starting in the first S seconds")(
+        "skip-seconds", po::value(&skip_s)->default_value(0),
+        "drop frames recorded in the first S seconds of each timed input (from its first frame)")(
+        "duration", po::value(&duration_s), "keep only frames starting in the first S seconds (after --skip-seconds)")(
         "pad-ms", po::value(&pad_ms)->default_value(50), "silence before the first and after the last frame, in ms")(
         "max-mb", po::value(&max_mb)->default_value(2048), "refuse to write more than this many MiB");
     po::options_description hidden;
@@ -222,6 +260,8 @@ int generate(bool uat, int argc, char** argv)
         return usageError("--limit must be at least 1");
     if (vm.count("duration") && (!std::isfinite(duration_s) || duration_s <= 0))
         return usageError("--duration must be positive");
+    if (!std::isfinite(skip_s) || skip_s < 0)
+        return usageError("--skip-seconds must be 0 or more");
     if (max_mb == 0 || max_mb > (uint64_t{1} << 40))
         return usageError("--max-mb must be 1 to 2^40");
 
@@ -235,6 +275,24 @@ int generate(bool uat, int argc, char** argv)
             return usageError(e.what());
         } catch (const std::exception& e) {
             return ioError(e.what());
+        }
+        auto& file = files.back();
+        const auto untimed = static_cast<std::size_t>(std::count_if(
+            file.begin(), file.end(), [](const iqgen::TimedFrame& f) { return !f.time.has_value(); }));
+        if (untimed && untimed < file.size())
+            std::cerr << "skycue-iqgen: warning: " << in << ": " << untimed << " of " << file.size()
+                      << " lines untimed; placing the whole file untimed, " << spacing_us << " us apart\n";
+        // --skip-seconds, on the recording's own clock, so that --duration
+        // then counts from the first kept frame.
+        if (skip_s > 0 && !file.empty() && !untimed) {
+            const double per_second = uat ? 1e9 : iqgen::kModesTickRate;
+            const auto skip = static_cast<int64_t>(std::llround(std::min(skip_s * per_second, 9.0e18)));
+            int64_t t0 = *file.front().time;
+            for (const auto& f : file)
+                t0 = std::min(t0, *f.time);
+            file.erase(std::remove_if(file.begin(), file.end(),
+                                      [&](const iqgen::TimedFrame& f) { return *f.time - t0 < skip; }),
+                       file.end());
         }
     }
 
@@ -315,44 +373,43 @@ int generate(bool uat, int argc, char** argv)
         }
         clipped = w.clipped();
     } catch (const std::runtime_error&) {  // IqWriter: the stream failed
-        const std::string why = errnoText();
-        out.discard();
-        return ioError("writing " + out_path + ": " + why);
+        return ioError("writing " + out_path + ": " + errnoText());
     } catch (const std::exception& e) {  // a synthesiser precondition: a bug
-        out.discard();
         return ioError(std::string("internal error: ") + e.what());
     }
-    if (!out.close()) {
-        const std::string why = errnoText();
-        out.discard();
-        return ioError("writing " + out_path + ": " + why);
-    }
+    if (!out.close())
+        return ioError("writing " + out_path + ": " + errnoText());
 
     // The sidecar, in start order.
     uint64_t expected = 0;
     OutFile side(sidecarPath(out_path));
-    if (!side.open()) {
-        const std::string why = errnoText();
-        out.discard();
-        return ioError("writing " + side.path() + ": " + why);
-    }
+    if (!side.open())
+        return ioError("writing " + side.path() + ": " + errnoText());
     for (const auto& f : placed.frames) {
         const bool exp = !f.overlap && (uat || iqgen::modesClean(f.payload));
         expected += exp ? 1 : 0;
         side.stream() << f.start / per << ' ' << iqgen::toHex(f.payload, !uat) << ' '
                       << (exp ? "expected" : "optional") << (f.overlap ? " overlap" : "") << '\n';
     }
-    if (!side.close()) {
+    if (!side.close())
+        return ioError("writing " + side.path() + ": " + errnoText());
+    // The sidecar first, OUT last: OUT appears only with its sidecar.
+    if (!side.commit())
+        return ioError("writing " + side.path() + ": " + errnoText());
+    if (!out.commit()) {
         const std::string why = errnoText();
-        side.discard();
-        out.discard();
-        return ioError("writing " + side.path() + ": " + why);
+        ::unlink(side.path().c_str());
+        return ioError("writing " + out_path + ": " + why);
     }
 
     warnClipped(clipped);
+    if (placed.overlaps)
+        std::cerr << "skycue-iqgen: warning: " << placed.overlaps
+                  << " pairs of frames overlap; overlapped frames are marked optional in " << side.path() << "\n";
     std::cout << "frames=" << placed.frames.size() << " expected=" << expected << " overlaps=" << placed.overlaps
               << " clipped=" << clipped << " skipped=" << stats.skipped
-              << " seconds=" << fmt3(static_cast<double>(out_samples) / rate) << " bytes=" << bytes << "\n";
+              << " seconds=" << fmt3(static_cast<double>(out_samples) / rate) << " bytes=" << bytes
+              << " skipped_seconds=" << fmt3(skip_s) << "\n";
     return 0;
 }
 
@@ -415,17 +472,14 @@ int resample(int argc, char** argv)
     try {
         n = iqgen::resampleCu8(*in, static_cast<uint64_t>(in_rate), static_cast<uint64_t>(out_rate), out.stream());
     } catch (const std::runtime_error&) {
-        const std::string why = errnoText();
-        out.discard();
-        return ioError("writing " + out_path + ": " + why);
+        return ioError("writing " + out_path + ": " + errnoText());
     }
-    if (!out.close()) {
-        const std::string why = errnoText();
-        out.discard();
-        return ioError("writing " + out_path + ": " + why);
-    }
+    if (!out.close())
+        return ioError("writing " + out_path + ": " + errnoText());
     if (in->bad())
         return ioError("reading " + in_path + ": " + errnoText());
+    if (!out.commit())
+        return ioError("writing " + out_path + ": " + errnoText());
     warnClipped(n.clipped);
     std::cout << "in_samples=" << n.in_samples << " out_samples=" << n.out_samples << "\n";
     return 0;

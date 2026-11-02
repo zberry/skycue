@@ -128,21 +128,32 @@ wait_fisb "$fisb_base" "$(grep -c '"uat_uplink"' "$fisb_rec")" || fail "2015 upl
 wait_fisb "$radar_base" "$(grep -c '"uat_uplink"' "$radar_rec")" || fail "tg30 uplinks not decoded"
 
 # Map tiles: one more skycued (the readsb fixture) serving a copy of the www
-# directory whose tiles/ has only the zoom-0 tile, one solid colour, while
-# meta.json claims zoom 0..4, so every tile the map asks for above zoom 0 is
-# missing and the page must fall back to an enlarged zoom-0 tile.
+# directory (without its own tiles/) with generated tiles while meta.json
+# claims zoom 0..6: 2/1/1 in four coloured quadrants (the fallback for the
+# zoom-6 tiles around the receiver, 4 levels up) and one native zoom-6
+# tile, 6/18/24 (the receiver's), transparent in its west half, which is
+# outside the "spot" region's bbox, so the page draws 2/1/1 underneath it.
 tiles_www="$tmp/www-tiles"
-cp -r "$www" "$tiles_www" && rm -rf "$tiles_www/tiles" && mkdir -p "$tiles_www/tiles/0/0" || fail "tiles www copy"
-python3 -I - "$tiles_www/tiles/0/0/0.png" <<'EOP' || fail "tiles fixture PNG"
-import struct, sys, zlib
+mkdir -p "$tiles_www/tiles/2/1" "$tiles_www/tiles/6/18" || fail "tiles www dir"
+for f in "$www"/* "$www"/.[!.]*; do
+  [ -e "$f" ] || continue
+  [ "$(basename "$f")" = tiles ] && continue
+  cp -r "$f" "$tiles_www/" || fail "tiles www copy"
+done
+python3 -I - "$tiles_www/tiles" <<'EOP' || fail "tiles fixture PNGs"
+import os, struct, sys, zlib
 def chunk(kind, data):
     return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
-row = b"\x00" + bytes((0x2e, 0x8b, 0x57)) * 256
-png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 256, 256, 8, 2, 0, 0, 0)) +
-       chunk(b"IDAT", zlib.compress(row * 256)) + chunk(b"IEND", b""))
-open(sys.argv[1], "wb").write(png)
+def png(path, pixel):  # 256x256 RGBA, pixel(x, y) -> (r, g, b, a)
+    raw = b"".join(b"\x00" + b"".join(bytes(pixel(x, y)) for x in range(256)) for y in range(256))
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 256, 256, 8, 6, 0, 0, 0)) +
+                chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+quad = [[(0x2e, 0x8b, 0x57, 255), (0x1e, 0x90, 0xff, 255)], [(0xff, 0xa5, 0x00, 255), (0x80, 0x00, 0x80, 255)]]
+png(os.path.join(sys.argv[1], "2/1/1.png"), lambda x, y: quad[y // 128][x // 128])
+png(os.path.join(sys.argv[1], "6/18/24.png"), lambda x, y: (0, 0, 0, 0) if x < 128 else (0xff, 0x00, 0xff, 255))
 EOP
-printf '%s\n' '{"minZoom":0,"maxZoom":4,"bbox":[-180,-85,180,85],"regions":[{"name":"fixture","bbox":[-180,-85,180,85],"minZoom":0,"maxZoom":4}]}' \
+printf '%s\n' '{"minZoom":0,"maxZoom":6,"bbox":[-180,-85,180,85],"regions":[{"name":"coarse","bbox":[-180,-85,180,85],"minZoom":0,"maxZoom":2},{"name":"spot","bbox":[-75.9375,30,-73.125,45],"minZoom":6,"maxZoom":6}]}' \
   > "$tiles_www/tiles/meta.json"
 tiles_port=$(free_port)
 sed -e "s/^WEB_PORT=.*/WEB_PORT=$tiles_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/tiles.conf"

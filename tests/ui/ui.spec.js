@@ -779,9 +779,10 @@ test.describe('fisb text and airspace (2015 sample)', () => {
   });
 });
 
-// Map tiles, against the skycued run.sh starts with a tiles directory that
-// has only the zoom-0 tile (one solid colour) while meta.json says zoom 0..4:
-// every tile the map asks for above zoom 0 is missing.
+// Map tiles, against the skycued run.sh starts with generated tiles while
+// meta.json says zoom 0..6: 2/1/1 in four coloured quadrants and one native
+// zoom-6 tile, 6/18/24 (the receiver's), transparent in its west half, on
+// the edge of its region. Every other zoom-6 tile is missing.
 const TILES_BASE = process.env.SKYCUE_TILES_URL;
 
 test.describe('map tiles fallback', () => {
@@ -790,30 +791,54 @@ test.describe('map tiles fallback', () => {
   test('missing_tile_shows_lower_zoom_fallback', async ({ page }) => {
     const pageErrors = [];
     page.on('pageerror', (e) => pageErrors.push(String(e)));
-    expect((await apiAt(TILES_BASE, '/api/tiles-available')).body).toEqual({ tiles: true, minZoom: 0, maxZoom: 4 });
+    expect((await apiAt(TILES_BASE, '/api/tiles-available')).body).toEqual({ tiles: true, minZoom: 0, maxZoom: 6 });
     await openPage(page);
     await waitMarkers(page, 1);
-    // The map fits the range ring (zoom > 4), so it shows zoom-4 tiles:
-    // none exists, and each one shows the zoom-0 tile enlarged 16 times.
-    await expect.poll(() => page.evaluate(() => window.skycueApp.tileCounts().fallback)).toBeGreaterThan(0);
-    // Until the zoom-3 tiles of the first view are pruned.
-    await expect.poll(() => page.evaluate(() => Array.from(document.querySelectorAll('.leaflet-tile-pane .leaflet-tile img'))
-      .filter((i) => i.style.width !== '4096px').length)).toBe(0);
-    const tiles = await page.evaluate(() => Array.from(document.querySelectorAll('.leaflet-tile-pane .leaflet-tile'))
+    // The map fits the range ring (zoom > 6), so it shows zoom-6 tiles;
+    // wait until those of the first view (zoom 3) are pruned and all loaded.
+    const read = () => page.evaluate(() => Array.from(document.querySelectorAll('.leaflet-tile-pane .leaflet-tile'))
       .map((t) => {
-        const img = t.querySelector('img');
-        return { loaded: t.classList.contains('leaflet-tile-loaded'), fallback: t.classList.contains('tile-fallback'),
-          zoom: t.getAttribute('data-fallback-zoom'), src: img && img.getAttribute('src'),
-          natural: img ? img.naturalWidth : 0, width: img && img.style.width, clip: getComputedStyle(t).overflow };
+        const imgs = Array.from(t.querySelectorAll('img')).map((i) => ({ src: i.getAttribute('src'),
+          natural: i.naturalWidth, width: i.style.width, left: i.style.left, top: i.style.top,
+          underlay: i.classList.contains('tile-underlay') }));
+        return { tile: t.getAttribute('data-tile'), loaded: t.classList.contains('leaflet-tile-loaded'),
+          fallback: t.getAttribute('data-fallback-zoom'), underlay: t.getAttribute('data-underlay-zoom'),
+          clip: getComputedStyle(t).overflow, imgs };
       }));
-    expect(tiles.length).toBeGreaterThan(0);
+    await expect.poll(async () => (await read()).every((t) => t.tile.startsWith('6/') && t.loaded &&
+      t.imgs.every((i) => i.natural === 256)), { timeout: 15000 }).toBe(true);
+    const tiles = await read();
+    const px = (n) => `${n}px`;
+    let fallbacks = 0;
+    const offsets = new Set();
     for (const t of tiles) {
-      expect(t).toMatchObject({ loaded: true, fallback: true, zoom: '0', src: 'tiles/0/0/0.png', natural: 256,
-        width: '4096px', clip: 'hidden' });
+      const [, x, y] = t.tile.split('/').map(Number);
+      expect(t.clip, t.tile).toBe('hidden');
+      // The tile's place in 2/1/1, 16 x 16 tiles: offset (x mod 16, y mod 16).
+      const parent = { src: 'tiles/2/1/1.png', natural: 256, width: px(4096),
+        left: px(-(x % 16) * 256), top: px(-(y % 16) * 256) };
+      if (x === 18 && y === 24) {
+        // Native, on its region's edge: the parent underneath, then itself.
+        expect(t.fallback, t.tile).toBe(null);
+        expect(t.underlay, t.tile).toBe('2');
+        expect(t.imgs.length).toBe(2);
+        expect(t.imgs[0]).toMatchObject(Object.assign({ underlay: true }, parent));
+        expect(t.imgs[1]).toMatchObject({ src: 'tiles/6/18/24.png', width: px(256), left: px(0), top: px(0), underlay: false });
+      } else {
+        expect(x >> 4, t.tile).toBe(1); // the view is inside 2/1/1
+        expect(y >> 4, t.tile).toBe(1);
+        expect(t.fallback, t.tile).toBe('2');
+        expect(t.imgs.length).toBe(1);
+        expect(t.imgs[0], t.tile).toMatchObject(Object.assign({ underlay: false }, parent));
+        fallbacks++;
+        offsets.add(`${x % 16},${y % 16}`);
+      }
     }
+    expect(tiles.some((t) => t.tile === '6/18/24'), 'the receiver tile is shown').toBe(true);
+    expect(fallbacks).toBeGreaterThanOrEqual(3);
+    expect(offsets.size).toBe(fallbacks); // each at its own place in the parent
     const counts = await page.evaluate(() => window.skycueApp.tileCounts());
-    expect(counts.failed).toBe(0);
-    expect(counts.missing).toBeGreaterThanOrEqual(4); // tried z4, z3, z2, z1 before z0
+    expect(counts.underlay).toBeGreaterThanOrEqual(1);
     expect(pageErrors).toEqual([]);
   });
 });

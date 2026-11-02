@@ -698,8 +698,8 @@
           '<label for="radar-opacity">Opacity</label> ' +
           '<input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7">' +
           '<div id="radar-legend" class="legend-row"></div>' +
-          '<div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span> not yet in force · ' +
-          '<span class="ln-cancelled">dashed</span> cancelled</div>' +
+          '<div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span>: not yet in force · ' +
+          '<span class="ln-cancelled">dashed</span>: cancelled</div>' +
           '<div id="raster-box" hidden>' +
           '<label for="raster-select">Raster</label> <select id="raster-select"></select>' +
           '<div id="raster-legend"></div></div>';

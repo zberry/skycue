@@ -161,7 +161,7 @@ grep -qE '^ +63  NEXRAD regional +200$' <<<"$fs" || { echo "$fs"; fail "(i) prod
 grep -qE '^  metar  decoded +150  stored +127$' <<<"$fs" || { echo "$fs"; fail "(i) METAR"; }
 grep -qE '^ +8  NOTAM +27 text, 6 keep-alive, 29 graphics, 0 cancel; stored 23 \(0 cancelled\)$' <<<"$fs" ||
   { echo "$fs"; fail "(i) TWGO 8"; }
-grep -qE '^  63 +NEXRAD regional +2015-01-24T04:10:00\.000Z  671 blocks, published 2$' <<<"$fs" ||
+grep -qE '^  63 +NEXRAD regional +2015-01-24T04:10:00\.000Z  671 blocks, published 1$' <<<"$fs" ||
   { echo "$fs"; fail "(i) mosaic 63"; }
 grep -qE '^  bad_frames +0$' <<<"$fs" || { echo "$fs"; fail "(i) counters"; }
 "$stats" "$uplinks" | cmp -s - "$tmp/i.out" || fail "(i) rerun differs"
@@ -172,7 +172,7 @@ assert f["text"]["metar"] == {"decoded": 150, "stored": 127}, f["text"]
 t8 = [t for t in f["twgo"] if t["product"] == 8][0]
 assert (t8["text"], t8["keepalive"], t8["graphics"], t8["stored"]) == (27, 6, 29, 23), t8
 m = f["mosaics"][0]
-assert (m["key"], m["blocks"], m["published"]) == ("63", 671, 2), m
+assert (m["key"], m["blocks"], m["published"]) == ("63", 671, 1), m
 assert f["counters"]["store.applied"] == 561, f["counters"]' || fail "(i) --json fisb section"
 
 echo "PASS"

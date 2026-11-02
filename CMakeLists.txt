@@ -5,10 +5,26 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(SKYCUE_BUILD_TESTS "Build the skycue unit tests" ON)
-option(SKYCUE_BUILD_EXAMPLES "Build the example libskycue consumers" ON)
+# A parent project that vendors this directory and only wants libskycue sets
+# SKYCUE_BUILD_DAEMON, SKYCUE_BUILD_TESTS and SKYCUE_BUILD_EXAMPLES OFF (and
+# usually SKYCUE_INSTALL OFF, see libskycue/CMakeLists.txt) before
+# add_subdirectory(); it then needs only Boost.System and Threads. Tests and
+# examples default to OFF when skycue is not the top-level project.
+option(SKYCUE_BUILD_DAEMON "Build skycued, the skycue-* tools and the web UI" ON)
+option(SKYCUE_BUILD_TESTS "Build the skycue unit tests (needs SKYCUE_BUILD_DAEMON)" ${PROJECT_IS_TOP_LEVEL})
+option(SKYCUE_BUILD_EXAMPLES "Build the example libskycue consumers" ${PROJECT_IS_TOP_LEVEL})
+if(SKYCUE_BUILD_TESTS AND NOT SKYCUE_BUILD_DAEMON)
+  message(FATAL_ERROR "skycue: SKYCUE_BUILD_TESTS=ON needs SKYCUE_BUILD_DAEMON=ON")
+endif()
 
-find_package(Boost 1.66 REQUIRED COMPONENTS system program_options unit_test_framework)
+set(_skycue_boost_components system)
+if(SKYCUE_BUILD_DAEMON)
+  list(APPEND _skycue_boost_components program_options)
+endif()
+if(SKYCUE_BUILD_TESTS)
+  list(APPEND _skycue_boost_components unit_test_framework)
+endif()
+find_package(Boost 1.66 REQUIRED COMPONENTS ${_skycue_boost_components})
 find_package(Threads REQUIRED)
 
 include(GNUInstallDirs)
@@ -16,15 +32,23 @@ include(cmake/CompilerWarnings.cmake)
 
 enable_testing()
 
+add_subdirectory(libskycue)
+if(SKYCUE_BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif()
+if(NOT SKYCUE_BUILD_DAEMON)
+  return()
+endif()
+
 set(SKYCUE_LEAFLET_DIR "" CACHE PATH
   "Leaflet's extracted dist/ directory (leaflet.js, leaflet.css, images/); staged and installed under www/vendor/leaflet")
 option(SKYCUE_UI_TESTS "Register the headless-browser test ui_playwright (skips itself without node/Playwright)" ON)
 
-# The web UI: www/ plus Leaflet, assembled in ${CMAKE_BINARY_DIR}/www-stage
+# The web UI: www/ plus Leaflet, assembled in ${PROJECT_BINARY_DIR}/www-stage
 # (what the tests serve with --www-dir) and installed to share/skycue/www.
 # vendor/ and tiles/ in the source tree are local, untracked additions:
 # neither is copied from there.
-set(SKYCUE_WWW_STAGE "${CMAKE_BINARY_DIR}/www-stage")
+set(SKYCUE_WWW_STAGE "${PROJECT_BINARY_DIR}/www-stage")
 file(GLOB _skycue_www_files CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/www/*.html"
   "${PROJECT_SOURCE_DIR}/www/*.js" "${PROJECT_SOURCE_DIR}/www/*.css" "${PROJECT_SOURCE_DIR}/www/*.svg")
 set(_skycue_www_cmds COMMAND ${CMAKE_COMMAND} -E make_directory ${SKYCUE_WWW_STAGE})
@@ -55,16 +79,12 @@ if(SKYCUE_LEAFLET_DIR)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/leaflet/images)
 endif()
 
-add_subdirectory(libskycue)
 add_subdirectory(skycued)
 add_subdirectory(skycue-dump)
 add_subdirectory(skycue-rawrec)
 add_subdirectory(skycue-rawplay)
 add_subdirectory(skycue-stats)
 add_subdirectory(skycue-fisb)
-if(SKYCUE_BUILD_EXAMPLES)
-  add_subdirectory(examples)
-endif()
 if(SKYCUE_BUILD_TESTS)
   add_subdirectory(tests)
 endif()

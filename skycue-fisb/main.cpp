@@ -438,6 +438,7 @@ std::string formatSummary(const Gathered& g, const FisbDecoder& decoder, const F
         {"store.blocks_merged", ss.blocks_merged},
         {"store.blocks_too_old", ss.blocks_too_old},
         {"store.blocks_superseded", ss.blocks_superseded},
+        {"store.blocks_unchanged", ss.blocks_unchanged},
         {"store.blocks_evicted", ss.blocks_evicted},
         {"store.blocks_pruned", ss.blocks_pruned},
         {"store.mosaics_published", ss.mosaics_published},

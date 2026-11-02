@@ -8,14 +8,16 @@
 // newest APDU hh:mm seen as its product time. A block merges in when its
 // product time is no more than 10 min older than the mosaic's; a block
 // already held with a newer time wins (equal times: the later reception
-// wins). When the mosaic's time advances, held blocks more than 10 min older
+// wins; an identical repeat, same time and bins, changes nothing). When the
+// mosaic's time advances, held blocks more than 10 min older
 // than the new time are pruned (they belong to an old cycle). An empty-block
 // list adds its blocks with every bin 0, or 1 for CONUS (64; reference
 // §5.4, ruling §10.6). At most 4096 blocks per mosaic: past that the oldest
 // block (by product time, then arrival) is evicted and counted. A mosaic is
 // published (a radar/raster FisbEvent carrying a copy of every block) once no
-// block has arrived for 10 s, or 30 s after the first block not yet
-// published while blocks keep coming.
+// changed block has arrived for 10 s, or 30 s after the first change not yet
+// published while changes keep coming. Unchanged repeats (every cycle
+// re-sends the mosaic) neither mark it changed nor delay its publish.
 //
 // Text (§10.5). METAR and TAF: one per (kind, station), replaced only by a
 // strictly newer `issued`. Winds aloft: one per (station, forecast period),
@@ -162,6 +164,7 @@ struct FisbStoreStats {
     uint64_t blocks_merged = 0;     // blocks merged into a mosaic
     uint64_t blocks_too_old = 0;    // more than 10 min older than the mosaic: not merged
     uint64_t blocks_superseded = 0; // older than the held block: not merged
+    uint64_t blocks_unchanged = 0;  // the held block again (same time and bins): no change
     uint64_t blocks_evicted = 0;    // over the 4096 cap
     uint64_t blocks_pruned = 0;     // dropped when the mosaic time advanced
     uint64_t mosaics_published = 0;
@@ -237,7 +240,9 @@ private:
                    std::vector<FisbEvent>& out);
     void applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint now, std::vector<FisbEvent>& out);
     void applyBlocks(const FisbProduct& p, const DecodedBlocks& b, TimePoint now, std::vector<FisbEvent>& out);
-    bool merge(MosaicState& m, const RadarBlock& block, uint8_t scale, TimePoint time);  // false: superseded
+    // true when the mosaic changed: a block new to it, or one with a newer
+    // time or other bins than the one held (an identical repeat is no change).
+    bool merge(MosaicState& m, const RadarBlock& block, uint8_t scale, TimePoint time);
     void publish(MosaicState& m, TimePoint now, std::vector<FisbEvent>& out);
     Mosaic view(const MosaicState& m) const;
 

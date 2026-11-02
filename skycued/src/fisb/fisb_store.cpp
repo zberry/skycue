@@ -409,6 +409,10 @@ bool FisbStore::merge(MosaicState& m, const RadarBlock& block, uint8_t scale, Ti
             ++stats_.blocks_superseded;
             return false;
         }
+        if (it->second.time == time && it->second.block.bins == block.bins) {
+            ++stats_.blocks_unchanged;
+            return false;
+        }
         it->second = HeldBlock{block, time, ++seq_};
         ++stats_.blocks_merged;
         return true;

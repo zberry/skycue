@@ -229,6 +229,49 @@ BOOST_AUTO_TEST_CASE(mosaic_merges_newest_wins_and_publishes_on_quiescence)
     BOOST_TEST(st.stats().mosaics_published == 4u);  // 13 s, 41 s, 60 s, streaming
 }
 
+// Final review: every cycle re-sends the mosaic; a block identical to the
+// one held (same time and bins) is no change, so it neither republishes nor
+// holds back a publish that is due.
+BOOST_AUTO_TEST_CASE(repeated_identical_blocks_do_not_republish)
+{
+    FisbStore st;
+    const TimePoint pt = iso("2015-01-24T04:10:00Z");
+    const auto product = [&](TimePoint now, uint8_t v) {
+        return blocks(63, pt, now, {block(277546, 0, v), block(277547, 0, 1)}, {277548});
+    };
+    st.apply(product(kT0, 1), kT0);
+    BOOST_REQUIRE_EQUAL(countKind(st.sweep(kT0 + 10s), FisbEvent::Kind::radar), 1u);
+    const auto updated = findMosaic(st.snapshot(), 63)->updated;
+    // The same blocks every 5 s for 2 min: never published again.
+    for (int i = 1; i <= 24; ++i) {
+        const TimePoint now = kT0 + 10s + std::chrono::seconds(5 * i);
+        BOOST_TEST(st.apply(product(now, 1), now).empty());
+        BOOST_TEST(st.sweep(now + 1s).empty());
+    }
+    BOOST_TEST(st.stats().mosaics_published == 1u);
+    BOOST_TEST(st.stats().blocks_unchanged == 24u * 3u);
+    BOOST_TEST((findMosaic(st.snapshot(), 63)->updated == updated));
+
+    // A changed bin is a change: published 10 s after it, although the
+    // identical repeats go on arriving every 5 s.
+    const TimePoint tc = kT0 + 200s;
+    st.apply(product(tc, 5), tc);
+    std::size_t published = 0;
+    TimePoint at{};
+    for (int i = 1; i <= 4; ++i) {
+        const TimePoint now = tc + std::chrono::seconds(5 * i);
+        st.apply(product(now, 5), now);
+        for (const TimePoint t : {now, now + 1s})
+            if (countKind(st.sweep(t), FisbEvent::Kind::radar) && !published++)
+                at = t;
+    }
+    BOOST_TEST(published == 1u);
+    BOOST_TEST((at == tc + 10s));
+    // A newer product time with the same bins is a change too.
+    st.apply(blocks(63, pt + 2min, tc + 60s, {block(277546, 0, 5)}), tc + 60s);
+    BOOST_TEST(countKind(st.sweep(tc + 70s), FisbEvent::Kind::radar) == 1u);
+}
+
 BOOST_AUTO_TEST_CASE(mosaic_rejects_blocks_older_than_10min)
 {
     FisbStore st;

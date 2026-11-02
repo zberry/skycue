@@ -85,6 +85,41 @@ echo "skip-seconds: frames $frames -> $skip_frames, first frame $first_a -> $fir
 rm -f "$tmp/s.cu8" "$tmp/s.frames.txt"
 expect_exit 2 skip_neg "$iqgen" modes "$modes" --skip-seconds -1 -o "$tmp/s.cu8"
 
+# ---- option caps: non-finite, negative or huge values exit 2 (no overflow) ----
+for opt in duration spacing-us pad-ms skip-seconds; do
+  case $opt in
+    duration) over=86400.5 ;;
+    spacing-us) over=1000000001 ;;
+    pad-ms) over=60000.5 ;;
+    skip-seconds) over=31622401 ;;
+  esac
+  for v in nan inf -inf -1 "$over" 1e300; do
+    expect_exit 2 "cap_${opt}_$v" "$iqgen" modes "$modes" "--$opt=$v" -o "$tmp/cap.cu8"
+    grep -q -- "--$opt" "$tmp/cap_${opt}_$v.err" || { cat "$tmp/cap_${opt}_$v.err"; fail "--$opt $v: option not named"; }
+    [ -e "$tmp/cap.cu8" ] && fail "--$opt $v wrote an output"
+  done
+done
+for v in nan inf -inf -1 1e300; do
+  expect_exit 2 "cap_uat_pad_$v" "$iqgen" uat "$uat" "--pad-ms=$v" -o "$tmp/cap.cu8"
+done
+# The caps themselves are accepted (--pad-ms 60000 would write 2 min of IQ: not run).
+expect_exit 0 cap_ok "$iqgen" modes "$modes" --duration 0.01 --spacing-us 1000000000 -o "$tmp/cap.cu8"
+expect_exit 0 cap_ok_duration "$iqgen" modes "$modes" --duration 86400 --skip-seconds 119.8 -o "$tmp/cap.cu8"
+expect_exit 2 cap_ok_skip "$iqgen" modes "$modes" --skip-seconds 31622400 -o "$tmp/cap.cu8"
+grep -q 'no frames' "$tmp/cap_ok_skip.err" || { cat "$tmp/cap_ok_skip.err"; fail "--skip-seconds 31622400 not accepted"; }
+rm -f "$tmp/cap.cu8" "$tmp/cap.frames.txt"
+
+# ---- --skip-seconds on an untimed input: ignored, with a warning ----
+zcat "$uat" | grep '^+' | head -3 >"$tmp/untimed.txt"
+expect_exit 0 skip_untimed "$iqgen" uat "$tmp/untimed.txt" --skip-seconds 5 -o "$tmp/ut.cu8"
+grep -q "^skycue-iqgen: warning: $tmp/untimed.txt: no timestamps; --skip-seconds ignored$" "$tmp/skip_untimed.err" ||
+  { cat "$tmp/skip_untimed.err"; fail "--skip-seconds on an untimed input: no warning"; }
+grep -qE '^frames=3 .* skipped_seconds=0\.000$' "$tmp/skip_untimed.out" ||
+  { cat "$tmp/skip_untimed.out"; fail "--skip-seconds on an untimed input: summary"; }
+expect_exit 0 noskip_untimed "$iqgen" uat "$tmp/untimed.txt" -o "$tmp/ut.cu8"
+[ -s "$tmp/noskip_untimed.err" ] && { cat "$tmp/noskip_untimed.err"; fail "untimed input without --skip-seconds warned"; }
+rm -f "$tmp/ut.cu8" "$tmp/ut.frames.txt" "$tmp/untimed.txt"
+
 # ---- determinism ---------------------------------------------------------------
 expect_exit 0 b "$iqgen" modes "$modes" --duration 1 -o "$tmp/b.cu8"
 cmp -s "$tmp/a.1090.cu8" "$tmp/b.cu8" || fail "same command, different output"

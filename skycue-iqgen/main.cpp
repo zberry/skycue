@@ -76,10 +76,23 @@ int ioError(const std::string& msg)
     return 1;
 }
 
+// Option caps (see generate()).
+constexpr double kMaxDurationS = 86400;    // one day
+constexpr double kMaxSkipS = 31622400;     // 366 days
+constexpr double kMaxSpacingUs = 1e9;      // 1000 s
+constexpr double kMaxPadMs = 60000;        // one minute
+
 std::string fmt3(double v)
 {
     char buf[64];
     std::snprintf(buf, sizeof buf, "%.3f", v);
+    return buf;
+}
+
+std::string fmt0(double v)
+{
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.0f", v);
     return buf;
 }
 
@@ -212,16 +225,19 @@ int generate(bool uat, int argc, char** argv)
                                                              : "modes: 1090 MHz Mode S from .bin/.csv/.txt/.avr"));
     desc.add_options()("help,h", "show this help")("output,o", po::value(&out_path), "output CU8 file")(
         "spacing-us", po::value(&spacing_us)->default_value(uat ? 20000 : 2000),
-        "gap between untimed frames and between input files, in us")(
+        "gap between untimed frames and between input files, in us (at most 1e9)")(
         "level", po::value(&level)->default_value(-12), "signal level in dB full scale")(
         "snr", po::value(&snr_arg)->default_value("25"), "signal-to-noise ratio in dB, or 'none' for no noise")(
         "cfo", po::value(&cfo)->default_value(0), "carrier frequency offset in Hz")(
         "seed", po::value(&seed)->default_value(1), "noise generator seed")(
         "limit", po::value(&limit), "keep only the first N frames")(
         "skip-seconds", po::value(&skip_s)->default_value(0),
-        "drop frames recorded in the first S seconds of each timed input (from its first frame)")(
-        "duration", po::value(&duration_s), "keep only frames starting in the first S seconds (after --skip-seconds)")(
-        "pad-ms", po::value(&pad_ms)->default_value(50), "silence before the first and after the last frame, in ms")(
+        "drop frames recorded in the first S seconds of each timed input (from its first frame; "
+        "ignored, with a warning, for an untimed input; at most 31622400)")(
+        "duration", po::value(&duration_s),
+        "keep only frames starting in the first S seconds (after --skip-seconds; at most 86400)")(
+        "pad-ms", po::value(&pad_ms)->default_value(50),
+        "silence before the first and after the last frame, in ms (at most 60000)")(
         "max-mb", po::value(&max_mb)->default_value(2048), "refuse to write more than this many MiB");
     po::options_description hidden;
     hidden.add_options()("input", po::value(&inputs));
@@ -248,26 +264,29 @@ int generate(bool uat, int argc, char** argv)
     if (out_path.empty())
         return usageError("-o OUT.cu8 is required");
     const double rate = uat ? iqgen::kUatRate : iqgen::kModesRate;
-    if (!std::isfinite(spacing_us) || spacing_us <= 0)
-        return usageError("--spacing-us must be positive");
+    // The caps keep every value well inside int64 once converted to 12 MHz
+    // ticks, output samples or nanoseconds (no llround overflow).
+    if (!std::isfinite(spacing_us) || spacing_us <= 0 || spacing_us > kMaxSpacingUs)
+        return usageError("--spacing-us must be positive and at most " + fmt0(kMaxSpacingUs));
     if (!std::isfinite(level))
         return usageError("--level must be a number");
     if (!std::isfinite(cfo) || std::fabs(cfo) >= rate / 2)
         return usageError("--cfo must be below half the sample rate (" + fmt3(rate / 2) + " Hz)");
-    if (!std::isfinite(pad_ms) || pad_ms < 0)
-        return usageError("--pad-ms must be 0 or more");
+    if (!std::isfinite(pad_ms) || pad_ms < 0 || pad_ms > kMaxPadMs)
+        return usageError("--pad-ms must be 0 to " + fmt0(kMaxPadMs));
     if (vm.count("limit") && limit == 0)
         return usageError("--limit must be at least 1");
-    if (vm.count("duration") && (!std::isfinite(duration_s) || duration_s <= 0))
-        return usageError("--duration must be positive");
-    if (!std::isfinite(skip_s) || skip_s < 0)
-        return usageError("--skip-seconds must be 0 or more");
+    if (vm.count("duration") && (!std::isfinite(duration_s) || duration_s <= 0 || duration_s > kMaxDurationS))
+        return usageError("--duration must be positive and at most " + fmt0(kMaxDurationS));
+    if (!std::isfinite(skip_s) || skip_s < 0 || skip_s > kMaxSkipS)
+        return usageError("--skip-seconds must be 0 to " + fmt0(kMaxSkipS));
     if (max_mb == 0 || max_mb > (uint64_t{1} << 40))
         return usageError("--max-mb must be 1 to 2^40");
 
     // Read every input.
     iqgen::InputStats stats;
     std::vector<std::vector<iqgen::TimedFrame>> files;
+    bool skip_applied = false;  // --skip-seconds took effect on at least one timed input
     for (const auto& in : inputs) {
         try {
             files.push_back(uat ? iqgen::readUatFile(in, stats) : iqgen::readModesFile(in, stats));
@@ -284,9 +303,12 @@ int generate(bool uat, int argc, char** argv)
                       << " lines untimed; placing the whole file untimed, " << spacing_us << " us apart\n";
         // --skip-seconds, on the recording's own clock, so that --duration
         // then counts from the first kept frame.
+        if (skip_s > 0 && !file.empty() && untimed)
+            std::cerr << "skycue-iqgen: warning: " << in << ": no timestamps; --skip-seconds ignored\n";
         if (skip_s > 0 && !file.empty() && !untimed) {
+            skip_applied = true;
             const double per_second = uat ? 1e9 : iqgen::kModesTickRate;
-            const auto skip = static_cast<int64_t>(std::llround(std::min(skip_s * per_second, 9.0e18)));
+            const auto skip = static_cast<int64_t>(std::llround(skip_s * per_second));  // <= 3.2e16
             int64_t t0 = *file.front().time;
             for (const auto& f : file)
                 t0 = std::min(t0, *f.time);
@@ -409,7 +431,7 @@ int generate(bool uat, int argc, char** argv)
     std::cout << "frames=" << placed.frames.size() << " expected=" << expected << " overlaps=" << placed.overlaps
               << " clipped=" << clipped << " skipped=" << stats.skipped
               << " seconds=" << fmt3(static_cast<double>(out_samples) / rate) << " bytes=" << bytes
-              << " skipped_seconds=" << fmt3(skip_s) << "\n";
+              << " skipped_seconds=" << fmt3(skip_applied ? skip_s : 0.0) << "\n";
     return 0;
 }
 

@@ -1,0 +1,46 @@
+# skycue web UI
+
+The page skycued serves on `WEB_PORT` (see `docs/web-api.md`): `index.html`,
+`app_pure.js` (pure helpers, `window.skycuePure`, also loaded by the node
+test), `app.js` (the page) and `style.css`. Plain ES2017, no framework, no
+build step, and no request to any host but skycued itself.
+
+## Leaflet
+
+The map library is Leaflet 1.9.4, pinned in `cmake/sources.cmake` as the
+npm registry tarball (`leaflet-1.9.4.tgz`: it ships the prebuilt `dist/`,
+which the GitHub source archive does not; it is only extracted, never run
+through npm). It is not committed: the page loads it from
+`vendor/leaflet/leaflet.js` and `vendor/leaflet/leaflet.css`.
+
+- **Superbuild** (`cmake -S . -B build && cmake --build build`): the
+  `leaflet` step extracts the tarball and the skycue step installs
+  `dist/leaflet.js`, `dist/leaflet.css` and `dist/images/` into
+  `stage/share/skycue/www/vendor/leaflet/`, next to these files.
+- **Standalone skycue build**: pass the extracted `dist/` directory,
+  ```sh
+  mkdir -p /tmp/leaflet && tar xzf sources/leaflet-1.9.4.tgz -C /tmp/leaflet package/dist
+  cmake -S skycue -B build-skycue -DSKYCUE_LEAFLET_DIR=/tmp/leaflet/package/dist
+  ```
+  The `www_stage` target (part of `all`) assembles these files plus Leaflet
+  in `<build>/www-stage/`, which the web tests serve with `--www-dir`, and
+  `cmake --install` puts them in `<prefix>/share/skycue/www/`. Without
+  `SKYCUE_LEAFLET_DIR` the page has no map library and the tests that need
+  it say SKIP.
+
+`vendor/` and `tiles/` in this directory are git-ignored, for local use
+only; the build never copies them.
+
+## Map tiles
+
+When `www/tiles/<z>/<x>/<y>.png` exist (see `/api/tiles-available`) the page
+shows them; otherwise it draws a plain background with a 1°/5° graticule
+and a scale bar.
+
+## Geometry
+
+`elevationDeg` in `app_pure.js` duplicates `skycued/src/geo.cpp`
+(haversine on a 6371008.8 m sphere, 4/3 effective radius in the curvature
+term) so the elevation ring matches what the filters use. Change both
+together; `tests/js/app_pure.test.js` checks it against values from
+`tests/test_geo.cpp`.

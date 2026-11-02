@@ -16,6 +16,45 @@ include(cmake/CompilerWarnings.cmake)
 
 enable_testing()
 
+set(SKYCUE_LEAFLET_DIR "" CACHE PATH
+  "Leaflet's extracted dist/ directory (leaflet.js, leaflet.css, images/); staged and installed under www/vendor/leaflet")
+option(SKYCUE_UI_TESTS "Register the headless-browser test ui_playwright (skips itself without node/Playwright)" ON)
+
+# The web UI: www/ plus Leaflet, assembled in ${CMAKE_BINARY_DIR}/www-stage
+# (what the tests serve with --www-dir) and installed to share/skycue/www.
+# vendor/ and tiles/ in the source tree are local, untracked additions:
+# neither is copied from there.
+set(SKYCUE_WWW_STAGE "${CMAKE_BINARY_DIR}/www-stage")
+file(GLOB _skycue_www_files CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/www/*.html"
+  "${PROJECT_SOURCE_DIR}/www/*.js" "${PROJECT_SOURCE_DIR}/www/*.css" "${PROJECT_SOURCE_DIR}/www/*.svg")
+set(_skycue_www_cmds COMMAND ${CMAKE_COMMAND} -E make_directory ${SKYCUE_WWW_STAGE})
+if(_skycue_www_files)
+  list(APPEND _skycue_www_cmds
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_skycue_www_files} ${SKYCUE_WWW_STAGE}/)
+endif()
+if(SKYCUE_LEAFLET_DIR)
+  foreach(_f leaflet.js leaflet.css)
+    if(NOT EXISTS "${SKYCUE_LEAFLET_DIR}/${_f}")
+      message(FATAL_ERROR "skycue: SKYCUE_LEAFLET_DIR=${SKYCUE_LEAFLET_DIR} has no ${_f}")
+    endif()
+  endforeach()
+  list(APPEND _skycue_www_cmds
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SKYCUE_WWW_STAGE}/vendor/leaflet
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SKYCUE_LEAFLET_DIR}/leaflet.js
+      ${SKYCUE_LEAFLET_DIR}/leaflet.css ${SKYCUE_WWW_STAGE}/vendor/leaflet/
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${SKYCUE_LEAFLET_DIR}/images
+      ${SKYCUE_WWW_STAGE}/vendor/leaflet/images)
+endif()
+add_custom_target(www_stage ALL ${_skycue_www_cmds}
+  COMMENT "Staging the web UI in ${SKYCUE_WWW_STAGE}" VERBATIM)
+install(FILES ${_skycue_www_files} DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www)
+if(SKYCUE_LEAFLET_DIR)
+  install(FILES ${SKYCUE_LEAFLET_DIR}/leaflet.js ${SKYCUE_LEAFLET_DIR}/leaflet.css
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/leaflet)
+  install(DIRECTORY ${SKYCUE_LEAFLET_DIR}/images/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/leaflet/images)
+endif()
+
 add_subdirectory(libskycue)
 add_subdirectory(skycued)
 add_subdirectory(skycue-dump)

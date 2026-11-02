@@ -294,6 +294,24 @@ BOOST_AUTO_TEST_CASE(avr_lines)
     BOOST_TEST(avrLine(1783963099005369000LL, "AB") == std::string("@") + want + "AB;");
 }
 
+BOOST_AUTO_TEST_CASE(avr_input_lines)
+{
+    auto m = parseAvrLine("@000000B71B005F406A936F50F0;\r\n");
+    BOOST_REQUIRE(m);
+    BOOST_TEST(*m->ticks == 0xB71B00u);
+    BOOST_TEST(m->hex == "5F406A936F50F0");
+    m = parseAvrLine("*8d4840d6202cc371c32ce0576098;");
+    BOOST_REQUIRE(m);
+    BOOST_TEST(!m->ticks);
+    BOOST_TEST(m->hex == "8D4840D6202CC371C32CE0576098");
+    BOOST_TEST(parseAvrLine(avrLine(1783963099005369000LL, "5D486258DD7987"))->hex == "5D486258DD7987");
+    for (const char* bad : {"", "@12;", "*ABC;", "@000000B71B005F406A936F50F0", "#x", "*5F406A936F50FZ;"})
+        BOOST_TEST(!parseAvrLine(bad).has_value(), "accepted: " << bad);
+    // Mode A/C (4 digits) is not a Mode S frame.
+    BOOST_TEST(!parseAvrLine("@000000B71B001234;").has_value());
+    BOOST_TEST(!parseAvrLine("*1234;").has_value());
+}
+
 BOOST_AUTO_TEST_CASE(uat_lines)
 {
     auto u = parseUatLine("-00a66ef135445d525a0c0519119021204800;\n");
@@ -306,6 +324,57 @@ BOOST_AUTO_TEST_CASE(uat_lines)
     BOOST_TEST(u->text == "+3514c952;rs=3;");
     for (const char* bad : {"", "\n", "# comment", "123 x;", "123", "123 ", "abc -00;", " -00;", "12a -00;"})
         BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+    BOOST_TEST(!parseUatLine("1793536496789 +3514c952;")->offset_ns.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(stratux_uat_lines)
+{
+    auto u = parseUatLine("1441566520123456789,-00a66ef135445d525a0c0519119021204800;rs=2;\n");
+    BOOST_REQUIRE(u);
+    BOOST_TEST(!u->epoch_ms);
+    BOOST_TEST(*u->offset_ns == 1441566520123456789LL);
+    BOOST_TEST(u->text == "-00a66ef135445d525a0c0519119021204800;rs=2;");
+    for (const char* bad : {"123,", "123,x;", ",+00;", "12a,+00;"})
+        BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+    // The stratux log's session header, and an <ns> past int64_t.
+    for (const char* bad : {"START,Wed Sep 2 04:23:37 +0000 UTC 2015", "9223372036854775808,+00;",
+                            "12345678901234567890,+00;"})
+        BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+    u = parseUatLine("9223372036854775807,+00;");
+    BOOST_REQUIRE(u);
+    BOOST_TEST(*u->offset_ns == INT64_MAX);
+    // 19 digits are an <ns> only: an epoch_ms has at most 18.
+    BOOST_TEST(!parseUatLine("1234567890123456789 +00;").has_value());
+}
+
+BOOST_AUTO_TEST_CASE(stratux_sessions_in_file_order)
+{
+    BOOST_TEST(isStratuxStart("START,Wed Sep 2 04:25:25 +0000 UTC 2015\r\n"));
+    BOOST_TEST(!isStratuxStart("START"));
+    BOOST_TEST(!isStratuxStart("123,+00;"));
+    // Session 1 at 5.0/5.2/5.2 s; a START, then session 2 below it (1.0/1.3 s);
+    // a backward jump without a START, session 3 (0.5/0.9 s); a START before a
+    // forward offset still begins session 4 (9.0 s).
+    StratuxClock c;
+    c.startSession();  // a header before the first line changes nothing
+    std::vector<int64_t> got;
+    for (int64_t off : {5'000'000'000LL, 5'200'000'000LL, 5'200'000'000LL})
+        got.push_back(*c.next(off));
+    c.startSession();
+    for (int64_t off : {1'000'000'000LL, 1'300'000'000LL})
+        got.push_back(*c.next(off));
+    for (int64_t off : {500'000'000LL, 900'000'000LL})
+        got.push_back(*c.next(off));
+    c.startSession();
+    got.push_back(*c.next(9'000'000'000LL));
+    const std::vector<int64_t> want = {5'000'000'000LL, 5'200'000'000LL, 5'200'000'000LL, 6'200'000'000LL,
+                                       6'500'000'000LL, 7'500'000'000LL, 7'900'000'000LL, 8'900'000'000LL};
+    BOOST_TEST(got == want, boost::test_tools::per_element());
+    // Past int64_t: nullopt, and the clock carries on from where it was.
+    StratuxClock big;
+    BOOST_TEST(*big.next(INT64_MAX - 10) == INT64_MAX - 10);
+    BOOST_TEST(!big.next(0).has_value());
+    BOOST_TEST(*big.next(INT64_MAX) == INT64_MAX);
 }
 
 BOOST_AUTO_TEST_CASE(rotating_file_names_and_rotation)

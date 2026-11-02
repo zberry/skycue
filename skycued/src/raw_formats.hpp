@@ -78,12 +78,48 @@ std::optional<CsvMessage> parseCsvMessage(const std::string& line);
 // 12 uppercase hex digits, the AVR-with-timestamp form readsb's raw input reads.
 std::string avrLine(int64_t epoch_ns, const std::string& hex);
 
-// A dump978 raw line, optionally "<epoch_ms> "-prefixed as skycue-rawrec writes it.
+// One AVR line as readsb's raw output writes it.
+struct AvrMessage {
+    std::optional<uint64_t> ticks;  // the 48-bit 12 MHz counter of an "@" line; nullopt for "*"
+    std::string hex;                // uppercase, 14 or 28 digits
+};
+// "@<12 hex ticks><HEX>;" or "*<HEX>;" with HEX 14 or 28 hex digits (trailing
+// CR/LF ok); nullopt for anything else, Mode A/C (4 digits) included. The
+// inverse of avrLine(). Never throws.
+std::optional<AvrMessage> parseAvrLine(const std::string& line);
+
+// A dump978 raw line, optionally "<epoch_ms> "-prefixed as skycue-rawrec writes
+// it, or "<ns>,"-prefixed as stratux's UAT logs write it (a nanosecond offset
+// from an arbitrary start, not an epoch).
 struct UatLine {
     std::optional<int64_t> epoch_ms;
+    std::optional<int64_t> offset_ns;
     std::string text;  // starts with '-' (downlink) or '+' (uplink); no line end
 };
-// nullopt for anything else (blank lines, comments, ...). Trailing CR/LF dropped.
+// nullopt for anything else (blank lines, comments, stratux "START,..." lines,
+// an <ns> beyond int64_t, ...). Trailing CR/LF dropped.
 std::optional<UatLine> parseUatLine(const std::string& line);
+
+// A stratux log's session header, "START,<date>" (trailing CR/LF ok).
+bool isStratuxStart(const std::string& line);
+
+// Puts the sessions of one stratux log on one timeline, in file order. A
+// session begins at a "START," line (startSession()) or where the offset goes
+// backwards; it starts kGapNs after the previous session's last line and
+// keeps its own spacing. The first session keeps its offsets as they are.
+// next() returns nullopt (state unchanged) if the time would leave int64_t.
+class StratuxClock {
+public:
+    static constexpr int64_t kGapNs = 1'000'000'000;
+    void startSession() { restart_ = true; }
+    std::optional<int64_t> next(int64_t offset_ns);
+
+private:
+    bool have_ = false, restart_ = false;
+    int64_t first_ = 0;     // offset of the session's first line
+    int64_t start_ = 0;     // its time
+    int64_t last_off_ = 0;  // offset and time of the latest line
+    int64_t last_ = 0;
+};
 
 }  // namespace skycued

@@ -256,3 +256,16 @@ target_compile_definitions(test_fisb_decoder PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_fisb_decoder)
 add_test(NAME fisb_decoder COMMAND test_fisb_decoder)
 set_tests_properties(fisb_decoder PROPERTIES TIMEOUT 120)
+
+# Mode S CRC, UAT Reed-Solomon and framing for the IQ generators, on
+# hand-built vectors and the raw UAT fixture.
+add_executable(test_iqgen test_iqgen.cpp)
+target_link_libraries(test_iqgen PRIVATE skycue_iqgen_core Boost::unit_test_framework)
+target_compile_definitions(test_iqgen PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_iqgen)
+add_test(NAME iqgen COMMAND test_iqgen)
+add_test(NAME iqgen_cli
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
+    $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180)

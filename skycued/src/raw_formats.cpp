@@ -213,24 +213,85 @@ std::string avrLine(int64_t epoch_ns, const std::string& hex)
     return out;
 }
 
+std::optional<AvrMessage> parseAvrLine(const std::string& raw)
+{
+    const std::string line = chomp(raw);
+    if (line.size() < 2 || (line[0] != '@' && line[0] != '*') || line.back() != ';')
+        return std::nullopt;
+    const bool timed = line[0] == '@';
+    const std::size_t digits = line.size() - 2;
+    const std::size_t n = digits - (timed ? 12 : 0);
+    if ((timed && digits < 12) || (n != 14 && n != 28))
+        return std::nullopt;
+    AvrMessage m;
+    uint64_t ticks = 0;
+    m.hex.reserve(n);
+    for (std::size_t i = 1; i + 1 < line.size(); ++i) {
+        const int v = hexValue(line[i]);
+        if (v < 0)
+            return std::nullopt;
+        if (timed && i <= 12)
+            ticks = (ticks << 4) | static_cast<uint64_t>(v);
+        else
+            m.hex += static_cast<char>(v < 10 ? '0' + v : 'A' + v - 10);
+    }
+    if (timed)
+        m.ticks = ticks;
+    return m;
+}
+
 std::optional<UatLine> parseUatLine(const std::string& raw)
 {
     std::string line = chomp(raw);
     UatLine u;
     if (!line.empty() && isDigit(line[0])) {
+        // At most 19 digits: below 10^19 < 2^64, so v cannot wrap.
         std::size_t i = 0;
-        int64_t ms = 0;
-        for (; i < line.size() && isDigit(line[i]) && i < 18; ++i)
-            ms = ms * 10 + (line[i] - '0');
-        if (i >= line.size() || line[i] != ' ')
+        uint64_t v = 0;
+        for (; i < line.size() && isDigit(line[i]) && i < 19; ++i)
+            v = v * 10 + static_cast<uint64_t>(line[i] - '0');
+        if (i < line.size() && line[i] == ' ' && i <= 18)
+            u.epoch_ms = static_cast<int64_t>(v);  // "<epoch_ms> " (skycue-rawrec)
+        else if (i < line.size() && line[i] == ',' && v <= static_cast<uint64_t>(INT64_MAX))
+            u.offset_ns = static_cast<int64_t>(v);  // "<ns>," (stratux)
+        else
             return std::nullopt;
-        u.epoch_ms = ms;
         line.erase(0, i + 1);
     }
     if (line.empty() || (line[0] != '-' && line[0] != '+'))
         return std::nullopt;
     u.text = std::move(line);
     return u;
+}
+
+bool isStratuxStart(const std::string& line)
+{
+    return line.compare(0, 6, "START,") == 0;
+}
+
+std::optional<int64_t> StratuxClock::next(int64_t offset_ns)
+{
+    int64_t first = offset_ns, start = offset_ns;
+    if (have_) {
+        if (restart_ || offset_ns < last_off_) {
+            if (last_ > INT64_MAX - kGapNs)
+                return std::nullopt;
+            start = last_ + kGapNs;
+        } else {
+            first = first_;
+            start = start_;
+        }
+    }
+    const int64_t rel = offset_ns - first;  // >= 0: offsets are never negative
+    if (rel > INT64_MAX - start)
+        return std::nullopt;
+    have_ = true;
+    restart_ = false;
+    first_ = first;
+    start_ = start;
+    last_off_ = offset_ns;
+    last_ = start + rel;
+    return last_;
 }
 
 }  // namespace skycued

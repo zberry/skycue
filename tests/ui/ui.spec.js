@@ -237,6 +237,18 @@ test('hide_filtered_removes_filtered_markers', async ({ page }) => {
   expect(r.domTrails).toBe(r.after);
   expect(await page.evaluate(() => localStorage.getItem('skycue.hideFiltered'))).toBe('1');
 
+  // Live updates keep the filtered tracks out (the per-update upsert path).
+  const live = () => page.evaluate(() => ({
+    dom: document.querySelectorAll('.ac-marker:not(.decision-sent):not(.decision-allow_listed)').length,
+    hidden: window.skycueApp.hiddenCount(), text: document.getElementById('hidden-count').textContent }));
+  for (let i = 0; i < 4; i++) {
+    await page.waitForTimeout(400);
+    const l = await live();
+    expect(l.dom).toBe(0);
+    expect(l.text).toBe(l.hidden > 0 ? l.hidden + ' hidden' : '');
+  }
+  await page.evaluate(() => window.skycueApp.setHideFiltered(false));
+
   // A selected track that becomes hidden is deselected and the panel closes.
   await page.evaluate(() => window.skycueApp.setHideFiltered(false));
   const panel = await selectTarget(page);
@@ -246,7 +258,6 @@ test('hide_filtered_removes_filtered_markers', async ({ page }) => {
   expect(await page.evaluate(() => window.skycueApp.selected())).toBe(null);
   await expect(page.locator('#details')).toBeHidden();
   await page.evaluate(() => window.skycueApp.setHideFiltered(false));
-  await panel.waitFor({ state: 'hidden' });
   await page.locator('#list-block li', { hasText: TARGET }).getByRole('button').click();
   await expect.poll(async () => (await api('/api/lists')).body.block.map((e) => e.toLowerCase()),
     { timeout: 3000 }).not.toContain(TARGET);
@@ -259,6 +270,11 @@ test('hide_filtered_removes_filtered_markers', async ({ page }) => {
     return { hidden, shown: window.skycueApp.markers().length, text: document.getElementById('hidden-count').textContent };
   });
   expect(r2.shown).toBeGreaterThan(r2.hidden);
+  const off = await page.evaluate(() => ({ dom: document.querySelectorAll('.ac-marker').length,
+    domFiltered: document.querySelectorAll('.ac-marker:not(.decision-sent):not(.decision-allow_listed)').length,
+    hook: window.skycueApp.markers().length }));
+  expect(off.dom).toBe(off.hook);
+  expect(off.domFiltered).toBeGreaterThan(0);
   expect(r2.text).toBe('');
   expect(await page.evaluate(() => localStorage.getItem('skycue.hideFiltered'))).toBe('0');
   await expect.poll(snap, { timeout: 5000 }).toBe(filtersBefore);

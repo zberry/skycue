@@ -78,13 +78,14 @@
     return !hideFiltered || decision === 'send' || decision === 'allow_listed' ||
       decision === 'sent' || decision === 'allow';
   }
-  // How many tracks the toggle hides. no_position tracks are never drawn, so
-  // they do not count. `tracks` is an array of track objects.
+  // How many tracks the toggle hides: filtered ones that have a position (so
+  // would have had a marker). no_position tracks are never drawn. `tracks` is an array of track objects.
   function hiddenCount(tracks, hideFiltered) {
     if (!hideFiltered) return 0;
     var n = 0;
     tracks.forEach(function (t) {
-      if (t.decision !== 'no_position' && !trackVisible(t.decision, true)) n++;
+      if (t.decision !== 'no_position' && typeof t.lat === 'number' && typeof t.lon === 'number' &&
+          !trackVisible(t.decision, true)) n++;
     });
     return n;
   }

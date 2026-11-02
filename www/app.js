@@ -356,6 +356,8 @@
   }
 
   function select(key) {
+    var te = tracks.get(key);
+    if (te && !P.trackVisible(te.t.decision, hideFiltered)) return; // no marker to select
     var prev = selectedKey;
     selectedKey = key;
     [prev, key].forEach(function (k) {

@@ -354,10 +354,11 @@ test('trackVisible: only sent and allow-listed survive hide filtered', () => {
 
 test('hiddenCount counts drawn-but-filtered tracks only when on', () => {
   const ts = ['send', 'allow_listed', 'out_of_range', 'below_elevation', 'blocked', 'no_position', 'weird']
-    .map((decision) => ({ decision }));
+    .map((decision) => ({ decision, lat: 37, lon: -122 }));
   assert.strictEqual(P.hiddenCount(ts, false), 0);
   assert.strictEqual(P.hiddenCount(ts, true), 4);           // no_position is never drawn
   assert.strictEqual(P.hiddenCount([], true), 0);
+  assert.strictEqual(P.hiddenCount([{ decision: 'blocked' }, { decision: 'blocked', lat: 1 }], true), 0); // no position
   assert.strictEqual(P.hiddenCount(ts.slice(0, 2), true), 0);
 });
 

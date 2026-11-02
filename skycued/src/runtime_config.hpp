@@ -42,6 +42,7 @@
 
 #include <sys/types.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -117,6 +118,14 @@ public:
     // Starts the 1 s poll (see the top of this file). Once.
     void startWatching();
 
+    // The one change callback (replaces any earlier one; empty to clear).
+    // Called after promoteToBaseline, and after any applied change (applyUi,
+    // a hand edit) that gave the Engine nothing to apply, so emitted no
+    // Engine event: the overlay may still have changed (overlay_active), e.g.
+    // a value cleared that equals the baseline's. It must not call back into
+    // this object's changing methods.
+    void onChange(std::function<void()> callback) { on_change_ = std::move(callback); }
+
     // skycue.conf as running: filter values and list file names as in effect
     // now (overlay included), other keys as at load().
     Config effective() const;
@@ -142,7 +151,9 @@ private:
     IdList effectiveList(ListKind kind) const;
     FilterConfig effectiveFilters() const;
 
-    void applyEffective(const std::string& origin);
+    // True when it handed the Engine a change (which emits its event).
+    bool applyEffective(const std::string& origin);
+    void changed();  // on_change_, if set
     void writeOverlay(const Overlay& overlay);  // throws std::runtime_error
     void writeFile(const std::string& path, const std::string& text, Stamp& stamp);  // throws
 
@@ -167,6 +178,7 @@ private:
     std::optional<Stamp> conf_pending_, overlay_pending_, allow_pending_, block_pending_;
     boost::asio::steady_timer timer_;
     bool watching_ = false;
+    std::function<void()> on_change_;
     std::shared_ptr<char> alive_ = std::make_shared<char>(0);
 };
 

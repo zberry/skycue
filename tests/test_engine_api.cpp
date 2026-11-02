@@ -439,3 +439,48 @@ BOOST_AUTO_TEST_CASE(on_event_sequence)
     std::this_thread::sleep_for(1300ms);
     BOOST_TEST(fx.t.call([&] { return sink.events.size(); }) == n);
 }
+
+BOOST_AUTO_TEST_CASE(expired_event_for_unforwarded_track)
+{
+    Config cfg = baseConfig();
+    cfg.max_range_nm = 20;
+    FakeSource* fake = nullptr;
+    EngineFx fx(cfg, fakeSource(fake));
+    Sink sink;
+    const TrackId far = icao(0x600001), near = icao(0x600002), live = icao(0x600003);
+    fx.t.call([&] {
+        sink.attach(*fx.engine);
+        fake->connection(true);
+        // Both heard 10 s ago (TRACK_TIMEOUT_S is 5): they expire on the next tick.
+        TrackObservation f = nearbyObservation(far.address, 0.6);  // 39 nm: out of range, never sent
+        f.received_time -= 10s;
+        f.position_time = f.received_time;
+        fake->emit(f);
+        TrackObservation n = nearbyObservation(near.address, 0);  // sent
+        n.received_time -= 10s;
+        n.position_time = n.received_time;
+        fake->emit(n);
+        fake->emit(nearbyObservation(live.address, 0.01));  // moves the data clock to now
+    });
+    std::this_thread::sleep_for(1300ms);
+    fx.t.call([&] {
+        std::vector<EngineEvent> expired, drops;
+        for (const auto& e : sink.events) {
+            if (e.kind == EventKind::expired)
+                expired.push_back(e);
+            if (e.kind == EventKind::drop)
+                drops.push_back(e);
+        }
+        // The never-forwarded track: an expired event, no drop.
+        BOOST_REQUIRE(expired.size() == 1u);
+        BOOST_TEST((expired[0].id.value_or(TrackId{}) == far));
+        BOOST_TEST(!expired[0].reason);
+        BOOST_TEST(!expired[0].track);
+        // The forwarded one: a timeout drop, as before, and no expired event.
+        BOOST_REQUIRE(drops.size() == 1u);
+        BOOST_TEST((drops[0].id.value_or(TrackId{}) == near));
+        BOOST_TEST((drops[0].reason.value_or(DropReason::shutdown) == DropReason::timeout));
+        BOOST_TEST(fx.engine->snapshot().tracks.size() == 1u);
+        BOOST_TEST(fx.engine->stats().sent_drops == 1u);
+    });
+}

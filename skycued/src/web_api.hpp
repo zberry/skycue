@@ -30,10 +30,11 @@ std::string filtersJson(const RuntimeConfig& runtime, const char* type = nullptr
 std::string listsJson(const Engine& engine, const RuntimeConfig& runtime, const char* type = nullptr);
 std::string trackJson(const TrackSnapshot& track, const char* type = nullptr);
 std::string dropJson(skycue::TrackId id, skycue::DropReason reason);  // {"type":"drop",...}
+std::string expiredJson(skycue::TrackId id);                          // {"type":"expired",...}
 std::string tilesAvailableJson(const std::string& www_dir);
 std::string errorJson(const std::string& message);  // {"error":"..."}
 
-// One item of a {"type":"events"} message: update, drop or stats (the
+// One item of a {"type":"events"} message: observed, update, drop, expired or stats (the
 // filters/lists items are built from the current state: filtersJson,
 // listsJson).
 std::string eventJson(const EngineEvent& event);

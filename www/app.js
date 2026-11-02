@@ -627,6 +627,7 @@
       case 'observed': onTrack(it, true); break;
       case 'update': flashSent(onTrack(it, false)); break;
       case 'drop': onDrop(it); break;
+      case 'expired': removeEntry(P.trackKey(it)); break; // never forwarded, gone from skycued's table
       case 'stats': applyStats(it); break;
       case 'filters': applyFilters(it); break;
       case 'lists': applyLists(it); break;

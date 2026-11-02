@@ -144,6 +144,8 @@ struct WebServer::Impl : std::enable_shared_from_this<WebServer::Impl> {
     void stop();
     void accept();
     void onEvent(const EngineEvent& ev);
+    void onRuntimeChange();
+    void enqueue(Item&& item);
     void flush();
     void wsOpened(WsSession* s);
     void wsClosed(WsSession* s, bool was_open);
@@ -555,6 +557,7 @@ void WebServer::Impl::start()
         LOG_WARN("web: www directory " << cfg.www_dir << " does not exist; the UI pages will be 404 (the API works)");
     Impl* self = this;  // stop() clears the sink before this goes away
     engine.onEvent([self](const EngineEvent& ev) { self->onEvent(ev); });
+    runtime.onChange([self] { self->onRuntimeChange(); });
     accept();
 }
 
@@ -589,8 +592,10 @@ void WebServer::Impl::stop()
     error_code ignored;
     acceptor.close(ignored);
     accept_retry.cancel(ignored);
-    if (started)
+    if (started) {
         engine.onEvent(nullptr);
+        runtime.onChange(nullptr);
+    }
     pending.clear();
     const auto http_copy = http_sessions;
     for (const auto& kv : http_copy)
@@ -614,6 +619,20 @@ void WebServer::Impl::onEvent(const EngineEvent& ev)
     Item item{ev.kind, webapi::eventJson(ev)};
     if (item.json.empty() && ev.kind != EventKind::filters_changed && ev.kind != EventKind::lists_changed)
         return;
+    enqueue(std::move(item));
+}
+
+void WebServer::Impl::onRuntimeChange()
+{
+    // The overlay (overlay_active) may have changed without an Engine event.
+    if (stopped || ws_open == 0)
+        return;
+    enqueue(Item{EventKind::filters_changed, std::string()});
+    enqueue(Item{EventKind::lists_changed, std::string()});
+}
+
+void WebServer::Impl::enqueue(Item&& item)
+{
     pending.push_back(std::move(item));
     if (flush_posted)
         return;

@@ -394,8 +394,14 @@ void Engine::tick()
         // A track that ages out while the source is down went because of it.
         const auto reason = source_connected_ ? skycue::DropReason::timeout : skycue::DropReason::source_lost;
         for (const auto& id : table_.expire(now, track_timeout_)) {
-            if (!forwarded.count(id))
+            if (!forwarded.count(id)) {
+                if (sink_) {
+                    EngineEvent ev = kindEvent(EventKind::expired);
+                    ev.id = id;
+                    emit(ev);
+                }
                 continue;
+            }
             forwarder_.sendDrop(id, reason);
             countDrop(reason);
             if (sent_)

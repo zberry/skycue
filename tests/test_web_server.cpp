@@ -908,6 +908,38 @@ BOOST_AUTO_TEST_CASE(bad_json_400)
                "{\"max_range_nm\":150,\"min_elevation_deg\":2.5,\"overlay_active\":true}");
 }
 
+BOOST_AUTO_TEST_CASE(save_baseline_broadcasts_filters_lists)
+{
+    WebFx f;
+    WsClient c(f.port);
+    BOOST_TEST(c.waitFor([&] { return !c.msgs.empty(); }));
+    BOOST_TEST(pollUntil([&] { return f.webClients() == 1u; }));
+
+    // An overlay value equal to the baseline's: no Engine change, but the
+    // overlay is no longer empty, and every page must show that.
+    BOOST_TEST(request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":150}").status == 200u);
+    BOOST_TEST(!c.waitForMessage({"\"type\":\"filters\",\"max_range_nm\":150,\"min_elevation_deg\":0,"
+                                  "\"overlay_active\":true"})
+                    .empty());
+    BOOST_TEST(!c.waitForMessage({"\"type\":\"lists\",\"allow\":[],\"block\":[],\"overlay_active\":true"}).empty());
+
+    // Save as baseline: nothing effective changes; overlay_active goes false.
+    const Reply s = request(f.port, http::verb::post, "/api/filters/save-baseline", "{}");
+    BOOST_TEST(s.status == 200u);
+    const std::string m = c.waitForMessage({"\"type\":\"filters\",\"max_range_nm\":150,\"min_elevation_deg\":0,"
+                                            "\"overlay_active\":false"});
+    BOOST_TEST(!m.empty());
+    BOOST_TEST(has(m, "\"type\":\"lists\",\"allow\":[],\"block\":[],\"overlay_active\":false"));
+    BOOST_TEST(m.compare(0, 17, "{\"type\":\"events\",") == 0);
+    // No filter_change was recorded for either: the Engine saw no change.
+    BOOST_TEST(countOf(f.sent(), "\"event\":\"filter_change\"") == 1u);  // startup only
+
+    // A change the Engine applies still gives one filters item, not two.
+    BOOST_TEST(request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":90}").status == 200u);
+    const std::string fm = c.waitForMessage({"\"type\":\"filters\",\"max_range_nm\":90"});
+    BOOST_TEST(countOf(fm, "\"type\":\"filters\"") == 1u);
+}
+
 using Headers = std::vector<std::pair<std::string, std::string>>;
 
 BOOST_AUTO_TEST_CASE(put_without_json_content_type_415)

@@ -49,11 +49,14 @@ struct Snapshot {
     EngineStats stats;
 };
 
-enum class EventKind { update, observed, drop, stats, filters_changed, lists_changed };
+enum class EventKind { update, observed, drop, expired, stats, filters_changed, lists_changed };
 
 // update: `track` (the track just sent). observed: `track` (after an
 // observation with a position, whatever the decision: every track, forwarded
-// or not). drop: `id` and `reason` (any reason but shutdown). stats: `stats`. filters_changed, lists_changed: nothing set.
+// or not). drop: `id` and `reason` (any reason but shutdown). expired: `id`
+// (a track that was not being forwarded left the table: no drop is sent for
+// it, but an observer showing it should remove it). stats: `stats`.
+// filters_changed, lists_changed: nothing set.
 struct EngineEvent {
     EventKind kind = EventKind::stats;
     std::optional<TrackSnapshot> track;

@@ -500,12 +500,21 @@ Config RuntimeConfig::effective() const
     return c;
 }
 
-void RuntimeConfig::applyEffective(const std::string& origin)
+void RuntimeConfig::changed()
+{
+    if (on_change_)
+        on_change_();
+}
+
+bool RuntimeConfig::applyEffective(const std::string& origin)
 {
     const FilterConfig want = effectiveFilters();
     const FilterConfig have = engine_.snapshot().filters;
-    if (want.max_range_nm != have.max_range_nm || want.min_elevation_deg != have.min_elevation_deg)
+    bool filters = false;
+    if (want.max_range_nm != have.max_range_nm || want.min_elevation_deg != have.min_elevation_deg) {
         engine_.setFilterConfig(want, origin);
+        filters = true;
+    }
 
     IdList allow = effectiveList(ListKind::allow), block = effectiveList(ListKind::block);
     std::vector<std::string> allow_add, allow_remove, block_add, block_remove;
@@ -513,10 +522,10 @@ void RuntimeConfig::applyEffective(const std::string& origin)
     listDiff(engine_.blockList(), block, block_add, block_remove);
     const size_t changes = allow_add.size() + allow_remove.size() + block_add.size() + block_remove.size();
     if (changes == 0)
-        return;
+        return filters;
     if (changes > 1) {
         engine_.setLists(std::move(allow), std::move(block), origin);
-        return;
+        return true;
     }
     // One entry: the record names it.
     if (!allow_add.empty())
@@ -527,6 +536,7 @@ void RuntimeConfig::applyEffective(const std::string& origin)
         engine_.addListEntry(ListKind::block, block_add.front(), origin);
     else
         engine_.removeListEntry(ListKind::block, block_remove.front(), origin);
+    return true;
 }
 
 void RuntimeConfig::writeFile(const std::string& path, const std::string& text, Stamp& stamp)
@@ -584,7 +594,8 @@ void RuntimeConfig::applyUi(const Overlay& delta, const std::string& origin)
         writeOverlay(next);
         overlay_ = std::move(next);
     }
-    applyEffective(origin);
+    if (!applyEffective(origin))
+        changed();
 }
 
 std::string RuntimeConfig::promoteToBaseline()
@@ -664,6 +675,7 @@ std::string RuntimeConfig::promoteToBaseline()
         result += (result.empty() ? "" : "\n") + p;
     }
     LOG_INFO("save-baseline: " << (result.empty() ? "the overlay is now the baseline" : "partly done"));
+    changed();  // overlay_active changed even when no effective value did
     return result;
 }
 
@@ -708,22 +720,25 @@ bool RuntimeConfig::settled(const std::string& path, Stamp& known, std::optional
 
 void RuntimeConfig::poll()
 {
+    bool quiet_change = false;  // a file reloaded without an Engine change
     if (settled(conf_path_, conf_stamp_, conf_pending_)) {
         reloadConf();
-        applyEffective("file:" + baseName(conf_path_));
+        quiet_change |= !applyEffective("file:" + baseName(conf_path_));
     }
     if (settled(overlay_path_, overlay_stamp_, overlay_pending_)) {
         reloadOverlay();
-        applyEffective(std::string("file:") + kOverlayName);
+        quiet_change |= !applyEffective(std::string("file:") + kOverlayName);
     }
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         if (listPath(kind).empty())
             continue;
         if (settled(listPath(kind), listStamp(kind), kind == ListKind::allow ? allow_pending_ : block_pending_)) {
             reloadList(kind);
-            applyEffective("file:" + baseName(listPath(kind)));
+            quiet_change |= !applyEffective("file:" + baseName(listPath(kind)));
         }
     }
+    if (quiet_change)
+        changed();
 }
 
 void RuntimeConfig::reloadConf()

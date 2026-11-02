@@ -15,7 +15,9 @@
 // (the /api/state object), then the Engine's events, batched: every event of
 // one io turn goes out as one {"type":"events","items":[...]} message. The
 // WebServer is the Engine's event sink (Engine::onEvent) and fans out to
-// every client. Each client has at most one write in flight and a queue of
+// every client; it is also the RuntimeConfig's change callback
+// (RuntimeConfig::onChange), on which it sends the filters and lists items,
+// so every page sees overlay_active change after "save as baseline". Each client has at most one write in flight and a queue of
 // messages behind it; a client whose queued bytes (the one in flight
 // included) would pass max_ws_queue_bytes is disconnected (WARN), without
 // affecting the others. A ping goes out every ping_interval; a client that
@@ -55,12 +57,14 @@ public:
     WebServer(const WebServer&) = delete;
     WebServer& operator=(const WebServer&) = delete;
 
-    // Listens and becomes the Engine's event sink. Throws std::runtime_error
+    // Listens and becomes the Engine's event sink and the RuntimeConfig's
+    // change callback. Throws std::runtime_error
     // ("web: cannot listen on <bind>:<port>: <reason>") when it cannot bind.
     // Logs a WARN when www_dir does not exist. Once.
     void start();
     // Closes the listener and every HTTP and WebSocket connection, clears the
-    // Engine's event sink and sets its web client count to 0. Idempotent.
+    // Engine's event sink and the RuntimeConfig's change callback, and sets
+    // the web client count to 0. Idempotent.
     void stop();
 
     uint16_t localPort() const;     // the bound port; 0 before start()

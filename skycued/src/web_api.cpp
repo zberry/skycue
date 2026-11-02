@@ -425,6 +425,15 @@ std::string dropJson(skycue::TrackId id, skycue::DropReason reason)
         .str();
 }
 
+std::string expiredJson(skycue::TrackId id)
+{
+    return JsonWriter()
+        .add("type", "expired")
+        .add("hex", hexAddress(id.address))
+        .add("addr_type", addressTypeName(id.type))
+        .str();
+}
+
 std::string eventJson(const EngineEvent& event)
 {
     switch (event.kind) {
@@ -434,6 +443,8 @@ std::string eventJson(const EngineEvent& event)
         return event.track ? trackJson(*event.track, "observed") : std::string();
     case EventKind::drop:
         return event.id && event.reason ? dropJson(*event.id, *event.reason) : std::string();
+    case EventKind::expired:
+        return event.id ? expiredJson(*event.id) : std::string();
     case EventKind::stats:
         return event.stats ? statsJson(*event.stats, "stats") : std::string();
     case EventKind::filters_changed:

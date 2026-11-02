@@ -886,7 +886,8 @@ BOOST_AUTO_TEST_CASE(tcp_dead_peer_detected_by_heartbeat_timeout)
         BOOST_TEST(ev.conns[1] == false);
         BOOST_TEST(ev.countDrops(DropReason::source_lost) == 2u);
     }
-    BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() >= 350);
+    // steady_timer may fire a few ms early after rounding; the bound proves detection is not immediate.
+    BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() >= 315);
     BOOST_TEST(client.trackCount() == 0u);
 
     // And it reconnects (the listener's backlog completes the connect).

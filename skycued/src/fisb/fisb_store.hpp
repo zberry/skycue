@@ -28,7 +28,14 @@
 // month). A record whose report year is not the data clock's year (the year
 // before also accepted in January, the year after in December; a one-digit
 // NOTAM year, products 8/16/17, matched on its last digit) is rejected and
-// counted (wrong_year): a stuck or foreign-year report is not current. The
+// counted (wrong_year): a stuck or foreign-year report is not current.
+// AIRMET, SIGMET and CWA (products 11, 12, 15; not G-AIRMET 14, not NOTAMs)
+// are also rejected and counted (stale_start) on every reception whose
+// reference instant (the graphics start, else the ddhhmm issuance in the
+// text header resolved to the nearest month) is more than 12 h before or 6 h
+// after the clock: no such report is valid that long, so it is a stuck
+// re-broadcast. A cancel is never rejected; a held key whose receptions are
+// rejected simply ages out. The
 // text and graphics halves arrive in separate APDUs and are
 // paired. A non-empty text that differs from the stored one replaces it and
 // drops the old graphics (reference §6.5); an empty text (TFR keep-alive)
@@ -92,6 +99,10 @@ constexpr std::chrono::minutes kTwgo{70};
 constexpr std::chrono::minutes kTwgoUnmatched{720};
 constexpr std::chrono::minutes kCancelled{30};
 }  // namespace expiry
+// §10.2 (amended 2026-11-02): an AIRMET, SIGMET or CWA whose reference
+// instant is further than this from the data clock is stale on arrival.
+constexpr std::chrono::hours kStaleStartBefore{12};
+constexpr std::chrono::hours kStaleStartAhead{6};
 constexpr std::chrono::seconds kMosaicQuiet{10};
 constexpr std::chrono::seconds kMosaicMaxInterval{30};
 constexpr std::chrono::minutes kMosaicMergeWindow{10};
@@ -174,6 +185,7 @@ struct FisbStoreStats {
     uint64_t no_product_time = 0;   // raster products whose APDU time did not resolve: dropped
     uint64_t twgo_pending = 0;      // gauge (computed by stats()): TWGO halves held, not yet complete
     uint64_t wrong_year = 0;        // TWGO halves whose report year is not the data clock's: dropped
+    uint64_t stale_start = 0;       // AIRMET/SIGMET/CWA halves whose start/issuance is >12 h old or >6 h ahead: dropped
 };
 
 struct FisbSnapshot {

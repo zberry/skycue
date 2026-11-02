@@ -109,6 +109,57 @@ bool plausibleYear(const TwgoKey& k, TimePoint now)
 // cycle, so a report not heard for 70 min is gone whatever end it carries.
 bool cappedByReception(uint16_t pid) { return pid != 13; }
 
+// §10.2 (amended 2026-11-02): AIRMET, SIGMET (incl. convective) and CWA. Not
+// G-AIRMET (its forecast windows run hours ahead) and not NOTAMs.
+bool checksStaleStart(uint16_t pid) { return pid == 11 || pid == 12 || pid == 15; }
+
+// The issuance in a text header ("WST KMKC 062057 ...", "AIRMET KCHI 300231
+// ...", "CWA ... 301845"): the first six-digit group on the first line,
+// read as ddhhmm and resolved to the nearest month around the clock.
+std::optional<TimePoint> headerIssued(const std::string& text, TimePoint now)
+{
+    const std::size_t eol = std::min(text.find('\n'), text.size());
+    for (std::size_t i = 0; i + 6 <= eol; ++i) {
+        if (i > 0 && isDigit(text[i - 1]))
+            continue;
+        bool six = true;
+        for (std::size_t j = i; j < i + 6; ++j)
+            six = six && isDigit(text[j]);
+        if (!six || (i + 6 < eol && isDigit(text[i + 6])))
+            continue;
+        const auto two = [&](std::size_t k) { return static_cast<unsigned>((text[k] - '0') * 10 + (text[k + 1] - '0')); };
+        return resolveUtc(now, std::nullopt, two(i), two(i + 2), two(i + 4));
+    }
+    return std::nullopt;
+}
+
+// The instant a reception is judged by: the graphics start (of this half, or
+// of the held record when this half brings no new text), else the issuance
+// in the text header (this half's, else the held one's).
+std::optional<TimePoint> referenceInstant(const TwgoParsed& t, const TwgoRecord* r, TimePoint now)
+{
+    const bool new_text = t.text && !t.text->empty();
+    if (t.has_graphics) {
+        if (t.start)
+            return t.start;
+    } else if (r && r->has_graphics && r->start && (!new_text || (r->text && *r->text == *t.text))) {
+        return r->start;
+    }
+    if (new_text)
+        return headerIssued(*t.text, now);
+    if (r && r->text)
+        return headerIssued(*r->text, now);
+    return std::nullopt;
+}
+
+bool staleOnArrival(uint16_t pid, const TwgoParsed& t, const TwgoRecord* r, TimePoint now)
+{
+    if (!checksStaleStart(pid) || t.cancel)
+        return false;
+    const auto ref = referenceInstant(t, r, now);
+    return ref && (*ref < now - kStaleStartBefore || *ref > now + kStaleStartAhead);
+}
+
 }  // namespace
 
 std::string Mosaic::key() const
@@ -210,6 +261,12 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
         return;
     }
     auto it = twgo_.find(t.key);
+    if (staleOnArrival(p.id, t, it == twgo_.end() ? nullptr : &it->second.rec, now)) {
+        // A stuck re-broadcast: rejected on every reception, so a held key
+        // is no longer renewed and ages out by its existing expiry.
+        ++stats_.stale_start;
+        return;
+    }
     if (it == twgo_.end()) {
         // A keep-alive or a cancel for a report not held creates nothing.
         if (t.cancel || (t.text && t.text->empty() && !t.has_graphics))

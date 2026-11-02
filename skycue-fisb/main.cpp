@@ -448,6 +448,7 @@ std::string formatSummary(const Gathered& g, const FisbDecoder& decoder, const F
         {"store.no_product_time", ss.no_product_time},
         {"store.twgo_pending", ss.twgo_pending},
         {"store.wrong_year", ss.wrong_year},
+        {"store.stale_start", ss.stale_start},
     };
     o += "\n== Decoder counters\n";
     for (const auto& kv : counters)

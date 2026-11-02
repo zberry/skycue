@@ -759,6 +759,95 @@ BOOST_AUTO_TEST_CASE(twgo_future_start_pending_then_active)
     BOOST_TEST(st.apply(g, kT0 + 61min).empty());
 }
 
+// §10.2 amended 2026-11-02: an AIRMET/SIGMET/CWA whose start is more than
+// 12 h before or 6 h after the clock is a stuck re-broadcast (tg30's July
+// convective SIGMET 99C), rejected on arrival like a wrong year.
+namespace {
+FisbProduct withStart(FisbProduct p, TimePoint start)
+{
+    std::get<TwgoParsed>(p.body).start = start;
+    return p;
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(sigmet_stale_start_rejected)
+{
+    FisbStore st;
+    auto g = withStart(twgoGraphics(12, 99, {square(33, -90)}, kT0, 15, kT0 + 2h), kT0 - 13h);
+    BOOST_TEST(st.apply(g, kT0).empty());
+    BOOST_TEST(st.stats().stale_start == 1u);
+    BOOST_TEST(st.stats().twgo_pending == 0u);  // nothing held
+    BOOST_TEST(st.snapshot().twgo.empty());
+    // Every reception is judged: the same half again is rejected again.
+    BOOST_TEST(st.apply(g, kT0 + 1min).empty());
+    BOOST_TEST(st.stats().stale_start == 2u);
+    BOOST_TEST(st.stats().wrong_year == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(sigmet_recent_start_kept)
+{
+    FisbStore st;
+    st.apply(twgoText(12, 98, "WST KMKC 240112 CONVECTIVE SIGMET 98C", kT0), kT0);
+    auto ev = st.apply(withStart(twgoGraphics(12, 98, {square(33, -90)}, kT0, 15, kT0 + 1h), kT0 - 3h), kT0);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].kind == FisbEvent::Kind::twgo));
+    BOOST_TEST(!ev[0].twgo->pending);
+    BOOST_TEST(ev[0].twgo->has_graphics);
+    BOOST_TEST(st.stats().stale_start == 0u);
+    // Exactly 12 h before is still accepted (the bound is "more than").
+    FisbStore b;
+    BOOST_TEST(b.apply(withStart(twgoGraphics(11, 1, {square(33, -90)}, kT0), kT0 - 12h), kT0).empty());
+    BOOST_TEST(b.stats().stale_start == 0u);
+    BOOST_TEST(b.stats().twgo_pending == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(sigmet_text_only_stale_issuance_rejected)
+{
+    FisbStore st;  // kT0: 2015-01-24T04:12Z
+    // ddhhmm 310412 is 24 days earlier (Dec 31); the nearest month resolves
+    // it to Jan 31, 7 days ahead: out of the window either way.
+    BOOST_TEST(st.apply(twgoText(12, 99, "WST KMKC 310412 CONVECTIVE SIGMET 99C\nAREA TS", kT0), kT0).empty());
+    BOOST_TEST(st.stats().stale_start == 1u);
+    BOOST_TEST(st.snapshot().twgo.empty());
+    // A CWA and an AIRMET issued an hour ago are kept; text without a
+    // ddhhmm group is not judged.
+    BOOST_TEST(st.apply(twgoText(15, 1, "ZOB1 CWA 240312\nZOB CWA 101 VALID UNTIL 240512Z", kT0), kT0).size() == 1u);
+    BOOST_TEST(st.apply(twgoText(11, 2, "AIRMET KCHI 240312 CHIT WA 240315", kT0), kT0).size() == 1u);
+    BOOST_TEST(st.apply(twgoText(11, 3, "AIRMET TANGO", kT0), kT0).size() == 1u);
+    // A ddhhmm 12 h 1 min old on the WS/WA header is rejected.
+    BOOST_TEST(st.apply(twgoText(12, 4, "SIGMET KSFO 231611 SFOR WS 231611", kT0), kT0).empty());
+    BOOST_TEST(st.stats().stale_start == 2u);
+    // A text-only report is judged by its header even when held: a re-send
+    // with a stale header is dropped and the held text is not renewed.
+    BOOST_TEST(st.apply(twgoText(11, 3, "AIRMET KCHI 010000 X", kT0 + 1min), kT0 + 1min).empty());
+    BOOST_TEST(st.stats().stale_start == 3u);
+    BOOST_TEST(*findTwgo(st.snapshot(), 3)->text == "AIRMET TANGO");
+}
+
+BOOST_AUTO_TEST_CASE(gairmet_start_hours_ahead_not_rejected)
+{
+    FisbStore st;
+    auto ev = st.apply(withStart(twgoGraphics(14, 5, {square(39, -100)}, kT0, 15, kT0 + 12h), kT0 + 9h), kT0);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST(ev[0].twgo->pending);
+    BOOST_TEST(st.stats().stale_start == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(sigmet_far_future_start_rejected)
+{
+    FisbStore st;
+    BOOST_TEST(st.apply(withStart(twgoGraphics(12, 6, {square(39, -100)}, kT0, 15, kT0 + 10h), kT0 + 7h), kT0)
+                   .empty());
+    BOOST_TEST(st.stats().stale_start == 1u);
+    BOOST_TEST(st.stats().twgo_pending == 0u);
+    // 6 h ahead exactly is still accepted (published pending once paired).
+    st.apply(twgoText(12, 7, "SIGMET b", kT0), kT0);
+    auto ev = st.apply(withStart(twgoGraphics(12, 7, {square(39, -100)}, kT0, 15, kT0 + 10h), kT0 + 6h), kT0);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST(ev[0].twgo->pending);
+    BOOST_TEST(st.stats().stale_start == 1u);
+}
+
 // Final review: SIGMET (and AIRMET, G-AIRMET, CWA) end 70 min after the last
 // reception even when the graphics end is later.
 BOOST_AUTO_TEST_CASE(sigmet_lifetime_capped_by_last_reception)

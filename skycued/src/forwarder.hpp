@@ -77,6 +77,7 @@ public:
     void setKeyframeProvider(KeyframeProvider provider);
 
     size_t tcpClientCount() const; // accepted and outbound connections
+    size_t udpTargetCount() const; // UDP targets that resolved at start(); 0 before
     // Frames handed to a destination: one per frame per TCP client or UDP target.
     uint64_t framesSent() const;
     // Port the TCP server listens on (useful with tcp_listen_ephemeral); 0

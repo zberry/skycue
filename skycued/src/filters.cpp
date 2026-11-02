@@ -3,6 +3,7 @@
 #include "geo.hpp"
 #include "registration.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <limits>
@@ -87,21 +88,62 @@ IdList IdList::parse(const std::string& text, const std::string& name)
         const std::string entry = trim(stripComment(line));
         if (entry.empty())
             continue;
-        if (isHexEntry(entry)) {
-            list.hex_.insert(static_cast<uint32_t>(std::stoul(entry, nullptr, 16)));
-        } else if (isRegistrationEntry(entry)) {
-            const std::string reg = upper(entry);
-            list.registrations_.insert(reg);
-            if (reg[0] == 'N') {
-                if (auto icao = registration::icaoFromNNumber(reg))
-                    list.n_number_icao_.insert(*icao);
-            }
-        } else {
+        if (!isHexEntry(entry) && !isRegistrationEntry(entry))
             throw std::runtime_error(name + ":" + std::to_string(lineno) + ": bad entry '" + entry + "'");
-        }
-        ++list.entries_;
+        list.index(entry);
+        list.entries_.push_back(entry);
     }
     return list;
+}
+
+void IdList::index(const std::string& entry)
+{
+    if (isHexEntry(entry)) {
+        hex_.insert(static_cast<uint32_t>(std::stoul(entry, nullptr, 16)));
+        return;
+    }
+    const std::string reg = upper(entry);
+    registrations_.insert(reg);
+    if (reg[0] == 'N') {
+        if (auto icao = registration::icaoFromNNumber(reg))
+            n_number_icao_.insert(*icao);
+    }
+}
+
+void IdList::rebuild()
+{
+    hex_.clear();
+    n_number_icao_.clear();
+    registrations_.clear();
+    for (const auto& e : entries_)
+        index(e);
+}
+
+bool IdList::add(const std::string& text)
+{
+    const std::string entry = trim(text);
+    if (!isHexEntry(entry) && !isRegistrationEntry(entry))
+        throw std::invalid_argument("bad entry '" + entry + "'");
+    const std::string key = upper(entry);
+    for (const auto& e : entries_)
+        if (upper(e) == key)
+            return false;
+    index(entry);
+    entries_.push_back(entry);
+    return true;
+}
+
+bool IdList::remove(const std::string& text)
+{
+    const std::string key = upper(trim(text));
+    const auto before = entries_.size();
+    entries_.erase(std::remove_if(entries_.begin(), entries_.end(),
+                                  [&](const std::string& e) { return upper(e) == key; }),
+                   entries_.end());
+    if (entries_.size() == before)
+        return false;
+    rebuild();
+    return true;
 }
 
 bool IdList::contains(skycue::TrackId id, const std::optional<std::string>& registration) const
@@ -127,6 +169,16 @@ void FilterSet::setLists(IdList allow, IdList block)
 }
 
 void FilterSet::setConfig(FilterConfig config) { config_ = config; }
+
+bool FilterSet::addEntry(ListKind list, const std::string& entry)
+{
+    return (list == ListKind::allow ? allow_ : block_).add(entry);
+}
+
+bool FilterSet::removeEntry(ListKind list, const std::string& entry)
+{
+    return (list == ListKind::allow ? allow_ : block_).remove(entry);
+}
 
 FilterResult FilterSet::evaluate(const TrackState& t) const
 {

@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 namespace skycued {
 
@@ -25,6 +26,8 @@ namespace skycued {
 //
 // A registration that is a valid US N-number is also stored as its ICAO
 // address, so it matches a track that reports no registration.
+//
+// Two entries are the same entry when they are equal ignoring case.
 class IdList {
 public:
     // Reads the whole file and parses it; errors name the path (and line).
@@ -36,15 +39,29 @@ public:
     // N-number whose ICAO address is `id.address` (ICAO addresses only), or a
     // registration equal to `registration` (case-insensitive, trimmed).
     bool contains(skycue::TrackId id, const std::optional<std::string>& registration) const;
-    // Number of entries (lines) parsed.
-    size_t size() const { return entries_; }
+    // Number of entries (lines parsed, plus those added, minus those removed).
+    size_t size() const { return entries_.size(); }
+    // The entries as written (trimmed), in the order they were parsed or added.
+    const std::vector<std::string>& entries() const { return entries_; }
+
+    // Adds one entry (trimmed). Returns false, changing nothing, when the
+    // same entry is already listed. Throws std::invalid_argument("bad entry
+    // '<text>'") when it is not a valid entry.
+    bool add(const std::string& entry);
+    // Removes every copy of the entry (trimmed). Returns false when it was not listed.
+    bool remove(const std::string& entry);
 
 private:
+    void index(const std::string& entry);  // entry is trimmed and valid
+    void rebuild();
+
     std::unordered_set<uint32_t> hex_;            // listed addresses, any type
     std::unordered_set<uint32_t> n_number_icao_;  // addresses derived from N-numbers
     std::unordered_set<std::string> registrations_; // upper case
-    size_t entries_ = 0;
+    std::vector<std::string> entries_;
 };
+
+enum class ListKind { allow, block };
 
 struct ReceiverPosition {
     double lat, lon;  // degrees
@@ -89,6 +106,13 @@ public:
 
     void setLists(IdList allow, IdList block);
     void setConfig(FilterConfig config);
+    // IdList::add / IdList::remove on the named list.
+    bool addEntry(ListKind list, const std::string& entry);
+    bool removeEntry(ListKind list, const std::string& entry);
+
+    FilterConfig config() const { return config_; }
+    const IdList& allow() const { return allow_; }
+    const IdList& block() const { return block_; }
 
 private:
     ReceiverPosition rx_;

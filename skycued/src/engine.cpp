@@ -2,7 +2,9 @@
 
 #include "log.hpp"
 
+#include <cctype>
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
@@ -24,16 +26,13 @@ IdList loadList(const std::string& path)
     return path.empty() ? IdList() : IdList::loadFile(path);
 }
 
-FilterSet makeFilters(const Config& c, size_t& allow_size, size_t& block_size)
+FilterSet makeFilters(const Config& c)
 {
     if (!std::isfinite(c.receiver_lat) || !std::isfinite(c.receiver_lon))
         throw std::runtime_error("the receiver position (RECEIVER_LAT, RECEIVER_LON) is required");
-    IdList allow = loadList(c.allow_list_file);
-    IdList block = loadList(c.block_list_file);
-    allow_size = allow.size();
-    block_size = block.size();
     return FilterSet(ReceiverPosition{c.receiver_lat, c.receiver_lon, c.receiver_alt_m + c.antenna_height_m},
-                     FilterConfig{c.max_range_nm, c.min_elevation_deg}, std::move(allow), std::move(block));
+                     FilterConfig{c.max_range_nm, c.min_elevation_deg}, loadList(c.allow_list_file),
+                     loadList(c.block_list_file));
 }
 
 Thresholds makeThresholds(const Config& c)
@@ -42,6 +41,23 @@ Thresholds makeThresholds(const Config& c)
     t.min_interval_s = c.min_interval_s;
     t.max_interval_s = c.max_interval_s;
     return t;
+}
+
+std::string trimmed(const std::string& s)
+{
+    size_t b = 0, e = s.size();
+    while (b < e && std::isspace(static_cast<unsigned char>(s[b])))
+        ++b;
+    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
+        --e;
+    return s.substr(b, e - b);
+}
+
+const char* listName(ListKind list) { return list == ListKind::allow ? "allow" : "block"; }
+
+EngineEvent kindEvent(EventKind kind)
+{
+    return EngineEvent{kind, std::nullopt, std::nullopt, std::nullopt, std::nullopt};
 }
 
 }  // namespace
@@ -55,7 +71,7 @@ Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_pt
       forwarder_(forwarder),
       received_(received),
       sent_(sent),
-      filters_(makeFilters(config_, allow_size_, block_size_)),
+      filters_(makeFilters(config_)),
       thresholds_(makeThresholds(config_)),
       track_timeout_(std::max<long long>(1, std::llround(config_.track_timeout_s))),
       tick_timer_(io),
@@ -94,11 +110,12 @@ std::string Engine::filterDescription() const
 {
     std::ostringstream ss;
     ss << "startup: receiver=" << config_.receiver_lat << "," << config_.receiver_lon
-       << " alt_m=" << (config_.receiver_alt_m + config_.antenna_height_m) << " max_range_nm=" << config_.max_range_nm
-       << " min_elevation_deg=" << config_.min_elevation_deg << " allow_list="
-       << (config_.allow_list_file.empty() ? "none" : config_.allow_list_file) << " (" << allow_size_
+       << " alt_m=" << (config_.receiver_alt_m + config_.antenna_height_m)
+       << " max_range_nm=" << filters_.config().max_range_nm
+       << " min_elevation_deg=" << filters_.config().min_elevation_deg << " allow_list="
+       << (config_.allow_list_file.empty() ? "none" : config_.allow_list_file) << " (" << filters_.allow().size()
        << " entries) block_list=" << (config_.block_list_file.empty() ? "none" : config_.block_list_file) << " ("
-       << block_size_ << " entries)";
+       << filters_.block().size() << " entries)";
     return ss.str();
 }
 
@@ -124,6 +141,7 @@ void Engine::stop()
     if (stopped_)
         return;
     stopped_ = true;
+    sink_ = nullptr;  // no event from here on
     if (!started_)
         return;
     source_->stop();
@@ -186,15 +204,25 @@ void Engine::process(TrackState& state, steady::time_point now)
     if (isSend(result.decision)) {
         if (reason == SendReason::none && state.currently_forwarded)
             return;  // still eligible; nothing worth sending yet
-        const skycue::Track track = toTrack(state, false, result.alt_is_geom);
-        forwarder_.sendUpdate(track);
-        markSent(state, track, now);
-        state.currently_forwarded = true;
-        ++sent_updates_;
-        if (sent_)
-            sent_->writeTrack(track, "update");
+        forward(state, result, now);
     } else if (state.currently_forwarded) {
         drop(state, skycue::DropReason::filtered);
+    }
+}
+
+void Engine::forward(TrackState& state, const FilterResult& result, steady::time_point now)
+{
+    const skycue::Track track = toTrack(state, false, result.alt_is_geom);
+    forwarder_.sendUpdate(track);
+    markSent(state, track, now);
+    state.currently_forwarded = true;
+    ++sent_updates_;
+    if (sent_)
+        sent_->writeTrack(track, "update");
+    if (sink_) {
+        EngineEvent ev = kindEvent(EventKind::update);
+        ev.track = trackSnapshot(state, result);
+        emit(ev);
     }
 }
 
@@ -202,9 +230,106 @@ void Engine::drop(TrackState& state, skycue::DropReason reason)
 {
     forwarder_.sendDrop(state.id, reason);
     state.currently_forwarded = false;
-    ++sent_drops_;
+    countDrop(reason);
     if (sent_)
         sent_->writeDrop(state.id, reason);
+    emitDrop(state.id, reason);
+}
+
+void Engine::emitDrop(skycue::TrackId id, skycue::DropReason reason)
+{
+    if (!sink_)
+        return;
+    EngineEvent ev = kindEvent(EventKind::drop);
+    ev.id = id;
+    ev.reason = reason;
+    emit(ev);
+}
+
+void Engine::countDrop(skycue::DropReason reason)
+{
+    ++sent_drops_;
+    switch (reason) {
+    case skycue::DropReason::timeout: ++drops_timeout_; break;
+    case skycue::DropReason::filtered: ++drops_filtered_; break;
+    case skycue::DropReason::source_lost: ++drops_source_lost_; break;
+    default: break;
+    }
+}
+
+void Engine::emit(const EngineEvent& event)
+{
+    if (sink_ && !stopped_)
+        sink_(event);
+}
+
+void Engine::onEvent(std::function<void(const EngineEvent&)> sink)
+{
+    if (!stopped_)
+        sink_ = std::move(sink);
+}
+
+void Engine::applied(const std::string& note, EventKind kind)
+{
+    LOG_INFO("filters " << note);
+    if (sent_)
+        sent_->writeFilterChange(note);
+    emit(kindEvent(kind));
+    reevaluate();
+}
+
+void Engine::reevaluate()
+{
+    // One pass, no allocation beyond the sends themselves. drop() and
+    // forward() change only the state they are given, never the table.
+    const auto now = steady::now();
+    table_.forEach([&](TrackState& s) {
+        const FilterResult r = filters_.evaluate(s);
+        if (s.currently_forwarded) {
+            if (!isSend(r.decision))
+                drop(s, skycue::DropReason::filtered);
+        } else if (isSend(r.decision)) {  // implies a position
+            forward(s, r, now);
+        }
+    });
+}
+
+void Engine::setFilterConfig(FilterConfig config, const std::string& origin)
+{
+    if (stopped_)
+        return;
+    if (!std::isfinite(config.max_range_nm) || !(config.max_range_nm > 0))
+        throw std::invalid_argument("max_range_nm must be greater than 0");
+    if (!(config.min_elevation_deg >= -90 && config.min_elevation_deg <= 90))
+        throw std::invalid_argument("min_elevation_deg must be in [-90,90]");
+    filters_.setConfig(config);
+    std::ostringstream ss;
+    ss << origin << ": max_range_nm=" << config.max_range_nm << " min_elevation_deg=" << config.min_elevation_deg;
+    applied(ss.str(), EventKind::filters_changed);
+}
+
+void Engine::setLists(IdList allow, IdList block, const std::string& origin)
+{
+    if (stopped_)
+        return;
+    std::ostringstream ss;
+    ss << origin << ": allow_list=" << allow.size() << " entries block_list=" << block.size() << " entries";
+    filters_.setLists(std::move(allow), std::move(block));
+    applied(ss.str(), EventKind::lists_changed);
+}
+
+void Engine::addListEntry(ListKind list, const std::string& entry, const std::string& origin)
+{
+    if (stopped_ || !filters_.addEntry(list, entry))  // throws std::invalid_argument for a bad entry
+        return;
+    applied(origin + ": " + listName(list) + " += " + trimmed(entry), EventKind::lists_changed);
+}
+
+void Engine::removeListEntry(ListKind list, const std::string& entry, const std::string& origin)
+{
+    if (stopped_ || !filters_.removeEntry(list, entry))
+        return;
+    applied(origin + ": " + listName(list) + " -= " + trimmed(entry), EventKind::lists_changed);
 }
 
 void Engine::dropAllForwarded(skycue::DropReason reason)
@@ -250,8 +375,7 @@ void Engine::handleConnection(bool up)
 void Engine::tick()
 {
     if (have_data_clock_) {
-        const auto now = last_obs_time_ + std::chrono::duration_cast<std::chrono::system_clock::duration>(
-                                              steady::now() - last_obs_steady_);
+        const auto now = dataNow();
         std::unordered_set<skycue::TrackId> forwarded;
         table_.forEach([&](TrackState& s) {
             if (s.currently_forwarded)
@@ -263,15 +387,29 @@ void Engine::tick()
             if (!forwarded.count(id))
                 continue;
             forwarder_.sendDrop(id, reason);
-            ++sent_drops_;
+            countDrop(reason);
             if (sent_)
                 sent_->writeDrop(id, reason);
+            emitDrop(id, reason);
         }
     }
     if (received_)
         received_->flush();
     if (sent_)
         sent_->flush();
+    if (sink_) {
+        EngineEvent ev = kindEvent(EventKind::stats);
+        ev.stats = stats();
+        emit(ev);
+    }
+}
+
+std::chrono::system_clock::time_point Engine::dataNow() const
+{
+    if (!have_data_clock_)
+        return std::chrono::system_clock::now();
+    return last_obs_time_ +
+           std::chrono::duration_cast<std::chrono::system_clock::duration>(steady::now() - last_obs_steady_);
 }
 
 void Engine::armTick()
@@ -312,6 +450,43 @@ EngineStats Engine::stats() const
     }
     s.readsb_connected = source_connected_;
     s.dump978_connected = uat_ && uat_connected_;
+    s.tcp_clients = forwarder_.tcpClientCount();
+    s.udp_targets = forwarder_.udpTargetCount();
+    s.drops_timeout = drops_timeout_;
+    s.drops_filtered = drops_filtered_;
+    s.drops_source_lost = drops_source_lost_;
+    s.recorder_dropped_received = received_ ? received_->droppedRecords() : 0;
+    s.recorder_dropped_sent = sent_ ? sent_->droppedRecords() : 0;
+    s.web_clients = web_clients_;
+    return s;
+}
+
+TrackSnapshot Engine::trackSnapshot(const TrackState& state, const FilterResult& result) const
+{
+    TrackSnapshot t;
+    t.track = toTrack(state, false, result.alt_is_geom);
+    t.decision = result.decision;
+    t.range_nm = result.range_nm;
+    t.elevation_deg = result.elevation_deg;
+    t.forwarded = state.currently_forwarded;
+    t.first_seen = state.first_seen;
+    t.last_seen = state.last_seen;
+    t.emergency = state.latest.emergency;
+    t.category = state.latest.category;
+    t.rssi = state.latest.rssi.value_or(std::numeric_limits<double>::quiet_NaN());
+    return t;
+}
+
+Snapshot Engine::snapshot() const
+{
+    Snapshot s;
+    s.now = dataNow();
+    s.tracks.reserve(table_.size());
+    table_.forEach([&](const TrackState& t) { s.tracks.push_back(trackSnapshot(t, filters_.evaluate(t))); });
+    s.filters = filters_.config();
+    s.allow_entries = filters_.allow().size();
+    s.block_entries = filters_.block().size();
+    s.stats = stats();
     return s;
 }
 

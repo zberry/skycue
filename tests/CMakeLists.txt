@@ -124,6 +124,16 @@ skycue_set_warnings(test_engine)
 add_test(NAME engine COMMAND test_engine)
 set_tests_properties(engine PROPERTIES TIMEOUT 120)
 
+foreach(_t engine_api recording_independence)
+  add_executable(test_${_t} test_${_t}.cpp)
+  target_link_libraries(test_${_t} PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+  target_compile_definitions(test_${_t} PRIVATE BOOST_TEST_DYN_LINK
+    SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+  skycue_set_warnings(test_${_t})
+  add_test(NAME ${_t} COMMAND test_${_t})
+  set_tests_properties(${_t} PROPERTIES TIMEOUT 60)
+endforeach()
+
 # skycue-dump against a skycued replaying the readsb JSON fixture, TCP and UDP.
 add_test(NAME dump
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_dump.sh

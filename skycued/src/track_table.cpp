@@ -23,6 +23,7 @@ TrackState& TrackTable::apply(const TrackObservation& obs)
         TrackState fresh;
         fresh.id = obs.id;
         fresh.latest.id = obs.id;
+        fresh.first_seen = obs.received_time;
         it = tracks_.emplace(obs.id, std::move(fresh)).first;
     }
     TrackState& s = it->second;

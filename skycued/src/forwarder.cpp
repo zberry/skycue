@@ -674,6 +674,7 @@ void Forwarder::sendDrop(skycue::TrackId id, skycue::DropReason reason)
 
 void Forwarder::setKeyframeProvider(KeyframeProvider provider) { impl_->provider = std::move(provider); }
 size_t Forwarder::tcpClientCount() const { return impl_->sessions.size(); }
+size_t Forwarder::udpTargetCount() const { return impl_->targets.size(); }
 uint64_t Forwarder::framesSent() const { return impl_->frames_sent; }
 uint16_t Forwarder::tcpPort() const { return impl_->port; }
 

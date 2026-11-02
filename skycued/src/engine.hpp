@@ -21,11 +21,29 @@
 // The keyframe provider returns every forwarded track (periodic keyframes
 // are not recorded). Stats are logged at INFO every 10 s.
 //
-// Threading: lives on the caller's io_context; call everything from its
-// thread. The Forwarder and the recorders must outlive the Engine.
+// Live changes (setFilterConfig, setLists, addListEntry, removeListEntry):
+// the change is applied, ONE filter_change record "<origin>: <what>" is
+// written to the sent stream and logged at INFO, then every track in the
+// table is re-evaluated at once, in one pass: a forwarded track that is no
+// longer eligible gets sendDrop(filtered); one not forwarded that has a
+// position and is now eligible is sent at once (not waiting for
+// MIN_INTERVAL_S), through markSent like every send. So the record precedes
+// the drops and updates it causes. The received stream never depends on the
+// filters: every observation is recorded before any of this.
+//
+// Events (onEvent): update after every update sent, drop after every drop
+// sent (timeout, filtered, source_lost; the shutdown drops of stop() are
+// not reported), stats on every 1 s tick, filters_changed / lists_changed
+// after a live change is applied and recorded but before the drops and
+// updates it causes. Fired synchronously on the io thread; never after stop().
+//
+// Threading: lives on the caller's io_context; call everything (including
+// every method below) from its thread. The Forwarder and the recorders must
+// outlive the Engine.
 
 #include "config.hpp"
 #include "dump978_raw_source.hpp"
+#include "engine_events.hpp"
 #include "filters.hpp"
 #include "forwarder.hpp"
 #include "observation.hpp"
@@ -39,16 +57,11 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
 namespace skycued {
-
-struct EngineStats {
-    uint64_t observations = 0, sent_updates = 0, sent_drops = 0, tracks_total = 0, tracks_forwarded = 0,
-             uat_downlink = 0, uat_uplink = 0;
-    bool readsb_connected = false, dump978_connected = false;
-};
 
 class Engine {
 public:
@@ -75,11 +88,43 @@ public:
     // readsb=up|down dump978=up|down|off"
     std::string statsLine() const;
 
+    // Every track in the table with its filter decision now, the filters and
+    // the stats. Changes nothing.
+    Snapshot snapshot() const;
+
+    // Live changes (see the top of this file). `origin` names who made the
+    // change in the record ("ui", say). Ignored after stop().
+    // Throws std::invalid_argument, changing nothing, unless max_range_nm is
+    // finite and > 0 and min_elevation_deg is in [-90, 90].
+    void setFilterConfig(FilterConfig config, const std::string& origin);
+    void setLists(IdList allow, IdList block, const std::string& origin);
+    // One entry, in the list file grammar. Throws std::invalid_argument for a
+    // bad entry. Adding an entry already listed, or removing one that is not,
+    // changes nothing: no record, no event.
+    void addListEntry(ListKind list, const std::string& entry, const std::string& origin);
+    void removeListEntry(ListKind list, const std::string& entry, const std::string& origin);
+    const IdList& allowList() const { return filters_.allow(); }
+    const IdList& blockList() const { return filters_.block(); }
+
+    // The one event sink (replaces any earlier one; empty to clear). It must
+    // not call the live-change methods or stop().
+    void onEvent(std::function<void(const EngineEvent&)> sink);
+    // Reported in EngineStats::web_clients.
+    void setWebClientCount(uint32_t n) { web_clients_ = n; }
+
 private:
     void handleObservation(const TrackObservation& obs);
     void handleConnection(bool up);
     void process(TrackState& state, std::chrono::steady_clock::time_point now);
+    void forward(TrackState& state, const FilterResult& result, std::chrono::steady_clock::time_point now);
     void drop(TrackState& state, skycue::DropReason reason);
+    void countDrop(skycue::DropReason reason);
+    void applied(const std::string& note, EventKind kind);
+    void reevaluate();
+    TrackSnapshot trackSnapshot(const TrackState& state, const FilterResult& result) const;
+    std::chrono::system_clock::time_point dataNow() const;
+    void emit(const EngineEvent& event);
+    void emitDrop(skycue::TrackId id, skycue::DropReason reason);
     void dropAllForwarded(skycue::DropReason reason);
     void tick();
     void armTick();
@@ -94,8 +139,6 @@ private:
     Recorder* received_;
     Recorder* sent_;
 
-    // Before filters_: makeFilters() sets them while filters_ is initialised.
-    size_t allow_size_ = 0, block_size_ = 0;
     FilterSet filters_;
     Thresholds thresholds_;
     std::chrono::seconds track_timeout_;
@@ -109,6 +152,9 @@ private:
     std::chrono::steady_clock::time_point last_obs_steady_{};
     unsigned lost_gen_ = 0;
     uint64_t observations_ = 0, sent_updates_ = 0, sent_drops_ = 0;
+    uint64_t drops_timeout_ = 0, drops_filtered_ = 0, drops_source_lost_ = 0;
+    uint32_t web_clients_ = 0;
+    std::function<void(const EngineEvent&)> sink_;
     std::shared_ptr<char> alive_ = std::make_shared<char>(0);
 };
 

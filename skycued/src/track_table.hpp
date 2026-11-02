@@ -22,6 +22,7 @@ struct TrackState {
     // received_time, source and raw_line always come from the newest;
     // on_ground from the newest that carries alt_baro (on_ground or a value).
     TrackObservation latest;
+    std::chrono::system_clock::time_point first_seen{};         // received_time of the first observation
     std::chrono::system_clock::time_point last_seen{};          // newest received_time
     std::chrono::system_clock::time_point last_position_time{}; // newest position time (if ever positioned)
     std::optional<skycue::Track> last_sent;                     // what the consumer last received

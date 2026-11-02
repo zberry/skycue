@@ -151,3 +151,13 @@ add_test(NAME stats_cli
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_stats_cli.sh
     $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-stats> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(stats_cli PROPERTIES TIMEOUT 120)
+
+add_executable(test_web_server test_web_server.cpp)
+target_link_libraries(test_web_server PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_web_server PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+  SKYCUED_EXE="$<TARGET_FILE:skycued>")
+add_dependencies(test_web_server skycued)
+skycue_set_warnings(test_web_server)
+add_test(NAME web_server COMMAND test_web_server)
+set_tests_properties(web_server PROPERTIES TIMEOUT 120)

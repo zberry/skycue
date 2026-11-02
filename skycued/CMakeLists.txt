@@ -22,7 +22,9 @@ add_library(skycued_core STATIC
   src/runtime_config.cpp
   src/stats_report.cpp
   src/time_util.cpp
-  src/track_table.cpp)
+  src/track_table.cpp
+  src/web_api.cpp
+  src/web_server.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(skycued_core PUBLIC skycue::skycue Boost::boost Boost::program_options)
 skycue_set_warnings(skycued_core)

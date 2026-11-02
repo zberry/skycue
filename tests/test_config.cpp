@@ -187,7 +187,7 @@ BOOST_AUTO_TEST_CASE(numeric_errors_name_key_and_line)
     ConfigError e = expectError(std::string(kLatLon) + "MAX_RANGE_NM=12abc\n");
     BOOST_TEST(e.line == 3);
     BOOST_TEST(contains(e.what(), "MAX_RANGE_NM"));
-    for (const char* line : {"WEB_PORT=0", "WEB_PORT=65536", "WEB_PORT=-1", "WEB_PORT=+80",
+    for (const char* line : {"READSB_JSON_PORT=0", "WEB_PORT=65536", "WEB_PORT=-1", "WEB_PORT=+80",
                              "WEB_PORT=8o", "WEB_PORT=", "MIN_INTERVAL_S=nan",
                              "MIN_INTERVAL_S=inf", "MIN_INTERVAL_S="}) {
         e = expectError(std::string(kLatLon) + line + "\n");
@@ -326,9 +326,11 @@ BOOST_AUTO_TEST_CASE(cue_tcp_port_zero_allowed)
         BOOST_TEST(e.line == 3, v);
         BOOST_TEST(contains(e.what(), "CUE_TCP_PORT"), v);
     }
+    // WEB_PORT=0: no web UI.
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "WEB_PORT=0\n", "t").web_port == 0);
     // Other ports still need 1-65535.
-    ConfigError e = expectError(std::string(kLatLon) + "WEB_PORT=0\n");
-    BOOST_TEST(contains(e.what(), "WEB_PORT"));
+    ConfigError e = expectError(std::string(kLatLon) + "READSB_JSON_PORT=0\n");
+    BOOST_TEST(contains(e.what(), "READSB_JSON_PORT"));
 }
 
 BOOST_AUTO_TEST_CASE(web_bind_record_max_gb_trail_seconds)

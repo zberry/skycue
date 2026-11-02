@@ -14,11 +14,16 @@
 #include "recorder.hpp"
 #include "replay_source.hpp"
 #include "runtime_config.hpp"
+#include "web_server.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/program_options.hpp>
+
+#include <limits.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <cmath>
@@ -52,13 +57,30 @@ std::optional<LogLevel> parseLogLevel(const std::string& s)
     return std::nullopt;
 }
 
+// <directory of this executable>/../share/skycue/www, normalised when it exists.
+std::string defaultWwwDir()
+{
+    char buf[PATH_MAX];
+    const ssize_t n = ::readlink("/proc/self/exe", buf, sizeof buf - 1);
+    std::string dir = ".";
+    if (n > 0) {
+        const std::string exe(buf, static_cast<size_t>(n));
+        const auto slash = exe.rfind('/');
+        if (slash != std::string::npos)
+            dir = slash == 0 ? "/" : exe.substr(0, slash);
+    }
+    const std::string www = dir + "/../share/skycue/www";
+    char real[PATH_MAX];
+    return ::realpath(www.c_str(), real) ? std::string(real) : www;
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
 {
-    std::string config_path, replay_path, readsb_host, dump978_host, log_level;
+    std::string config_path, replay_path, readsb_host, dump978_host, log_level, www_dir, web_bind;
     double replay_speed = 1.0;
-    unsigned cue_tcp_port = 0;
+    unsigned cue_tcp_port = 0, web_port = 0;
     po::options_description desc(
         "usage: skycued --config PATH [--replay FILE [--replay-speed N] [--replay-loop]] [options]\n"
         "Forwards readsb's aircraft tracks to skycue clients");
@@ -72,6 +94,9 @@ int main(int argc, char** argv)
         "dump978-host", po::value(&dump978_host)->default_value("127.0.0.1"), "host of dump978's raw port")(
         "no-uat", "do not connect to dump978")(
         "cue-tcp-port", po::value(&cue_tcp_port), "override CUE_TCP_PORT (0: no listener)")(
+        "www-dir", po::value(&www_dir), "the web UI's files (default: <bin>/../share/skycue/www)")(
+        "web-bind", po::value(&web_bind), "override WEB_BIND (numeric address)")(
+        "web-port", po::value(&web_port), "override WEB_PORT (0: no web UI)")(
         "log-level", po::value(&log_level)->default_value("info"), "debug, info, warn or error");
     po::variables_map vm;
     try {
@@ -103,6 +128,14 @@ int main(int argc, char** argv)
         std::cerr << "skycued: --cue-tcp-port must be 0..65535\n";
         return 2;
     }
+    if (vm.count("web-port") && web_port > 65535) {
+        std::cerr << "skycued: --web-port must be 0..65535\n";
+        return 2;
+    }
+    if (vm.count("web-bind") && web_bind.empty()) {
+        std::cerr << "skycued: --web-bind must not be empty\n";
+        return 2;
+    }
     const bool replaying = vm.count("replay") > 0;
     if (replaying && (!std::isfinite(replay_speed) || replay_speed < 0)) {
         std::cerr << "skycued: --replay-speed must be 0 (unpaced) or positive\n";
@@ -118,6 +151,12 @@ int main(int argc, char** argv)
     }
     if (vm.count("cue-tcp-port"))
         config.cue_tcp_port = static_cast<uint16_t>(cue_tcp_port);
+    if (vm.count("web-port"))
+        config.web_port = static_cast<uint16_t>(web_port);
+    if (vm.count("web-bind"))
+        config.web_bind = web_bind;
+    if (!vm.count("www-dir"))
+        www_dir = defaultWwwDir();
 
     boost::asio::io_context io;
 
@@ -176,6 +215,23 @@ int main(int argc, char** argv)
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
     }
+    // The web UI (WEB_BIND:WEB_PORT); WEB_PORT=0: none.
+    std::unique_ptr<WebServer> web;
+    if (config.web_port == 0) {
+        LOG_INFO("web UI disabled (WEB_PORT=0)");
+    } else {
+        WebConfig wc;
+        wc.bind = config.web_bind;
+        wc.port = config.web_port;
+        wc.www_dir = www_dir;
+        web = std::make_unique<WebServer>(io, *engine, *runtime, wc);
+        try {
+            web->start();
+        } catch (const std::exception& e) {
+            LOG_ERROR("cannot start: " << e.what());
+            return 1;
+        }
+    }
     try {
         engine->start();
     } catch (const std::exception& e) {
@@ -212,11 +268,14 @@ int main(int argc, char** argv)
         if (ec)
             return;
         LOG_INFO("signal " << sig << ": shutting down");
+        if (web)
+            web->stop();
         engine->stop();  // shutdown drops; the Forwarder closes its sockets within ~2 s
         exit_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         pollExit();
     });
     io.run();
+    web.reset();
     runtime.reset();
     engine.reset();
     if (received)

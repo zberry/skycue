@@ -220,7 +220,7 @@ Config parseConfigText(const std::string& text, const std::string& name)
     conv.port("DUMP978_RAW_PORT", c.dump978_raw_port);
     conv.port("DUMP978_JSON_PORT", c.dump978_json_port);
     conv.port("READSB_JSON_PORT", c.readsb_json_port);
-    conv.port("WEB_PORT", c.web_port);
+    conv.port("WEB_PORT", c.web_port, true);
     conv.port("CUE_TCP_PORT", c.cue_tcp_port, true);
     conv.str("RECORD_DIR", c.record_dir);
     conv.num("MAX_RANGE_NM", c.max_range_nm);

@@ -436,6 +436,21 @@ BOOST_AUTO_TEST_CASE(static_index_served)
     BOOST_TEST(r.cache_control == "max-age=86400");
 }
 
+BOOST_AUTO_TEST_CASE(static_file_over_8mib_500)
+{
+    WebFx f;
+    writeFile(f.www + "/max.bin", std::string(8u << 20, 'x'));
+    writeFile(f.www + "/big.bin", std::string((8u << 20) + 1, 'x'));
+    Reply r = get(f.port, "/max.bin");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body.size() == (8u << 20));
+    r = get(f.port, "/big.bin");
+    BOOST_TEST(r.status == 500u);
+    BOOST_TEST(r.body == "file too large to serve\n");
+    BOOST_TEST(r.cache_control == "no-store");
+    BOOST_TEST(get(f.port, "/index.html").status == 200u);  // still serving
+}
+
 BOOST_AUTO_TEST_CASE(missing_www_dir_api_still_works)
 {
     WebOptions o;

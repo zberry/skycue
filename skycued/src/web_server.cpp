@@ -21,6 +21,8 @@
 
 #include <array>
 #include <cctype>
+#include <cerrno>
+#include <cstring>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -46,7 +48,7 @@ using steady = std::chrono::steady_clock;
 
 constexpr std::uint64_t kBodyLimit = 64 * 1024;           // request bodies
 constexpr std::size_t kWsMessageLimit = 64 * 1024;        // what a WebSocket client may send
-constexpr std::size_t kStaticFileLimit = 256u << 20;      // larger files are not served
+constexpr std::size_t kStaticFileLimit = 8u << 20;        // larger files are not served (500)
 constexpr std::size_t kLingerDrainLimit = 1u << 20;       // bytes read and discarded before closing
 constexpr auto kLingerTime = std::chrono::seconds(2);
 
@@ -56,37 +58,46 @@ bool isDirectory(const std::string& path)
     return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-// A regular file's content; nullopt when missing, not a regular file,
-// unreadable or over kStaticFileLimit.
-std::optional<std::string> readRegularFile(const std::string& path)
+enum class FileRead { ok, missing, too_large, error };
+
+// A regular file's content into `text`. missing: no such file, or not a
+// regular file; too_large: over kStaticFileLimit; error: unreadable.
+FileRead readRegularFile(const std::string& path, std::string& text)
 {
     const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0)
-        return std::nullopt;
+        return errno == ENOENT || errno == ENOTDIR || errno == EISDIR ? FileRead::missing : FileRead::error;
     struct stat st{};
-    if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || static_cast<std::size_t>(st.st_size) > kStaticFileLimit) {
+    FileRead result = FileRead::ok;
+    if (::fstat(fd, &st) != 0)
+        result = FileRead::error;
+    else if (!S_ISREG(st.st_mode))
+        result = FileRead::missing;
+    else if (static_cast<std::size_t>(st.st_size) > kStaticFileLimit)
+        result = FileRead::too_large;
+    if (result != FileRead::ok) {
         ::close(fd);
-        return std::nullopt;
+        return result;
     }
-    std::string text;
+    text.clear();
     text.reserve(static_cast<std::size_t>(st.st_size));
     char buf[16384];
     for (;;) {
         const ssize_t n = ::read(fd, buf, sizeof buf);
         if (n < 0) {
             ::close(fd);
-            return std::nullopt;
+            return FileRead::error;
         }
         if (n == 0)
             break;
         text.append(buf, static_cast<std::size_t>(n));
-        if (text.size() > kStaticFileLimit) {
+        if (text.size() > kStaticFileLimit) {  // grew while being read
             ::close(fd);
-            return std::nullopt;
+            return FileRead::too_large;
         }
     }
     ::close(fd);
-    return text;
+    return FileRead::ok;
 }
 
 std::string endpointText(const tcp::socket& s)
@@ -259,12 +270,22 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
             respond(version, keep, 400, "bad path\n", "text/plain; charset=utf-8", "no-store");
             return;
         }
-        auto file = readRegularFile(srv->cfg.www_dir + *rel);
-        if (!file) {
+        std::string file;
+        switch (readRegularFile(srv->cfg.www_dir + *rel, file)) {
+        case FileRead::ok: break;
+        case FileRead::missing:
             respond(version, keep, 404, "not found\n", "text/plain; charset=utf-8", "no-cache");
             return;
+        case FileRead::too_large:
+            LOG_WARN("web: " << *rel << " is over " << (kStaticFileLimit >> 20) << " MiB; not served");
+            respond(version, keep, 500, "file too large to serve\n", "text/plain; charset=utf-8", "no-store");
+            return;
+        case FileRead::error:
+            LOG_WARN("web: " << *rel << ": cannot read: " << std::strerror(errno));
+            respond(version, keep, 500, "cannot read the file\n", "text/plain; charset=utf-8", "no-store");
+            return;
         }
-        respond(version, keep, 200, std::move(*file), webapi::contentType(*rel), webapi::cacheControl(*rel), "",
+        respond(version, keep, 200, std::move(file), webapi::contentType(*rel), webapi::cacheControl(*rel), "",
                 head);
     }
 

@@ -529,11 +529,17 @@ std::vector<FisbEvent> FisbStore::sweep(TimePoint now)
 
 FisbSnapshot FisbStore::snapshot() const
 {
-    FisbSnapshot s;
+    FisbSnapshot s = records();
     for (const auto& m : mosaics_) {
         (isNexrad(m.second.head.product) ? s.radar : s.rasters).push_back(view(m.second));
         blocks_copied_ += m.second.blocks.size();
     }
+    return s;
+}
+
+FisbSnapshot FisbStore::records() const
+{
+    FisbSnapshot s;
     for (const auto& t : text_) {
         switch (t.second.kind) {
         case TextRecord::metar: s.metar.push_back(t.second); break;
@@ -630,6 +636,12 @@ FisbSummary FisbStore::summary(TimePoint now) const
         if (!s.radar_age_s || age < *s.radar_age_s)
             s.radar_age_s = age;
     }
+    std::optional<TimePoint> newest;
+    for (const auto& m : mosaics_)
+        if (!newest || m.second.head.product_time > *newest)
+            newest = m.second.head.product_time;
+    if (newest && *newest > now)
+        s.clock_skew_s = std::chrono::duration<double>(*newest - now).count();
     return s;
 }
 

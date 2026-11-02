@@ -113,6 +113,8 @@ public:
     // The current FIS-B products (empty with FISB_ENABLE=no): a copy of
     // everything, every mosaic's blocks included.
     fisb::FisbSnapshot fisbSnapshot() const;
+    // fisbSnapshot() without the mosaics (FisbStore::records()).
+    fisb::FisbSnapshot fisbRecords() const;
     // Counts and mosaic heads only (what snapshot().fisb holds), cheap.
     fisb::FisbSummary fisbSummary() const;
     // One mosaic with its blocks (FisbStore::mosaic); nullopt when none.

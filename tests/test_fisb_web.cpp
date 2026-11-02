@@ -327,6 +327,7 @@ BOOST_AUTO_TEST_CASE(fisb_status_shape)
     BOOST_TEST(regional.count("product_time") == 1u);
     BOOST_TEST(regional.count("age_s") == 1u);
     BOOST_TEST(s.get_child("radar").count("conus") == 0u);  // absent, not null
+    BOOST_TEST(s.count("clock_skew_s") == 0u);  // no product time ahead of the data clock
     BOOST_TEST(!has(r.body, "null"));
     BOOST_TEST(s.count("rasters") == 1u);
 
@@ -352,6 +353,10 @@ BOOST_AUTO_TEST_CASE(fisb_status_shape)
 
     // None of status, state or the snapshot copied a block out of the store;
     // the radar route copies its one mosaic.
+    // Nor do the text and shapes routes (records only).
+    BOOST_TEST(get(f.port, "/api/fisb/text").status == 200u);
+    BOOST_TEST(get(f.port, "/api/fisb/text?type=twgo").status == 200u);
+    BOOST_TEST(get(f.port, "/api/fisb/shapes").status == 200u);
     const uint64_t copied = f.t.call([&] { return f.engine->fisbBlocksCopied(); });
     BOOST_TEST(copied == 0u);
     get(f.port, "/api/fisb/radar?product=regional");

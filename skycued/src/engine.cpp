@@ -614,6 +614,11 @@ fisb::FisbSnapshot Engine::fisbSnapshot() const
     return fisb_decoder_ ? fisb_store_.snapshot() : fisb::FisbSnapshot{};
 }
 
+fisb::FisbSnapshot Engine::fisbRecords() const
+{
+    return fisb_decoder_ ? fisb_store_.records() : fisb::FisbSnapshot{};
+}
+
 fisb::FisbSummary Engine::fisbSummary() const
 {
     return fisb_decoder_ ? fisb_store_.summary(dataNow()) : fisb::FisbSummary{};

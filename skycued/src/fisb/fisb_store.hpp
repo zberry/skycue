@@ -191,6 +191,11 @@ struct FisbSummary {
     bool enabled = false;
     std::size_t text_records = 0, twgo_records = 0, mosaics = 0, mosaic_blocks = 0, stations = 0;
     std::optional<double> radar_age_s;  // now - the newest NEXRAD (63/64) product time
+    // The newest mosaic product time (the APDU time) minus now, when
+    // positive: product times ahead of the data clock (a receiver or station
+    // clock off). Absent when none is ahead. Text issue times are not used:
+    // a TAF is routinely issued for a time ahead of its broadcast.
+    std::optional<double> clock_skew_s;
     std::size_t metar = 0, taf = 0, pirep = 0, winds = 0, other = 0;  // text_records by kind
     std::size_t twgo_cancelled = 0;  // of twgo_records, in their cancelled window
     std::vector<MosaicHead> radar, rasters;  // as FisbSnapshot, heads only
@@ -209,12 +214,15 @@ public:
     std::vector<FisbEvent> apply(const FisbProduct& product, TimePoint now);
     std::vector<FisbEvent> sweep(TimePoint now);
     FisbSnapshot snapshot() const;
+    // snapshot() without the mosaics (radar and rasters left empty): the
+    // text and TWGO records and the stations, no block copied.
+    FisbSnapshot records() const;
     FisbSummary summary(TimePoint now) const;
     // One mosaic with its blocks: product and altitude code; without an
     // altitude code, the product's lowest layer. nullopt when none is held.
     std::optional<Mosaic> mosaic(uint16_t product, std::optional<uint8_t> altitude_code = std::nullopt) const;
     // Blocks copied out by snapshot() and mosaic() so far (a diagnostic: the
-    // cost of the readers).
+    // cost of the readers; records() copies none).
     uint64_t blocksCopied() const { return blocks_copied_; }
     FisbStoreStats stats() const;
     std::size_t mosaicBlocks() const;  // blocks held across every mosaic

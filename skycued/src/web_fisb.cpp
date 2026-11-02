@@ -573,6 +573,8 @@ std::string fisbStatusJson(const Snapshot& snap)
     w.add("now", iso(snap.now));
     if (f.radar_age_s)
         w.add("radar_age_s", std::round(*f.radar_age_s * 10) / 10);
+    if (f.clock_skew_s)
+        w.add("clock_skew_s", std::round(*f.clock_skew_s * 10) / 10);
 
     std::vector<std::string> stations;
     for (const auto& s : f.heard)
@@ -691,10 +693,10 @@ ApiResponse handleFisbApi(const ApiRequest& request, const Engine& engine)
     const auto params = queryParams(request.query);
     switch (route) {
     case Route::status: return reply(200, fisbStatusJson(engine.snapshot()));
-    // Text and shapes read the records, so the whole store; radar and
+    // Text and shapes copy the records only, never a block; radar and
     // raster copy only the one mosaic asked for.
-    case Route::text: return fisbTextRoute(params, engine.fisbSnapshot());
-    case Route::shapes: return shapesRoute(params, engine.fisbSnapshot());
+    case Route::text: return fisbTextRoute(params, engine.fisbRecords());
+    case Route::shapes: return shapesRoute(params, engine.fisbRecords());
     case Route::radar: return radarRoute(params, engine);
     case Route::raster: return rasterRoute(params, engine);
     }

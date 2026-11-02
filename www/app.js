@@ -1094,7 +1094,8 @@
     fisb.prevStatus = st;
     fisb.prevStatusWall = now;
     if (!st.enabled) return;
-    // Missed notifications (or a mosaic newer than the drawing): fetch it.
+    // A publish whose notification was missed: fetch it. Not a mosaic
+    // still filling (its block count moves between publishes).
     Object.keys(radar).forEach(function (w) {
       var h = st.radar && st.radar[w];
       if (!h) {
@@ -1103,10 +1104,11 @@
       }
       radar[w].head = h;
       var d = radar[w].drawn;
-      if (!d || d.head.product_time !== h.product_time || d.head.published !== h.published || d.blocks !== h.blocks) {
-        if (!radar[w].fetching) loadRadar(w);
-      }
+      if (P.radarNeedsFetch(d && d.head, h) && !radar[w].fetching) loadRadar(w);
     });
+    var skew = P.skewWarning(st.clock_skew_s), sk = $('stat-fisb-skew');
+    sk.hidden = !skew;
+    $('stat-fisb-skew-text').textContent = skew || '';
     var keys = {};
     (st.rasters || []).forEach(function (h) { keys[h.key] = true; fisb.rasterHeads.set(h.key, h); });
     Array.from(fisb.rasterHeads.keys()).forEach(function (k) { if (!keys[k]) fisb.rasterHeads.delete(k); });

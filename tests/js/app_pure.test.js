@@ -268,6 +268,25 @@ test('radarOpacity: half past 15 min (regional) / 30 min (CONUS)', () => {
   assert.strictEqual(P.RADAR_FADE_MS[64], 30 * min);
 });
 
+test('skewWarning: only past 10 min ahead', () => {
+  assert.strictEqual(P.skewWarning(undefined), null);
+  assert.strictEqual(P.skewWarning(0), null);
+  assert.strictEqual(P.skewWarning(-3600), null);
+  assert.strictEqual(P.skewWarning(600), null);
+  assert.strictEqual(P.skewWarning(601), 'product times 10 min ahead of the data clock');
+  assert.strictEqual(P.skewWarning(3 * 3600), 'product times 3 h ahead of the data clock');
+});
+
+test('radarNeedsFetch: a missed publish only, never a mosaic still filling', () => {
+  const pub = { published: '2020-10-30T08:56:31.128Z', blocks: 861 };
+  assert.strictEqual(P.radarNeedsFetch(null, pub), true);                // nothing drawn
+  assert.strictEqual(P.radarNeedsFetch(pub, pub), false);                // drawn
+  assert.strictEqual(P.radarNeedsFetch(pub, Object.assign({}, pub, { blocks: 900 })), false);   // filling
+  assert.strictEqual(P.radarNeedsFetch(pub, Object.assign({}, pub, { published: '2020-10-30T08:58:25.165Z' })), true);
+  assert.strictEqual(P.radarNeedsFetch(null, { blocks: 12 }), false);    // never published
+  assert.strictEqual(P.radarNeedsFetch(pub, null), false);
+});
+
 test('ageClass boundaries: fresh < 30 min, aging < 90 min, else old', () => {
   const issued = '2015-01-24T03:50:00.000Z';
   const t = Date.parse(issued);

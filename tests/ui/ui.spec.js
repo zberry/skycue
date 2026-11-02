@@ -681,6 +681,9 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     await expect(page.locator('#stat-fisb-uplinks')).toHaveText(/^\d+$/, { timeout: 15000 });
     await expect(page.locator('#stat-fisb-products')).toHaveText(/^\d+$/);
     await expect(page.locator('#stat-radar-age')).toHaveText(/\d+ (s|min)/);
+    // No product time runs ahead of the fixture's data clock: no skew warning.
+    expect(status.clock_skew_s).toBeUndefined();
+    await expect(page.locator('#stat-fisb-skew')).toBeHidden();
   });
 
   test('fisb_screenshots_weather', async ({ page }, testInfo) => {

@@ -832,6 +832,15 @@ BOOST_AUTO_TEST_CASE(summary_and_json_fields)
     BOOST_TEST(sum.stations == 1u);
     BOOST_REQUIRE(sum.radar_age_s.has_value());
     BOOST_TEST(*sum.radar_age_s == 130.0);
+    BOOST_TEST(!sum.clock_skew_s.has_value());  // nothing ahead of the clock
+    {
+        // A product time ahead of the data clock is reported as skew.
+        FisbStore ahead;
+        ahead.apply(blocks(63, kT0 + 15min, kT0, {block(277546, 0, 1)}), kT0);
+        const auto s2 = ahead.summary(kT0);
+        BOOST_REQUIRE(s2.clock_skew_s.has_value());
+        BOOST_TEST(*s2.clock_skew_s == 900.0);
+    }
 
     auto ev = st.sweep(kT0 + 10s);
     BOOST_REQUIRE_EQUAL(ev.size(), 1u);
@@ -913,8 +922,16 @@ BOOST_AUTO_TEST_CASE(status_does_not_copy_blocks)
     BOOST_TEST(!st.mosaic(64).has_value());
     BOOST_TEST(st.blocksCopied() == kMosaicMaxBlocks + 2);
 
-    // The full snapshot copies everything.
+    // The records (what /api/fisb/text and /shapes read): no block.
     const auto before = st.blocksCopied();
+    const FisbSnapshot rec = st.records();
+    BOOST_TEST(st.blocksCopied() == before);
+    BOOST_TEST(rec.radar.empty());
+    BOOST_TEST(rec.rasters.empty());
+    BOOST_TEST(rec.metar.size() == 1u);
+    BOOST_TEST(rec.taf.size() == 1u);
+    BOOST_TEST(rec.stations.size() == 1u);
+    // The full snapshot copies everything.
     (void)st.snapshot();
     BOOST_TEST(st.blocksCopied() == before + kMosaicMaxBlocks + 2);
 }

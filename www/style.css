@@ -39,6 +39,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 #stats b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 #stats .dot.on { color: var(--sent); }
 #stats .dot.off { color: var(--blocked); }
+#stats .warn, #stats .warn b { color: #e3b341; }
 #wx-toggle { margin-left: auto; }
 #wx-toggle[aria-pressed="true"], #table-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 [hidden] { display: none !important; }

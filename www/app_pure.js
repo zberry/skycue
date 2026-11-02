@@ -208,6 +208,26 @@
     return radarFaded(ageMs, product) ? base * 0.5 : base;
   }
 
+  // Seconds the newest product time runs ahead of the data clock, when that
+  // is more than the 10 min a receiver clock or a ground station can be
+  // off by: a warning for the status strip; null otherwise.
+  var CLOCK_SKEW_WARN_S = 600;
+  function skewWarning(skewS) {
+    if (typeof skewS !== 'number' || !(skewS > CLOCK_SKEW_WARN_S)) return null;
+    var min = Math.round(skewS / 60);
+    return 'product times ' + (min < 120 ? min + ' min' : Math.round(min / 60) + ' h') + ' ahead of the data clock';
+  }
+
+  // Whether the status poll should fetch a radar mosaic: `head` is the
+  // status's mosaic head, `drawnHead` the head of the mosaic drawn (null for
+  // none). Only a published mosaic is fetched, and only when its publish is
+  // not the one drawn (a missed fisb_radar item). A mosaic still filling
+  // (unpublished, or its block count moving between publishes) is not.
+  function radarNeedsFetch(drawnHead, head) {
+    if (!head || !head.published) return false;
+    return !drawnHead || drawnHead.published !== head.published;
+  }
+
   // Age colouring of a text report: fresh < 30 min, aging < 90 min, else old
   // (and old when the time is missing or unreadable).
   var AGE_FRESH_MS = 30 * 60000, AGE_AGING_MS = 90 * 60000;
@@ -268,6 +288,7 @@
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,
     RADAR_FADE_MS: RADAR_FADE_MS, radarFaded: radarFaded, radarOpacity: radarOpacity,
+    CLOCK_SKEW_WARN_S: CLOCK_SKEW_WARN_S, skewWarning: skewWarning, radarNeedsFetch: radarNeedsFetch,
     mercY: mercY, mosaicCanvasSize: mosaicCanvasSize, stationMatches: stationMatches
   };
   root.skycuePure = api;

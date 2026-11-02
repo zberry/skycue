@@ -4,12 +4,19 @@
 #include "gz_line_reader.hpp"
 
 #include "bits.hpp"
+#include "iq_writer.hpp"
 #include "modes_crc.hpp"
 #include "reed_solomon.hpp"
+#include "resample.hpp"
+#include "synth.hpp"
 #include "uat_frame.hpp"
 
+#include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -342,4 +349,371 @@ BOOST_AUTO_TEST_CASE(bits_msb_first)
     appendBits(bits, 0xff, 0);
     BOOST_TEST(bits.size() == 64u);
     BOOST_CHECK_THROW(appendBits(bits, 0, 65), std::invalid_argument);
+}
+
+// ---- Sample layer: synthesisers, CU8 writer, resampler, info ----
+
+namespace {
+
+const std::string kF112 = "8D4840D6202CC371C32CE0576098";
+
+std::vector<uint8_t> frameBits(const std::string& h)
+{
+    const std::vector<uint8_t> bytes = hex(h);
+    std::vector<uint8_t> bits;
+    appendBytes(bits, bytes.data(), bytes.size());
+    return bits;
+}
+
+// Mean of out[m].real() over the m whose centre 5m + 2.5 (in ticks) lies in
+// [start, start + 6), i.e. the half-us chip starting at tick start.
+double chipMean(const std::vector<std::complex<float>>& out, int64_t start)
+{
+    double sum = 0.0;
+    int count = 0;
+    for (std::size_t m = 0; m < out.size(); ++m) {
+        const double centre = 5.0 * static_cast<double>(m) + 2.5;
+        if (centre >= static_cast<double>(start) && centre < static_cast<double>(start + 6)) {
+            sum += static_cast<double>(out[m].real());
+            ++count;
+        }
+    }
+    BOOST_REQUIRE(count > 0);
+    return sum / count;
+}
+
+// CU8 bytes back to (I - 128, Q - 128).
+std::vector<std::complex<double>> cu8Samples(const std::string& bytes)
+{
+    std::vector<std::complex<double>> out;
+    for (std::size_t k = 0; k + 1 < bytes.size(); k += 2)
+        out.emplace_back(static_cast<uint8_t>(bytes[k]) - 128.0, static_cast<uint8_t>(bytes[k + 1]) - 128.0);
+    return out;
+}
+
+std::string writeConstant(std::complex<float> v, std::size_t n, double amplitude, std::optional<double> snr,
+                          double cfo, uint64_t seed, double rate = kModesRate)
+{
+    std::ostringstream os;
+    IqWriter w(os, rate, amplitude, snr, cfo, seed);
+    const std::vector<std::complex<float>> x(n, v);
+    w.write(x.data(), x.size());
+    BOOST_TEST(w.samples() == n);
+    return os.str();
+}
+
+// Mean of arg(x[n+1] conj(x[n])) over n in [from, to - 1).
+double meanPhaseStep(const std::vector<std::complex<double>>& x, std::size_t from, std::size_t to)
+{
+    double sum = 0.0;
+    for (std::size_t n = from; n + 1 < to; ++n)
+        sum += std::arg(x[n + 1] * std::conj(x[n]));
+    return sum / static_cast<double>(to - 1 - from);
+}
+
+uint64_t fnv1a(const std::string& s)
+{
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (char c : s) {
+        h ^= static_cast<uint8_t>(c);
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
+constexpr double kTestPi = 3.14159265358979323846;
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(modes_ppm_after_decimation)
+{
+    const std::vector<uint8_t> bits = frameBits(kF112);
+    BOOST_REQUIRE(bits.size() == 112u);
+    for (int64_t off : {0, 1, 2, 3, 4}) {  // fractional timing against the output clock
+        BOOST_TEST_CONTEXT("offset " << off)
+        {
+            ModesSynth s(100.0);
+            std::vector<std::complex<float>> out;
+            s.addFrame(off, hex(kF112));
+            s.emitUntil(off + 1440 + 10, out);
+            BOOST_TEST(out.size() == static_cast<std::size_t>((off + 1450) / 5));
+            for (int c : {0, 2, 7, 9})  // preamble pulses
+                BOOST_TEST(chipMean(out, off + 6 * c) >= 50.0);
+            for (int c : {1, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15})
+                BOOST_TEST(chipMean(out, off + 6 * c) <= 50.0);
+            for (int b = 0; b < 112; ++b) {  // data from 8 us = tick 96
+                const double first = chipMean(out, off + 96 + 12 * b);
+                const double second = chipMean(out, off + 102 + 12 * b);
+                BOOST_TEST((first > second) == (bitOf(bits, static_cast<std::size_t>(b)) == 1u), "bit " << b);
+            }
+            for (const auto& v : out)
+                BOOST_TEST(v.imag() == 0.0f);
+            // Nothing after the frame (tick off + 1440 on).
+            for (std::size_t m = static_cast<std::size_t>(off + 1440 + 4) / 5; m < out.size(); ++m)
+                BOOST_TEST(out[m].real() == 0.0f);
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(modes_frame_ticks)
+{
+    BOOST_TEST(modesFrameTicks(7) == 768u);
+    BOOST_TEST(modesFrameTicks(14) == 1440u);
+}
+
+BOOST_AUTO_TEST_CASE(modes_overlapping_frames_sum)
+{
+    ModesSynth once(100.0), twice(100.0);
+    std::vector<std::complex<float>> a, b;
+    once.addFrame(0, hex(kF112));
+    twice.addFrame(0, hex(kF112));
+    twice.addFrame(0, hex(kF112));
+    once.emitUntil(1450, a);
+    twice.emitUntil(1450, b);
+    BOOST_REQUIRE(a.size() == b.size());
+    for (int c : {0, 2, 7, 9})
+        BOOST_TEST(chipMean(b, 6 * c) >= 2 * 50.0);
+    for (std::size_t m = 0; m < a.size(); ++m)
+        BOOST_TEST(b[m].real() == 2.0f * a[m].real(), tt::tolerance(1e-5f));
+}
+
+BOOST_AUTO_TEST_CASE(synth_ring_bounds)
+{
+    ModesSynth m(10.0);
+    std::vector<std::complex<float>> out;
+    m.emitUntil(100, out);
+    BOOST_TEST(out.size() == 20u);
+    BOOST_TEST(m.emittedTicks() == 100);
+    BOOST_CHECK_THROW(m.addFrame(99, hex(kF112)), std::invalid_argument);  // before the emitted ticks
+    BOOST_CHECK_THROW(m.addFrame(100 + static_cast<int64_t>(kModesRingTicks) - 1439, hex(kF112)),
+                      std::invalid_argument);  // past the ring
+    BOOST_CHECK_NO_THROW(m.addFrame(100 + static_cast<int64_t>(kModesRingTicks) - 1440, hex(kF112)));
+    // A frame overlapping one already added is fine once emitted up to its start.
+    m.emitUntil(1000, out);
+    BOOST_CHECK_NO_THROW(m.addFrame(1000, hex(kF112)));
+
+    UatSynth u(10.0);
+    u.emitUntil(10, out);
+    BOOST_TEST(u.emittedSamples() == 10);
+    const std::vector<uint8_t> bits(kUatRingSamples / 2, 1);
+    BOOST_CHECK_THROW(u.addFrame(9, bits), std::invalid_argument);
+    BOOST_CHECK_THROW(u.addFrame(11, bits), std::invalid_argument);
+    BOOST_CHECK_NO_THROW(u.addFrame(10, bits));
+}
+
+BOOST_AUTO_TEST_CASE(uat_cpfsk_phase_steps)
+{
+    const auto all = fixturePayloads();
+    const std::vector<uint8_t>* payload = nullptr;
+    for (const auto& p : all)
+        if (uatKindForPayload(p.size()) && *uatKindForPayload(p.size()) != UatKind::uplink) {
+            payload = &p;
+            break;
+        }
+    BOOST_REQUIRE(payload != nullptr);
+    const std::vector<uint8_t> bits = uatFrameBits(*payload);
+    const std::size_t n_samples = 2 * bits.size();
+    BOOST_TEST(n_samples == uatFrameSamples(*uatKindForPayload(payload->size())));
+
+    UatSynth s(50.0);
+    std::vector<std::complex<float>> out;
+    s.addFrame(0, bits);
+    s.emitUntil(static_cast<int64_t>(n_samples) + 20, out);
+    BOOST_REQUIRE(out.size() == n_samples + 20);
+    BOOST_TEST(std::arg(out[0]) == 0.0f);  // phase starts at 0
+    for (std::size_t n = 0; n < n_samples; ++n)
+        BOOST_TEST(std::fabs(std::abs(out[n]) - 50.0f) <= 1e-3f, "sample " << n);
+    const double step = 0.3 * kTestPi;
+    for (std::size_t n = 0; n + 1 < n_samples; ++n) {
+        const std::complex<double> a(out[n]), b(out[n + 1]);
+        const double expect = bits[n / 2] ? step : -step;
+        BOOST_TEST(std::fabs(std::arg(b * std::conj(a)) - expect) <= 1e-4, "sample " << n);
+    }
+    for (std::size_t n = n_samples; n < out.size(); ++n)
+        BOOST_TEST(std::abs(out[n]) == 0.0f);
+
+    // Overlapping frames add as complex values.
+    UatSynth s2(50.0);
+    std::vector<std::complex<float>> out2;
+    s2.addFrame(0, bits);
+    s2.addFrame(0, bits);
+    s2.emitUntil(static_cast<int64_t>(n_samples), out2);
+    for (std::size_t n = 0; n < n_samples; n += 97)
+        BOOST_TEST(std::abs(out2[n] - 2.0f * out[n]) <= 1e-4f);
+}
+
+BOOST_AUTO_TEST_CASE(writer_level_and_quantise)
+{
+    BOOST_TEST(amplitudeForLevel(-12.0) == 32.15, tt::tolerance(0.01));
+    BOOST_TEST(amplitudeForLevel(0.0) == 128.0, tt::tolerance(1e-12));
+
+    const std::string bytes = writeConstant({32.15f, 0.0f}, 1000, 32.15, std::nullopt, 0.0, 1);
+    BOOST_REQUIRE(bytes.size() == 2000u);
+    for (std::size_t k = 0; k < bytes.size(); k += 2) {
+        BOOST_TEST(static_cast<uint8_t>(bytes[k]) == 160u);
+        BOOST_TEST(static_cast<uint8_t>(bytes[k + 1]) == 128u);
+    }
+
+    uint64_t clipped = 0;
+    BOOST_TEST(quantiseCu8(0.4, clipped) == 128u);
+    BOOST_TEST(quantiseCu8(0.5, clipped) == 129u);
+    BOOST_TEST(quantiseCu8(-0.5, clipped) == 128u);  // round(127.5), half away from zero
+    BOOST_TEST(quantiseCu8(-0.6, clipped) == 127u);
+    BOOST_TEST(quantiseCu8(127.4, clipped) == 255u);
+    BOOST_TEST(quantiseCu8(-128.0, clipped) == 0u);
+    BOOST_TEST(clipped == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(writer_noise_sigma)
+{
+    const double a = 32.15;
+    const std::string bytes = writeConstant({0.0f, 0.0f}, 1000000, a, 25.0, 0.0, 1);
+    double si = 0, sq = 0, si2 = 0, sq2 = 0;
+    for (const auto& x : cu8Samples(bytes)) {
+        si += x.real();
+        sq += x.imag();
+        si2 += x.real() * x.real();
+        sq2 += x.imag() * x.imag();
+    }
+    const double n = 1e6;
+    const double sd_i = std::sqrt(si2 / n - (si / n) * (si / n));
+    const double sd_q = std::sqrt(sq2 / n - (sq / n) * (sq / n));
+    const double s = a * std::pow(10.0, -25.0 / 20.0) / std::sqrt(2.0);
+    const double expect = std::sqrt(s * s + 1.0 / 12.0);
+    BOOST_TEST(sd_i == expect, tt::tolerance(0.05));
+    BOOST_TEST(sd_q == expect, tt::tolerance(0.05));
+    BOOST_TEST(std::fabs(si / n) <= 0.01);
+    BOOST_TEST(std::fabs(sq / n) <= 0.01);
+}
+
+BOOST_AUTO_TEST_CASE(writer_seed_determinism)
+{
+    const std::string a = writeConstant({20.0f, -10.0f}, 100000, 32.15, 10.0, 0.0, 1);
+    const std::string b = writeConstant({20.0f, -10.0f}, 100000, 32.15, 10.0, 0.0, 1);
+    const std::string c = writeConstant({20.0f, -10.0f}, 100000, 32.15, 10.0, 0.0, 2);
+    BOOST_TEST(a.size() == 200000u);
+    BOOST_TEST((a == b));
+    BOOST_TEST(c.size() == a.size());
+    BOOST_TEST((a != c));
+    // Known answer: the same bytes from every compiler and standard library
+    // (mt19937_64 is fully specified; Box-Muller is ours).
+    BOOST_TEST(fnv1a(a) == 0x38638F09A663D608ULL);
+}
+
+BOOST_AUTO_TEST_CASE(writer_cfo_rotation)
+{
+    for (double cfo : {10000.0, -10000.0}) {
+        const auto x = cu8Samples(writeConstant({60.0f, 0.0f}, 100000, 60.0, std::nullopt, cfo, 1));
+        BOOST_TEST(std::abs(x[0] - std::complex<double>(60.0, 0.0)) == 0.0);  // phase starts at 0
+        BOOST_TEST(meanPhaseStep(x, 0, x.size()) == 2.0 * kTestPi * cfo / 2.4e6, tt::tolerance(0.02));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(writer_counts_clipping)
+{
+    std::ostringstream os;
+    IqWriter w(os, kModesRate, 32.15, std::nullopt, 0.0, 1);
+    const std::vector<std::complex<float>> x(1000, {200.0f, 0.0f});
+    w.write(x.data(), x.size());
+    const std::string bytes = os.str();
+    for (std::size_t k = 0; k < bytes.size(); k += 2) {
+        BOOST_TEST(static_cast<uint8_t>(bytes[k]) == 255u);
+        BOOST_TEST(static_cast<uint8_t>(bytes[k + 1]) == 128u);
+    }
+    BOOST_TEST(w.samples() == 1000u);
+    BOOST_TEST(w.clipped() == w.samples());
+
+    const std::vector<std::complex<float>> y(10, {-200.0f, 300.0f});  // both clip
+    w.write(y.data(), y.size());
+    BOOST_TEST(w.samples() == 1010u);
+    BOOST_TEST(w.clipped() == 1020u);
+    BOOST_TEST(static_cast<uint8_t>(os.str()[2000]) == 0u);
+    BOOST_TEST(static_cast<uint8_t>(os.str()[2001]) == 255u);
+
+    std::ostream broken(nullptr);  // every write fails
+    IqWriter bad(broken, kModesRate, 32.15, std::nullopt, 0.0, 1);
+    BOOST_CHECK_THROW(bad.write(x.data(), x.size()), std::runtime_error);
+}
+
+BOOST_AUTO_TEST_CASE(resample_2M_to_2M4_count)
+{
+    std::istringstream in(std::string(2 * 2000000, static_cast<char>(128)));
+    std::ostringstream out;
+    const ResampleCounts n = resampleCu8(in, 2000000, 2400000, out);
+    BOOST_TEST(n.in_samples == 2000000u);
+    BOOST_TEST(n.out_samples >= 2400000u - 1);
+    BOOST_TEST(n.out_samples <= 2400000u + 1);
+    const std::string bytes = out.str();
+    BOOST_TEST(bytes.size() == 2 * n.out_samples);
+    BOOST_TEST(bytes.find_first_not_of(static_cast<char>(128)) == std::string::npos);  // zero stays zero
+
+    std::istringstream none("");
+    BOOST_CHECK_THROW(resampleCu8(none, 2083333, 2400000, out), std::invalid_argument);  // 2400000/2083333
+    BOOST_CHECK_THROW(resampleCu8(none, 0, 2400000, out), std::invalid_argument);
+    BOOST_CHECK_NO_THROW(resampleCu8(none, 2400000, 2000000, out));  // 5/6
+}
+
+BOOST_AUTO_TEST_CASE(resample_keeps_tone_frequency)
+{
+    const double in_rate = 2.0e6, f = 1.0e5;
+    std::string tone;
+    tone.reserve(4000000);
+    for (int n = 0; n < 2000000; ++n) {
+        const double ph = 2.0 * kTestPi * f * n / in_rate;
+        tone.push_back(static_cast<char>(static_cast<uint8_t>(std::round(128.0 + 60.0 * std::cos(ph)))));
+        tone.push_back(static_cast<char>(static_cast<uint8_t>(std::round(128.0 + 60.0 * std::sin(ph)))));
+    }
+    std::istringstream in(tone);
+    std::ostringstream out;
+    const ResampleCounts n = resampleCu8(in, 2000000, 2400000, out);
+    BOOST_TEST(n.out_samples == 2400000u);
+    const auto y = cu8Samples(out.str());
+    BOOST_REQUIRE(y.size() == n.out_samples);
+    const std::size_t from = y.size() / 20, to = y.size() - y.size() / 20;
+    BOOST_TEST(meanPhaseStep(y, from, to) * 2.4e6 / (2.0 * kTestPi) == f, tt::tolerance(0.005));
+    double mag = 0.0;
+    for (std::size_t k = from; k < to; ++k)
+        mag += std::abs(y[k]);
+    BOOST_TEST(mag / static_cast<double>(to - from) == 60.0, tt::tolerance(0.02));  // passband gain 1
+}
+
+BOOST_AUTO_TEST_CASE(info_numbers)
+{
+    std::string bytes(2 * 24000, static_cast<char>(128));
+    {
+        std::istringstream in(bytes);
+        const Cu8Info i = cu8Info(in, 2.4e6);
+        BOOST_TEST(i.samples == 24000u);
+        BOOST_TEST(i.seconds == 0.01, tt::tolerance(1e-12));
+        BOOST_TEST(i.dc_i == 0.0);
+        BOOST_TEST(i.dc_q == 0.0);
+        BOOST_TEST(i.peak_mag == 0.0);
+        BOOST_TEST(i.mean_mag == 0.0);
+    }
+    bytes.push_back(static_cast<char>(228));
+    bytes.push_back(static_cast<char>(128));
+    bytes.push_back(static_cast<char>(7));  // a trailing odd byte is ignored
+    {
+        std::istringstream in(bytes);
+        const Cu8Info i = cu8Info(in, 2.4e6);
+        BOOST_TEST(i.samples == 24001u);
+        BOOST_TEST(i.peak_mag == 100.0);
+        BOOST_TEST(i.mean_mag == 100.0 / 24001.0, tt::tolerance(1e-9));
+        BOOST_TEST(i.dc_i == 100.0 / 24001.0, tt::tolerance(1e-9));
+        BOOST_TEST(i.dc_q == 0.0);
+    }
+    {
+        std::istringstream in("");
+        const Cu8Info i = cu8Info(in, 2.4e6);
+        BOOST_TEST(i.samples == 0u);
+        BOOST_TEST(i.seconds == 0.0);
+    }
+    {
+        // DC of a noisy constant over 100 000 samples, within +-1.0.
+        std::istringstream in(writeConstant({10.0f, -5.0f}, 100000, 32.15, 10.0, 0.0, 3));
+        const Cu8Info i = cu8Info(in, 2.4e6);
+        BOOST_TEST(i.samples == 100000u);
+        BOOST_TEST(std::fabs(i.dc_i - 10.0) <= 1.0);
+        BOOST_TEST(std::fabs(i.dc_q + 5.0) <= 1.0);
+    }
 }

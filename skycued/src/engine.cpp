@@ -182,10 +182,20 @@ void Engine::handleObservation(const TrackObservation& obs)
     last_obs_steady_ = steady::now();
     if (received_)
         received_->writeObservation(obs);
-    process(table_.apply(obs), last_obs_steady_);
+    process(table_.apply(obs), last_obs_steady_, obs.lat.has_value());
 }
 
-void Engine::process(TrackState& state, steady::time_point now)
+void Engine::process(TrackState& state, steady::time_point now, bool positioned)
+{
+    decide(state, now);
+    if (positioned && sink_ && !stopped_) {
+        EngineEvent ev = kindEvent(EventKind::observed);
+        ev.track = trackSnapshot(state, filters_.evaluate(state));
+        emit(ev);
+    }
+}
+
+void Engine::decide(TrackState& state, steady::time_point now)
 {
     const SendReason reason = shouldSend(state, now, thresholds_);
     if (reason == SendReason::none) {

@@ -378,17 +378,22 @@ BOOST_AUTO_TEST_CASE(on_event_sequence)
             k.push_back(e.kind);
         return k;
     });
-    const std::vector<EventKind> head{EventKind::update, EventKind::filters_changed, EventKind::drop,
-                                      EventKind::lists_changed};
+    const std::vector<EventKind> head{EventKind::update, EventKind::observed, EventKind::filters_changed,
+                                      EventKind::drop, EventKind::lists_changed};
     BOOST_REQUIRE(kinds.size() >= head.size());
-    BOOST_TEST((std::vector<EventKind>(kinds.begin(), kinds.begin() + 4) == head));
+    BOOST_TEST((std::vector<EventKind>(kinds.begin(), kinds.begin() + 5) == head));
     fx.t.call([&] {
         const EngineEvent& up = sink.events[0];
         BOOST_REQUIRE(up.track);
         BOOST_TEST((up.track->track.id == id));
         BOOST_TEST(up.track->forwarded);
         BOOST_TEST((up.track->decision == Decision::send));
-        const EngineEvent& dr = sink.events[2];
+        const EngineEvent& ob = sink.events[1];  // after the update the observation caused
+        BOOST_REQUIRE(ob.track);
+        BOOST_TEST((ob.track->track.id == id));
+        BOOST_TEST(ob.track->forwarded);
+        BOOST_TEST(ob.track->range_nm > 30.0);
+        const EngineEvent& dr = sink.events[3];
         BOOST_TEST((dr.id.value_or(TrackId{}) == id));
         BOOST_TEST((dr.reason.value_or(DropReason::shutdown) == DropReason::filtered));
         BOOST_TEST(!dr.track);

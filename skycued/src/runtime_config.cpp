@@ -549,6 +549,8 @@ void RuntimeConfig::writeOverlay(const Overlay& overlay)
 void RuntimeConfig::applyUi(const Overlay& delta, const std::string& origin)
 {
     checkFilters(delta.max_range_nm, delta.min_elevation_deg);
+    if ((delta.clear_max_range_nm && delta.max_range_nm) || (delta.clear_min_elevation_deg && delta.min_elevation_deg))
+        throw std::invalid_argument("a filter value cannot be both set and cleared");
     // Every entry is checked before anything changes.
     const auto allow_add = normaliseAll(delta.allow_add), allow_remove = normaliseAll(delta.allow_remove);
     const auto block_add = normaliseAll(delta.block_add), block_remove = normaliseAll(delta.block_remove);
@@ -558,6 +560,10 @@ void RuntimeConfig::applyUi(const Overlay& delta, const std::string& origin)
         next.max_range_nm = delta.max_range_nm;
     if (delta.min_elevation_deg)
         next.min_elevation_deg = delta.min_elevation_deg;
+    if (delta.clear_max_range_nm)
+        next.max_range_nm.reset();
+    if (delta.clear_min_elevation_deg)
+        next.min_elevation_deg.reset();
     auto merge = [](const IdList& file, std::vector<std::string>& add, std::vector<std::string>& remove,
                     const std::vector<std::string>& to_add, const std::vector<std::string>& to_remove) {
         for (const auto& e : to_add) {

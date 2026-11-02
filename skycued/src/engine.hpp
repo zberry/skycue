@@ -31,7 +31,11 @@
 // the drops and updates it causes. The received stream never depends on the
 // filters: every observation is recorded before any of this.
 //
-// Events (onEvent): update after every update sent, drop after every drop
+// Events (onEvent): update after every update sent; observed after every
+// observation that carries a position, for every track (forwarded, blocked,
+// out of range...), once its decision is made (so after the update or drop
+// that observation caused), with the track's decision, range and elevation
+// now; drop after every drop
 // sent (timeout, filtered, source_lost; the shutdown drops of stop() are
 // not reported), stats on every 1 s tick, filters_changed / lists_changed
 // after a live change is applied and recorded but before the drops and
@@ -115,7 +119,9 @@ public:
 private:
     void handleObservation(const TrackObservation& obs);
     void handleConnection(bool up);
-    void process(TrackState& state, std::chrono::steady_clock::time_point now);
+    // `positioned`: the observation carried a position (an observed event follows).
+    void process(TrackState& state, std::chrono::steady_clock::time_point now, bool positioned);
+    void decide(TrackState& state, std::chrono::steady_clock::time_point now);
     void forward(TrackState& state, const FilterResult& result, std::chrono::steady_clock::time_point now);
     void drop(TrackState& state, skycue::DropReason reason);
     void countDrop(skycue::DropReason reason);

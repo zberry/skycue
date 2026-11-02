@@ -446,7 +446,11 @@ BOOST_AUTO_TEST_CASE(api_state_shape)
         oc.position_time.reset();
         f.src->emit(oc);
     });
-    f.fx->t.call([&] { f.rc->applyUi(skycued::Overlay{{}, {}, {"N123AB"}, {}, {}, {}}, "test"); });
+    f.fx->t.call([&] {
+        skycued::Overlay d;
+        d.allow_add = {"N123AB"};
+        f.rc->applyUi(d, "test");
+    });
 
     const Reply r = get(f.port, "/api/state");
     BOOST_TEST(r.status == 200u);
@@ -714,6 +718,75 @@ BOOST_AUTO_TEST_CASE(ws_snapshot_then_events)
         BOOST_TEST(!c.closed);
     }
     BOOST_TEST(pollUntil([&] { return f.webClients() == 0u; }));
+}
+
+BOOST_AUTO_TEST_CASE(ws_observed_events_for_filtered_tracks)
+{
+    WebFx f;
+    const TrackId blocked{0xb10c00, AddressType::icao}, sent{0x5e5e00, AddressType::icao};
+    BOOST_TEST(request(f.port, http::verb::post, "/api/lists/block", "{\"add\":[\"b10c00\"]}").status == 200u);
+    WsClient c(f.port);
+    BOOST_TEST(c.waitFor([&] { return !c.msgs.empty(); }));
+    f.fx->t.call([&] { f.src->connection(true); });
+    for (int i = 0; i < 3; ++i) {
+        f.fx->t.call([&] {
+            f.src->emit(nearbyObservation(blocked.address, 0.01 * i));
+            f.src->emit(nearbyObservation(sent.address, 0.01 * i));
+            auto np = nearbyObservation(0xa0a0a0, 0);  // no position: no observed item
+            np.lat.reset();
+            np.lon.reset();
+            np.position_time.reset();
+            f.src->emit(np);
+        });
+        std::this_thread::sleep_for(50ms);
+    }
+    // Every positioned observation of the blocked track gives an observed item.
+    auto count = [&](const std::string& needle) {
+        std::lock_guard<std::mutex> lk(c.m);
+        size_t n = 0;
+        for (const auto& m : c.msgs)
+            n += countOf(m, needle);
+        return n;
+    };
+    BOOST_TEST(pollUntil([&] {
+        return count("{\"type\":\"observed\",\"hex\":\"b10c00\"") == 3u &&
+               count("{\"type\":\"observed\",\"hex\":\"5e5e00\"") == 3u;
+    }));
+    BOOST_TEST(count("{\"type\":\"update\",\"hex\":\"b10c00\"") == 0u);  // never sent
+    BOOST_TEST(count("{\"type\":\"update\",\"hex\":\"5e5e00\"") >= 1u);
+    BOOST_TEST(count("\"type\":\"observed\",\"hex\":\"a0a0a0\"") == 0u);
+    const std::string m = c.waitForMessage({"{\"type\":\"observed\",\"hex\":\"b10c00\""});
+    const pt::ptree e = parseJson(m);
+    for (const auto& kv : e.get_child("items"))
+        if (kv.second.get<std::string>("type") == "observed" && kv.second.get<std::string>("hex") == "b10c00") {
+            BOOST_TEST(kv.second.get<std::string>("decision") == "blocked");
+            BOOST_TEST(kv.second.get<bool>("forwarded") == false);
+            BOOST_TEST(kv.second.count("lat") == 1u);
+            BOOST_TEST(kv.second.count("range_nm") == 1u);
+        }
+}
+
+BOOST_AUTO_TEST_CASE(put_filters_null_clears_overlay)
+{
+    WebFx f(WebOptions{false, true, 2u << 20, "MAX_RANGE_NM=120\nMIN_ELEVATION_DEG=1\n"});
+    Reply r = request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":30,\"min_elevation_deg\":3}");
+    BOOST_TEST(r.body == "{\"max_range_nm\":30,\"min_elevation_deg\":3,\"overlay_active\":true}");
+    r = request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":null}");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "{\"max_range_nm\":120,\"min_elevation_deg\":3,\"overlay_active\":true}");
+    BOOST_TEST(f.fx->t.call([&] { return f.fx->engine->snapshot().filters.max_range_nm; }) == 120.0);
+    const std::string overlay = readAll(f.tmp.path + "/skycue.runtime.json");
+    BOOST_TEST(!has(overlay, "max_range_nm"));
+    BOOST_TEST(has(overlay, "\"min_elevation_deg\": 3"));
+    r = request(f.port, http::verb::put, "/api/filters", "{\"min_elevation_deg\":null}");
+    BOOST_TEST(r.body == "{\"max_range_nm\":120,\"min_elevation_deg\":1,\"overlay_active\":false}");
+    BOOST_TEST(!exists(f.tmp.path + "/skycue.runtime.json"));  // empty overlay: deleted
+    // Clearing what is not set is no change; the baseline conf is untouched.
+    BOOST_TEST(request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":null}").status == 200u);
+    BOOST_TEST(has(readAll(f.conf), "MAX_RANGE_NM=120"));
+    const std::string sent = f.sent();
+    BOOST_TEST(has(sent, "ui: max_range_nm=120 min_elevation_deg=3"));
+    BOOST_TEST(has(sent, "ui: max_range_nm=120 min_elevation_deg=1"));
 }
 
 BOOST_AUTO_TEST_CASE(ws_slow_client_closed)

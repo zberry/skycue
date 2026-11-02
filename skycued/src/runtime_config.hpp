@@ -55,6 +55,10 @@ class Engine;
 struct Overlay {
     std::optional<double> max_range_nm, min_elevation_deg;
     std::vector<std::string> allow_add, allow_remove, block_add, block_remove;
+    // In a delta for applyUi only: drop the overlay's value, so the baseline
+    // value applies again. Not part of the overlay itself: empty(), ==,
+    // overlayJson and parseOverlay ignore them.
+    bool clear_max_range_nm = false, clear_min_elevation_deg = false;
 
     bool empty() const;
     bool operator==(const Overlay& o) const;
@@ -87,13 +91,13 @@ public:
     void load();
 
     // Merges `delta` into the overlay: its filter values replace the
-    // overlay's; adding an entry the overlay removes cancels the removal (and
+    // overlay's (its clear_* flags remove them); adding an entry the overlay removes cancels the removal (and
     // removing one it adds cancels the addition); adding an entry already in
     // the list file, or removing one not in it, records nothing. Then writes
     // skycue.runtime.json atomically (or deletes it when the overlay is
     // empty) and applies the result to the Engine with `origin`.
     // Throws std::invalid_argument, changing nothing, for a bad entry (naming
-    // it) or a filter value out of range; std::runtime_error when the file
+    // it), a filter value out of range, or a value both set and cleared; std::runtime_error when the file
     // cannot be written (nothing changes then either).
     void applyUi(const Overlay& delta, const std::string& origin);
 

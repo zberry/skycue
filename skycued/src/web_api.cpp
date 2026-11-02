@@ -198,10 +198,17 @@ Response putFiltersRoute(const std::string& body, RuntimeConfig& rc)
     for (const char* k : {"max_range_nm", "min_elevation_deg"}) {
         if (!obj->has(k))
             continue;
+        const bool range = std::strcmp(k, "max_range_nm") == 0;
+        // null: back to the baseline value. (PropertyTree keeps null as the
+        // text "null", so the string "null" reads the same.)
+        if (obj->getString(k).value_or("") == "null") {
+            (range ? delta.clear_max_range_nm : delta.clear_min_elevation_deg) = true;
+            continue;
+        }
         const auto v = obj->getDouble(k);
         if (!v)
-            return error(400, std::string(k) + " must be a number");
-        (std::strcmp(k, "max_range_nm") == 0 ? delta.max_range_nm : delta.min_elevation_deg) = *v;
+            return error(400, std::string(k) + " must be a number or null");
+        (range ? delta.max_range_nm : delta.min_elevation_deg) = *v;
     }
     return apply(rc, delta, [&] { return filtersJson(rc); });
 }
@@ -338,6 +345,8 @@ std::string eventJson(const EngineEvent& event)
     switch (event.kind) {
     case EventKind::update:
         return event.track ? trackJson(*event.track, "update") : std::string();
+    case EventKind::observed:
+        return event.track ? trackJson(*event.track, "observed") : std::string();
     case EventKind::drop:
         return event.id && event.reason ? dropJson(*event.id, *event.reason) : std::string();
     case EventKind::stats:

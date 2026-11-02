@@ -23,6 +23,9 @@ struct Config {
     double max_range_nm = 150, min_elevation_deg = 0;
     std::string allow_list_file, block_list_file;
     double min_interval_s = 1, max_interval_s = 10, track_timeout_s = 60, keyframe_interval_s = 10;
+    std::string web_bind = "127.0.0.1";  // address the web UI listens on
+    double record_max_gb = 0;            // recordings budget in GB; 0: unlimited
+    int trail_seconds = 120;             // seconds of track history the web map shows, 0-3600
     // Accepted (they are skycue-start.sh's), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";
 };

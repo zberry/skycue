@@ -2,6 +2,7 @@
 # tests can link it.
 add_library(skycued_core STATIC
   src/change_detector.cpp
+  src/conf_rewrite.cpp
   src/config.cpp
   src/dump978_raw_source.cpp
   src/engine.cpp
@@ -18,6 +19,7 @@ add_library(skycued_core STATIC
   src/registration.cpp
   src/replay_source.cpp
   src/rotating_file.cpp
+  src/runtime_config.cpp
   src/stats_report.cpp
   src/time_util.cpp
   src/track_table.cpp)

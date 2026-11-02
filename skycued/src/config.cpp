@@ -27,6 +27,7 @@ const std::vector<std::string>& knownConfigKeys()
         "MAX_RANGE_NM",    "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE",   "BLOCK_LIST_FILE",
         "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
         "RECORD_RAW",  // used by skycue-start.sh only (it launches skycue-rawrec)
+        "WEB_BIND",        "RECORD_MAX_GB",     "TRAIL_SECONDS",
     };
     return keys;
 }
@@ -234,6 +235,18 @@ Config parseConfigText(const std::string& text, const std::string& name)
     conv.str("SDR_978_SERIAL", c.sdr_978_serial);
     conv.str("GAIN_1090", c.gain_1090);
     conv.str("GAIN_978", c.gain_978);
+    conv.str("WEB_BIND", c.web_bind);
+    if (c.web_bind.empty())
+        conv.fail("WEB_BIND", "WEB_BIND must not be empty");
+    conv.num("RECORD_MAX_GB", c.record_max_gb, 0);
+    {
+        double trail = c.trail_seconds;
+        conv.num("TRAIL_SECONDS", trail, 0, 3600);
+        if (trail != std::floor(trail))
+            conv.fail("TRAIL_SECONDS", "TRAIL_SECONDS must be a whole number, got '" +
+                                           conv.find("TRAIL_SECONDS")->value + "'");
+        c.trail_seconds = static_cast<int>(trail);
+    }
 
     conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
     conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);

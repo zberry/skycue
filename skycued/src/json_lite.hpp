@@ -24,7 +24,17 @@ public:
 
     // nullopt on a parse error, on input over kMaxTextBytes or nested deeper
     // than kMaxJsonDepth, or when the top level is not an object. Never throws.
-    static std::optional<JsonObject> parse(const std::string& text);
+    // `max_bytes` replaces kMaxTextBytes (for a small file rather than a line).
+    static std::optional<JsonObject> parse(const std::string& text, std::size_t max_bytes = kMaxTextBytes);
+
+    // The keys of this object, in file order.
+    std::vector<std::string> keys() const;
+    // The nested object `key`; nullopt when absent or not an object. ({} and
+    // [] cannot be told apart, so an empty array is an empty object.)
+    std::optional<JsonObject> getObject(const char* key) const;
+    // The array `key` of scalars, each as its text; nullopt when absent, not
+    // an array, or holding an array/object. ([] and {} read as empty arrays.)
+    std::optional<std::vector<std::string>> getStringArray(const char* key) const;
 
     // The value's text when it is a scalar (string, number, true/false/null);
     // nullopt when absent or an array/object.

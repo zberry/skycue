@@ -13,6 +13,7 @@
 #include "readsb_json_source.hpp"
 #include "recorder.hpp"
 #include "replay_source.hpp"
+#include "runtime_config.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
@@ -165,6 +166,16 @@ int main(int argc, char** argv)
         std::cerr << "skycued: " << config_path << ": " << e.what() << "\n";
         return 2;
     }
+    // The runtime overlay (skycue.runtime.json) on top of skycue.conf, and
+    // hot reload of both and of the list files.
+    std::unique_ptr<RuntimeConfig> runtime;
+    try {
+        runtime = std::make_unique<RuntimeConfig>(io, config_path, *engine);
+        runtime->load();
+    } catch (const std::exception& e) {
+        std::cerr << "skycued: " << e.what() << "\n";
+        return 2;
+    }
     try {
         engine->start();
     } catch (const std::exception& e) {
@@ -179,6 +190,8 @@ int main(int argc, char** argv)
                       << (replaying ? " (replaying " + replay_path + ")" : std::string()));
     if (config.cue_tcp_port == 0 && config.cue_tcp_connect_targets.empty() && config.cue_udp_targets.empty())
         LOG_WARN("nowhere to forward to: CUE_TCP_PORT is 0 and CUE_TCP_CONNECT and CUE_UDP_TARGETS are empty");
+
+    runtime->startWatching();
 
     boost::asio::signal_set signals(io, SIGINT, SIGTERM);
     boost::asio::steady_timer exit_timer(io);
@@ -204,6 +217,7 @@ int main(int argc, char** argv)
         pollExit();
     });
     io.run();
+    runtime.reset();
     engine.reset();
     if (received)
         received->flush();

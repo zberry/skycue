@@ -331,6 +331,30 @@ BOOST_AUTO_TEST_CASE(cue_tcp_port_zero_allowed)
     BOOST_TEST(contains(e.what(), "WEB_PORT"));
 }
 
+BOOST_AUTO_TEST_CASE(web_bind_record_max_gb_trail_seconds)
+{
+    Config c = parseConfigText(kLatLon, "t");
+    BOOST_TEST(c.web_bind == "127.0.0.1");
+    BOOST_TEST(c.record_max_gb == 0.0);
+    BOOST_TEST(c.trail_seconds == 120);
+    c = parseConfigText(std::string(kLatLon) + "WEB_BIND=0.0.0.0\nRECORD_MAX_GB=2.5\nTRAIL_SECONDS=3600\n", "t");
+    BOOST_TEST(c.web_bind == "0.0.0.0");
+    BOOST_TEST(c.record_max_gb == 2.5);
+    BOOST_TEST(c.trail_seconds == 3600);
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "TRAIL_SECONDS=0\n", "t").trail_seconds == 0);
+    for (const char* line : {"TRAIL_SECONDS=3601", "TRAIL_SECONDS=-1", "TRAIL_SECONDS=1.5", "TRAIL_SECONDS=x"}) {
+        ConfigError e = expectError(std::string(kLatLon) + line + "\n");
+        BOOST_TEST(e.line == 3, line);
+        BOOST_TEST(contains(e.what(), "TRAIL_SECONDS"), line);
+    }
+    for (const char* line : {"RECORD_MAX_GB=-0.5", "RECORD_MAX_GB=x"}) {
+        ConfigError e = expectError(std::string(kLatLon) + line + "\n");
+        BOOST_TEST(contains(e.what(), "RECORD_MAX_GB"), line);
+    }
+    ConfigError e = expectError(std::string(kLatLon) + "WEB_BIND=\n");
+    BOOST_TEST(contains(e.what(), "WEB_BIND"));
+}
+
 BOOST_AUTO_TEST_CASE(known_keys_match_example)
 {
     std::string text = readExample();

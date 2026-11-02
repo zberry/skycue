@@ -39,9 +39,9 @@ bool nestingWithin(const std::string& text, int max_depth)
 
 }  // namespace
 
-std::optional<JsonObject> JsonObject::parse(const std::string& text)
+std::optional<JsonObject> JsonObject::parse(const std::string& text, std::size_t max_bytes)
 {
-    if (text.empty() || text.size() > kMaxTextBytes || !nestingWithin(text, kMaxJsonDepth))
+    if (text.empty() || text.size() > max_bytes || !nestingWithin(text, kMaxJsonDepth))
         return std::nullopt;
     boost::property_tree::ptree tree;
     try {
@@ -69,6 +69,51 @@ const boost::property_tree::ptree* JsonObject::scalar(const char* key) const
 }
 
 bool JsonObject::has(const char* key) const { return tree_.find(key) != tree_.not_found(); }
+
+std::vector<std::string> JsonObject::keys() const
+{
+    std::vector<std::string> out;
+    for (const auto& child : tree_)
+        out.push_back(child.first);
+    return out;
+}
+
+std::optional<JsonObject> JsonObject::getObject(const char* key) const
+{
+    auto it = tree_.find(key);
+    if (it == tree_.not_found())
+        return std::nullopt;
+    const auto& node = it->second;
+    if (node.empty()) {  // {} or [] (or a scalar)
+        if (!node.data().empty())
+            return std::nullopt;
+        return JsonObject(node);
+    }
+    for (const auto& child : node)
+        if (child.first.empty())  // an array
+            return std::nullopt;
+    return JsonObject(node);
+}
+
+std::optional<std::vector<std::string>> JsonObject::getStringArray(const char* key) const
+{
+    auto it = tree_.find(key);
+    if (it == tree_.not_found())
+        return std::nullopt;
+    const auto& node = it->second;
+    std::vector<std::string> out;
+    if (node.empty()) {
+        if (!node.data().empty())  // a scalar
+            return std::nullopt;
+        return out;
+    }
+    for (const auto& child : node) {
+        if (!child.first.empty() || !child.second.empty())  // an object, or an array/object element
+            return std::nullopt;
+        out.push_back(child.second.data());
+    }
+    return out;
+}
 
 std::optional<std::string> JsonObject::getString(const char* key) const
 {

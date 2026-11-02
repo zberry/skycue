@@ -15,6 +15,7 @@
 #include <vector>
 
 using namespace iqgen;
+namespace tt = boost::test_tools;
 
 namespace {
 
@@ -133,6 +134,36 @@ BOOST_AUTO_TEST_CASE(rs_codes_match_dump978)
     BOOST_TEST(uatCode(UatKind::downlink_short).nroots() == 12u);
     BOOST_TEST(uatCode(UatKind::downlink_long).nroots() == 14u);
     BOOST_TEST(uatCode(UatKind::uplink).nroots() == 20u);
+}
+
+// Known answers: the first payload of each kind in raw/uat-sample.txt.gz and
+// the parity dump978's own Reed-Solomon library (configured as in dump978's
+// fec.cc) computes for it, recorded from a one-off cross-check outside the
+// tree. Unlike the syndrome tests, these pin the field polynomial, fcr and
+// prim: a wrong one gives self-consistent codewords with different parity.
+BOOST_AUTO_TEST_CASE(rs_known_answer_parity)
+{
+    struct Vector {
+        UatKind kind;
+        const char* data;
+        const char* parity;
+    };
+    const Vector vectors[] = {
+        {UatKind::downlink_short, "00a66ef135445d525a0c0519119021204800", "6cb82bc4d53a5b2bb0a8ec6e"},
+        {UatKind::downlink_long, "08a66ef1353e2d525fd4050911882aa038101d06b85d440be2a4c2a0000590000000",
+         "d0e3c7ccb1fed50a5afd9d6aa963"},
+        {UatKind::uplink,  // block 0 of the first uplink
+         "3514c952d65ca7b0158000210de09082102d30cb00082f0d1e012d30cb000000000000000fd900011710120118173ba9c9635e4c"
+         "00158000210e9e0082102cf04b00082f521e012c",
+         "0b1400618e79e05a1f9f713cc76928071ea4a6eb"},
+    };
+    for (const auto& v : vectors) {
+        const auto data = hex(v.data);
+        const auto expected = hex(v.parity);
+        const auto got = uatCode(v.kind).parity(data.data(), data.size());
+        BOOST_TEST(got == expected, tt::per_element());
+        BOOST_TEST(toHex(got, false) == v.parity);
+    }
 }
 
 // Every line of raw/uat-sample.txt.gz:
@@ -268,7 +299,6 @@ BOOST_AUTO_TEST_CASE(uat_sync_word_first)
         const auto enc = uatEncode(p);
         BOOST_REQUIRE(bits.size() == 36u + 8u * enc.size());
         BOOST_TEST(readBits(bits, 0, 36) == (kind == UatKind::uplink ? 0x153225B1DULL : 0xEACDDA4E2ULL));
-        BOOST_TEST(readBits(bits, 36, 8) == enc[0]);
         for (std::size_t i = 0; i < enc.size(); ++i)
             BOOST_TEST(readBits(bits, 36 + 8 * i, 8) == enc[i]);
         for (uint8_t b : bits)

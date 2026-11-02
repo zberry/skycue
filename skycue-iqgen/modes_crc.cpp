@@ -35,6 +35,7 @@ int modesDf(const std::vector<uint8_t>& frame)
 bool modesClean(const std::vector<uint8_t>& frame)
 {
     const int df = modesDf(frame);
+    // Other DFs carry an address or data in the parity field and are never clean, so only these need a length check.
     const bool shape = (df == 11 && frame.size() == 7) || ((df == 17 || df == 18) && frame.size() == 14);
     return shape && modesCrcResidual(frame) == 0;
 }

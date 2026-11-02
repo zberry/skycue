@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -336,6 +337,10 @@ struct WsSession : std::enable_shared_from_this<WsSession> {
     bool writing = false, ping_due = false, open = false, closed = false;
     asio::steady_timer ping_timer;
     steady::time_point last_heard{};
+    // Pings and pongs count as hearing from the client. A member, passed as
+    // an lvalue: Boost 1.66's control_callback(Callback&) keeps a reference
+    // to it (later versions take a std::function by value and copy it).
+    std::function<void(websocket::frame_type, beast::string_view)> on_control;
     // Of batch skip_batch, the first skip_items events precede the snapshot.
     uint64_t skip_batch = std::numeric_limits<uint64_t>::max();
     size_t skip_items = 0;
@@ -352,7 +357,8 @@ struct WsSession : std::enable_shared_from_this<WsSession> {
         srv->ws_sessions[this] = shared_from_this();
         ws.read_message_max(kWsMessageLimit);
         // Invoked during async_read (always outstanding), which holds `self`.
-        ws.control_callback([this](websocket::frame_type, beast::string_view) { last_heard = steady::now(); });
+        on_control = [this](websocket::frame_type, beast::string_view) { last_heard = steady::now(); };
+        ws.control_callback(on_control);
         auto self = shared_from_this();
         ws.async_accept(req, [self](const error_code& ec) { self->onAccept(ec); });
     }

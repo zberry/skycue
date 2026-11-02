@@ -829,7 +829,7 @@ BOOST_AUTO_TEST_CASE(ws_slow_client_closed)
         beast::flat_buffer b;
         slow.ws.read(b, ec);
     }
-    BOOST_TEST(ec.failed());
+    BOOST_TEST(static_cast<bool>(ec));  // not ec.failed(): Boost 1.66 lacks it
     good.close();
     BOOST_TEST(pollUntil([&] { return f.webClients() == 0u; }));
 }

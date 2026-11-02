@@ -43,8 +43,9 @@ struct InputError : std::runtime_error {
 std::vector<TimedFrame> readModesFile(const std::string& path, InputStats& stats);
 
 // .txt[.gz]/.log[.gz]: parseUatLine; payload = the hex between the sign and
-// the first ';'; time = epoch_ms * 1e6 when the line has one, offset_ns on a
-// stratux "<ns>," line. A payload that is not 18, 34 or 432 bytes of hex
+// the first ';'; time = epoch_ms * 1e6 when the line has one; on a stratux
+// "<ns>," line, the offset mapped by skycued::StratuxClock (sessions in file
+// order, 1 s apart). A payload that is not 18, 34 or 432 bytes of hex
 // throws InputError naming FILE:LINE, except on a stratux line: that line is
 // skipped and counted.
 std::vector<TimedFrame> readUatFile(const std::string& path, InputStats& stats);

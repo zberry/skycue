@@ -147,11 +147,23 @@ rm -f "$tmp/u.978.cu8"
 
 # ---- uat: the stratux log, timed by its "<ns>," offsets ---------------------------------
 # Its 4 "START,..." session headers are the skipped lines; every payload is 18, 34 or 432 bytes.
-expect_exit 0 s "$iqgen" uat "$stratux" --duration 2 -o "$tmp/s.978.cu8"
-grep -qE '^frames=[1-9][0-9]* expected=[0-9]+ overlaps=[0-9]+ clipped=[0-9]+ skipped=4 seconds=[0-9]+\.[0-9]{3} bytes=[0-9]+ skipped_seconds=0\.000$' \
+# A busy 5 s of session 1, 459 s in: 101 frames (15 overlapping pairs, as recorded).
+expect_exit 0 s "$iqgen" uat "$stratux" --skip-seconds 459 --duration 5 -o "$tmp/s.978.cu8"
+grep -qE '^frames=101 expected=78 overlaps=15 clipped=0 skipped=4 seconds=5\.[0-9]{3} bytes=[0-9]+ skipped_seconds=459\.000$' \
   "$tmp/s.out" || { cat "$tmp/s.out" "$tmp/s.err"; fail "stratux summary"; }
 grep -q 'untimed' "$tmp/s.err" && { cat "$tmp/s.err"; fail "stratux lines placed untimed"; }
 rm -f "$tmp/s.978.cu8"
+# Sessions in file order, each 1 s after the one before: 5.0/5.2 s, a START, 1.0 s
+# (session 2 at 6.2 s), then a backward jump to 0.5 s (session 3 at 7.2 s).
+p18=$(printf '0a%.0s' {1..18})
+printf '5000000000,-%s;\n5200000000,-%s;\nSTART,x\n1000000000,-%s;\n500000000,-%s;\n' \
+  "$p18" "$p18" "$p18" "$p18" >"$tmp/stx_two.log"
+expect_exit 0 stratux_sessions "$iqgen" uat "$tmp/stx_two.log" -o "$tmp/stx_two.cu8"
+# 50 ms pad, then (t - 5.0 s) * 2083333.3 S/s, rounded.
+[ "$(awk '{ printf "%s ", $1 }' "$tmp/stx_two.frames.txt")" = "104167 520834 2604167 4687500 " ] ||
+  { cat "$tmp/stx_two.frames.txt" | cut -c1-40; fail "stratux_sessions: not in file order 1 s apart"; }
+grep -q ' skipped=1 ' "$tmp/stratux_sessions.out" || { cat "$tmp/stratux_sessions.out"; fail "stratux_sessions: START not counted"; }
+rm -f "$tmp/stx_two.cu8"
 
 # ---- resample ---------------------------------------------------------------------
 expect_exit 0 r "$iqgen" resample "$tmp/a.1090.cu8" 2400000 -o "$tmp/r.cu8" --out-rate 2000000

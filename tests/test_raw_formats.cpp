@@ -347,6 +347,36 @@ BOOST_AUTO_TEST_CASE(stratux_uat_lines)
     BOOST_TEST(!parseUatLine("1234567890123456789 +00;").has_value());
 }
 
+BOOST_AUTO_TEST_CASE(stratux_sessions_in_file_order)
+{
+    BOOST_TEST(isStratuxStart("START,Wed Sep 2 04:25:25 +0000 UTC 2015\r\n"));
+    BOOST_TEST(!isStratuxStart("START"));
+    BOOST_TEST(!isStratuxStart("123,+00;"));
+    // Session 1 at 5.0/5.2/5.2 s; a START, then session 2 below it (1.0/1.3 s);
+    // a backward jump without a START, session 3 (0.5/0.9 s); a START before a
+    // forward offset still begins session 4 (9.0 s).
+    StratuxClock c;
+    c.startSession();  // a header before the first line changes nothing
+    std::vector<int64_t> got;
+    for (int64_t off : {5'000'000'000LL, 5'200'000'000LL, 5'200'000'000LL})
+        got.push_back(*c.next(off));
+    c.startSession();
+    for (int64_t off : {1'000'000'000LL, 1'300'000'000LL})
+        got.push_back(*c.next(off));
+    for (int64_t off : {500'000'000LL, 900'000'000LL})
+        got.push_back(*c.next(off));
+    c.startSession();
+    got.push_back(*c.next(9'000'000'000LL));
+    const std::vector<int64_t> want = {5'000'000'000LL, 5'200'000'000LL, 5'200'000'000LL, 6'200'000'000LL,
+                                       6'500'000'000LL, 7'500'000'000LL, 7'900'000'000LL, 8'900'000'000LL};
+    BOOST_TEST(got == want, boost::test_tools::per_element());
+    // Past int64_t: nullopt, and the clock carries on from where it was.
+    StratuxClock big;
+    BOOST_TEST(*big.next(INT64_MAX - 10) == INT64_MAX - 10);
+    BOOST_TEST(!big.next(0).has_value());
+    BOOST_TEST(*big.next(INT64_MAX) == INT64_MAX);
+}
+
 BOOST_AUTO_TEST_CASE(rotating_file_names_and_rotation)
 {
     TempDir tmp;

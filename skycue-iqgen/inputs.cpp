@@ -176,6 +176,7 @@ std::vector<TimedFrame> readUatFile(const std::string& path, InputStats& stats)
         throw InputError(path + ": unknown UAT input (want .txt or .log, each optionally .gz)");
     auto in = openInput(path);
     std::vector<TimedFrame> out;
+    skycued::StratuxClock stratux;
     std::string line;
     for (uint64_t no = 1; in->getline(line); ++no) {
         line = chomp(line);
@@ -183,6 +184,8 @@ std::vector<TimedFrame> readUatFile(const std::string& path, InputStats& stats)
             continue;
         const auto u = skycued::parseUatLine(line);
         if (!u) {
+            if (skycued::isStratuxStart(line))
+                stratux.startSession();
             ++stats.skipped;
             continue;
         }
@@ -200,7 +203,9 @@ std::vector<TimedFrame> readUatFile(const std::string& path, InputStats& stats)
                              std::to_string(hex.size()) + " characters)");
         }
         if (u->offset_ns) {
-            t.time = *u->offset_ns;
+            t.time = stratux.next(*u->offset_ns);
+            if (!t.time)
+                throw InputError(where + ": timestamp out of range");
         } else if (u->epoch_ms) {
             if (*u->epoch_ms > INT64_MAX / 1000000)
                 throw InputError(where + ": timestamp out of range");

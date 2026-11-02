@@ -100,4 +100,26 @@ struct UatLine {
 // an <ns> beyond int64_t, ...). Trailing CR/LF dropped.
 std::optional<UatLine> parseUatLine(const std::string& line);
 
+// A stratux log's session header, "START,<date>" (trailing CR/LF ok).
+bool isStratuxStart(const std::string& line);
+
+// Puts the sessions of one stratux log on one timeline, in file order. A
+// session begins at a "START," line (startSession()) or where the offset goes
+// backwards; it starts kGapNs after the previous session's last line and
+// keeps its own spacing. The first session keeps its offsets as they are.
+// next() returns nullopt (state unchanged) if the time would leave int64_t.
+class StratuxClock {
+public:
+    static constexpr int64_t kGapNs = 1'000'000'000;
+    void startSession() { restart_ = true; }
+    std::optional<int64_t> next(int64_t offset_ns);
+
+private:
+    bool have_ = false, restart_ = false;
+    int64_t first_ = 0;     // offset of the session's first line
+    int64_t start_ = 0;     // its time
+    int64_t last_off_ = 0;  // offset and time of the latest line
+    int64_t last_ = 0;
+};
+
 }  // namespace skycued

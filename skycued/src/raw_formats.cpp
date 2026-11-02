@@ -264,4 +264,34 @@ std::optional<UatLine> parseUatLine(const std::string& raw)
     return u;
 }
 
+bool isStratuxStart(const std::string& line)
+{
+    return line.compare(0, 6, "START,") == 0;
+}
+
+std::optional<int64_t> StratuxClock::next(int64_t offset_ns)
+{
+    int64_t first = offset_ns, start = offset_ns;
+    if (have_) {
+        if (restart_ || offset_ns < last_off_) {
+            if (last_ > INT64_MAX - kGapNs)
+                return std::nullopt;
+            start = last_ + kGapNs;
+        } else {
+            first = first_;
+            start = start_;
+        }
+    }
+    const int64_t rel = offset_ns - first;  // >= 0: offsets are never negative
+    if (rel > INT64_MAX - start)
+        return std::nullopt;
+    have_ = true;
+    restart_ = false;
+    first_ = first;
+    start_ = start;
+    last_off_ = offset_ns;
+    last_ = start + rel;
+    return last_;
+}
+
 }  // namespace skycued

@@ -151,6 +151,19 @@ cmp -s "$tmp/stx7.out" "$tmp/stx7.want" || { head -c 300 "$tmp/stx7.out"; fail "
 awk -v w="$wall" 'BEGIN { exit !(w >= 1.1 && w <= 3.0) }' || fail "(c2) 1.2 s of stratux lines took ${wall}s"
 grep -q '1 lines skipped' "$tmp/play.err" || { cat "$tmp/play.err"; fail "(c2) the START line was not counted as skipped"; }
 echo "ok (c2) stratux lines paced by their offsets (${wall}s)"
+# Two sessions: lines 1-4 at 0..600 ms, a START, lines 5-7 at 100/400/700 ms
+# (below session 1's). In file order, session 2 starts 1 s after line 4 and
+# keeps its own spacing: lines at 1.6/1.9/2.2 s, so >= 2.1 s in all. A burst
+# would end at 0.6 s; session 2 sent at once after the gap, at 1.6 s.
+{ echo "START,Wed Sep 2 04:23:37 +0000 UTC 2015"
+  awk '{ off = NR <= 4 ? (NR - 1) * 200 : 100 + (NR - 5) * 300
+         if (NR == 5) print "START,Wed Sep 2 04:25:25 +0000 UTC 2015"
+         printf "%d,%s\n\n", off * 1000000, substr($0, index($0, ",") + 1) }' "$tmp/stx7.src"
+} > "$tmp/stx2s.log"
+wall=$(play_uat "$tmp/stx2s.out" --speed 1 "$tmp/stx2s.log")
+cmp -s "$tmp/stx2s.out" "$tmp/stx7.want" || { head -c 300 "$tmp/stx2s.out"; fail "(c2) two sessions not replayed in file order"; }
+awk -v w="$wall" 'BEGIN { exit !(w >= 2.1 && w <= 4.0) }' || fail "(c2) two sessions (2.2 s) took ${wall}s"
+echo "ok (c2) two stratux sessions in file order, 1 s apart, no burst (${wall}s)"
 
 # ---- (d) rawrec: byte-identical Beast capture across a reconnect; UAT lines ----
 # beast_server.py PORTFILE SENT FRAMES CONNS: serve CONNS connections, each

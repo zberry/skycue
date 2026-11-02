@@ -10,7 +10,9 @@
 //   FILE.txt[.gz], .log     dump978 raw UAT lines ("-..." / "+...", optionally
 //                           "<epoch_ms> "-prefixed as skycue-rawrec writes
 //                           them, or "<ns>,"-prefixed as stratux's UAT logs
-//                           do, <ns> a nanosecond offset; the prefix is
+//                           do, <ns> a nanosecond offset, a "START," line or
+//                           a backward offset beginning a session that plays
+//                           1 s after the one before; the prefix is
 //                           stripped and paces the lines, untimestamped lines
 //                           go at 10 per second), served
 //                           to whoever connects to --uat-listen PORT (readsb
@@ -319,11 +321,14 @@ int64_t playUat(const std::string& path, int64_t base, int64_t, Output& out, Pac
 {
     Reader in(path);
     std::optional<int64_t> first_ms, first_ns;
+    StratuxClock stratux;
     bool any = false;
     int64_t rel = 0;
     for (std::string line; in.getline(line);) {
         auto u = parseUatLine(line);
         if (!u) {
+            if (isStratuxStart(line))
+                stratux.startSession();
             if (!line.empty() && line[0] != '#')
                 ++st.skipped;
             continue;
@@ -333,11 +338,15 @@ int64_t playUat(const std::string& path, int64_t base, int64_t, Output& out, Pac
                 first_ms = *u->epoch_ms;
             rel = std::max(rel, (*u->epoch_ms - *first_ms) * 1'000'000);
         } else if (u->offset_ns) {
-            // stratux. Like epoch_ms, a line earlier than the latest so far goes at
-            // once: a later session in the same log restarts the offsets.
+            // stratux: each session in file order, 1 s after the one before.
+            const auto t = stratux.next(*u->offset_ns);
+            if (!t) {
+                ++st.skipped;
+                continue;
+            }
             if (!first_ns)
-                first_ns = *u->offset_ns;
-            rel = std::max(rel, *u->offset_ns - *first_ns);
+                first_ns = *t;
+            rel = std::max(rel, *t - *first_ns);
         } else if (any) {
             rel += kUntimedStepNs;
         }

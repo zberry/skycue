@@ -51,8 +51,12 @@
   16,253, from 65.807 s again to 2205.878 s (3,151 messages, 2,140 s).
 - Line format: `<ns>,<+|->HEX;[rs=N;]`: `<ns>` a nanosecond offset from an
   arbitrary start, then a dump978 raw line (`rs=` on 7,245 of them).
-  skycue-rawplay strips the offset and paces by it; skycue-iqgen sorts by
-  it, so the two sessions interleave. Both skip and count the `START` lines.
+  skycue-rawplay strips the offset and paces by it; skycue-iqgen times
+  frames by it. A `START` line or a backward offset begins a new session:
+  both tools play the sessions in file order, never interleaved, each one
+  1 s after the previous session's last message with its own spacing kept
+  (skycued::StratuxClock). Here session 2 follows at 2346.105 s from the
+  first message. Both skip and count the `START` lines.
   First line: `START,Wed Sep 2 04:23:37 +0000 UTC 2015`; first message:
   `162698355928,-0b2b4a513c417b8875f40d9610f227401105c4e6c4e6c40a32700300000000000000;rs=4;`.
 - sha256: `53fc80938c55d777ef85929fbaef519a7ccfa41ecb37c6e23aa773daebe5d588`

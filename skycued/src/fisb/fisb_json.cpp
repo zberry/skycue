@@ -171,6 +171,7 @@ std::string twgoRecordJson(const TwgoRecord& r)
 {
     JsonWriter w;
     w.add("key", r.key.str());
+    w.add("kind", "twgo");  // tells a TWGO record from a text record (whose kind is metar, taf, ...)
     w.add("product", static_cast<int64_t>(r.key.pid));
     w.add("name", productName(r.key.pid));
     w.add("report", static_cast<int64_t>(r.key.report));

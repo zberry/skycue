@@ -418,8 +418,13 @@ BOOST_AUTO_TEST_CASE(text_filter_by_station)
     const Reply twgo = get(f.port, "/api/fisb/text?type=twgo");
     BOOST_TEST(twgo.status == 200u);
     const pt::ptree twgo_recs = parseJson(twgo.body);
-    for (const auto& rec : twgo_recs.get_child("records"))
+    BOOST_TEST(count(twgo_recs.get_child("records")) >= 1u);
+    for (const auto& rec : twgo_recs.get_child("records")) {
         BOOST_TEST(rec.second.get<std::string>("has_graphics") == "false");
+        // kind "twgo" tells the page (fisb_text items) it is a TWGO record.
+        BOOST_TEST(rec.second.get<std::string>("kind") == "twgo");
+        BOOST_TEST(rec.second.count("pending") == 1u);
+    }
 
     BOOST_TEST(get(f.port, "/api/fisb/text?type=sigmet").status == 400u);
     BOOST_TEST(has(get(f.port, "/api/fisb/text?type=sigmet").body, "\"error\""));

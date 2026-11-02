@@ -494,6 +494,48 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     expect(errors).toEqual([]);
   });
 
+  // An amended TWGO text arrives without graphics (the store dropped the old
+  // ones): the page clears the old shape and lists the text instead.
+  test('twgo_text_update_clears_old_shape', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openFisbPage(page);
+    await layerToggle(page, 'NOTAM / TFR').check();
+    const key = '8-15-997-ZOA-1';
+    const path = page.locator(`path.fisb-tfr[data-key="${key}"]`);
+    await page.evaluate((k) => window.skycueApp.injectFisbItems([{
+      type: 'fisb_shape', product: 8, key: k, features: [{ type: 'Feature', id: k + '/0',
+        geometry: { type: 'Polygon', coordinates: [[[-122.2, 37.2], [-121.8, 37.2], [-121.8, 37.5], [-122.2, 37.2]]] },
+        properties: { key: k, product: 8, name: 'NOTAM', text: 'NOTAM-TFR ORIGINAL', geom: 'polygon',
+          cancelled: false, pending: false, agl: false, shape: 0 } }] }]), key);
+    await expect(path).toHaveCount(1);
+    await page.evaluate((k) => window.skycueApp.injectFisbItems([{ type: 'fisb_text', product: 8, key: k,
+      record: { key: k, kind: 'twgo', product: 8, name: 'NOTAM', report: 997, location: 'ZOA', text: 'NOTAM-TFR AMENDED',
+        has_graphics: false, complete: true, cancelled: false, pending: false,
+        received: new Date(window.skycueApp.dataNow()).toISOString(),
+        last_received: new Date(window.skycueApp.dataNow()).toISOString(), shapes: [] } }]), key);
+    await expect(path).toHaveCount(0);
+    expect(await page.evaluate((k) => window.skycueApp.shapeLayers(k), key)).toBeNull();
+    // Listed with the text-only TWGO reports in the Weather tab.
+    await page.locator('#wx-toggle').click();
+    const row = page.locator(`#wx-list section[data-kind="twgo"] li.wx-row[data-key="${key}"]`);
+    await expect(row).toHaveCount(1);
+    await expect(page.locator('#wx-list section[data-kind="twgo"] h3')).toContainText('NOTAM / SIGMET text');
+    await row.locator('.wx-head').click();
+    await expect(row.locator('.wx-text')).toHaveText('NOTAM-TFR AMENDED');
+    // Its graphics again: drawn, no longer listed; then expired: gone.
+    await page.evaluate((k) => window.skycueApp.injectFisbItems([{
+      type: 'fisb_shape', product: 8, key: k, features: [{ type: 'Feature', id: k + '/0',
+        geometry: { type: 'Point', coordinates: [-122.0, 37.3] },
+        properties: { key: k, product: 8, name: 'NOTAM', text: 'NOTAM-TFR AMENDED', geom: 'point',
+          cancelled: false, pending: false, agl: false, shape: 0 } }] }]), key);
+    await expect(path).toHaveCount(1);
+    await expect(row).toHaveCount(0);
+    await page.evaluate((k) => window.skycueApp.injectFisbItems([
+      { type: 'fisb_expired', kind: 'twgo', product: 8, key: k, reason: 'expired' }]), key);
+    await expect(path).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test('weather_panel_lists_metars_and_filters', async ({ page }) => {
     const errors = watchErrors(page);
     const metars = (await apiAt(FISB_BASE, '/api/fisb/text?type=metar')).body.records;

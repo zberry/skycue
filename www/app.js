@@ -642,7 +642,8 @@
   var RADAR_FADE_MS = 75 * 60000;   // older than this: drawn at half opacity
   var FISB_POLL_MS = 5000;          // /api/fisb/status for the strip's rates
   var WX_DEBOUNCE_MS = 200;
-  var WX_KINDS = [['metar', 'METAR'], ['taf', 'TAF'], ['pirep', 'PIREP'], ['winds', 'Winds aloft']];
+  var WX_KINDS = [['metar', 'METAR'], ['taf', 'TAF'], ['pirep', 'PIREP'], ['winds', 'Winds aloft'],
+    ['twgo', 'NOTAM / SIGMET text']];
   var SHAPE_LAYERS = [
     ['tfr', 'NOTAM / TFR'], ['sigmet', 'SIGMET / convective'], ['airmet', 'AIRMET / G-AIRMET'], ['cwa', 'CWA'], ['sua', 'SUA']
   ];
@@ -1019,9 +1020,19 @@
 
   // ---- text reports ----
   function upsertText(rec) {
-    if (!rec || !rec.key || !rec.kind) return;   // a TWGO record without graphics: not listed
+    if (!rec || !rec.key || !rec.kind) return;
+    if (rec.kind === 'twgo') {
+      if (rec.has_graphics) return;   // drawn (fisb_shape), not listed
+      // A TWGO record without graphics: new, or amended (the store dropped
+      // the old graphics with the old text), so no shape of it stays drawn.
+      setShapes(rec.key, []);
+      rec = Object.assign({}, rec, { station: rec.location || rec.label || '', issued: rec.last_received || rec.received });
+    }
     fisb.text.set(rec.key, rec);
     fisb.wxDirty = true;
+  }
+  function dropText(key) {
+    if (fisb.text.delete(key)) fisb.wxDirty = true;
   }
   function hhmm(iso) {
     var ms = Date.parse(iso);
@@ -1053,7 +1064,9 @@
         var t = Date.parse(r.issued);
         return '<li class="wx-row age-' + P.ageClass(r.issued, now) + '" data-key="' + esc(r.key) + '" data-kind="' + r.kind +
           '" data-station="' + esc(r.station) + '"><button type="button" class="wx-head" aria-expanded="' + open + '">' +
-          '<span class="wx-st">' + esc(r.station || '—') + '</span><span class="wx-issued">' + hhmm(r.issued) + '</span>' +
+          '<span class="wx-st">' + esc(r.station || '—') + '</span>' +
+          (r.kind === 'twgo' ? '<span class="wx-name">' + esc(r.name || 'product ' + r.product) + '</span>' : '') +
+          '<span class="wx-issued">' + hhmm(r.issued) + '</span>' +
           (r.valid ? '<span class="wx-valid">valid ' + hhmm(r.valid) + '</span>' : '') +
           '<span class="wx-age">' + (isNaN(t) ? '' : shortAge(t, now)) + '</span></button>' +
           '<pre class="wx-text"' + (open ? '' : ' hidden') + '>' + esc(r.text || '') + '</pre></li>';
@@ -1142,9 +1155,11 @@
     }
     fisb.loading = true;
     applyFisbStatus(st);
-    Promise.all([request('GET', 'api/fisb/text'), request('GET', 'api/fisb/shapes')]).then(function (r) {
+    Promise.all([request('GET', 'api/fisb/text'), request('GET', 'api/fisb/shapes'),
+      request('GET', 'api/fisb/text?type=twgo')]).then(function (r) {
       if (gen !== fisb.gen) return;
       (r[0].records || []).forEach(upsertText);
+      (r[2].records || []).forEach(upsertText);
       var byKey = new Map();
       (r[1].features || []).forEach(function (f) {
         var k = f.properties && f.properties.key;
@@ -1169,7 +1184,10 @@
     if (fisb.loading) { fisb.queue.push(it); return; }
     switch (it.type) {
       case 'fisb_text': upsertText(it.record); break;
-      case 'fisb_shape': setShapes(it.key, it.features || []); break;
+      case 'fisb_shape':
+        dropText(it.key);   // a text-only TWGO record that now has graphics
+        setShapes(it.key, it.features || []);
+        break;
       case 'fisb_radar': {
         var w = RADAR_NAMES[it.product];
         if (w) { radar[w].head = it; loadRadar(w); }
@@ -1182,9 +1200,10 @@
         break;
       case 'fisb_expired':
         if (it.kind === 'text') {
-          if (fisb.text.delete(it.key)) fisb.wxDirty = true;
+          dropText(it.key);
         } else if (it.kind === 'twgo') {
           removeShapes(it.key);
+          dropText(it.key);
         } else if (it.kind === 'radar') {
           var which = RADAR_NAMES[it.product] || (it.key === '64' ? 'conus' : it.key === '63' ? 'regional' : null);
           if (which) clearRadar(which);

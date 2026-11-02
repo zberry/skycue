@@ -172,6 +172,7 @@ input.invalid { border-color: var(--blocked); }
 .wx-head:hover { background: var(--panel-2); }
 .wx-st { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; min-width: 3.6em; }
 .wx-issued, .wx-valid { color: var(--text); }
+.wx-name { color: var(--muted); }
 .wx-age { margin-left: auto; color: var(--muted); }
 .wx-row.age-old .wx-age { color: var(--blocked); }
 .wx-text, .shape-text {

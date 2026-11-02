@@ -315,9 +315,11 @@ BOOST_AUTO_TEST_CASE(fuzz_products_stay_in_range)
         BOOST_CHECK_NO_THROW(dec.feed(t, line));
     }
     BOOST_TEST_MESSAGE("fuzz: products=" << dec.counters().products << " shapes=" << shapes << " rejected_shapes="
-                                         << dec.counters().rejected_shapes << " bad_products="
+                                         << dec.counters().rejected_shapes << " graphics_rejected="
+                                         << dec.counters().graphics_rejected << " bad_products="
                                          << dec.counters().bad_products);
     BOOST_TEST(out_of_range == 0u);
+    BOOST_TEST(dec.counters().graphics_rejected <= dec.counters().rejected_shapes);
     BOOST_TEST(bad_blocks == 0u);
     BOOST_TEST(dec.counters().products > 1000u);
 }

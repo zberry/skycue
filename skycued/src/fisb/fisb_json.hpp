@@ -31,7 +31,7 @@ std::string shapeJson(const Shape& s);
 // {"key","product","name","report","location","label"?,"text"?,"has_graphics","complete",
 //  "cancelled","start"?,"end"?,"received","last_received","expires","shapes":[...]}
 std::string twgoRecordJson(const TwgoRecord& r);
-// {"key","product","name","altitude_code"?,"product_time","updated","published"?,"expires",
+// {"key","product","name","altitude_code"?,"scale","product_time","updated","published"?,"expires",
 //  "bins_per_block":128,"block_count","evicted",
 //  "blocks":[{"block","lat0","lon0","dlat","dlon","rle":[[v,n],...]},...]}
 std::string mosaicJson(const Mosaic& m);

@@ -15,6 +15,13 @@ namespace {
 
 bool isNexrad(uint16_t pid) { return pid == 63 || pid == 64; }
 
+// §10.3 with the reference §7 table: NEXRAD and lightning 75 min, the other
+// rasters (icing, turbulence, cloud tops) 105 min.
+std::chrono::minutes rasterLifetime(uint16_t pid)
+{
+    return isNexrad(pid) || pid == 103 ? expiry::kNexrad : expiry::kOtherRaster;
+}
+
 uint32_t fnv1a(const std::string& s)
 {
     uint32_t h = 2166136261u;
@@ -186,7 +193,6 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
     }
     TwgoState& s = it->second;
     TwgoRecord& r = s.rec;
-    r.last_received = now;
 
     auto event = [&](FisbEvent::Kind kind, const char* reason) {
         FisbEvent e;
@@ -199,20 +205,27 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
         out.push_back(std::move(e));
     };
 
+    if (r.cancelled) {
+        // Within its 30 min only the cancellation is kept (reference §6.5): a
+        // repeated cancel does not extend it, and a keep-alive or a graphics
+        // half still on the air does not bring the report back.
+        ++stats_.ignored_after_cancel;
+        return;
+    }
+    r.last_received = now;
     if (t.cancel) {
-        if (r.cancelled)
-            return;  // a repeated cancel does not extend the 30 min
         r.cancelled = true;
+        r.complete = false;
+        r.text.reset();  // nothing stale can resurface
+        r.shapes.clear();
+        r.has_graphics = false;
+        r.start.reset();
+        r.end.reset();
         r.expires = now + expiry::kCancelled;
         ++stats_.cancelled;
         s.published = true;  // listed (flagged cancelled) until it expires
         event(FisbEvent::Kind::expired, "cancelled");
         return;
-    }
-    if (r.cancelled) {
-        // Active again after a cancel: start afresh.
-        r.cancelled = false;
-        s.published = false;
     }
 
     bool changed = false;
@@ -271,8 +284,10 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
 
 void FisbStore::applyBlocks(const FisbProduct& p, const DecodedBlocks& b, TimePoint now, std::vector<FisbEvent>& out)
 {
-    if (!p.product_time)
+    if (!p.product_time) {
+        ++stats_.no_product_time;
         return;
+    }
     const TimePoint pt = *p.product_time;
     Mosaic head;
     head.product = p.id;
@@ -303,7 +318,7 @@ void FisbStore::applyBlocks(const FisbProduct& p, const DecodedBlocks& b, TimePo
         stats_.blocks_too_old += n_blocks;
         return;
     }
-    m.head.expires = m.head.product_time + (isNexrad(p.id) ? expiry::kNexrad : expiry::kOtherRaster);
+    m.head.expires = m.head.product_time + rasterLifetime(p.id);
     if (m.head.expires <= now) {
         ++stats_.stale;
         if (m.blocks.empty())
@@ -331,6 +346,7 @@ void FisbStore::applyBlocks(const FisbProduct& p, const DecodedBlocks& b, TimePo
     if (!merged)
         return;
     m.head.updated = now;
+    m.head.scale = b.scale;
     m.last_block = now;
     if (!m.dirty) {
         m.dirty = true;
@@ -410,7 +426,8 @@ std::vector<FisbEvent> FisbStore::sweep(TimePoint now)
     for (auto it = mosaics_.begin(); it != mosaics_.end();) {
         MosaicState& m = it->second;
         if (m.head.expires <= now) {
-            expired(m.head.product, it->first, m.head.expires);
+            if (m.head.published)  // never published: nobody was told of it
+                expired(m.head.product, it->first, m.head.expires);
             it = mosaics_.erase(it);
             continue;
         }

@@ -53,6 +53,8 @@ struct FisbDecoderCounters : FisbCounters {
     uint64_t bad_products = 0;     // a complete TWGO payload that did not parse
     uint64_t rejected_shapes = 0;  // TWGO shapes with a point outside lat/lon range
     uint64_t not_app_data = 0;     // uplinks whose header says the application data is not valid
+    uint64_t empty_text = 0;       // a 413 product with no report in it: dropped
+    uint64_t graphics_rejected = 0;  // a TWGO graphics half whose every shape was out of range
 };
 
 class FisbDecoder {

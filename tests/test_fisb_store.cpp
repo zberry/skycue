@@ -389,6 +389,68 @@ BOOST_AUTO_TEST_CASE(twgo_cancel_kept_30min_then_expires)
     BOOST_TEST(st.stats().cancelled == 1u);
 }
 
+// Reference §6.5: a cancelled report is removed; only the cancellation is
+// kept for 30 min, whatever else is still on the air for that key.
+BOOST_AUTO_TEST_CASE(cancelled_twgo_does_not_resurrect_on_keepalive_or_graphics)
+{
+    FisbStore st;
+    const std::string tfr = "NOTAM-TFR 5/6095 240100Z ...";
+    st.apply(twgoText(8, 6095, tfr, kT0), kT0);
+    st.apply(twgoGraphics(8, 6095, {square(39, -121)}, kT0 + 1s), kT0 + 1s);
+    const TimePoint tc = kT0 + 2min;
+    auto ev = st.apply(twgoText(8, 6095, "", tc, true), tc);  // text status 0
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST(ev[0].reason == "cancelled");
+    BOOST_REQUIRE(ev[0].twgo.has_value());
+    BOOST_TEST(!ev[0].twgo->text.has_value());  // nothing stale left in it
+    BOOST_TEST(ev[0].twgo->shapes.empty());
+    BOOST_TEST(!ev[0].twgo->complete);
+
+    // Within the 30 min: a keep-alive, a graphics half still broadcast active,
+    // even the full text again: all ignored.
+    BOOST_TEST(st.apply(twgoText(8, 6095, "", tc + 5min), tc + 5min).empty());
+    BOOST_TEST(st.apply(twgoGraphics(8, 6095, {square(39, -121)}, tc + 6min), tc + 6min).empty());
+    BOOST_TEST(st.apply(twgoText(8, 6095, tfr, tc + 7min), tc + 7min).empty());
+    BOOST_TEST(st.stats().ignored_after_cancel == 3u);
+    auto s = st.snapshot();
+    const TwgoRecord* r = findTwgo(s, 6095);
+    BOOST_REQUIRE(r);
+    BOOST_TEST(r->cancelled);
+    BOOST_TEST(!r->text.has_value());
+    BOOST_TEST(r->shapes.empty());
+    BOOST_TEST((r->expires == tc + expiry::kCancelled));
+    BOOST_TEST(st.sweep(tc + 30min - 1s).empty());
+
+    // After the 30 min the key is free: a full record publishes normally.
+    ev = st.sweep(tc + 30min);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST(ev[0].reason == "expired");
+    ev = st.apply(twgoText(8, 6095, tfr, tc + 31min), tc + 31min);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].kind == FisbEvent::Kind::twgo));
+    BOOST_TEST(!ev[0].twgo->cancelled);
+    BOOST_TEST(*ev[0].twgo->text == tfr);
+    ev = st.apply(twgoGraphics(8, 6095, {square(39, -121)}, tc + 32min), tc + 32min);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST(ev[0].twgo->has_graphics);
+}
+
+// A mosaic that expires before it was ever published leaves silently.
+BOOST_AUTO_TEST_CASE(unpublished_mosaic_expires_without_event)
+{
+    FisbStore st;
+    const TimePoint pt = iso("2015-01-24T04:10:00Z");
+    st.apply(blocks(63, pt, kT0, {block(277546, 0, 1)}), kT0);
+    // No sweep in between (so no publish), then straight past its lifetime.
+    BOOST_TEST(st.sweep(pt + 75min).empty());
+    BOOST_TEST(!findMosaic(st.snapshot(), 63));
+    // A product without a resolvable time is dropped and counted.
+    FisbProduct p = blocks(63, pt, kT0, {block(277547, 0, 1)});
+    p.product_time.reset();
+    BOOST_TEST(st.apply(p, kT0).empty());
+    BOOST_TEST(st.stats().no_product_time == 1u);
+}
+
 BOOST_AUTO_TEST_CASE(metar_replaced_by_newer_issued)
 {
     FisbStore st;
@@ -474,7 +536,9 @@ BOOST_AUTO_TEST_CASE(expiry_table_values)
         if (pid == 70 || pid == 71 || pid == 90 || pid == 91)
             alt = 1;
         st.apply(blocks(pid, pt, kT0, {block(bn, scale, 1)}, {}, scale, alt), kT0);
-        const auto life = (pid == 63 || pid == 64) ? std::chrono::minutes(75) : std::chrono::minutes(105);
+        // NEXRAD and lightning 75 min (reference §7); icing, turbulence, cloud tops 105.
+        const auto life =
+            (pid == 63 || pid == 64 || pid == 103) ? std::chrono::minutes(75) : std::chrono::minutes(105);
         BOOST_TEST_CONTEXT("product " << pid)
         {
             const auto snap = st.snapshot();
@@ -552,6 +616,7 @@ BOOST_AUTO_TEST_CASE(summary_and_json_fields)
     BOOST_TEST(*j->getInt("product") == 63);
     BOOST_TEST(*j->getInt("block_count") == 2);
     BOOST_TEST(*j->getString("product_time") == "2015-01-24T04:10:00.000Z");
+    BOOST_TEST(*j->getInt("scale") == 0);
     BOOST_TEST(line.find("\"rle\":[[1,128]]") != std::string::npos);
     BOOST_TEST(line.find("\"rle\":[[0,128]]") != std::string::npos);
     BOOST_TEST(mosaicHeadJson(*ev[0].mosaic).find("blocks\"") == std::string::npos);

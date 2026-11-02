@@ -46,8 +46,8 @@ struct TrackSnapshot {
 };
 
 struct Snapshot {
-    // The data clock (the newest observation's receive time plus the steady
-    // time since; the wall clock before any observation). Compare it with
+    // The data clock (the newest observation or uplink receive time plus the
+    // steady time since; the wall clock before any). Compare it with
     // first_seen/last_seen, which are on the same clock.
     std::chrono::system_clock::time_point now{};
     std::vector<TrackSnapshot> tracks;  // every track in the table, in no particular order

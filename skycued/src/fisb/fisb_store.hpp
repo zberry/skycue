@@ -29,12 +29,15 @@
 // only renews. A record is complete when it has non-empty text (G-AIRMET,
 // product 14, which has no text: when it has graphics); only complete records
 // are published and listed. Cancellation (text status 0 or object_status 13)
-// flags the record cancelled, publishes an expired event with reason
-// "cancelled", and keeps it 30 min; repeats of the cancel do not extend that.
+// flags the record cancelled, clears its text and graphics, publishes an
+// expired event with reason "cancelled", and keeps only that cancellation for
+// 30 min: every APDU for the key meanwhile (a repeated cancel, a keep-alive,
+// a graphics half still broadcast active) is ignored and counted. After the
+// 30 min the key is free and a full record publishes afresh.
 //
 // Expiry (§10.3), always against the `now` passed in (the data clock):
-// NEXRAD 63/64 75 min from product time; other rasters 105 min from product
-// time; METAR 120 min from issued; TAF at the end of its ddhh/ddhh validity
+// NEXRAD 63/64 and lightning 103 75 min from product time (reference §7);
+// other rasters (70/71/84/90/91) 105 min from product time; METAR 120 min from issued; TAF at the end of its ddhh/ddhh validity
 // (else 120 min from issued); PIREP 120 min from issued; winds 12 h from
 // issued unless replaced by the next issue first; TWGO 70 min after the last
 // reception, or the record's end time when it has one; an unmatched half
@@ -67,7 +70,7 @@ namespace fisb {
 // Spec §10.3 lifetimes and the §10.1 mosaic timings.
 namespace expiry {
 constexpr std::chrono::minutes kNexrad{75};
-constexpr std::chrono::minutes kOtherRaster{105};
+constexpr std::chrono::minutes kOtherRaster{105};  // 70, 71, 84, 90, 91 (lightning 103: kNexrad)
 constexpr std::chrono::minutes kMetar{120};
 constexpr std::chrono::minutes kTafFallback{120};
 constexpr std::chrono::minutes kPirep{120};
@@ -99,6 +102,7 @@ struct TwgoRecord {
 struct Mosaic {
     uint16_t product = 0;
     std::optional<uint8_t> altitude_code;  // 70/71/90/91
+    uint8_t scale = 0;  // scale factor of the last block merged (0 high, 1 medium, 2 low)
     TimePoint product_time{}, updated{}, expires{};  // updated: the last merge (store clock)
     std::optional<TimePoint> published;              // the last publish (store clock)
     std::vector<RadarBlock> blocks;
@@ -136,6 +140,8 @@ struct FisbStoreStats {
     uint64_t mosaics_published = 0;
     uint64_t expired = 0;           // items removed by expiry
     uint64_t cancelled = 0;         // TWGO cancels applied
+    uint64_t ignored_after_cancel = 0;  // TWGO halves for a key in its 30 min cancelled window
+    uint64_t no_product_time = 0;   // raster products whose APDU time did not resolve: dropped
     uint64_t twgo_pending = 0;      // gauge (computed by stats()): TWGO halves held, not yet complete
 };
 

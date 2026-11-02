@@ -68,6 +68,7 @@ void mosaicFields(JsonWriter& w, const Mosaic& m)
     w.add("name", productName(m.product));
     if (m.altitude_code)
         w.add("altitude_code", static_cast<int64_t>(*m.altitude_code));
+    w.add("scale", static_cast<int64_t>(m.scale));
     w.add("product_time", iso(m.product_time));
     w.add("updated", iso(m.updated));
     if (m.published)

@@ -13,8 +13,8 @@
 //   - otherwise, if it was forwarded: sendDrop(filtered), writeDrop, no
 //     longer forwarded (it is sent afresh once it is eligible again).
 // Every second: table.expire(TRACK_TIMEOUT_S) on the data clock (the newest
-// observation's receive time plus the steady time since it, so a replay of
-// old data ages like live data); forwarded tracks among the expired get
+// observation or uplink receive time seen, plus the steady time since; it
+// never goes back; so a replay of old data ages like live data); forwarded tracks among the expired get
 // sendDrop(timeout), or sendDrop(source_lost) while the source is down; both
 // recorders are flushed. When the source has been lost for TRACK_TIMEOUT_S,
 // every forwarded track is dropped as source_lost (a reconnect cancels it).
@@ -147,6 +147,7 @@ private:
     void reevaluate();
     TrackSnapshot trackSnapshot(const TrackState& state, const FilterResult& result) const;
     std::chrono::system_clock::time_point dataNow() const;
+    void advanceDataClock(std::chrono::system_clock::time_point t);
     void emit(const EngineEvent& event);
     void emitDrop(skycue::TrackId id, skycue::DropReason reason);
     void dropAllForwarded(skycue::DropReason reason);

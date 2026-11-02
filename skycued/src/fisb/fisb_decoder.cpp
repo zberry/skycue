@@ -133,8 +133,10 @@ void FisbDecoder::apdu(const ApduHeader& h, const uint8_t* p, std::size_t n, Tim
 
     if (family == ProductFamily::generic_text) {
         auto records = parseTextProduct(hdr, p, n, ref);
-        if (records.empty())
+        if (records.empty()) {
+            ++counters_.empty_text;
             return;
+        }
         out.body = std::move(records);
         emit(std::move(out));
         return;
@@ -150,6 +152,13 @@ void FisbDecoder::apdu(const ApduHeader& h, const uint8_t* p, std::size_t n, Tim
                                    [](const Shape& s) { return !shapeInRange(s); }),
                     t->shapes.end());
     counters_.rejected_shapes += before - t->shapes.size();
+    if (t->has_graphics && before > 0 && t->shapes.empty()) {
+        // Nothing drawable is left: do not pair it as a graphics half.
+        t->has_graphics = false;
+        ++counters_.graphics_rejected;
+        if (!t->text && !t->cancel)
+            return;
+    }
     out.body = std::move(*t);
     emit(std::move(out));
 }

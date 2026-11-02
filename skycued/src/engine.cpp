@@ -190,9 +190,7 @@ void Engine::handleObservation(const TrackObservation& obs)
     if (stopped_)
         return;
     ++observations_;
-    have_data_clock_ = true;
-    last_obs_time_ = obs.received_time;
-    last_obs_steady_ = steady::now();
+    advanceDataClock(obs.received_time);
     if (received_)
         received_->writeObservation(obs);
     process(table_.apply(obs), last_obs_steady_, obs.lat.has_value());
@@ -206,13 +204,9 @@ void Engine::handleUplink(std::chrono::system_clock::time_point when, const std:
         received_->writeUplink(when, hex);
     if (!fisb_decoder_)
         return;
-    // An uplink moves the data clock forward (never back), so a recording of
-    // uplinks alone still has its own clock.
-    if (!have_data_clock_ || when > dataNow()) {
-        have_data_clock_ = true;
-        last_obs_time_ = when;
-        last_obs_steady_ = steady::now();
-    }
+    // Uplinks move the data clock too, so a recording of uplinks alone still
+    // has its own clock.
+    advanceDataClock(when);
     fisb_decoder_->feed(when, hex);
 }
 
@@ -502,6 +496,17 @@ void Engine::tick()
         ev.stats = stats();
         emit(ev);
     }
+}
+
+void Engine::advanceDataClock(std::chrono::system_clock::time_point t)
+{
+    // Monotonic: the newest of the observation and uplink times seen (plus
+    // the steady time since), never moved back by an older one.
+    if (have_data_clock_ && t <= dataNow())
+        return;
+    have_data_clock_ = true;
+    last_obs_time_ = t;
+    last_obs_steady_ = steady::now();
 }
 
 std::chrono::system_clock::time_point Engine::dataNow() const

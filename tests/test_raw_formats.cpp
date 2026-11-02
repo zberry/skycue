@@ -161,6 +161,76 @@ BOOST_AUTO_TEST_CASE(skips_garbage_unknown_types_and_cut_frames)
     BOOST_TEST(sp.fed() == stream.size());
 }
 
+// What a write failure in skycue-rawrec can leave in a .bin: N good frames,
+// one frame cut short (the rest never written), then, after the gap, M good
+// frames from the reopen. The splitter resyncs on the next frame's 0x1a.
+BOOST_AUTO_TEST_CASE(resyncs_after_a_truncated_frame)
+{
+    auto frame = [](int i) {
+        const uint8_t type = "123"[i % 3];
+        std::string body = tsBytes(1000 + static_cast<uint64_t>(i)) + bytes({0x1a});  // an escaped 0x1a in each
+        while (body.size() < beast::bodyLength(type))
+            body += static_cast<char>(i * 7 + static_cast<int>(body.size()));
+        return wire(type, body);
+    };
+    const std::size_t n = 5, m = 7;
+    std::string head, tail;
+    for (std::size_t i = 0; i < n; ++i)
+        head += frame(static_cast<int>(i));
+    for (std::size_t i = 0; i < m; ++i)
+        tail += frame(static_cast<int>(100 + i));
+    const std::string full = wire('3', tsBytes(77) + bytes({0x8d, 0x1a, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}));
+    // Cut anywhere except between the two bytes of a doubled 0x1a (below).
+    for (std::size_t cut = 1; cut < full.size(); ++cut) {
+        const std::string trunc = full.substr(0, cut);
+        // Count trailing 0x1a bytes after the header: an odd count inside the
+        // body means the cut split an escape pair.
+        std::size_t trailing = 0;
+        for (std::size_t k = trunc.size(); k > 2 && static_cast<uint8_t>(trunc[k - 1]) == 0x1a; --k)
+            ++trailing;
+        if (trailing % 2 == 1)
+            continue;
+        BOOST_TEST_CONTEXT("cut at " << cut)
+        {
+            const std::string stream = head + trunc + tail;
+            for (std::size_t chunk : {std::size_t{1}, std::size_t{7}, stream.size()}) {
+                FrameSplitter sp;
+                std::vector<Frame> out;
+                for (std::size_t i = 0; i < stream.size(); i += chunk)
+                    sp.feed(reinterpret_cast<const uint8_t*>(stream.data()) + i, std::min(chunk, stream.size() - i),
+                            out);
+                BOOST_REQUIRE(out.size() == n + m);
+                std::string got;
+                for (const auto& f : out)
+                    got += f.raw;
+                BOOST_TEST((got == head + tail));
+                BOOST_TEST(sp.skippedBytes() == trunc.size());
+                BOOST_TEST(out[n].start == head.size() + trunc.size());
+            }
+        }
+    }
+    // A cut between the two bytes of a doubled 0x1a inside the body is
+    // ambiguous: that 0x1a plus the next frame's leading 0x1a read as one
+    // escaped data byte, so the cut frame swallows the start of the next one
+    // and comes out as a single malformed frame of the right length (readsb
+    // drops it: its CRC fails). Every frame after that one is read normally.
+    const std::string split_escape = full.substr(0, 10);  // 1a '3', 6 timestamp bytes, 8d, the first 1a of the pair
+    BOOST_REQUIRE(static_cast<uint8_t>(split_escape.back()) == 0x1a);
+    const std::string stream = head + split_escape + tail;
+    FrameSplitter sp;
+    std::vector<Frame> out;
+    sp.feed(reinterpret_cast<const uint8_t*>(stream.data()), stream.size(), out);
+    BOOST_REQUIRE(out.size() == n + m);
+    std::string got_head, got_rest;
+    for (std::size_t i = 0; i < n; ++i)
+        got_head += out[i].raw;
+    BOOST_TEST((got_head == head));
+    BOOST_TEST((out[n].raw != full));  // the merged, malformed one
+    for (std::size_t i = n + 1; i < out.size(); ++i)
+        got_rest += out[i].raw;
+    BOOST_TEST((got_rest == tail.substr(frame(100).size())));
+}
+
 BOOST_AUTO_TEST_CASE(receiver_id_prefix_is_its_own_frame)
 {
     const std::string id = wire(0xe3, bytes({1, 2, 3, 0x1a, 5, 6, 7, 8}));

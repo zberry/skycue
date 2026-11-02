@@ -55,10 +55,14 @@ void FrameSplitter::feed(const uint8_t* data, std::size_t n, std::vector<Frame>&
         case State::type:
             if (bodyLength(c) > 0) {
                 beginFrame(c, esc_pos_);
+            } else if (c == kEscape) {
+                // A doubled 0x1a outside any frame (we joined in the middle of
+                // one), or a lone 0x1a left by a frame cut short right after
+                // its first byte: skip the first and let this one start a frame.
+                ++skipped_;
+                esc_pos_ = pos_;
             } else {
-                // An unknown type, or a doubled 0x1a outside any frame (we
-                // joined in the middle of one): skip both bytes.
-                skipped_ += 2;
+                skipped_ += 2;  // an unknown type
                 state_ = State::hunt;
             }
             break;

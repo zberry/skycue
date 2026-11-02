@@ -266,6 +266,9 @@ head -c 30000 /dev/zero > "$tmp/ret/raw/beast-20200101-000000.bin"
 head -c 30000 /dev/zero > "$tmp/ret/received-20200101-000000.jsonl"
 head -c 100 /dev/zero > "$tmp/ret/received-20200102-000000.jsonl"  # newest of its stream: kept
 head -c 50000 /dev/zero > "$tmp/ret/notes.txt"                     # not a recording: kept, not counted
+# A day old: files modified within the last 10 minutes are never deleted.
+touch -d '1 day ago' "$tmp/ret/raw/beast-20200101-000000.bin" "$tmp/ret/received-20200101-000000.jsonl" \
+  "$tmp/ret/received-20200102-000000.jsonl" "$tmp/ret/notes.txt"
 rawrec_run "$tmp/ret/raw" 1000 1 --rotate-mb 0.005 --max-gb 0.00003 --retention-dir "$tmp/ret"
 [ -e "$tmp/ret/raw/beast-20200101-000000.bin" ] && { cat "$tmp/rec.err"; fail "(g) old beast file not deleted"; }
 [ -e "$tmp/ret/received-20200101-000000.jsonl" ] && { cat "$tmp/rec.err"; fail "(g) old received file not deleted"; }
@@ -274,6 +277,28 @@ rawrec_run "$tmp/ret/raw" 1000 1 --rotate-mb 0.005 --max-gb 0.00003 --retention-
 cat $(in_order "$tmp/ret/raw"/beast-*.bin) | cmp -s - "$tmp/sent.bin" || fail "(g) the capture lost data to retention"
 [ "$(grep -c 'INFO  retention: deleted' "$tmp/rec.err")" = 2 ] || { cat "$tmp/rec.err"; fail "(g) want 2 retention INFO lines"; }
 echo "ok (g) retention deleted the 2 oldest files"
+
+# ---- (h) a .bin with a frame cut short (a write failure's gap) replays -----------
+# 50 frames, a long frame cut after 9 bytes (no escape pair split), 60 frames:
+# rawplay skips the cut bytes and sends the other 110 frames unchanged.
+python3 - "$tmp/gap.bin" "$tmp/gap.want" <<'EOF'
+import random, sys
+rnd = random.Random(11)
+def esc(b): return b.replace(b"\x1a", b"\x1a\x1a")
+def frame(i):
+    t = b"123"[i % 3]
+    n = {ord("1"): 2, ord("2"): 7, ord("3"): 14}[t]
+    body = (i * 12000).to_bytes(6, "big") + bytes([0x40]) + bytes(rnd.choice([0x1a, rnd.randrange(256)]) for _ in range(n))
+    return b"\x1a" + bytes([t]) + esc(body)
+good = [frame(i) for i in range(110)]
+cut = b"\x1a3" + bytes([0, 0, 0, 1, 2, 3, 0x40])  # 9 of 23 bytes, no 0x1a in the body
+open(sys.argv[1], "wb").write(b"".join(good[:50]) + cut + b"".join(good[50:]))
+open(sys.argv[2], "wb").write(b"".join(good))
+EOF
+play_to_sink "$tmp/h.out" --beast-in --speed 0 "$tmp/gap.bin" >/dev/null
+cmp -s "$tmp/h.out" "$tmp/gap.want" || fail "(h) replay of the gapped capture is not the 110 good frames"
+grep -q 'done: 110 frames sent, 9 bytes skipped' "$tmp/play.err" || { cat "$tmp/play.err"; fail "(h) rawplay summary"; }
+echo "ok (h) rawplay resyncs after a truncated frame: 110 frames, 9 bytes skipped"
 
 # ---- full stack: the capture through a real readsb -----------------------------
 if [ -z "$readsb" ] || [ ! -x "$readsb" ]; then

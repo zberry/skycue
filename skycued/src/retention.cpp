@@ -8,9 +8,11 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <ctime>
 #include <map>
 #include <tuple>
 #include <utility>
@@ -76,11 +78,22 @@ struct Candidate {
     uint64_t size = 0;
     dev_t dev = 0;
     ino_t ino = 0;
+    struct timespec mtime {};
 };
+
+bool mtimeBefore(const struct timespec& a, const struct timespec& b)
+{
+    return a.tv_sec < b.tv_sec || (a.tv_sec == b.tv_sec && a.tv_nsec < b.tv_nsec);
+}
 
 void scan(const std::string& dir, const std::string& subdir, std::vector<Candidate>& out)
 {
     const std::string where = subdir.empty() ? dir : dir + "/" + subdir;
+    if (!subdir.empty()) {
+        struct stat st {};
+        if (::lstat(where.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
+            return;  // missing, or a symlink: not followed
+    }
     DIR* d = ::opendir(where.c_str());
     if (!d)
         return;
@@ -97,6 +110,7 @@ void scan(const std::string& dir, const std::string& subdir, std::vector<Candida
         c.size = static_cast<uint64_t>(st.st_size);
         c.dev = st.st_dev;
         c.ino = st.st_ino;
+        c.mtime = st.st_mtim;
         out.push_back(std::move(c));
     }
     ::closedir(d);
@@ -130,7 +144,8 @@ RetentionResult enforce(const std::string& dir, uint64_t max_bytes, const std::s
     std::sort(files.begin(), files.end(), [](const Candidate& a, const Candidate& b) {
         return std::tie(a.name.stamp, a.name.suffix, a.path) < std::tie(b.name.stamp, b.name.suffix, b.path);
     });
-    // Protected: the open files, and the newest of each (directory, stream, ext).
+    // Protected: the open files, the newest of each (directory, stream, ext)
+    // by name and by modification time, and anything modified recently.
     std::set<std::pair<dev_t, ino_t>> keep;
     for (const auto& p : open_files) {
         struct stat st {};
@@ -142,6 +157,18 @@ RetentionResult enforce(const std::string& dir, uint64_t max_bytes, const std::s
         newest[std::make_tuple(f.subdir, f.name.stream, f.name.ext)] = &f;  // sorted: the last one wins
     for (const auto& n : newest)
         keep.emplace(n.second->dev, n.second->ino);
+    std::map<std::tuple<std::string, std::string, std::string>, const Candidate*> latest;
+    const auto recent_since =
+        std::chrono::system_clock::to_time_t(std::chrono::system_clock::now() - kRecentWindow);
+    for (const auto& f : files) {
+        auto& l = latest[std::make_tuple(f.subdir, f.name.stream, f.name.ext)];
+        if (!l || !mtimeBefore(f.mtime, l->mtime))
+            l = &f;
+        if (f.mtime.tv_sec >= recent_since)  // also a time stamp in the future
+            keep.emplace(f.dev, f.ino);
+    }
+    for (const auto& l : latest)
+        keep.emplace(l.second->dev, l.second->ino);
 
     for (const auto& f : files) {
         if (r.bytes_after <= max_bytes)
@@ -157,6 +184,9 @@ RetentionResult enforce(const std::string& dir, uint64_t max_bytes, const std::s
         LOG_INFO("retention: deleted " << f.path << " (" << f.size << " bytes) to keep " << dir << " within "
                                        << max_bytes << " bytes; " << r.bytes_after << " left");
     }
+    if (r.bytes_after > max_bytes)
+        LOG_WARN("retention: still " << r.bytes_after - max_bytes << " bytes over the cap of " << max_bytes
+                                     << " under " << dir << "; only open/recent files remain");
     return r;
 }
 

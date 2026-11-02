@@ -12,18 +12,26 @@
 //   - a file in `open_files` (compared by device and inode, so any spelling
 //     of the path works);
 //   - the newest file of each stream and extension in each of the two
-//     directories, since another process (skycued and skycue-rawrec share the
-//     budget) may still be writing it.
-// So the total can stay above max_bytes when only protected files are left.
-// Each deletion is logged at INFO; a file that cannot be deleted is logged at
-// WARN and skipped.
+//     directories, by name and also by modification time, and any file
+//     modified within kRecentWindow (or in the future): another process
+//     (skycued and skycue-rawrec share the budget) may still be writing it,
+//     and a clock step or a restart can give its file an older name stamp.
+// `dir/raw` is not followed when it is a symlink. So the total can stay above
+// max_bytes when only protected files are left; that is logged at WARN once
+// per call. Each deletion is logged at INFO; a file that cannot be deleted is
+// logged at WARN and skipped. A file deleted while a reader (a replay) has it
+// open stays readable to that reader (POSIX unlink semantics).
 
+#include <chrono>
 #include <cstdint>
 #include <set>
 #include <string>
 #include <vector>
 
 namespace skycued {
+
+// Files modified this recently are never deleted.
+constexpr std::chrono::minutes kRecentWindow{10};
 
 struct RetentionResult {
     uint64_t bytes_before = 0, bytes_after = 0;  // of the matching files

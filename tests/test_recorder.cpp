@@ -14,6 +14,7 @@
 #include <dirent.h>
 #include <ftw.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -382,7 +383,18 @@ BOOST_AUTO_TEST_CASE(retention_cap_on_start_and_rotation)
 {
     TempDir tmp;
     ::mkdir((tmp.path + "/raw").c_str(), 0755);
-    auto put = [&](const std::string& rel, std::size_t n) { std::ofstream(tmp.path + "/" + rel) << std::string(n, 'x'); };
+    // Files a day old, so that retention's recent-file protection does not apply.
+    auto age = [](const std::string& p) {
+        struct timeval tv[2] {};
+        ::gettimeofday(&tv[0], nullptr);
+        tv[0].tv_sec -= 86400;
+        tv[1] = tv[0];
+        ::utimes(p.c_str(), tv);
+    };
+    auto put = [&](const std::string& rel, std::size_t n) {
+        std::ofstream(tmp.path + "/" + rel) << std::string(n, 'x');
+        age(tmp.path + "/" + rel);
+    };
     put("received-20200101-000000.jsonl", 4000);
     put("raw/beast-20200101-000000.bin", 4000);
     put("raw/beast-20200102-000000.bin", 100);  // the newest beast file: kept (rawrec may be writing it)
@@ -395,6 +407,9 @@ BOOST_AUTO_TEST_CASE(retention_cap_on_start_and_rotation)
         Recorder rec(off, "sent");
         sent_jsonl = rec.currentPath("jsonl");
     }
+    for (const auto& suffix : {".jsonl", ".csv"})
+        for (const auto& p : filesWithSuffix(tmp.path, suffix))
+            age(p);
     BOOST_TEST(pathExists(tmp.path + "/received-20200101-000000.jsonl"));
 
     // A cap: on start the oldest files go first, then on every rotation.
@@ -410,6 +425,11 @@ BOOST_AUTO_TEST_CASE(retention_cap_on_start_and_rotation)
         // Retention never removes the files being written.
         BOOST_REQUIRE(pathExists(rec.currentPath("jsonl")));
         BOOST_REQUIRE(pathExists(rec.currentPath("csv")));
+        // Let the closed files look old, as they would after hourly rotations.
+        for (const auto& suffix : {".jsonl", ".csv"})
+            for (const auto& p : filesWithSuffix(tmp.path, suffix))
+                if (p != rec.currentPath("jsonl") && p != rec.currentPath("csv"))
+                    age(p);
     }
     rec.flush();
     uint64_t total = 0;

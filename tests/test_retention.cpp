@@ -5,6 +5,7 @@
 
 #include <ftw.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -38,12 +39,22 @@ struct TempDir {
     }
     ~TempDir() { ::nftw(path.c_str(), removeEntry, 16, FTW_DEPTH | FTW_PHYS); }
 
-    // A file of `size` bytes at path/rel; returns the full path.
-    std::string file(const std::string& rel, std::size_t size) const
+    // A file of `size` bytes at path/rel, last modified `age_s` seconds ago
+    // (default: a day, well outside kRecentWindow); returns the full path.
+    std::string file(const std::string& rel, std::size_t size, long age_s = 86400) const
     {
         const std::string p = path + "/" + rel;
         std::ofstream(p, std::ios::binary) << std::string(size, 'x');
+        setAge(p, age_s);
         return p;
+    }
+    static void setAge(const std::string& p, long age_s)
+    {
+        struct timeval tv[2] {};
+        ::gettimeofday(&tv[0], nullptr);
+        tv[0].tv_sec -= age_s;
+        tv[1] = tv[0];
+        ::utimes(p.c_str(), tv);
     }
     bool has(const std::string& rel) const
     {
@@ -186,4 +197,50 @@ BOOST_AUTO_TEST_CASE(newest_of_each_stream_and_extension_is_kept)
     const auto r = enforce(t.path, 1, {});
     BOOST_TEST(r.deleted.empty());
     BOOST_TEST(r.bytes_after == 500u);
+}
+
+BOOST_AUTO_TEST_CASE(retention_never_deletes_recently_modified_file)
+{
+    TempDir t;
+    // An older name stamp but modified a minute ago (a clock step back, or a
+    // restart reusing an earlier stamp): another process may be writing it.
+    t.file("raw/beast-20261101-080000.bin", 100, 60);
+    t.file("raw/beast-20261101-090000.bin", 100);  // old in both name and mtime: deletable
+    t.file("raw/beast-20261101-100000.bin", 100);  // newest by name: kept
+    t.file("received-20261101-070000.jsonl", 100, 1200);  // 20 min old: outside the window
+    t.file("received-20261101-110000.jsonl", 100, 900);  // newest by name and by mtime, not recent
+    const auto r = enforce(t.path, 1, {});
+    const std::vector<std::string> want{"received-20261101-070000.jsonl", "raw/beast-20261101-090000.bin"};
+    BOOST_TEST(names(t, r.deleted) == want, boost::test_tools::per_element());
+    BOOST_TEST(t.has("raw/beast-20261101-080000.bin"));
+    BOOST_TEST(r.bytes_after == 300u);  // still over: the WARN case
+}
+
+BOOST_AUTO_TEST_CASE(newest_by_mtime_is_kept_even_with_an_old_name)
+{
+    TempDir t;
+    // Both outside the window, but the older-named one was written last.
+    t.file("uat-20261101-080000.txt", 100, 3600);
+    t.file("uat-20261101-090000.txt", 100, 7200);
+    t.file("uat-20261101-070000.txt", 100, 9000);
+    const auto r = enforce(t.path, 1, {});
+    BOOST_TEST(names(t, r.deleted) == std::vector<std::string>{"uat-20261101-070000.txt"},
+               boost::test_tools::per_element());
+    BOOST_TEST(t.has("uat-20261101-080000.txt"));  // newest by mtime
+    BOOST_TEST(t.has("uat-20261101-090000.txt"));  // newest by name
+}
+
+BOOST_AUTO_TEST_CASE(raw_symlink_is_not_followed)
+{
+    TempDir t;
+    TempDir elsewhere;
+    elsewhere.file("raw/beast-20200101-000000.bin", 1000);
+    elsewhere.file("raw/beast-20200102-000000.bin", 1000);
+    ::rmdir((t.path + "/raw").c_str());
+    BOOST_REQUIRE(::symlink((elsewhere.path + "/raw").c_str(), (t.path + "/raw").c_str()) == 0);
+    t.file("received-20261101-090000.jsonl", 100);
+    const auto r = enforce(t.path, 1, {});
+    BOOST_TEST(r.bytes_before == 100u);
+    BOOST_TEST(r.deleted.empty());
+    BOOST_TEST(elsewhere.has("raw/beast-20200101-000000.bin"));
 }

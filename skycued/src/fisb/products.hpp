@@ -3,6 +3,7 @@
 // FIS-B product catalogue (docs/fisb-reference.md §3) and the decoder's
 // counters.
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -87,6 +88,19 @@ struct Shape {
     double radius_nm = 0;  // circle and prism
     std::optional<int> alt_low_ft, alt_high_ft;
     bool agl = false;  // altitudes above ground (geometries 4, 8, 9, 12) rather than MSL
+};
+
+// One decoded global block (reference §5). The 128 bins are 4 rows of 32,
+// ordered W->E then N->S from the block's NW corner (§5.2): bin i covers
+// latitude [lat0 - (i/32+1)*dlat, lat0 - (i/32)*dlat) and longitude
+// [lon0 + (i%32)*dlon, lon0 + (i%32+1)*dlon). lat0/lon0 are the NW corner
+// in degrees (lon0 in -180..180), dlat/dlon one bin's height/width in
+// degrees. Bin values are the product's raw level (0-7 for NEXRAD, the
+// unmapped run value for the others).
+struct RadarBlock {
+    uint32_t block = 0;
+    double lat0 = 0, lon0 = 0, dlat = 0, dlon = 0;
+    std::array<uint8_t, 128> bins{};
 };
 
 // Running totals kept by the decoder (one instance per decoder).

@@ -8,6 +8,7 @@ add_library(skycued_core STATIC
   src/engine.cpp
   src/fisb/apdu.cpp
   src/fisb/dlac.cpp
+  src/fisb/global_block.cpp
   src/fisb/segment_assembler.cpp
   src/fisb/text_products.cpp
   src/fisb/twgo.cpp

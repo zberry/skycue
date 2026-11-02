@@ -203,3 +203,12 @@ target_compile_definitions(test_fisb_twgo PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_fisb_twgo)
 add_test(NAME fisb_twgo COMMAND test_fisb_twgo)
+
+# FIS-B global-block rasters (63/64 NEXRAD, 70/71/84/90/91/103) on hand-built
+# vectors and both uplink fixtures.
+add_executable(test_fisb_blocks test_fisb_blocks.cpp)
+target_link_libraries(test_fisb_blocks PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
+target_compile_definitions(test_fisb_blocks PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_fisb_blocks)
+add_test(NAME fisb_blocks COMMAND test_fisb_blocks)

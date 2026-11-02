@@ -133,13 +133,124 @@
     return seen > offsetMs || offsetMs - seen > CLOCK_RESET_MS ? seen : offsetMs;
   }
 
+  // ---- FIS-B (docs/web-api.md, FIS-B) ------------------------------------
+  var BINS_PER_BLOCK = 128;
+
+  // A mosaic block's `rle` ([[value, count], ...]) as its 128 bins, W->E
+  // then N->S in 4 rows of 32. Throws when the runs are malformed or do
+  // not total 128 bins.
+  function expandRle(rle) {
+    if (!Array.isArray(rle)) throw new Error('rle is not an array');
+    var out = new Uint8Array(BINS_PER_BLOCK);
+    var n = 0;
+    for (var i = 0; i < rle.length; i++) {
+      var run = rle[i];
+      if (!Array.isArray(run) || run.length !== 2) throw new Error('bad run ' + JSON.stringify(run));
+      var v = run[0], c = run[1];
+      if (!(v >= 0 && v <= 255 && Math.floor(v) === v) || !(c >= 0 && Math.floor(c) === c)) {
+        throw new Error('bad run ' + JSON.stringify(run));
+      }
+      if (n + c > BINS_PER_BLOCK) throw new Error('rle totals more than 128 bins');
+      out.fill(v, n, n + c);
+      n += c;
+    }
+    if (n !== BINS_PER_BLOCK) throw new Error('rle totals ' + n + ' bins, not 128');
+    return out;
+  }
+
+  // The palette's CSS colour for a bin value; 'transparent' for a level the
+  // palette marks so, or does not have.
+  function dbzColor(level, palette) {
+    if (!Array.isArray(palette)) return 'transparent';
+    var e = palette[level];
+    if (!e || e.level !== level) {
+      e = null;
+      for (var i = 0; i < palette.length; i++) if (palette[i] && palette[i].level === level) { e = palette[i]; break; }
+    }
+    return e && e.color ? e.color : 'transparent';
+  }
+
+  // TWGO shape families: one map layer each.
+  var SHAPE_FAMILY = { 8: 'tfr', 16: 'tfr', 17: 'tfr', 12: 'sigmet', 11: 'airmet', 14: 'airmet', 15: 'cwa', 13: 'sua' };
+  var SHAPE_COLORS = { tfr: '#f85149', sigmet: '#bc8cff', airmet: '#e3b341', cwa: '#f0883e', sua: '#8b949e' };
+  function shapeFamily(product) {
+    return Object.prototype.hasOwnProperty.call(SHAPE_FAMILY, product) ? SHAPE_FAMILY[product] : null;
+  }
+  // Leaflet path options for a shape of `product`; cancelled ones dashed.
+  function shapeStyle(product, cancelled) {
+    var fam = shapeFamily(product) || 'other';
+    var color = SHAPE_COLORS[fam] || '#d2a8ff';
+    var s = {
+      className: 'fisb-shape fisb-' + fam + (cancelled ? ' cancelled' : ''),
+      color: color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: fam === 'tfr' ? 0.18 : fam === 'airmet' ? 0.04 : 0.08
+    };
+    if (cancelled) {
+      s.dashArray = '6 6';
+      s.fillOpacity = 0.03;
+    }
+    return s;
+  }
+
+  // Age colouring of a text report: fresh < 30 min, aging < 90 min, else old
+  // (and old when the time is missing or unreadable).
+  var AGE_FRESH_MS = 30 * 60000, AGE_AGING_MS = 90 * 60000;
+  function ageClass(issuedIso, nowMs) {
+    var t = typeof issuedIso === 'string' ? Date.parse(issuedIso) : NaN;
+    if (isNaN(t)) return 'old';
+    var age = nowMs - t;
+    if (age < AGE_FRESH_MS) return 'fresh';
+    if (age < AGE_AGING_MS) return 'aging';
+    return 'old';
+  }
+
+  // The bounding box [[south, west], [north, east]] of mosaic blocks (each
+  // NW corner lat0/lon0, 4 rows of dlat by 32 columns of dlon); null for none.
+  function mosaicBounds(blocks) {
+    if (!blocks || !blocks.length) return null;
+    var s = Infinity, w = Infinity, n = -Infinity, e = -Infinity;
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      s = Math.min(s, b.lat0 - 4 * b.dlat);
+      n = Math.max(n, b.lat0);
+      w = Math.min(w, b.lon0);
+      e = Math.max(e, b.lon0 + 32 * b.dlon);
+    }
+    return [[s, w], [n, e]];
+  }
+
+  // Web Mercator y of a latitude, in degrees (as Leaflet stretches an image
+  // overlay: linear in this, not in latitude).
+  function mercY(lat) {
+    if (lat === 0) return 0;
+    return Math.log(Math.tan(Math.PI / 4 + lat * DEG / 2)) / DEG;
+  }
+
+  // Canvas size for a mosaic over `bounds`, `pxPerBin` pixels per smallest
+  // bin (dlat, dlon), scaled down to fit `cap` x `cap`.
+  function mosaicCanvasSize(bounds, dlat, dlon, pxPerBin, cap) {
+    var s = bounds[0][0], w = bounds[0][1], n = bounds[1][0], e = bounds[1][1];
+    var binY = Math.min(mercY(Math.min(s + dlat, n)) - mercY(s), mercY(n) - mercY(Math.max(n - dlat, s)));
+    var width = (e - w) / dlon * pxPerBin;
+    var height = (mercY(n) - mercY(s)) / binY * pxPerBin;
+    var k = Math.min(1, cap / width, cap / height);
+    return { width: Math.max(1, Math.round(width * k)), height: Math.max(1, Math.round(height * k)) };
+  }
+
+  function stationMatches(station, prefix) {
+    if (!prefix) return true;
+    return String(station || '').toUpperCase().indexOf(String(prefix).toUpperCase()) === 0;
+  }
+
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
     decisionColor: decisionColor, formatAlt: formatAlt, formatNum: formatNum, formatAge: formatAge,
     thousands: thousands, trackKey: trackKey, markerLabel: markerLabel, listHas: listHas,
     sortTracks: sortTracks, graticuleStep: graticuleStep, dropRemovesMarker: dropRemovesMarker,
-    backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset
+    backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
+    BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
+    shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,
+    mercY: mercY, mosaicCanvasSize: mosaicCanvasSize, stationMatches: stationMatches
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

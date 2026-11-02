@@ -52,6 +52,20 @@ from one ground station) is `../raw/uat-sample.txt.gz`. See
   no arguments; rerun it after changing either input). Derived from the
   BSD-2-Clause dump978 sample and the repository's own synthetic readsb data.
 
+## received-tg30.jsonl
+
+- **What it is:** the 963 uplinks of `tg30.978` as a received-stream
+  recording (`"type":"uat_uplink"` records, each at its own `t=` time,
+  2020-10-30 08:52:40-09:00:17 UTC), about 900 kB; the same conversion as
+  `tests/test_fisb_web.cpp`'s `tg30AsRecording`. The UI tests
+  (`tests/ui/ui.spec.js`) replay it for radar: unlike the 2015 sample (all
+  level 0), its NEXRAD regional mosaic (861 blocks, 36.7-43.3 N,
+  90.4-81.6 W) and CONUS mosaic (1413 blocks, 20-53 N, 132-60 W) carry
+  echoes, and it has the raster layers and AIRMETs.
+- **How it is made:** `python3 gen_received_tg30.py` (deterministic, no
+  arguments). Derived from `tg30.978` (BSD-2-Clause Plus Patent,
+  `LICENSE.fisb-decode`).
+
 ## tg30.golden.jsonl
 
 - **What it is:** `skycue-fisb --json --ref-date 2020-10-30 tg30.978`, the

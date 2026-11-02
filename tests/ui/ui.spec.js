@@ -26,14 +26,25 @@ async function api(path, init) {
 }
 const state = async () => (await api('/api/state')).body;
 
+// The FIS-B cases run against two more skycueds that run.sh starts, each
+// replaying a received recording with uplinks (unpaced, not looped):
+// FISB_BASE the 2015 sample (text, NOTAMs, a SIGMET; clear-sky radar),
+// RADAR_BASE tg30.978 (real NEXRAD regional and CONUS, rasters, AIRMETs).
+const FISB_BASE = process.env.SKYCUE_FISB_URL;
+const RADAR_BASE = process.env.SKYCUE_RADAR_URL;
+
+// Every request the page makes goes to the origin it was loaded from
+// (data: URLs, the radar canvases, are not requests to a host).
 let offOrigin;
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, baseURL }) => {
   offOrigin = [];
+  const origin = baseURL.replace(/\/$/, '');
+  const wsOrigin = origin.replace(/^http/, 'ws');
   page.on('request', (r) => {
-    if (!r.url().startsWith(BASE + '/')) offOrigin.push(r.url());
+    if (!r.url().startsWith(origin + '/') && !r.url().startsWith('data:')) offOrigin.push(r.url());
   });
   page.on('websocket', (ws) => {
-    if (!ws.url().startsWith(WS_BASE + '/')) offOrigin.push(ws.url());
+    if (!ws.url().startsWith(wsOrigin + '/')) offOrigin.push(ws.url());
   });
 });
 test.afterEach(async () => {
@@ -290,4 +301,299 @@ test('screenshots', async ({ page }, testInfo) => {
   expect(nums).toEqual([...nums].sort((a, b) => b - a));
   await th.click();
   await page.screenshot({ path: testInfo.outputPath(`skycue-table-${testInfo.project.name}.png`), fullPage: true });
+});
+
+// ---- FIS-B ---------------------------------------------------------------------
+async function apiAt(base, path) {
+  const r = await fetch(base + path);
+  return { status: r.status, body: await r.json() };
+}
+function watchErrors(page) {
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e)));
+  return errors;
+}
+async function openFisbPage(page) {
+  await openPage(page);
+  await page.waitForFunction(() => window.skycueApp.fisbLoaded());
+}
+function layerToggle(page, name) {
+  return page.locator('.leaflet-control-layers-overlays label', { hasText: name }).locator('input');
+}
+// The index of the first element matching `selector` that is on top at its
+// own centre (so a real click lands on it, not on an overlapping shape).
+async function clickableIndex(page, selector) {
+  return page.evaluate((sel) => {
+    const els = Array.from(document.querySelectorAll(sel));
+    for (let i = 0; i < els.length; i++) {
+      const r = els[i].getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (hit === els[i]) return i;
+    }
+    return -1;
+  }, selector);
+}
+
+test.describe('fisb radar (tg30)', () => {
+  test.use({ baseURL: RADAR_BASE });
+
+  test('radar_canvas_drawn_when_radar_present', async ({ page }) => {
+    const errors = watchErrors(page);
+    const status = (await apiAt(RADAR_BASE, '/api/fisb/status')).body;
+    expect(status.radar.regional.blocks).toBeGreaterThan(0);
+    expect(status.radar.conus.blocks).toBeGreaterThan(0);
+    await openFisbPage(page);
+    // Radar on by default, every other layer off.
+    await expect(layerToggle(page, 'Radar (regional)')).toBeChecked();
+    await expect(layerToggle(page, 'Radar (CONUS)')).toBeChecked();
+    for (const name of ['Other rasters', 'TFR', 'SIGMET', 'AIRMET', 'CWA', 'SUA']) {
+      await expect(layerToggle(page, name)).not.toBeChecked();
+    }
+    await expect(page.locator('img.leaflet-image-layer.fisb-radar-regional')).toHaveCount(1);
+    await expect(page.locator('img.leaflet-image-layer.fisb-radar-conus')).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => window.skycueApp.radarStats().products.regional.painted),
+      { timeout: 10000 }).toBeGreaterThan(0);
+    const st = await page.evaluate(() => window.skycueApp.radarStats());
+    expect(st.products.regional.blocks).toBe(status.radar.regional.blocks);
+    expect(st.products.conus.blocks).toBe(status.radar.conus.blocks);
+    expect(st.products.conus.painted).toBeGreaterThan(0);
+    expect(st.blocks).toBe(st.products.regional.blocks + st.products.conus.blocks);
+    expect(st.painted).toBeGreaterThan(0);
+    // The overlay covers the mosaic's own box.
+    const radar = (await apiAt(RADAR_BASE, '/api/fisb/radar?product=regional')).body;
+    const b = await page.evaluate(() => window.skycueApp.radarBounds('regional'));
+    const north = Math.max(...radar.blocks.map((x) => x.lat0));
+    const west = Math.min(...radar.blocks.map((x) => x.lon0));
+    expect(b[1][0]).toBeCloseTo(north, 4);
+    expect(b[0][1]).toBeCloseTo(west, 4);
+    // Radar age from the product time, ticking.
+    await expect(page.locator('#radar-age')).toContainText(/\d+ (s|min)/);
+    await expect(page.locator('#stat-radar-age')).toHaveText(/\d+ (s|min)/);
+    // Toggling the regional layer removes and restores its overlay.
+    await layerToggle(page, 'Radar (regional)').uncheck();
+    await expect(page.locator('img.fisb-radar-regional')).toHaveCount(0);
+    await layerToggle(page, 'Radar (regional)').check();
+    await expect(page.locator('img.fisb-radar-regional')).toHaveCount(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('radar_opacity_slider', async ({ page }) => {
+    await openFisbPage(page);
+    const img = page.locator('img.leaflet-image-layer.fisb-radar-regional');
+    await expect(img).toHaveCount(1);
+    const opacity = () => img.evaluate((el) => Number(getComputedStyle(el).opacity));
+    await page.locator('#radar-opacity').fill('0.4');
+    await expect.poll(opacity).toBeCloseTo(0.4, 2);
+    await page.locator('#radar-opacity').fill('1');
+    await expect.poll(opacity).toBeCloseTo(1, 2);
+    await page.locator('#radar-opacity').fill('0.2');
+    await expect.poll(opacity).toBeCloseTo(0.2, 2);
+    await expect(page.locator('img.fisb-radar-conus')).toHaveCSS('opacity', '0.2');
+  });
+
+  test('other_rasters_layer_and_legend', async ({ page }) => {
+    await openFisbPage(page);
+    await layerToggle(page, 'Other rasters').check();
+    const sel = page.locator('#raster-select');
+    await expect.poll(() => sel.locator('option').count()).toBeGreaterThanOrEqual(5);
+    await sel.selectOption('70-0');
+    await expect(page.locator('img.leaflet-image-layer.fisb-raster')).toHaveCount(1);
+    await expect(page.locator('#raster-legend')).toContainText('Icing');
+    await expect(page.locator('#raster-legend')).toContainText('approximate');
+    await sel.selectOption('103');
+    await expect(page.locator('#raster-legend')).toContainText(/lightning/i);
+    await layerToggle(page, 'Other rasters').uncheck();
+    await expect(page.locator('img.fisb-raster')).toHaveCount(0);
+  });
+
+  test('fisb_screenshots_radar', async ({ page }, testInfo) => {
+    await openFisbPage(page);
+    await expect.poll(() => page.evaluate(() => window.skycueApp.radarStats().painted)).toBeGreaterThan(0);
+    await layerToggle(page, 'SIGMET').check();
+    await page.locator('#wx-toggle').click();
+    await expect(page.locator('#pane-weather')).toBeVisible();
+    await expect.poll(() => page.locator('#wx-list li.wx-row').count()).toBeGreaterThan(100);
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: testInfo.outputPath(`fisb-radar-${testInfo.project.name}.png`), fullPage: true });
+  });
+});
+
+test.describe('fisb text and airspace (2015 sample)', () => {
+  test.use({ baseURL: FISB_BASE });
+
+  test('tfr_polygon_rendered_and_clickable', async ({ page }) => {
+    const errors = watchErrors(page);
+    const shapes = (await apiAt(FISB_BASE, '/api/fisb/shapes?product=8,16,17')).body.features;
+    expect(shapes.length).toBeGreaterThan(0);
+    await openFisbPage(page);
+    await expect(page.locator('path.fisb-tfr')).toHaveCount(0);   // off by default
+    await layerToggle(page, 'TFR').check();
+    await expect.poll(() => page.locator('path.fisb-tfr').count()).toBe(shapes.length);
+    const i = await clickableIndex(page, 'path.fisb-tfr');
+    expect(i).toBeGreaterThanOrEqual(0);
+    await page.locator('path.fisb-tfr').nth(i).click();
+    const card = page.locator('#shape-details');
+    await expect(page.locator('#details')).toBeVisible();
+    await expect(card).toBeVisible();
+    const key = await card.getAttribute('data-key');
+    const f = shapes.find((x) => x.properties.key === key);
+    expect(f, 'clicked shape ' + key).toBeTruthy();
+    await expect(card.locator('pre.shape-text')).toHaveText(f.properties.text);
+    await expect(card.locator('[data-field="product"]')).toContainText('NOTAM');
+    await expect(card.locator('[data-field="key"]')).toHaveText(key);
+    await expect(card.locator('[data-field="cancelled"]')).toHaveText('no');
+
+    // The fixtures have no TFR polygon (their NOTAMs are points): live items
+    // with a polygon, a circle and a cancelled shape, through the page's
+    // own WebSocket item handler.
+    const tfr = {
+      type: 'fisb_shape', product: 8, key: '8-15-999-ZOA-1', features: [
+        { type: 'Feature', id: '8-15-999-ZOA-1/0',
+          geometry: { type: 'Polygon', coordinates: [[[-122.2, 37.2], [-121.8, 37.2], [-121.8, 37.5], [-122.2, 37.5], [-122.2, 37.2]]] },
+          properties: { key: '8-15-999-ZOA-1', product: 8, name: 'NOTAM', text: 'NOTAM-TFR TEST POLYGON', geom: 'polygon',
+            cancelled: false, alt_low_ft: 0, alt_high_ft: 3000, agl: true, shape: 0, start: '2015-01-24T04:00:00.000Z',
+            text_end: '2015-01-24T08:00:00.000Z' } },
+        { type: 'Feature', id: '8-15-999-ZOA-1/1', geometry: { type: 'Point', coordinates: [-121.5, 37.0] },
+          properties: { key: '8-15-999-ZOA-1', product: 8, name: 'NOTAM', text: 'NOTAM-TFR TEST POLYGON', geom: 'circle',
+            radius_nm: 5, cancelled: false, agl: false, shape: 1 } }]
+    };
+    const cancelled = {
+      type: 'fisb_shape', product: 16, key: '16-15-998-ZOA-1', features: [
+        { type: 'Feature', id: '16-15-998-ZOA-1/0',
+          geometry: { type: 'Polygon', coordinates: [[[-122.6, 37.6], [-122.4, 37.6], [-122.4, 37.8], [-122.6, 37.6]]] },
+          properties: { key: '16-15-998-ZOA-1', product: 16, name: 'NOTAM-TRA', text: 'CANCELLED ONE', geom: 'polygon',
+            cancelled: true, agl: false, shape: 0 } }]
+    };
+    await page.evaluate((items) => window.skycueApp.injectFisbItems(items), [tfr, cancelled]);
+    await expect(page.locator('path.fisb-tfr[data-key="8-15-999-ZOA-1"]')).toHaveCount(2);
+    expect(await page.evaluate(() => window.skycueApp.shapeLayers('8-15-999-ZOA-1'))).toEqual(
+      [{ kind: 'polygon' }, { kind: 'circle', radius_m: 5 * 1852 }]);
+    await expect(page.locator('path.fisb-tfr.cancelled')).toHaveCount(1);
+    await expect(page.locator('path.fisb-tfr.cancelled')).toHaveAttribute('stroke-dasharray', /\d/);
+    // A replaced record replaces its shapes (upsert by key).
+    await page.evaluate((it) => window.skycueApp.injectFisbItems([Object.assign({}, it,
+      { features: [it.features[0]] })]), tfr);
+    await expect(page.locator('path.fisb-tfr[data-key="8-15-999-ZOA-1"]')).toHaveCount(1);
+    const j = await clickableIndex(page, 'path.fisb-tfr[data-key="8-15-999-ZOA-1"]');
+    expect(j).toBe(0);
+    await page.locator('path.fisb-tfr[data-key="8-15-999-ZOA-1"]').click();
+    await expect(card).toHaveAttribute('data-key', '8-15-999-ZOA-1');
+    await expect(card.locator('pre.shape-text')).toHaveText('NOTAM-TFR TEST POLYGON');
+    await expect(card.locator('[data-field="alt"]')).toHaveText('0 – 3,000 ft AGL');
+    await expect(card.locator('[data-field="text_end"]')).toContainText('08:00:00Z');
+    // Expired (or cancelled): gone from the map and the panel.
+    await page.evaluate(() => window.skycueApp.injectFisbItems([
+      { type: 'fisb_expired', kind: 'twgo', product: 8, key: '8-15-999-ZOA-1', reason: 'cancelled' },
+      { type: 'fisb_expired', kind: 'twgo', product: 16, key: '16-15-998-ZOA-1', reason: 'expired' }]));
+    await expect(page.locator('path.fisb-tfr[data-key="8-15-999-ZOA-1"]')).toHaveCount(0);
+    await expect(page.locator('path.fisb-tfr.cancelled')).toHaveCount(0);
+    await expect(card).toBeHidden();
+    await expect(page.locator('path.fisb-tfr')).toHaveCount(shapes.length);
+    expect(errors).toEqual([]);
+  });
+
+  test('weather_panel_lists_metars_and_filters', async ({ page }) => {
+    const errors = watchErrors(page);
+    const metars = (await apiAt(FISB_BASE, '/api/fisb/text?type=metar')).body.records;
+    expect(metars.length).toBeGreaterThanOrEqual(100);
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    await expect(page.locator('#details')).toBeVisible();
+    await expect(page.locator('#tab-weather')).toHaveAttribute('aria-selected', 'true');
+    const rows = page.locator('#wx-list li.wx-row[data-kind="metar"]');
+    await expect.poll(() => rows.count()).toBe(metars.length);
+    for (const kind of ['taf', 'pirep', 'winds']) {
+      await expect.poll(() => page.locator(`#wx-list li.wx-row[data-kind="${kind}"]`).count()).toBeGreaterThan(0);
+    }
+    const first = rows.first();
+    await expect(first.locator('.wx-issued')).toHaveText(/^\d\d:\d\dZ/);
+    await expect(first).toHaveClass(/\bage-(fresh|aging|old)\b/);
+    await expect(page.locator('#wx-list li.wx-row[data-kind="winds"]').first().locator('.wx-valid')).toHaveText(/valid \d\d:\d\dZ/);
+    // Age colouring agrees with the pure function on the data clock.
+    const sample = metars[0];
+    const want = await page.evaluate((r) => window.skycuePure.ageClass(r.issued, window.skycueApp.dataNow()), sample);
+    await expect(page.locator(`#wx-list li.wx-row[data-key="${sample.key}"]`)).toHaveClass(new RegExp('\\bage-' + want + '\\b'));
+    // Text expands.
+    await first.locator('.wx-head').click();
+    await expect(first.locator('.wx-text')).toBeVisible();
+    await expect(first.locator('.wx-text')).toContainText('METAR');
+
+    // A 3-letter prefix that some but not all METAR stations have.
+    const counts = {};
+    for (const r of metars) counts[r.station.slice(0, 3)] = (counts[r.station.slice(0, 3)] || 0) + 1;
+    const prefix = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+    expect(counts[prefix]).toBeLessThan(metars.length);
+    await page.locator('#wx-filter').fill(prefix.toLowerCase());
+    await expect.poll(() => rows.count()).toBe(counts[prefix]);
+    for (const st of await rows.evaluateAll((els) => els.map((e) => e.getAttribute('data-station')))) {
+      expect(st.startsWith(prefix), st).toBe(true);
+    }
+    await page.locator('#wx-filter').fill('');
+    await expect.poll(() => rows.count()).toBe(metars.length);
+
+    // Live: an upsert adds or replaces by key, an expiry removes.
+    await page.evaluate(() => window.skycueApp.injectFisbItems([{ type: 'fisb_text', product: 413, key: 'metar:KZZZ',
+      record: { key: 'metar:KZZZ', kind: 'metar', station: 'KZZZ', issued: new Date(window.skycueApp.dataNow()).toISOString(),
+        text: 'METAR KZZZ TEST' } }]));
+    const zzz = page.locator('#wx-list li.wx-row[data-key="metar:KZZZ"]');
+    await expect(zzz).toHaveCount(1);
+    await expect(zzz).toHaveClass(/\bage-fresh\b/);
+    await expect.poll(() => rows.count()).toBe(metars.length + 1);
+    await page.evaluate((k) => window.skycueApp.injectFisbItems([
+      { type: 'fisb_expired', kind: 'text', product: 413, key: 'metar:KZZZ', station: 'KZZZ', reason: 'expired' },
+      { type: 'fisb_expired', kind: 'text', product: 413, key: k, station: '', reason: 'expired' }]), metars[1].key);
+    await expect(zzz).toHaveCount(0);
+    await expect.poll(() => rows.count()).toBe(metars.length - 1);
+    // The Track tab is still there.
+    await page.locator('#tab-track').click();
+    await expect(page.locator('#pane-track')).toBeVisible();
+    await expect(page.locator('#pane-weather')).toBeHidden();
+    expect(errors).toEqual([]);
+  });
+
+  test('layer_toggles_hide_show', async ({ page }) => {
+    const sig = (await apiAt(FISB_BASE, '/api/fisb/shapes?product=12')).body.features;
+    expect(sig.length).toBeGreaterThan(0);
+    await openFisbPage(page);
+    const paths = page.locator('path.fisb-sigmet');
+    await expect(paths).toHaveCount(0);
+    await layerToggle(page, 'SIGMET').check();
+    await expect(paths).toHaveCount(sig.length);
+    await layerToggle(page, 'SIGMET').uncheck();
+    await expect(paths).toHaveCount(0);
+    await layerToggle(page, 'SIGMET').check();
+    await expect(paths).toHaveCount(sig.length);
+    await expect(paths.first()).toHaveAttribute('stroke', '#bc8cff');
+  });
+
+  test('fisb_status_strip', async ({ page }) => {
+    await openFisbPage(page);
+    const status = (await apiAt(FISB_BASE, '/api/fisb/status')).body;
+    await expect(page.locator('#stats')).toContainText('uplinks/min');
+    await expect(page.locator('#stats')).toContainText('products/min');
+    await expect(page.locator('#stats')).toContainText('stations');
+    await expect(page.locator('#stats')).toContainText('radar age');
+    await expect.poll(async () => Number(await page.locator('#stat-fisb-stations').textContent()))
+      .toBe(status.stations.length);
+    expect(status.stations.length).toBeGreaterThanOrEqual(1);
+    await expect(page.locator('#stat-fisb-uplinks')).toHaveText(/^\d+$/, { timeout: 15000 });
+    await expect(page.locator('#stat-fisb-products')).toHaveText(/^\d+$/);
+    await expect(page.locator('#stat-radar-age')).toHaveText(/\d+ (s|min)/);
+  });
+
+  test('fisb_screenshots_weather', async ({ page }, testInfo) => {
+    await openFisbPage(page);
+    await layerToggle(page, 'TFR').check();
+    await layerToggle(page, 'SIGMET').check();
+    await expect.poll(() => page.locator('path.fisb-sigmet').count()).toBeGreaterThan(0);
+    const i = await clickableIndex(page, 'path.fisb-tfr');
+    await page.locator('path.fisb-tfr').nth(i).click();
+    await expect(page.locator('#shape-details')).toBeVisible();
+    await page.locator('#wx-filter').fill('KS');
+    await page.locator('#wx-list li.wx-row[data-kind="metar"]').first().locator('.wx-head').click();
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: testInfo.outputPath(`fisb-weather-${testInfo.project.name}.png`), fullPage: true });
+  });
 });

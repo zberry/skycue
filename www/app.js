@@ -89,6 +89,7 @@
     }
     L.control.scale({ position: 'bottomleft' }).addTo(map);
     map.on('click', function () { deselect(); });
+    initFisbLayers();
   }
 
   // Plain-background fallback: a lat/lon grid every 5° (zoomed out) or 1°.
@@ -125,7 +126,7 @@
     }
     updateRings();
     if (!fitted && rangeRing) {
-      map.fitBounds(rangeRing.getBounds(), { padding: [10, 10] });
+      map.fitBounds(rangeRing.getBounds(), { padding: [10, 10], animate: false });
       fitted = true;
     }
   }
@@ -294,6 +295,32 @@
   }
 
   // ---- selection panel ---------------------------------------------------------
+  // The side panel: a Track tab (the selected aircraft) and a Weather tab
+  // (FIS-B text reports and the clicked airspace shape).
+  var activeTab = 'track';
+  function setTab(tab) {
+    activeTab = tab;
+    ['track', 'weather'].forEach(function (t) {
+      $('tab-' + t).setAttribute('aria-selected', String(t === tab));
+      $('pane-' + t).hidden = t !== tab;
+    });
+    $('wx-toggle').setAttribute('aria-pressed', String(tab === 'weather' && !$('details').hidden));
+    if (tab === 'weather') renderWx(true);
+  }
+  function openPanel(tab) {
+    var wasHidden = $('details').hidden;
+    $('details').hidden = false;
+    setTab(tab);
+    if (wasHidden && map) map.invalidateSize({ pan: false });
+  }
+  function closePanel() {
+    deselect();
+    if ($('details').hidden) return;
+    $('details').hidden = true;
+    $('wx-toggle').setAttribute('aria-pressed', 'false');
+    if (map) map.invalidateSize({ pan: false });
+  }
+
   function select(key) {
     var prev = selectedKey;
     selectedKey = key;
@@ -302,21 +329,24 @@
       if (e) styleMarker(e);
     });
     actionsSig = '';
-    var wasHidden = $('details').hidden;
-    $('details').hidden = false;
+    openPanel('track');
     renderDetails();
-    if (wasHidden && map) map.invalidateSize({ pan: false });
     $('details').focus({ preventScroll: true });
     tableDirty = true;
   }
 
+  // Clears the aircraft selection; the panel closes with it when it shows
+  // the Track tab (the Weather tab stays open).
   function deselect() {
     if (selectedKey === null) return;
     var e = tracks.get(selectedKey);
     selectedKey = null;
     if (e) styleMarker(e);
-    $('details').hidden = true;
-    if (map) map.invalidateSize({ pan: false });
+    renderDetails();
+    if (activeTab === 'track' && !$('details').hidden) {
+      $('details').hidden = true;
+      if (map) map.invalidateSize({ pan: false });
+    }
     tableDirty = true;
   }
 
@@ -353,7 +383,13 @@
 
   function renderDetails() {
     var e = selectedKey && tracks.get(selectedKey);
-    if (!e) return;
+    $('track-empty').hidden = !!e;
+    $('details-actions').hidden = !e;
+    $('details-fields').hidden = !e;
+    if (!e) {
+      $('details-title').textContent = 'Track';
+      return;
+    }
     var t = Object.assign({}, e.t);
     var r = cfg.receiver;
     if (r && typeof t.lat === 'number') t.bearing = P.bearingDeg(r.lat, r.lon, t.lat, t.lon);
@@ -597,6 +633,571 @@
     else renderTable();
   }
 
+  // ---- FIS-B: radar, rasters, airspace, weather ---------------------------------
+  // docs/web-api.md, FIS-B. The snapshot carries only the status object; the
+  // products come from /api/fisb/* after it, then the WebSocket items keep
+  // them current (radar/raster items are notifications: GET the mosaic).
+  var PX_PER_BIN = 4;               // canvas pixels per smallest bin
+  var CANVAS_CAP = 4096;            // canvas width/height limit
+  var RADAR_FADE_MS = 75 * 60000;   // older than this: drawn at half opacity
+  var FISB_POLL_MS = 5000;          // /api/fisb/status for the strip's rates
+  var WX_DEBOUNCE_MS = 200;
+  var WX_KINDS = [['metar', 'METAR'], ['taf', 'TAF'], ['pirep', 'PIREP'], ['winds', 'Winds aloft']];
+  var SHAPE_LAYERS = [
+    ['tfr', 'TFR'], ['sigmet', 'SIGMET / convective'], ['airmet', 'AIRMET / G-AIRMET'], ['cwa', 'CWA'], ['sua', 'SUA']
+  ];
+  var RADAR_NAMES = { 63: 'regional', 64: 'conus' };
+
+  var fisb = {
+    gen: 0,                         // bumped per snapshot: older responses are dropped
+    loading: false, loaded: false, queue: [],
+    status: null, prevStatus: null, prevStatusWall: 0,
+    text: new Map(),                // key -> text record (METAR, TAF, PIREP, winds)
+    shapes: new Map(),              // properties.key -> {fam, layers, props}
+    shapeKey: null,                 // the shape shown in the panel
+    rasterHeads: new Map(),         // raster layer key -> mosaic head
+    rasterSel: null, raster: null,  // the chosen raster layer and its drawing
+    wxDirty: true, wxFilter: '', wxTimer: null, wxExpanded: {}
+  };
+  var radar = {
+    regional: { product: 63, label: 'Radar (regional)', head: null, drawn: null, fetching: false, again: false },
+    conus: { product: 64, label: 'Radar (CONUS)', head: null, drawn: null, fetching: false, again: false }
+  };
+  var radarGroups = {}, shapeGroups = {}, rasterGroup = null;
+
+  function swatchName(color, name) {
+    return '<i class="sw" style="color:' + color + '"></i>' + esc(name);
+  }
+
+  function initFisbLayers() {
+    map.createPane('fisbRaster');
+    map.getPane('fisbRaster').style.zIndex = 350;   // under the shapes (overlayPane, 400)
+    map.getPane('fisbRaster').style.pointerEvents = 'none';
+    var overlays = {};
+    ['conus', 'regional'].forEach(function (w) {
+      radarGroups[w] = L.layerGroup().addTo(map);    // radar: on by default
+    });
+    overlays[swatchName('#02fd02', radar.regional.label)] = radarGroups.regional;
+    overlays[swatchName('#008e00', radar.conus.label)] = radarGroups.conus;
+    rasterGroup = L.layerGroup();
+    overlays[swatchName('#54278f', 'Other rasters')] = rasterGroup;
+    SHAPE_LAYERS.forEach(function (s) {
+      shapeGroups[s[0]] = L.layerGroup();
+      overlays[swatchName(P.SHAPE_COLORS[s[0]], s[1])] = shapeGroups[s[0]];
+    });
+    L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(map);
+    rasterGroup.on('add', function () { $('raster-box').hidden = false; loadRaster(); });
+    rasterGroup.on('remove', function () { $('raster-box').hidden = true; });
+
+    var WxControl = L.Control.extend({
+      options: { position: 'bottomright' },
+      onAdd: function () {
+        var div = L.DomUtil.create('div', 'wx-control');
+        div.innerHTML =
+          '<div id="radar-age">radar –</div>' +
+          '<label for="radar-opacity">Opacity</label> ' +
+          '<input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7">' +
+          '<div id="radar-legend" class="legend-row"></div>' +
+          '<div id="raster-box" hidden>' +
+          '<label for="raster-select">Raster</label> <select id="raster-select"></select>' +
+          '<div id="raster-legend"></div></div>';
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+        return div;
+      }
+    });
+    new WxControl().addTo(map);
+    $('radar-opacity').addEventListener('input', applyRadarOpacity);
+    $('raster-select').addEventListener('change', function () {
+      fisb.rasterSel = $('raster-select').value || null;
+      loadRaster();
+    });
+  }
+
+  // ---- mosaics ----
+  function rasterValueLevel(legend) {
+    // Icing packs three fields into a value; its palette is indexed by one.
+    if (!legend || !legend.palette_field || !Array.isArray(legend.fields)) return null;
+    for (var i = 0; i < legend.fields.length; i++) {
+      var f = legend.fields[i];
+      if (f.name === legend.palette_field) return function (v) { return (v >> f.shift) & f.mask; };
+    }
+    return null;
+  }
+
+  // Paints a mosaic onto one canvas over its blocks' box (rows spaced in Web
+  // Mercator, as the image overlay is stretched). Bad blocks are skipped.
+  function paintMosaic(m) {
+    var blocks = m.blocks || [];
+    var bounds = P.mosaicBounds(blocks);
+    if (!bounds) return null;
+    var dlat = Infinity, dlon = Infinity;
+    blocks.forEach(function (b) {
+      dlat = Math.min(dlat, b.dlat);
+      dlon = Math.min(dlon, b.dlon);
+    });
+    var size = P.mosaicCanvasSize(bounds, dlat, dlon, PX_PER_BIN, CANVAS_CAP);
+    var canvas = document.createElement('canvas');
+    canvas.width = size.width;
+    canvas.height = size.height;
+    var ctx = canvas.getContext('2d');
+    var w = bounds[0][1], yN = P.mercY(bounds[1][0]);
+    var kx = size.width / (bounds[1][1] - w), ky = size.height / (yN - P.mercY(bounds[0][0]));
+    var toLevel = rasterValueLevel(m.legend);
+    var colors = {};
+    function colorOf(v) {
+      if (!(v in colors)) colors[v] = P.dbzColor(toLevel ? toLevel(v) : v, m.palette);
+      return colors[v];
+    }
+    var bins = 0, bad = 0;
+    blocks.forEach(function (b) {
+      var v;
+      try { v = P.expandRle(b.rle); } catch (err) { bad++; return; }
+      for (var r = 0; r < 4; r++) {
+        var top = b.lat0 - r * b.dlat;
+        var y0 = Math.round((yN - P.mercY(top)) * ky);
+        var y1 = Math.max(y0 + 1, Math.round((yN - P.mercY(top - b.dlat)) * ky));
+        var c = 0;
+        while (c < 32) {
+          var val = v[r * 32 + c], c1 = c + 1;
+          while (c1 < 32 && v[r * 32 + c1] === val) c1++;
+          var col = colorOf(val);
+          if (col !== 'transparent') {
+            var x0 = Math.round((b.lon0 + c * b.dlon - w) * kx);
+            var x1 = Math.max(x0 + 1, Math.round((b.lon0 + c1 * b.dlon - w) * kx));
+            ctx.fillStyle = col;
+            ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+            bins += c1 - c;
+          }
+          c = c1;
+        }
+      }
+    });
+    return { canvas: canvas, bounds: bounds, blocks: blocks.length, bins: bins, bad: bad };
+  }
+
+  function canvasPainted(canvas) {
+    if (!canvas) return 0;
+    var d = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    var n = 0;
+    for (var i = 3; i < d.length; i += 4) if (d[i]) n++;
+    return n;
+  }
+
+  function mosaicOverlay(group, drawing, className) {
+    var o = L.imageOverlay(drawing.canvas.toDataURL('image/png'), drawing.bounds, {
+      pane: 'fisbRaster', className: className, interactive: false
+    });
+    group.clearLayers();
+    group.addLayer(o);
+    return o;
+  }
+
+  function radarOpacity() { return Number($('radar-opacity').value) || 0.7; }
+  function productAgeMs(head) {
+    var t = head && Date.parse(head.product_time);
+    return t ? dataNow() - t : NaN;
+  }
+  function applyRadarOpacity() {
+    var base = radarOpacity();
+    Object.keys(radar).forEach(function (w) {
+      var d = radar[w].drawn;
+      if (!d) return;
+      var faded = productAgeMs(d.head) > RADAR_FADE_MS;
+      d.overlay.setOpacity(base * (faded ? 0.5 : 1));
+      var el = d.overlay.getElement();
+      if (el) el.classList.toggle('faded', faded);
+    });
+    if (fisb.raster) fisb.raster.overlay.setOpacity(base);
+  }
+
+  function loadRadar(which) {
+    var r = radar[which];
+    if (r.fetching) { r.again = true; return; }
+    r.fetching = true;
+    var gen = fisb.gen;
+    request('GET', 'api/fisb/radar?product=' + which).then(function (m) {
+      if (gen !== fisb.gen) return;
+      var d = paintMosaic(m);
+      if (!d) { clearRadar(which); return; }
+      d.head = m;
+      d.overlay = mosaicOverlay(radarGroups[which], d, 'fisb-radar fisb-radar-' + which);
+      r.drawn = d;
+      if (which === 'regional' || !radar.regional.drawn) renderLegend($('radar-legend'), m, false);
+      radarAgeTick();
+    }).catch(function () {
+      if (gen === fisb.gen) clearRadar(which);   // gone (404) or skycued away: the next status says
+    }).then(function () {
+      r.fetching = false;
+      if (r.again) { r.again = false; loadRadar(which); }
+    });
+  }
+  function clearRadar(which) {
+    radar[which].drawn = null;
+    radar[which].head = null;
+    radarGroups[which].clearLayers();
+  }
+
+  function renderLegend(el, m, withTitle) {
+    var lg = m.legend || {};
+    var labels = {};
+    (lg.levels || []).forEach(function (l) { labels[l.level] = l.label + (l.approximate ? ' (approximate)' : ''); });
+    var items = (m.palette || []).filter(function (p) { return p.color && p.color !== 'transparent'; });
+    el.innerHTML = (withTitle ? '<div class="legend-title">' + esc(lg.title || m.name || '') +
+      (lg.approximate ? ' <span class="approx">(approximate)</span>' : '') +
+      (typeof lg.altitude_ft === 'number' ? ' · ' + (lg.altitude_approximate ? '≈ ' : '') + P.thousands(lg.altitude_ft) + ' ft' : '') +
+      '</div>' : '') +
+      items.map(function (p) {
+        var label = labels[p.level] !== undefined ? labels[p.level] : 'level ' + p.level;
+        return '<span class="legend-item" title="' + esc(label) + '"><i class="sw" style="color:' + esc(p.color) + '"></i>' +
+          (withTitle ? esc(label) : esc(String(p.level))) + '</span>';
+      }).join('');
+  }
+
+  function rasterLabel(h) {
+    var alt = '';
+    if (typeof h.altitude_code === 'number') {
+      var ft = (h.product === 71 || h.product === 91 ? 18000 : 2000) + h.altitude_code * 2000;
+      alt = ' · ≈ ' + P.thousands(ft) + ' ft';
+    }
+    return (h.name || 'product ' + h.product) + alt;
+  }
+  function renderRasterSelect() {
+    var sel = $('raster-select');
+    var heads = Array.from(fisb.rasterHeads.values()).sort(function (a, b) {
+      return a.product - b.product || (a.altitude_code || 0) - (b.altitude_code || 0);
+    });
+    var sig = heads.map(function (h) { return h.key; }).join(',');
+    if (!fisb.rasterSel || !fisb.rasterHeads.has(fisb.rasterSel)) fisb.rasterSel = heads.length ? heads[0].key : null;
+    if (sel.getAttribute('data-sig') !== sig) {
+      sel.setAttribute('data-sig', sig);
+      sel.innerHTML = heads.map(function (h) {
+        return '<option value="' + esc(h.key) + '">' + esc(rasterLabel(h)) + '</option>';
+      }).join('');
+    }
+    sel.disabled = !heads.length;
+    if (fisb.rasterSel) sel.value = fisb.rasterSel;
+  }
+  function loadRaster() {
+    if (!map.hasLayer(rasterGroup)) return;
+    var h = fisb.rasterSel && fisb.rasterHeads.get(fisb.rasterSel);
+    if (!h) { clearRaster(); return; }
+    var gen = fisb.gen, key = h.key;
+    var q = 'api/fisb/raster?product=' + h.product + (typeof h.altitude_code === 'number' ? '&altitude=' + h.altitude_code : '');
+    request('GET', q).then(function (m) {
+      if (gen !== fisb.gen || key !== fisb.rasterSel || !map.hasLayer(rasterGroup)) return;
+      var d = paintMosaic(m);
+      if (!d) { clearRaster(); return; }
+      d.key = key;
+      d.overlay = mosaicOverlay(rasterGroup, d, 'fisb-raster fisb-raster-' + key);
+      fisb.raster = d;
+      renderLegend($('raster-legend'), m, true);
+      applyRadarOpacity();
+    }).catch(function () { if (key === fisb.rasterSel) clearRaster(); });
+  }
+  function clearRaster() {
+    fisb.raster = null;
+    rasterGroup.clearLayers();
+    $('raster-legend').innerHTML = fisb.rasterHeads.size ? '' : '<span class="msg">No raster products.</span>';
+  }
+
+  // ---- airspace shapes ----
+  function shapeLayer(f, key) {
+    var p = f.properties || {}, g = f.geometry;
+    if (!g || !g.coordinates) return null;
+    var style = P.shapeStyle(p.product, !!p.cancelled);
+    var layer, kind;
+    if (g.type === 'Point') {
+      var ll = [g.coordinates[1], g.coordinates[0]];
+      if (p.geom === 'circle' && p.radius_nm > 0) {
+        layer = L.circle(ll, Object.assign({}, style, { radius: p.radius_nm * NM }));
+        kind = 'circle';
+      } else {
+        layer = L.circleMarker(ll, Object.assign({}, style, { radius: 5, fillOpacity: 0.5 }));
+        kind = 'point';
+      }
+    } else {
+      layer = L.geoJSON(f, { style: function () { return style; } });
+      kind = g.type === 'LineString' ? 'polyline' : 'polygon';
+    }
+    var leaves = layer instanceof L.LayerGroup ? layer.getLayers() : [layer];
+    leaves.forEach(function (l) {
+      l.on('add', function () {
+        var el = l.getElement();
+        if (el) el.setAttribute('data-key', key);
+      });
+    });
+    layer.on('click', function (ev) {
+      L.DomEvent.stopPropagation(ev);
+      showShape(key);
+    });
+    layer.fisbKind = kind;
+    return layer;
+  }
+  function removeShapes(key) {
+    var s = fisb.shapes.get(key);
+    if (!s) return;
+    s.layers.forEach(function (l) { shapeGroups[s.fam].removeLayer(l); });
+    fisb.shapes.delete(key);
+    if (fisb.shapeKey === key) hideShape();
+  }
+  function setShapes(key, features) {
+    var shown = fisb.shapeKey === key;
+    var s = fisb.shapes.get(key);
+    if (s) {
+      s.layers.forEach(function (l) { shapeGroups[s.fam].removeLayer(l); });
+      fisb.shapes.delete(key);
+    }
+    var fam = features && features.length ? P.shapeFamily(features[0].properties.product) : null;
+    if (!fam) {
+      if (shown) hideShape();
+      return;
+    }
+    var layers = [];
+    features.forEach(function (f) {
+      var l = shapeLayer(f, key);
+      if (l) {
+        layers.push(l);
+        shapeGroups[fam].addLayer(l);
+      }
+    });
+    fisb.shapes.set(key, { fam: fam, layers: layers, props: features[0].properties });
+    if (shown) showShape(key);
+  }
+
+  // A TWGO time: date and time, and how far from the data clock (NOTAM
+  // ends are often days ahead).
+  function fmtWhen(iso) {
+    var ms = Date.parse(iso);
+    if (isNaN(ms)) return String(iso);
+    var d = ms - dataNow(), a = Math.abs(d);
+    var rel = a < 60000 ? Math.round(a / 1000) + ' s' : a < 3600000 ? Math.round(a / 60000) + ' min' :
+      a < 172800000 ? Math.floor(a / 3600000) + ' h ' + Math.round(a % 3600000 / 60000) + ' min' :
+      Math.round(a / 86400000) + ' d';
+    return new Date(ms).toISOString().substr(0, 19).replace('T', ' ') + 'Z · ' + (d > 0 ? 'in ' + rel : rel + ' ago');
+  }
+  function altText(p) {
+    var lo = p.alt_low_ft, hi = p.alt_high_ft;
+    if (typeof lo !== 'number' && typeof hi !== 'number') return null;
+    if (!lo && !hi) return null;   // no altitudes given (point NOTAMs)
+    var range = typeof lo === 'number' && typeof hi === 'number' ? P.thousands(lo) + ' – ' + P.thousands(hi) :
+      typeof lo === 'number' ? 'from ' + P.thousands(lo) : 'up to ' + P.thousands(hi);
+    return range + ' ft ' + (p.agl ? 'AGL' : 'MSL');
+  }
+  function showShape(key) {
+    var s = fisb.shapes.get(key);
+    if (!s) return;
+    var p = s.props;
+    fisb.shapeKey = key;
+    var card = $('shape-details');
+    card.setAttribute('data-key', key);
+    $('shape-title').textContent = (p.name || 'product ' + p.product) + (p.label || p.location ? ' · ' + (p.label || p.location) : '');
+    var rows = [
+      ['product', 'Product', (p.name || '') + ' (' + p.product + ')'],
+      ['key', 'Key', key],
+      ['location', 'Location', p.location || null],
+      ['start', 'Start', p.start ? fmtWhen(p.start) : null],
+      ['text_end', 'Text end', p.text_end ? fmtWhen(p.text_end) : null],
+      ['graphics_end', 'Graphics end', p.graphics_end ? fmtWhen(p.graphics_end) : null],
+      ['alt', 'Altitudes', altText(p)],
+      ['cancelled', 'Cancelled', yesNo(p.cancelled)]
+    ];
+    $('shape-fields').innerHTML = rows.filter(function (r) { return r[2] !== null && r[2] !== undefined; }).map(function (r) {
+      return '<tr><th scope="row">' + esc(r[1]) + '</th><td data-field="' + r[0] + '">' + esc(r[2]) + '</td></tr>';
+    }).join('');
+    var pre = card.querySelector('pre.shape-text');
+    pre.textContent = p.text || '';
+    pre.hidden = !p.text;
+    card.hidden = false;
+    openPanel('weather');
+    card.scrollIntoView({ block: 'nearest' });
+  }
+  function hideShape() {
+    fisb.shapeKey = null;
+    $('shape-details').hidden = true;
+  }
+
+  // ---- text reports ----
+  function upsertText(rec) {
+    if (!rec || !rec.key || !rec.kind) return;   // a TWGO record without graphics: not listed
+    fisb.text.set(rec.key, rec);
+    fisb.wxDirty = true;
+  }
+  function hhmm(iso) {
+    var ms = Date.parse(iso);
+    return isNaN(ms) ? '—' : new Date(ms).toISOString().substr(11, 5) + 'Z';
+  }
+  function shortAge(ms, now) { return P.formatAge(ms, now).replace(/ ago$/, ''); }
+
+  function renderWx(force) {
+    if (!force && (!fisb.wxDirty || $('pane-weather').hidden || $('details').hidden)) return;
+    fisb.wxDirty = false;
+    var now = dataNow(), prefix = fisb.wxFilter;
+    var groups = {};
+    WX_KINDS.forEach(function (k) { groups[k[0]] = []; });
+    var total = 0;
+    fisb.text.forEach(function (r) {
+      if (!groups[r.kind]) return;
+      total++;
+      if (P.stationMatches(r.station, prefix)) groups[r.kind].push(r);
+    });
+    var shown = 0;
+    $('wx-list').innerHTML = WX_KINDS.map(function (k) {
+      var list = groups[k[0]].sort(function (a, b) {
+        return a.station < b.station ? -1 : a.station > b.station ? 1 : Date.parse(a.issued) - Date.parse(b.issued);
+      });
+      shown += list.length;
+      return '<section class="wx-group" data-kind="' + k[0] + '"><h3>' + k[1] + ' <span class="n">' + list.length +
+        '</span></h3>' + (list.length ? '<ul>' + list.map(function (r) {
+        var open = !!fisb.wxExpanded[r.key];
+        var t = Date.parse(r.issued);
+        return '<li class="wx-row age-' + P.ageClass(r.issued, now) + '" data-key="' + esc(r.key) + '" data-kind="' + r.kind +
+          '" data-station="' + esc(r.station) + '"><button type="button" class="wx-head" aria-expanded="' + open + '">' +
+          '<span class="wx-st">' + esc(r.station || '—') + '</span><span class="wx-issued">' + hhmm(r.issued) + '</span>' +
+          (r.valid ? '<span class="wx-valid">valid ' + hhmm(r.valid) + '</span>' : '') +
+          '<span class="wx-age">' + (isNaN(t) ? '' : shortAge(t, now)) + '</span></button>' +
+          '<pre class="wx-text"' + (open ? '' : ' hidden') + '>' + esc(r.text || '') + '</pre></li>';
+      }).join('') + '</ul>' : '<p class="msg">None' + (prefix ? ' matching' : '') + '.</p>') + '</section>';
+    }).join('');
+    $('wx-summary').textContent = prefix ? shown + ' of ' + total + ' reports match "' + prefix.toUpperCase() + '"' :
+      total + ' reports' + (fisb.loaded ? '' : ' (loading…)');
+  }
+
+  // ---- status strip ----
+  function applyFisbStatus(st) {
+    if (!st) return;
+    var now = Date.now();
+    fisb.status = st;
+    setStat('stat-fisb-stations', String((st.stations || []).length));
+    var prev = fisb.prevStatus;
+    if (prev && now > fisb.prevStatusWall) {
+      var perMin = 60000 / (now - fisb.prevStatusWall);
+      setStat('stat-fisb-uplinks', (Math.max(0, (st.uplinks || 0) - (prev.uplinks || 0)) * perMin).toFixed(0));
+      setStat('stat-fisb-products', (Math.max(0, (st.products || 0) - (prev.products || 0)) * perMin).toFixed(0));
+    }
+    fisb.prevStatus = st;
+    fisb.prevStatusWall = now;
+    if (!st.enabled) return;
+    // Missed notifications (or a mosaic newer than the drawing): fetch it.
+    Object.keys(radar).forEach(function (w) {
+      var h = st.radar && st.radar[w];
+      if (!h) {
+        if (radar[w].drawn && fisb.loaded) clearRadar(w);
+        return;
+      }
+      radar[w].head = h;
+      var d = radar[w].drawn;
+      if (!d || d.head.product_time !== h.product_time || d.head.published !== h.published || d.blocks !== h.blocks) {
+        if (!radar[w].fetching) loadRadar(w);
+      }
+    });
+    var keys = {};
+    (st.rasters || []).forEach(function (h) { keys[h.key] = true; fisb.rasterHeads.set(h.key, h); });
+    Array.from(fisb.rasterHeads.keys()).forEach(function (k) { if (!keys[k]) fisb.rasterHeads.delete(k); });
+    renderRasterSelect();
+    if (fisb.raster && !fisb.rasterHeads.has(fisb.raster.key)) clearRaster();
+  }
+  function pollFisb() {
+    if (!connected) return;
+    var gen = fisb.gen;
+    request('GET', 'api/fisb/status').then(function (st) {
+      if (gen === fisb.gen) applyFisbStatus(st);
+    }).catch(function () { /* the WebSocket watchdog reports a dead skycued */ });
+  }
+  function radarAgeTick() {
+    var parts = [], newest = NaN;
+    Object.keys(radar).forEach(function (w) {
+      var d = radar[w].drawn;
+      if (!d) return;
+      var age = productAgeMs(d.head);
+      if (!(newest <= age)) newest = age;
+      parts.push((w === 'conus' ? 'CONUS' : 'regional') + ' ' + hhmm(d.head.product_time) + ' · ' +
+        shortAge(Date.parse(d.head.product_time), dataNow()) + (age > RADAR_FADE_MS ? ' (stale)' : ''));
+    });
+    $('radar-age').textContent = parts.length ? 'Radar ' + parts.join(', ') : 'No radar';
+    setStat('stat-radar-age', isNaN(newest) ? '–' : shortAge(dataNow() - newest, dataNow()));
+    applyRadarOpacity();
+  }
+
+  // ---- snapshot and items ----
+  function fisbReset(st) {
+    fisb.gen++;
+    var gen = fisb.gen;
+    fisb.text.clear();
+    Array.from(fisb.shapes.keys()).forEach(removeShapes);
+    hideShape();
+    Object.keys(radar).forEach(clearRadar);
+    fisb.rasterHeads.clear();
+    clearRaster();
+    fisb.prevStatus = null;
+    fisb.loaded = false;
+    fisb.queue = [];
+    fisb.wxDirty = true;
+    if (!st || !st.enabled) {
+      fisb.loading = false;
+      fisb.loaded = true;
+      applyFisbStatus(st);
+      renderWx();
+      return;
+    }
+    fisb.loading = true;
+    applyFisbStatus(st);
+    Promise.all([request('GET', 'api/fisb/text'), request('GET', 'api/fisb/shapes')]).then(function (r) {
+      if (gen !== fisb.gen) return;
+      (r[0].records || []).forEach(upsertText);
+      var byKey = new Map();
+      (r[1].features || []).forEach(function (f) {
+        var k = f.properties && f.properties.key;
+        if (!k) return;
+        if (!byKey.has(k)) byKey.set(k, []);
+        byKey.get(k).push(f);
+      });
+      byKey.forEach(function (fs, k) { setShapes(k, fs); });
+    }).catch(function () { /* reloaded with the next snapshot */ }).then(function () {
+      if (gen !== fisb.gen) return;
+      fisb.loading = false;
+      var q = fisb.queue;
+      fisb.queue = [];
+      q.forEach(onFisbItem);
+      fisb.loaded = true;
+      fisb.wxDirty = true;
+      renderWx();
+    });
+  }
+
+  function onFisbItem(it) {
+    if (fisb.loading) { fisb.queue.push(it); return; }
+    switch (it.type) {
+      case 'fisb_text': upsertText(it.record); break;
+      case 'fisb_shape': setShapes(it.key, it.features || []); break;
+      case 'fisb_radar': {
+        var w = RADAR_NAMES[it.product];
+        if (w) { radar[w].head = it; loadRadar(w); }
+        break;
+      }
+      case 'fisb_raster':
+        fisb.rasterHeads.set(it.key, it);
+        renderRasterSelect();
+        if (it.key === fisb.rasterSel) loadRaster();
+        break;
+      case 'fisb_expired':
+        if (it.kind === 'text') {
+          if (fisb.text.delete(it.key)) fisb.wxDirty = true;
+        } else if (it.kind === 'twgo') {
+          removeShapes(it.key);
+        } else if (it.kind === 'radar') {
+          var which = RADAR_NAMES[it.product] || (it.key === '64' ? 'conus' : it.key === '63' ? 'regional' : null);
+          if (which) clearRadar(which);
+        } else if (it.kind === 'raster') {
+          fisb.rasterHeads.delete(it.key);
+          renderRasterSelect();
+          if (fisb.raster && fisb.raster.key === it.key) clearRaster();
+        }
+        break;
+      default: break;
+    }
+  }
+
   // ---- WebSocket -----------------------------------------------------------------
   function setConnected(on) {
     connected = on;
@@ -620,6 +1221,7 @@
     attempt = 0;
     lastStatsWall = Date.now();
     setConnected(true);
+    if (map) fisbReset(s.fisb);
   }
 
   function onItem(it) {
@@ -635,6 +1237,9 @@
       case 'stats': lastStatsWall = Date.now(); applyStats(it); break;
       case 'filters': applyFilters(it); break;
       case 'lists': applyLists(it); break;
+      case 'fisb_text': case 'fisb_shape': case 'fisb_radar': case 'fisb_raster': case 'fisb_expired':
+        onFisbItem(it);
+        break;
       default: break;
     }
   }
@@ -719,7 +1324,31 @@
       });
     });
     $('save-baseline').addEventListener('click', saveBaseline);
-    $('details-close').addEventListener('click', deselect);
+    $('details-close').addEventListener('click', closePanel);
+    $('tab-track').addEventListener('click', function () { setTab('track'); });
+    $('tab-weather').addEventListener('click', function () { setTab('weather'); });
+    $('wx-toggle').addEventListener('click', function () {
+      if (!$('details').hidden && activeTab === 'weather') closePanel();
+      else openPanel('weather');
+    });
+    $('shape-close').addEventListener('click', hideShape);
+    $('wx-filter').addEventListener('input', function () {
+      clearTimeout(fisb.wxTimer);
+      fisb.wxTimer = setTimeout(function () {
+        fisb.wxFilter = $('wx-filter').value.trim();
+        renderWx(true);
+      }, WX_DEBOUNCE_MS);
+    });
+    $('wx-list').addEventListener('click', function (ev) {
+      var head = ev.target.closest('.wx-head');
+      if (!head) return;
+      var li = head.closest('.wx-row');
+      var key = li.getAttribute('data-key');
+      var open = !fisb.wxExpanded[key];
+      if (open) fisb.wxExpanded[key] = true; else delete fisb.wxExpanded[key];
+      head.setAttribute('aria-expanded', String(open));
+      li.querySelector('.wx-text').hidden = !open;
+    });
     $('table-toggle').addEventListener('click', toggleTable);
     Array.prototype.forEach.call(document.querySelectorAll('#table-view th'), function (th) {
       th.addEventListener('click', function () { sortBy(th.getAttribute('data-key')); });
@@ -732,13 +1361,18 @@
       if (tr) select(tr.getAttribute('data-key'));
     });
     document.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape') deselect();
+      if (ev.key === 'Escape') closePanel();
     });
     setInterval(prune, 2000);
     setInterval(watchdog, 1000);
+    setInterval(pollFisb, FISB_POLL_MS);
+    var ticks = 0;
     setInterval(function () {
       if (selectedKey) renderDetails(); // ages
       if (tableDirty) renderTable();
+      if (map) radarAgeTick();
+      if (++ticks % 15 === 0) fisb.wxDirty = true; // ages and age classes
+      renderWx();
     }, 1000);
   }
 
@@ -762,7 +1396,31 @@
     },
     connected: function () { return connected; },
     // Adds a marker skycued does not know (the reconnect test checks it goes).
-    injectTestMarker: function (t) { onTrack(t, true); }
+    injectTestMarker: function (t) { onTrack(t, true); },
+    dataNow: dataNow,
+    // FIS-B: the initial /api/fisb/* load is done; WebSocket items through
+    // the page's own handler; what the radar canvases hold.
+    fisbLoaded: function () { return fisb.loaded; },
+    injectFisbItems: function (items) { items.forEach(onItem); },
+    radarStats: function () {
+      var out = { blocks: 0, painted: 0, products: {} };
+      Object.keys(radar).forEach(function (w) {
+        var d = radar[w].drawn;
+        var p = { blocks: d ? d.blocks : 0, painted: d ? canvasPainted(d.canvas) : 0,
+          width: d ? d.canvas.width : 0, height: d ? d.canvas.height : 0 };
+        out.products[w] = p;
+        out.blocks += p.blocks;
+        out.painted += p.painted;
+      });
+      return out;
+    },
+    radarBounds: function (w) { return radar[w] && radar[w].drawn ? radar[w].drawn.bounds : null; },
+    shapeLayers: function (key) {
+      var s = fisb.shapes.get(key);
+      return s ? s.layers.map(function (l) {
+        return l.fisbKind === 'circle' ? { kind: 'circle', radius_m: l.getRadius() } : { kind: l.fisbKind };
+      }) : null;
+    }
   };
 
   wire();

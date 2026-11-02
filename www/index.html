@@ -20,6 +20,11 @@
   <span class="stat">UDP targets <b id="stat-udp">–</b></span>
   <span class="stat">recorder drops <b id="stat-rec-drops">–</b></span>
   <span class="stat">web clients <b id="stat-web">–</b></span>
+  <span class="stat fisb">uplinks/min <b id="stat-fisb-uplinks">–</b></span>
+  <span class="stat fisb">products/min <b id="stat-fisb-products">–</b></span>
+  <span class="stat fisb">radar age <b id="stat-radar-age">–</b></span>
+  <span class="stat fisb">stations <b id="stat-fisb-stations">–</b></span>
+  <button id="wx-toggle" type="button" aria-pressed="false">Weather</button>
   <button id="table-toggle" type="button" aria-pressed="false">Table</button>
 </header>
 <div id="conn-banner" role="alert" hidden>Disconnected from skycued, reconnecting…</div>
@@ -88,13 +93,36 @@
       </table>
     </div>
   </div>
-  <aside id="details" tabindex="-1" aria-label="Selected aircraft" hidden>
-    <div class="details-head">
-      <h2 id="details-title"></h2>
+  <aside id="details" tabindex="-1" aria-label="Side panel" hidden>
+    <div class="tabs">
+      <div role="tablist" aria-label="Side panel">
+        <button type="button" role="tab" id="tab-track" aria-controls="pane-track" aria-selected="true">Track</button>
+        <button type="button" role="tab" id="tab-weather" aria-controls="pane-weather" aria-selected="false">Weather</button>
+      </div>
       <button type="button" id="details-close" aria-label="Close (Esc)">×</button>
     </div>
-    <div id="details-actions"></div>
-    <table id="details-fields"><tbody></tbody></table>
+    <section id="pane-track" role="tabpanel" aria-labelledby="tab-track">
+      <div class="details-head">
+        <h2 id="details-title"></h2>
+      </div>
+      <p id="track-empty" class="msg">Click an aircraft on the map.</p>
+      <div id="details-actions"></div>
+      <table id="details-fields"><tbody></tbody></table>
+    </section>
+    <section id="pane-weather" role="tabpanel" aria-labelledby="tab-weather" hidden>
+      <div id="shape-details" hidden>
+        <div class="details-head">
+          <h2 id="shape-title"></h2>
+          <button type="button" id="shape-close" aria-label="Close airspace details">×</button>
+        </div>
+        <table class="kv"><tbody id="shape-fields"></tbody></table>
+        <pre class="shape-text"></pre>
+      </div>
+      <input id="wx-filter" type="search" placeholder="Station prefix (e.g. KSF)" aria-label="Filter by station prefix"
+        autocomplete="off" spellcheck="false">
+      <p id="wx-summary" class="msg" role="status"></p>
+      <div id="wx-list"></div>
+    </section>
   </aside>
 </main>
 <script src="vendor/leaflet/leaflet.js"></script>

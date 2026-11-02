@@ -165,5 +165,133 @@ test('formatAge', () => {
   assert.strictEqual(P.formatAge(Date.parse('2026-11-01T12:00:00.000Z'), Date.parse('2026-11-01T12:03:05.000Z')), '3 min 5 s ago');
 });
 
+// ---- FIS-B (docs/web-api.md, FIS-B) ------------------------------------------
+test('expandRle expands runs to exactly 128 bins', () => {
+  const bins = P.expandRle([[0, 100], [3, 20], [7, 8]]);
+  assert.ok(bins instanceof Uint8Array);
+  assert.strictEqual(bins.length, 128);
+  assert.strictEqual(bins[0], 0);
+  assert.strictEqual(bins[99], 0);
+  assert.strictEqual(bins[100], 3);
+  assert.strictEqual(bins[119], 3);
+  assert.strictEqual(bins[120], 7);
+  assert.strictEqual(bins[127], 7);
+  assert.deepStrictEqual(Array.from(P.expandRle([[0, 128]])), new Array(128).fill(0));
+});
+test('expandRle rejects a bad sum, a bad run and a non-array', () => {
+  assert.throws(() => P.expandRle([[0, 127]]), /128/);
+  assert.throws(() => P.expandRle([[0, 100], [1, 29]]), /128/);
+  assert.throws(() => P.expandRle([[0, -1], [1, 129]]));
+  assert.throws(() => P.expandRle([[0, 64], [256, 64]]));
+  assert.throws(() => P.expandRle([[0]]));
+  assert.throws(() => P.expandRle(null));
+});
+
+const REGIONAL = [
+  { level: 0, dbz_max: 5, color: 'transparent' }, { level: 1, dbz_min: 5, dbz_max: 20, color: '#04e9e7' },
+  { level: 2, color: '#02fd02' }, { level: 3, color: '#008e00' }, { level: 4, color: '#fdf802' },
+  { level: 5, color: '#fd9500' }, { level: 6, color: '#fd0000' }, { level: 7, color: '#f800fd' }
+];
+const CONUS = REGIONAL.map((e) => Object.assign({}, e, e.level === 1 ? { color: 'transparent' } : {}));
+test('dbzColor maps each level to its palette colour', () => {
+  assert.strictEqual(P.dbzColor(0, REGIONAL), 'transparent');
+  assert.strictEqual(P.dbzColor(1, REGIONAL), '#04e9e7');
+  assert.strictEqual(P.dbzColor(4, REGIONAL), '#fdf802');
+  assert.strictEqual(P.dbzColor(7, REGIONAL), '#f800fd');
+  assert.strictEqual(P.dbzColor(0, CONUS), 'transparent');
+  assert.strictEqual(P.dbzColor(1, CONUS), 'transparent');   // every empty CONUS block is level 1
+  assert.strictEqual(P.dbzColor(2, CONUS), '#02fd02');
+});
+test('dbzColor: an unknown level or no palette is transparent', () => {
+  assert.strictEqual(P.dbzColor(8, REGIONAL), 'transparent');
+  assert.strictEqual(P.dbzColor(-1, REGIONAL), 'transparent');
+  assert.strictEqual(P.dbzColor(2, null), 'transparent');
+  // Entries are matched on `level`, not only on the index.
+  assert.strictEqual(P.dbzColor(5, [{ level: 5, color: '#123456' }]), '#123456');
+});
+
+test('shapeStyle colours by family', () => {
+  const fam = (p) => P.shapeStyle(p, false);
+  for (const p of [8, 16, 17]) {
+    assert.strictEqual(fam(p).color, P.SHAPE_COLORS.tfr, 'product ' + p);
+    assert.match(fam(p).className, /\bfisb-tfr\b/);
+  }
+  assert.match(fam(12).className, /\bfisb-sigmet\b/);
+  assert.match(fam(11).className, /\bfisb-airmet\b/);
+  assert.match(fam(14).className, /\bfisb-airmet\b/);
+  assert.match(fam(15).className, /\bfisb-cwa\b/);
+  assert.match(fam(13).className, /\bfisb-sua\b/);
+  assert.strictEqual(P.SHAPE_COLORS.tfr, '#f85149');       // red
+  assert.strictEqual(P.SHAPE_COLORS.sigmet, '#bc8cff');    // purple
+  assert.strictEqual(P.SHAPE_COLORS.airmet, '#e3b341');    // yellow
+  assert.strictEqual(P.SHAPE_COLORS.cwa, '#f0883e');       // orange
+  assert.strictEqual(P.SHAPE_COLORS.sua, '#8b949e');       // grey
+  assert.strictEqual(fam(12).color, P.SHAPE_COLORS.sigmet);
+  assert.strictEqual(fam(15).color, P.SHAPE_COLORS.cwa);
+  assert.strictEqual(P.shapeFamily(99), null);
+  assert.strictEqual(P.shapeFamily(16), 'tfr');
+  assert.strictEqual(fam(8).dashArray, undefined);
+});
+test('shapeStyle dashes a cancelled shape', () => {
+  const s = P.shapeStyle(8, true);
+  assert.ok(typeof s.dashArray === 'string' && s.dashArray.length > 0);
+  assert.match(s.className, /\bcancelled\b/);
+  assert.doesNotMatch(P.shapeStyle(8, false).className, /\bcancelled\b/);
+});
+
+test('ageClass boundaries: fresh < 30 min, aging < 90 min, else old', () => {
+  const issued = '2015-01-24T03:50:00.000Z';
+  const t = Date.parse(issued);
+  const min = 60000;
+  assert.strictEqual(P.ageClass(issued, t), 'fresh');
+  assert.strictEqual(P.ageClass(issued, t + 30 * min - 1), 'fresh');
+  assert.strictEqual(P.ageClass(issued, t + 30 * min), 'aging');
+  assert.strictEqual(P.ageClass(issued, t + 90 * min - 1), 'aging');
+  assert.strictEqual(P.ageClass(issued, t + 90 * min), 'old');
+  assert.strictEqual(P.ageClass(issued, t - 5 * min), 'fresh');   // issued "in the future": fresh
+  assert.strictEqual(P.ageClass('not a time', t), 'old');
+  assert.strictEqual(P.ageClass(undefined, t), 'old');
+});
+
+test('mosaicBounds of two blocks', () => {
+  const b = P.mosaicBounds([
+    { block: 1, lat0: 34, lon0: -121.6, dlat: 0.016667, dlon: 0.025, rle: [[0, 128]] },
+    { block: 2, lat0: 35, lon0: -122.4, dlat: 0.016667, dlon: 0.025, rle: [[0, 128]] }
+  ]);
+  // NW corners; each block is 4 rows of dlat and 32 columns of dlon.
+  between(b[0][0], 34 - 4 * 0.016667 - 1e-9, 34 - 4 * 0.016667 + 1e-9, 'south');
+  between(b[0][1], -122.4 - 1e-9, -122.4 + 1e-9, 'west');
+  between(b[1][0], 35 - 1e-9, 35 + 1e-9, 'north');
+  between(b[1][1], -121.6 + 32 * 0.025 - 1e-9, -121.6 + 32 * 0.025 + 1e-9, 'east');
+  assert.strictEqual(P.mosaicBounds([]), null);
+});
+
+test('mercY is 0 at the equator and grows with latitude', () => {
+  assert.strictEqual(P.mercY(0), 0);
+  assert.ok(P.mercY(60) - P.mercY(50) > P.mercY(10) - P.mercY(0));
+  between(P.mercY(45), 50.49, 50.51, 'mercY(45) in degrees');
+});
+
+test('mosaicCanvasSize caps at 4096 and keeps the aspect', () => {
+  const s = P.mosaicCanvasSize([[30, -100], [40, -90]], 0.025, 0.025, 4, 4096);
+  assert.strictEqual(s.width, 1600);          // 10 deg / 0.025 * 4
+  assert.ok(s.height > 1600 && s.height <= 4096);
+  const big = P.mosaicCanvasSize([[20, -132], [53, -60]], 0.016667, 0.025, 4, 4096);
+  assert.ok(big.width <= 4096 && big.height <= 4096);
+  assert.ok(Math.max(big.width, big.height) === 4096);
+  const uncapped = P.mosaicCanvasSize([[20, -132], [53, -60]], 0.016667, 0.025, 4, 1e9);
+  assert.strictEqual(uncapped.width, 11520);  // 72 deg / 0.025 * 4
+  between(big.width / big.height, uncapped.width / uncapped.height * 0.99,
+    uncapped.width / uncapped.height * 1.01, 'aspect kept');
+});
+
+test('stationMatches: case-insensitive prefix', () => {
+  assert.strictEqual(P.stationMatches('KSFO', 'ks'), true);
+  assert.strictEqual(P.stationMatches('KSFO', 'KSF'), true);
+  assert.strictEqual(P.stationMatches('KSFO', 'SFO'), false);
+  assert.strictEqual(P.stationMatches('KSFO', ''), true);
+  assert.strictEqual(P.stationMatches('', 'K'), false);
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

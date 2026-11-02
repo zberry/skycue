@@ -39,8 +39,9 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 #stats b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 #stats .dot.on { color: var(--sent); }
 #stats .dot.off { color: var(--blocked); }
-#table-toggle { margin-left: auto; }
-#table-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#wx-toggle { margin-left: auto; }
+#wx-toggle[aria-pressed="true"], #table-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+[hidden] { display: none !important; }
 
 #conn-banner {
   background: #8e1519; color: #fff; padding: 6px var(--gutter); font-weight: 600; text-align: center;
@@ -141,6 +142,74 @@ input.invalid { border-color: var(--blocked); }
 #details-fields { width: 100%; border-collapse: collapse; font-size: 13px; }
 #details-fields th { text-align: left; color: var(--muted); font-weight: normal; padding: 3px 8px 3px 0; vertical-align: top; white-space: nowrap; }
 #details-fields td { padding: 3px 0; font-variant-numeric: tabular-nums; word-break: break-word; }
+
+/* side panel tabs */
+.tabs { display: flex; align-items: center; justify-content: space-between; margin: -4px 0 12px; border-bottom: 1px solid var(--line); }
+.tabs [role="tablist"] { display: flex; gap: 2px; }
+.tabs [role="tab"] {
+  border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted);
+  padding: 6px 12px; margin-bottom: -1px;
+}
+.tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs [role="tab"]:hover { color: var(--text); }
+#track-empty { margin: 0 0 8px; }
+
+/* weather tab */
+#wx-filter { width: 100%; margin-bottom: 4px; text-transform: uppercase; }
+#wx-filter::placeholder { text-transform: none; }
+.wx-group { margin-top: 12px; }
+.wx-group h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
+.wx-group h3 .n { color: var(--text); font-variant-numeric: tabular-nums; }
+.wx-group ul { list-style: none; margin: 0; padding: 0; }
+.wx-row { border-left: 3px solid var(--line); border-bottom: 1px solid var(--line); }
+.wx-row.age-fresh { border-left-color: var(--sent); }
+.wx-row.age-aging { border-left-color: #e3b341; }
+.wx-row.age-old { border-left-color: var(--blocked); }
+.wx-head {
+  display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; border: none; border-radius: 0;
+  background: none; padding: 3px 6px; font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.wx-head:hover { background: var(--panel-2); }
+.wx-st { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; min-width: 3.6em; }
+.wx-issued, .wx-valid { color: var(--text); }
+.wx-age { margin-left: auto; color: var(--muted); }
+.wx-row.age-old .wx-age { color: var(--blocked); }
+.wx-text, .shape-text {
+  margin: 0; padding: 4px 8px 6px; font: 11.5px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--text);
+  white-space: pre-wrap; word-break: break-word; background: var(--bg);
+}
+#shape-details { border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; margin-bottom: 12px; background: var(--panel-2); }
+#shape-details .details-head h2 { font-size: 14px; }
+#shape-close { border: none; background: none; font-size: 18px; line-height: 1; padding: 0 4px; color: var(--muted); }
+table.kv { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 6px; }
+table.kv th { text-align: left; color: var(--muted); font-weight: normal; padding: 2px 8px 2px 0; white-space: nowrap; vertical-align: top; }
+table.kv td { padding: 2px 0; word-break: break-word; }
+#shape-details .shape-text { max-height: 220px; overflow-y: auto; border-radius: 3px; }
+
+/* map: FIS-B layers and controls */
+.leaflet-image-layer.fisb-radar, .leaflet-image-layer.fisb-raster { image-rendering: pixelated; }
+.leaflet-control-layers {
+  background: rgba(22, 27, 34, .92); color: var(--text); border: 1px solid var(--line) !important; border-radius: 4px;
+  box-shadow: none !important; font-size: 12px;
+}
+.leaflet-control-layers-expanded { padding: 6px 10px 6px 8px; }
+.leaflet-control-layers label { margin: 2px 0; }
+.leaflet-control-layers .sw { margin: 0 4px 0 2px; }
+.wx-control {
+  background: rgba(22, 27, 34, .92); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px;
+  font-size: 12px; color: var(--muted); max-width: 300px;
+}
+.wx-control label { color: var(--muted); }
+.wx-control input[type="range"] { width: 120px; vertical-align: middle; padding: 0; }
+.wx-control select { max-width: 200px; font-size: 12px; margin: 4px 0; }
+#radar-age { color: var(--text); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.legend-row { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 4px; }
+#raster-box { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 4px; }
+#raster-legend { display: flex; flex-direction: column; gap: 1px; max-height: 150px; overflow-y: auto; }
+#raster-legend .legend-title { color: var(--text); margin-bottom: 2px; }
+#raster-legend .approx { color: var(--elev); }
+.legend-item { white-space: nowrap; }
+.legend-item .sw { margin-right: 4px; }
 
 @media (max-width: 1400px) {
   #filters { width: 230px; }

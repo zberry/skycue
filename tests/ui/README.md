@@ -43,6 +43,18 @@ stops skycued and copies the `skycue-*.png` screenshots to
 `.superpowers/sdd/2026-11-01-skycue-ui/screenshots/` (override with
 `SKYCUE_UI_SCREENSHOTS`). Results go to `<build>/ui-test-results/`.
 
+For the FIS-B cases it starts two more skycueds, each replaying a received
+recording with uplinks unpaced (`--replay-speed 0`, no loop) and waits
+until every uplink is decoded and the NEXRAD published:
+`../fixtures/fisb/received-with-uplinks.jsonl` (2015: METAR/TAF/PIREP/winds,
+point NOTAMs, a SIGMET; receiver at its ground station, 37.32 N 121.75 W)
+as `SKYCUE_FISB_URL`, and `../fixtures/fisb/received-tg30.jsonl` (2020:
+NEXRAD regional and CONUS with echoes, rasters, AIRMETs; receiver at its
+ground station, 40.04 N 86.26 W, inside both mosaics) as
+`SKYCUE_RADAR_URL`. Their `fisb-*.png` screenshots go to
+`.superpowers/sdd/2026-11-02-skycue-fisb/screenshots/` (override with
+`SKYCUE_FISB_SCREENSHOTS`).
+
 ## Cases
 
 1. `page_loads_without_console_errors`: no console error or page error;
@@ -68,4 +80,35 @@ stops skycued and copies the `skycue-*.png` screenshots to
    reconnects.
 9. `screenshots`: map with a selection, and the table sorted by range.
 
-Every test also fails if the page requested anything from another host.
+FIS-B, against the tg30 skycued:
+
+10. `radar_canvas_drawn_when_radar_present`: radar layers on and every
+    other layer off by default; both radar image overlays exist, their
+    canvases have painted pixels (`skycueApp.radarStats()`), cover the
+    mosaic's box, and the radar age shows; the layer toggle removes and
+    restores the overlay; no console error.
+11. `radar_opacity_slider`: the slider sets the overlays' opacity.
+12. `other_rasters_layer_and_legend`: the raster layer draws the product
+    chosen in the dropdown, with its legend marked approximate.
+13. `fisb_screenshots_radar`: radar, SIGMETs and the Weather tab.
+
+FIS-B, against the 2015 skycued:
+
+14. `tfr_polygon_rendered_and_clickable`: the TFR layer draws every
+    NOTAM shape; clicking one shows its text, key and times in the panel.
+    The fixtures have no TFR polygon, so live items injected through the
+    page's own handler add a polygon, a circle (radius from `radius_nm`)
+    and a cancelled (dashed) shape, replace a record's shapes by key, and
+    `fisb_expired` removes them and closes their details.
+15. `weather_panel_lists_metars_and_filters`: the Weather tab lists every
+    METAR (and TAF, PIREP, winds with `valid`), each row with its issue
+    time and age class; a row expands to its text; a 3-letter station
+    prefix narrows the list; `fisb_text` adds a row and `fisb_expired`
+    removes rows.
+16. `layer_toggles_hide_show`: the SIGMET layer's paths appear and go.
+17. `fisb_status_strip`: `uplinks/min`, `products/min`, `radar age` and
+    `stations` in the strip, stations as in `/api/fisb/status`.
+18. `fisb_screenshots_weather`: a clicked NOTAM, SIGMET and a filtered list.
+
+Every test also fails if the page requested anything from another host
+than the one it was loaded from (`data:` URLs, the radar images, aside).

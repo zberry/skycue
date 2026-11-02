@@ -37,6 +37,23 @@ When `www/tiles/<z>/<x>/<y>.png` exist (see `/api/tiles-available`) the page
 shows them; otherwise it draws a plain background with a 1°/5° graticule
 and a scale bar.
 
+## FIS-B weather
+
+From the `fisb` status in the snapshot the page GETs `/api/fisb/text`,
+`/api/fisb/shapes` and the NEXRAD mosaics, then applies the `fisb_*`
+WebSocket items (docs/web-api.md, FIS-B). Map layers (the layer control,
+top right): "Radar (regional)" and "Radar (CONUS)" (on by default), "Other
+rasters" (lightning, icing, turbulence, cloud tops: one at a time from a
+dropdown, legend marked approximate) and one layer per shape family (TFR,
+SIGMET, AIRMET/G-AIRMET, CWA, SUA; off by default). A mosaic's blocks are
+expanded from their RLE and painted on one canvas over their box (rows
+spaced in Web Mercator, at most 4096 x 4096), shown as an image overlay;
+the opacity slider and radar age sit bottom right, and a radar older than
+75 min is drawn at half opacity. Clicking a shape shows its text, times and
+altitudes in the side panel's Weather tab, which also lists METAR, TAF,
+PIREP and winds aloft with a station-prefix filter and age colouring (fresh
+< 30 min, aging < 90 min, old).
+
 ## Geometry
 
 `elevationDeg` in `app_pure.js` duplicates `skycued/src/geo.cpp`

@@ -27,7 +27,7 @@
   var prevStats = null, prevStatsWall = 0;
   var tableSort = { key: 'hex', dir: 1 };
   var tableDirty = true;
-  var putTimers = {};
+  var editing = {};                 // filter key -> the input holds an uncommitted edit
   var actionsSig = '';
 
   var $ = function (id) { return document.getElementById(id); };
@@ -413,7 +413,7 @@
   function applyFilters(f) {
     cfg.filters = f;
     Object.keys(FILTER_INPUTS).forEach(function (k) {
-      if (putTimers[k]) return; // the user's pending edit wins
+      if (editing[k]) return; // the user's uncommitted edit wins
       var el = $(FILTER_INPUTS[k]);
       if (typeof f[k] !== 'number') return;
       if (el.value === '' || Number(el.value) !== f[k]) el.value = String(f[k]);
@@ -474,21 +474,36 @@
     });
   }
 
+  // The input's value as a valid filter value, or null (marked invalid,
+  // with the reason shown).
+  function checkFilterInput(key) {
+    var el = $(FILTER_INPUTS[key]);
+    var raw = el.value.trim();
+    var v = Number(raw);
+    var ok = raw !== '' && isFinite(v) && (key === 'max_range_nm' ? v > 0 : v >= -90 && v <= 90);
+    el.classList.toggle('invalid', !ok);
+    if (!ok) {
+      showMsg($('filter-msg'), key === 'max_range_nm' ? 'Max range must be a number > 0' :
+        'Min elevation must be a number from -90 to 90', true);
+      return null;
+    }
+    if ($('filter-msg').classList.contains('error')) showMsg($('filter-msg'), '');
+    return v;
+  }
+
+  // While typing: only validate (and keep live updates off the field).
   function onFilterInput(key) {
-    clearTimeout(putTimers[key]);
-    putTimers[key] = setTimeout(function () {
-      putTimers[key] = null;
-      var raw = $(FILTER_INPUTS[key]).value.trim();
-      var v = Number(raw);
-      var ok = raw !== '' && isFinite(v) && (key === 'max_range_nm' ? v > 0 : v >= -90 && v <= 90);
-      if (!ok) {
-        showMsg($('filter-msg'), key === 'max_range_nm' ? 'Max range must be a number > 0' :
-          'Min elevation must be a number from -90 to 90', true);
-        return;
-      }
-      if (cfg.filters && cfg.filters[key] === v) return;
-      putFilter(key, v);
-    }, 300);
+    editing[key] = true;
+    checkFilterInput(key);
+  }
+
+  // Committed (Enter or leaving the field): apply.
+  function onFilterChange(key) {
+    var v = checkFilterInput(key);
+    if (v === null) return;
+    editing[key] = false;
+    if (cfg.filters && cfg.filters[key] === v) return;
+    putFilter(key, v);
   }
 
   function saveBaseline() {
@@ -662,12 +677,13 @@
     sel.addEventListener('change', updateRings);
     Object.keys(FILTER_INPUTS).forEach(function (k) {
       $(FILTER_INPUTS[k]).addEventListener('input', function () { onFilterInput(k); });
+      $(FILTER_INPUTS[k]).addEventListener('change', function () { onFilterChange(k); });
     });
     Array.prototype.forEach.call(document.querySelectorAll('button[data-reset]'), function (b) {
       b.addEventListener('click', function () {
         var k = b.getAttribute('data-reset');
-        clearTimeout(putTimers[k]);
-        putTimers[k] = null;
+        editing[k] = false;
+        $(FILTER_INPUTS[k]).classList.remove('invalid');
         putFilter(k, null);
       });
     });

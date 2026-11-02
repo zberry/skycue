@@ -149,9 +149,22 @@ test('range_change_moves_ring_and_drops', async ({ page }) => {
   page.on('request', (r) => {
     if (r.method() === 'PUT' && r.url() === BASE + '/api/filters') puts.push(r.postDataJSON());
   });
-  await page.locator('#max-range').fill('20');
-  await expect.poll(() => puts.length, { timeout: 3000 }).toBeGreaterThan(0);
-  expect(puts[puts.length - 1]).toEqual({ max_range_nm: 20 });
+  // Typing only validates: nothing is sent until the edit is committed.
+  const input = page.locator('#max-range');
+  await input.fill('2');
+  await page.waitForTimeout(1000);
+  expect(puts, 'PUTs while typing').toEqual([]);
+  await input.fill('0');
+  await expect(input).toHaveClass(/\binvalid\b/);
+  await expect(page.locator('#filter-msg')).toHaveClass(/\berror\b/);
+  await input.fill('20');
+  await expect(input).not.toHaveClass(/\binvalid\b/);
+  await page.waitForTimeout(500);
+  expect(puts, 'PUTs while typing').toEqual([]);
+  expect(await page.evaluate(() => window.skycueApp.rangeRingRadius())).toBeCloseTo(r0, 0);
+  await input.press('Enter');
+  await expect.poll(() => puts.length, { timeout: 3000 }).toBe(1);
+  expect(puts[0]).toEqual({ max_range_nm: 20 });
   await expect.poll(() => page.evaluate(() => window.skycueApp.rangeRingRadius())).toBeCloseTo(20 * 1852, 0);
   expect(r0).toBeGreaterThan(20 * 1852);
   await expect(page.locator('#overlay-indicator')).toBeVisible();
@@ -185,6 +198,7 @@ test('save_baseline_confirms_and_clears_overlay', async ({ page }) => {
   const cur = (await api('/api/filters')).body.max_range_nm;
   const want = cur === 140 ? 145 : 140;
   await page.locator('#max-range').fill(String(want));
+  await page.locator('#max-range').blur(); // committed by leaving the field
   await expect.poll(async () => (await api('/api/filters')).body.overlay_active, { timeout: 3000 }).toBe(true);
   await expect(page.locator('#overlay-indicator')).toBeVisible();
   let dialogSeen = '';

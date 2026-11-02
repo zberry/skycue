@@ -54,9 +54,9 @@ stops skycued and copies the `skycue-*.png` screenshots to
 4. `add_to_block_list_drops_and_recolours`: blocking a forwarded aircraft
    from the panel lists it, turns its marker red, stops forwarding it (it
    keeps moving on the map), and removing it restores all of that.
-5. `range_change_moves_ring_and_drops`: typing 20 in Max range sends one
-   `PUT /api/filters`, shrinks the range ring, and the marker colours agree
-   with `/api/state`.
+5. `range_change_moves_ring_and_drops`: typing in Max range sends nothing
+   (an invalid value is marked); Enter on 20 sends one `PUT /api/filters`,
+   shrinks the range ring, and the marker colours agree with `/api/state`.
 6. `save_baseline_confirms_and_clears_overlay`: Save as baseline asks for
    confirmation, clears the overlay and writes `MAX_RANGE_NM` to the conf.
 7. `reconnect_after_restart_converges`: kill and restart skycued; the

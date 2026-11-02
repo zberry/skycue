@@ -33,6 +33,7 @@ expect_exit 0 help_modes "$iqgen" modes --help
 grep -q 'usage: skycue-iqgen' "$tmp/help_modes.out" || fail "modes --help: no usage line"
 expect_exit 0 help_resample "$iqgen" resample --help
 grep -q '32 taps' "$tmp/help_resample.out" || fail "resample --help does not mention the 32-tap limit"
+grep -qF 'min(0.5 * IN_RATE, 0.45 * --out-rate)' "$tmp/help_resample.out" || fail "resample --help does not state the cutoff"
 expect_exit 2 noargs "$iqgen"
 expect_exit 2 unknown "$iqgen" frobnicate
 grep -q "frobnicate" "$tmp/unknown.err" || fail "unknown command not named"

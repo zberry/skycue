@@ -20,7 +20,12 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr int64_t kTaps = kResampleTapsPerPhase;
 constexpr int64_t kBefore = kTaps / 2 - 1;  // taps at n0 - 15 .. n0 + 16
 constexpr int64_t kAfter = kTaps / 2;
-constexpr double kCutoff = 0.45;
+// Cutoff: the input's Nyquist frequency, but at most 0.45 * out_rate. When
+// upsampling the input holds nothing above its Nyquist frequency, so a guard
+// band there would only remove signal (readsb needs the full +-1 MHz of a
+// 2 MS/s capture); when downsampling 0.45 * out_rate keeps an anti-alias margin.
+constexpr double kInCutoff = 0.5;
+constexpr double kOutCutoff = 0.45;
 constexpr std::size_t kChunkSamples = 65536;
 
 double sinc(double x)
@@ -62,7 +67,8 @@ ResampleCounts resampleCu8(std::istream& in, uint64_t in_rate, uint64_t out_rate
                                     " needs a factor above " + std::to_string(kResampleMaxFactor));
 
     // Cutoff in cycles per input sample.
-    const double fc = kCutoff * static_cast<double>(std::min(in_rate, out_rate)) / static_cast<double>(in_rate);
+    const double fc = std::min(kInCutoff * static_cast<double>(in_rate), kOutCutoff * static_cast<double>(out_rate)) /
+                      static_cast<double>(in_rate);
     const std::vector<double> taps = makeTaps(up, fc);
 
     std::vector<std::complex<float>> hist;  // input samples from index base on

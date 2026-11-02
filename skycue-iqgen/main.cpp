@@ -423,6 +423,8 @@ int resample(int argc, char** argv)
         std::string(kUsage) +
         "resample: converts CU8 from IN_RATE to --out-rate (IN may be '-' for stdin).\n"
         "The rates' ratio must reduce to factors of at most 1000 (2083333 -> 2400000 does not).\n"
+        "The cutoff is min(0.5 * IN_RATE, 0.45 * --out-rate): the input's whole band when\n"
+        "upsampling, an anti-alias margin when downsampling.\n"
         "The polyphase filter has 32 taps per phase whatever the ratio, so for large\n"
         "down-sampling factors (beyond a few times) its stop band degrades: resample in steps");
     desc.add_options()("help,h", "show this help")("output,o", po::value(&out_path), "output CU8 file")(

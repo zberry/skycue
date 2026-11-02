@@ -2,7 +2,9 @@
 
 // Rational resampling of a CU8 stream: up / down = out_rate / in_rate
 // reduced by their gcd, a polyphase windowed-sinc filter (32 taps per phase,
-// Blackman window, cutoff 0.45 * min(in_rate, out_rate), unity gain at DC)
+// Blackman window, cutoff min(0.5 * in_rate, 0.45 * out_rate): the input's
+// Nyquist frequency when upsampling, an anti-alias margin when downsampling;
+// unity gain at DC)
 // and the output rounded and clipped as IqWriter does without noise.
 // Output sample m is the input interpolated at m * down / up input samples;
 // samples before the start and after the end of the input count as zero.

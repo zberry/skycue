@@ -695,6 +695,44 @@ BOOST_AUTO_TEST_CASE(resample_keeps_tone_frequency)
     BOOST_TEST(mag / static_cast<double>(to - from) == 60.0, tt::tolerance(0.02));  // passband gain 1
 }
 
+namespace {
+
+// Mean output magnitude of a complex tone at f Hz (amplitude 60 counts, 0.5 s)
+// resampled from in_rate to out_rate, over the middle 90 % of the output.
+double resampledToneMagnitude(double f, uint64_t in_rate, uint64_t out_rate)
+{
+    const int count = static_cast<int>(in_rate / 2);
+    std::string tone;
+    tone.reserve(2 * static_cast<std::size_t>(count));
+    for (int n = 0; n < count; ++n) {
+        const double ph = 2.0 * kTestPi * f * n / static_cast<double>(in_rate);
+        tone.push_back(static_cast<char>(static_cast<uint8_t>(std::round(128.0 + 60.0 * std::cos(ph)))));
+        tone.push_back(static_cast<char>(static_cast<uint8_t>(std::round(128.0 + 60.0 * std::sin(ph)))));
+    }
+    std::istringstream in(tone);
+    std::ostringstream out;
+    resampleCu8(in, in_rate, out_rate, out);
+    const auto y = cu8Samples(out.str());
+    const std::size_t from = y.size() / 20, to = y.size() - y.size() / 20;
+    double mag = 0.0;
+    for (std::size_t k = from; k < to; ++k)
+        mag += std::abs(y[k]);
+    return mag / static_cast<double>(to - from);
+}
+
+}  // namespace
+
+// The cutoff is min(0.5 * in_rate, 0.45 * out_rate): upsampling keeps the
+// input's band up to its Nyquist frequency (a 2 MS/s capture's +-1 MHz, which
+// readsb's 2.4 MS/s demodulator needs); downsampling still rejects what would alias.
+BOOST_AUTO_TEST_CASE(resample_passband_reaches_input_nyquist_when_upsampling)
+{
+    const double up_db = 20.0 * std::log10(resampledToneMagnitude(0.47 * 2.0e6, 2000000, 2400000) / 60.0);
+    BOOST_TEST(up_db >= -3.0);
+    const double down_db = 20.0 * std::log10(resampledToneMagnitude(0.48 * 2.4e6, 2400000, 2000000) / 60.0);
+    BOOST_TEST(down_db <= -20.0);
+}
+
 BOOST_AUTO_TEST_CASE(info_numbers)
 {
     std::string bytes(2 * 24000, static_cast<char>(128));

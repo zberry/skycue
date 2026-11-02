@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -129,13 +130,20 @@ std::string readFile(const std::string& path)
 
 IdList loadList(const std::string& path) { return path.empty() ? IdList() : IdList::loadFile(path); }
 
-// Writes `text` to path.tmp and renames it over `path`, keeping the mode of
+// Writes `text` to <file>.tmp and renames it over <file>, where <file> is
+// `path` with symlinks resolved (so a symlink stays a symlink and the file it
+// points to gets the text), keeping the mode and, best effort, the owner of
 // the file it replaces. Throws std::runtime_error.
 void atomicWrite(const std::string& path, const std::string& text)
 {
-    const std::string tmp = path + ".tmp";
+    std::string target = path;
+    if (char* real = ::realpath(path.c_str(), nullptr)) {  // fails for a file not created yet
+        target = real;
+        std::free(real);
+    }
+    const std::string tmp = target + ".tmp";  // same directory: rename stays atomic
     struct stat st{};
-    const bool existed = ::stat(path.c_str(), &st) == 0;
+    const bool existed = ::stat(target.c_str(), &st) == 0;
     const mode_t mode = existed ? (st.st_mode & 07777) : 0644;
     const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode);
     if (fd < 0)
@@ -148,6 +156,11 @@ void atomicWrite(const std::string& path, const std::string& text)
     };
     if (existed && ::fchmod(fd, mode) != 0)
         fail("cannot set the mode");
+    // Keep the owner (when skycued runs as root, an operator's file stays
+    // theirs). Without the privilege this fails with EPERM: ignored.
+    if (existed && (st.st_uid != ::geteuid() || st.st_gid != ::getegid()) &&
+        ::fchown(fd, st.st_uid, st.st_gid) != 0 && errno != EPERM)
+        fail("cannot set the owner");
     for (size_t done = 0; done < text.size();) {
         const ssize_t n = ::write(fd, text.data() + done, text.size() - done);
         if (n < 0) {
@@ -164,10 +177,10 @@ void atomicWrite(const std::string& path, const std::string& text)
         ::unlink(tmp.c_str());
         throw std::runtime_error(tmp + ": close failed: " + std::strerror(err));
     }
-    if (::rename(tmp.c_str(), path.c_str()) != 0) {
+    if (::rename(tmp.c_str(), target.c_str()) != 0) {
         const int err = errno;
         ::unlink(tmp.c_str());
-        throw std::runtime_error(path + ": cannot replace: " + std::strerror(err));
+        throw std::runtime_error(target + ": cannot replace: " + std::strerror(err));
     }
 }
 
@@ -447,8 +460,15 @@ void RuntimeConfig::load()
             for (const auto& w : warnings)
                 LOG_WARN(overlay_path_ << ": " << w);
         } catch (const std::exception& e) {
-            LOG_ERROR(overlay_path_ << ": " << e.what()
-                                    << "; ignoring it (the baseline applies; the next change from the UI replaces it)");
+            // Moved aside, so the next change from the UI does not overwrite it.
+            const std::string rejected = overlay_path_ + ".rejected";
+            if (::rename(overlay_path_.c_str(), rejected.c_str()) == 0)
+                LOG_ERROR(overlay_path_ << ": " << e.what() << "; ignoring it (the baseline applies), moved to "
+                                        << rejected);
+            else
+                LOG_ERROR(overlay_path_ << ": " << e.what() << "; ignoring it (the baseline applies); cannot move it to "
+                                        << rejected << ": " << std::strerror(errno));
+            overlay_stamp_ = stampOf(overlay_path_);
         }
     }
     applyEffective("startup");
@@ -663,29 +683,37 @@ void RuntimeConfig::arm()
     });
 }
 
+bool RuntimeConfig::settled(const std::string& path, Stamp& known, std::optional<Stamp>& pending)
+{
+    const Stamp now = stampOf(path);
+    if (now == known) {
+        pending.reset();
+        return false;
+    }
+    if (!pending || *pending != now) {  // changed since the last poll: maybe still being written
+        pending = now;
+        return false;
+    }
+    known = now;
+    pending.reset();
+    LOG_INFO(path << ": changed on disk; reloading");
+    return true;
+}
+
 void RuntimeConfig::poll()
 {
-    Stamp s = stampOf(conf_path_);
-    if (s != conf_stamp_) {
-        conf_stamp_ = s;
-        LOG_INFO(conf_path_ << ": changed on disk; reloading");
+    if (settled(conf_path_, conf_stamp_, conf_pending_)) {
         reloadConf();
         applyEffective("file:" + baseName(conf_path_));
     }
-    s = stampOf(overlay_path_);
-    if (s != overlay_stamp_) {
-        overlay_stamp_ = s;
-        LOG_INFO(overlay_path_ << ": changed on disk; reloading");
+    if (settled(overlay_path_, overlay_stamp_, overlay_pending_)) {
         reloadOverlay();
         applyEffective(std::string("file:") + kOverlayName);
     }
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         if (listPath(kind).empty())
             continue;
-        s = stampOf(listPath(kind));
-        if (s != listStamp(kind)) {
-            listStamp(kind) = s;
-            LOG_INFO(listPath(kind) << ": changed on disk; reloading");
+        if (settled(listPath(kind), listStamp(kind), kind == ListKind::allow ? allow_pending_ : block_pending_)) {
             reloadList(kind);
             applyEffective("file:" + baseName(listPath(kind)));
         }
@@ -701,12 +729,13 @@ void RuntimeConfig::reloadConf()
         LOG_ERROR(e.what() << "; keeping the previous configuration");
         return;
     }
-    const auto restart = restartKeysChanged(file_conf_, c);
+    // Against the running values: a key edited back to what is running needs no restart.
+    const auto restart = restartKeysChanged(running_, c);
     if (!restart.empty()) {
         std::string keys;
         for (const auto& k : restart)
             keys += (keys.empty() ? "" : ", ") + k;
-        LOG_WARN(conf_path_ << ": " << keys << " changed; requires restart");
+        LOG_WARN(conf_path_ << ": " << keys << " differ from the running values; requires restart");
     }
     const Config old = file_conf_;
     file_conf_ = c;

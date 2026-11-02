@@ -15,14 +15,21 @@
 // baseline files and clears it. That is the only time skycue.conf is written.
 //
 // The watcher (startWatching) polls the four files every second (mtime,
-// size, inode) and applies an edit made by hand: the effective values are
+// size, inode) and applies an edit made by hand once the file has kept the
+// same stamp for two polls in a row (so within about 2 s, and never half
+// written): the effective values are
 // handed to the Engine's live setters, so every change is recorded once, as
 // "<origin>: ..." with origin "file:<file name>". An edit that does not parse
 // is logged once at ERROR and the previous values stay in effect. A changed
-// skycue.conf key that is not a filter key (ports, serials, intervals...) is
-// logged once at WARN: it takes effect only on a restart, and effective()
-// keeps its running value. The watcher skips the files' changes made by this
-// object (it records each file's stamp after writing it).
+// skycue.conf key that is not a filter key (ports, serials, intervals...) and
+// now differs from its running value is logged at WARN, once per reload: it
+// takes effect only on a restart, and effective() keeps its running value.
+// The watcher skips the files' changes made by this object (it records each
+// file's stamp after writing it).
+//
+// Writes (overlay, promote) are atomic: <file>.tmp in the directory of the
+// file a symlink points to, renamed over that file, with its mode and (best
+// effort) owner kept; a symlink stays a symlink.
 //
 // Threading: lives on the Engine's io_context; call everything from its
 // thread. The Engine must outlive it.
@@ -73,7 +80,8 @@ public:
 
     // Parses skycue.conf (throws ConfigError) and the list files (throws
     // std::runtime_error), then the overlay when there is one: a malformed
-    // overlay is logged at ERROR and ignored (the baseline applies). Hands
+    // overlay is logged at ERROR, ignored (the baseline applies) and renamed
+    // to skycue.runtime.json.rejected, so nothing overwrites it. Hands
     // the effective values to the Engine with origin "startup" (nothing is
     // recorded when they equal what the Engine already has).
     void load();
@@ -138,6 +146,10 @@ private:
     void reloadConf();
     void reloadOverlay();
     void reloadList(ListKind kind);
+    // True when `path` changed since `known` and has kept the same stamp for
+    // two polls in a row (so a file still being written is not read half
+    // done); then `known` is updated.
+    bool settled(const std::string& path, Stamp& known, std::optional<Stamp>& pending);
     void arm();
     void poll();
 
@@ -148,6 +160,7 @@ private:
     Overlay overlay_;
     IdList allow_file_, block_file_;
     Stamp conf_stamp_, overlay_stamp_, allow_stamp_, block_stamp_;
+    std::optional<Stamp> conf_pending_, overlay_pending_, allow_pending_, block_pending_;
     boost::asio::steady_timer timer_;
     bool watching_ = false;
     std::shared_ptr<char> alive_ = std::make_shared<char>(0);

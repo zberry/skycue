@@ -221,7 +221,10 @@ BOOST_AUTO_TEST_CASE(malformed_or_missing_overlay_ignored_on_load)
         err.restore();
         BOOST_TEST(f.filters().max_range_nm == 150.0);
         BOOST_TEST(has(err.text(), "ERROR"));
-        BOOST_TEST(has(err.text(), "skycue.runtime.json"));
+        BOOST_TEST(has(err.text(), "skycue.runtime.json.rejected"));
+        // Moved aside, so a later change from the UI cannot overwrite it.
+        BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+        BOOST_TEST(readAll(f.path("skycue.runtime.json.rejected")) == "{\"version\":1,");
     }
     {
         // A bad entry or an out-of-range number makes the whole file malformed.
@@ -433,14 +436,19 @@ BOOST_AUTO_TEST_CASE(watch_detects_conf_edit_within_2s)
     f.start(true);
     StderrCapture err(f.path("stderr.txt"));
     writeFile(f.conf, std::string(kConfHead) + "MAX_RANGE_NM=99\nWEB_PORT=8081\n");
-    BOOST_TEST(f.waitFor([&] { return f.filters().max_range_nm == 99.0; }, 2000ms));
+    // Applied once the file has kept its stamp for two polls: about 2 s at most.
+    BOOST_TEST(f.waitFor([&] { return f.filters().max_range_nm == 99.0; }, 2600ms));
     BOOST_TEST(f.waitFor([&] { return has(err.text(), "WEB_PORT"); }, 500ms));
-    err.restore();
     BOOST_TEST(has(err.text(), "requires restart"));
+    // Back to the running value: no restart needed, no warning.
+    writeFile(f.conf, std::string(kConfHead) + "MAX_RANGE_NM=98\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().max_range_nm == 98.0; }, 2600ms));
+    err.restore();
+    BOOST_TEST(countOf(err.text(), "requires restart") == 1u);
     BOOST_TEST(has(f.sent(), "file:skycue.conf: max_range_nm=99 min_elevation_deg=0"));
     // The web port keeps its running value; the filters take the new one.
     BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().web_port; }) == 8080);
-    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().max_range_nm; }) == 99.0);
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().max_range_nm; }) == 98.0);
 }
 
 BOOST_AUTO_TEST_CASE(watch_ignores_own_writes)
@@ -472,14 +480,14 @@ BOOST_AUTO_TEST_CASE(watch_rejects_malformed_edit_keeps_previous)
     f.start(true);
     StderrCapture err(f.path("stderr.txt"));
     writeFile(f.conf, std::string(kConfHead) + "MAX_RANGE_NM=abc\n");
-    BOOST_TEST(f.waitFor([&] { return has(err.text(), "ERROR"); }, 2000ms));
-    std::this_thread::sleep_for(1200ms);  // more polls: still logged once
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "ERROR"); }, 2600ms));
+    std::this_thread::sleep_for(1100ms);  // more polls: still logged once
     BOOST_TEST(countOf(err.text(), "ERROR") == 1u);
     BOOST_TEST(has(err.text(), "MAX_RANGE_NM"));
     BOOST_TEST(f.filters().max_range_nm == 150.0);
     BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().max_range_nm; }) == 150.0);
     writeFile(f.conf, std::string(kConfHead) + "MAX_RANGE_NM=77\n");
-    BOOST_TEST(f.waitFor([&] { return f.filters().max_range_nm == 77.0; }, 2000ms));
+    BOOST_TEST(f.waitFor([&] { return f.filters().max_range_nm == 77.0; }, 2600ms));
     err.restore();
 }
 
@@ -491,10 +499,83 @@ BOOST_AUTO_TEST_CASE(watch_detects_list_file_edit)
     f.start(true);
     BOOST_TEST(f.block() == (Strings{"a1b2c3"}));
     writeFile(f.path("block.txt"), "a1b2c3\nN99ZZ\n");
-    BOOST_TEST(f.waitFor([&] { return f.block() == (Strings{"a1b2c3", "N99ZZ"}); }, 2000ms));
+    BOOST_TEST(f.waitFor([&] { return f.block() == (Strings{"a1b2c3", "N99ZZ"}); }, 2600ms));
     BOOST_TEST(has(f.sent(), "file:block.txt: "));
     // A hand edit of the overlay applies too.
     writeFile(f.path("skycue.runtime.json"), "{\"version\":1,\"filters\":{\"min_elevation_deg\":3}}\n");
-    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 3.0; }, 2000ms));
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 3.0; }, 2600ms));
     BOOST_TEST(has(f.sent(), "file:skycue.runtime.json: "));
+}
+
+BOOST_AUTO_TEST_CASE(watch_debounces_partial_write)
+{
+    RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\n");
+    f.start(true);
+    // An editor writing the file in two parts: the first part alone parses
+    // (MAX_RANGE_NM=1) but must not be applied. The parts are 0.6 s apart
+    // around the first poll (1 s after start), so exactly one poll sees the
+    // first part: without the debounce it would be applied.
+    std::this_thread::sleep_for(700ms);
+    writeFile(f.conf, std::string(kConfHead) + "MAX_RANGE_NM=1");
+    std::this_thread::sleep_for(600ms);
+    {
+        std::ofstream out(f.conf, std::ios::binary | std::ios::app);
+        out << "23\n";
+    }
+    BOOST_TEST(f.waitFor([&] { return f.filters().max_range_nm == 123.0; }, 2600ms));
+    std::this_thread::sleep_for(300ms);
+    const std::string sent = f.sent();
+    BOOST_TEST(countOf(sent, "file:skycue.conf:") == 1u);
+    BOOST_TEST(!has(sent, "file:skycue.conf: max_range_nm=1 "));
+}
+
+BOOST_AUTO_TEST_CASE(atomic_write_preserves_symlink)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string real_dir = f.path("real");
+    ::mkdir(real_dir.c_str(), 0755);
+    const std::string real_conf = real_dir + "/skycue.conf", real_allow = real_dir + "/allow.txt";
+    writeFile(real_allow, "a1b2c3\n");
+    writeFile(real_conf, std::string(kConfHead) + "MAX_RANGE_NM=150\nALLOW_LIST_FILE=" + f.path("allow.txt") + "\n");
+    ::unlink(f.conf.c_str());
+    BOOST_REQUIRE(::symlink(real_conf.c_str(), f.conf.c_str()) == 0);
+    BOOST_REQUIRE(::symlink("real/allow.txt", f.path("allow.txt").c_str()) == 0);  // relative target
+    f.start();
+    Overlay d;
+    d.max_range_nm = 55;
+    d.allow_add = {"c0ffee"};
+    f.applyUi(d);
+    BOOST_TEST(f.promote() == "");
+    struct stat st{};
+    BOOST_TEST(::lstat(f.conf.c_str(), &st) == 0);
+    BOOST_TEST(S_ISLNK(st.st_mode));
+    BOOST_TEST(::lstat(f.path("allow.txt").c_str(), &st) == 0);
+    BOOST_TEST(S_ISLNK(st.st_mode));
+    BOOST_TEST(has(readAll(real_conf), "MAX_RANGE_NM=55\n"));
+    BOOST_TEST(readAll(real_allow) == "a1b2c3\nc0ffee\n");
+    BOOST_TEST(!exists(real_conf + ".tmp"));
+    BOOST_TEST(!exists(f.conf + ".tmp"));
+    BOOST_TEST(f.filters().max_range_nm == 55.0);
+}
+
+BOOST_AUTO_TEST_CASE(atomic_write_keeps_mode)
+{
+    RtFx f{std::string(kConfHead)};
+    writeFile(f.path("allow.txt"), "a1b2c3\n");
+    writeFile(f.conf, std::string(kConfHead) + "ALLOW_LIST_FILE=" + f.path("allow.txt") + "\n");
+    ::chmod(f.conf.c_str(), 0640);
+    ::chmod(f.path("allow.txt").c_str(), 0600);
+    f.start();
+    Overlay d;
+    d.min_elevation_deg = 4;
+    d.allow_add = {"c0ffee"};
+    f.applyUi(d);
+    BOOST_TEST(f.promote() == "");
+    struct stat st{};
+    ::stat(f.conf.c_str(), &st);
+    BOOST_TEST((st.st_mode & 07777) == 0640u);
+    ::stat(f.path("allow.txt").c_str(), &st);
+    BOOST_TEST((st.st_mode & 07777) == 0600u);
+    BOOST_TEST(has(readAll(f.conf), "MIN_ELEVATION_DEG=4\n"));
+    // The owner is kept too (fchown, best effort); that needs root to test: manual.
 }

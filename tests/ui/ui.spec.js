@@ -778,3 +778,42 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     await page.screenshot({ path: testInfo.outputPath(`fisb-weather-${testInfo.project.name}.png`), fullPage: true });
   });
 });
+
+// Map tiles, against the skycued run.sh starts with a tiles directory that
+// has only the zoom-0 tile (one solid colour) while meta.json says zoom 0..4:
+// every tile the map asks for above zoom 0 is missing.
+const TILES_BASE = process.env.SKYCUE_TILES_URL;
+
+test.describe('map tiles fallback', () => {
+  test.use({ baseURL: TILES_BASE });
+
+  test('missing_tile_shows_lower_zoom_fallback', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (e) => pageErrors.push(String(e)));
+    expect((await apiAt(TILES_BASE, '/api/tiles-available')).body).toEqual({ tiles: true, minZoom: 0, maxZoom: 4 });
+    await openPage(page);
+    await waitMarkers(page, 1);
+    // The map fits the range ring (zoom > 4), so it shows zoom-4 tiles:
+    // none exists, and each one shows the zoom-0 tile enlarged 16 times.
+    await expect.poll(() => page.evaluate(() => window.skycueApp.tileCounts().fallback)).toBeGreaterThan(0);
+    // Until the zoom-3 tiles of the first view are pruned.
+    await expect.poll(() => page.evaluate(() => Array.from(document.querySelectorAll('.leaflet-tile-pane .leaflet-tile img'))
+      .filter((i) => i.style.width !== '4096px').length)).toBe(0);
+    const tiles = await page.evaluate(() => Array.from(document.querySelectorAll('.leaflet-tile-pane .leaflet-tile'))
+      .map((t) => {
+        const img = t.querySelector('img');
+        return { loaded: t.classList.contains('leaflet-tile-loaded'), fallback: t.classList.contains('tile-fallback'),
+          zoom: t.getAttribute('data-fallback-zoom'), src: img && img.getAttribute('src'),
+          natural: img ? img.naturalWidth : 0, width: img && img.style.width, clip: getComputedStyle(t).overflow };
+      }));
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const t of tiles) {
+      expect(t).toMatchObject({ loaded: true, fallback: true, zoom: '0', src: 'tiles/0/0/0.png', natural: 256,
+        width: '4096px', clip: 'hidden' });
+    }
+    const counts = await page.evaluate(() => window.skycueApp.tileCounts());
+    expect(counts.failed).toBe(0);
+    expect(counts.missing).toBeGreaterThanOrEqual(4); // tried z4, z3, z2, z1 before z0
+    expect(pageErrors).toEqual([]);
+  });
+});

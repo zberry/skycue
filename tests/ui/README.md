@@ -110,5 +110,13 @@ FIS-B, against the 2015 skycued:
     `stations` in the strip, stations as in `/api/fisb/status`.
 18. `fisb_screenshots_weather`: a clicked NOTAM, SIGMET and a filtered list.
 
+Map tiles, against a fourth skycued (the readsb fixture) serving a copy of
+the www directory whose `tiles/` holds only a generated solid-colour zoom-0
+tile while `meta.json` says zoom 0..4 (`SKYCUE_TILES_URL`):
+
+19. `missing_tile_shows_lower_zoom_fallback`: every tile on the map is
+    loaded and shows `tiles/0/0/0.png` enlarged 16 times (the zoom-4 to
+    zoom-1 URLs 404 and are remembered), none failed, no page error.
+
 Every test also fails if the page requested anything from another host
 than the one it was loaded from (`data:` URLs, the radar images, aside).

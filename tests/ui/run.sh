@@ -127,6 +127,34 @@ radar_base=$(start_fisb fisb-tg30 "$radar_rec" 40.04 -86.26) || fail "FIS-B skyc
 wait_fisb "$fisb_base" "$(grep -c '"uat_uplink"' "$fisb_rec")" || fail "2015 uplinks not decoded"
 wait_fisb "$radar_base" "$(grep -c '"uat_uplink"' "$radar_rec")" || fail "tg30 uplinks not decoded"
 
+# Map tiles: one more skycued (the readsb fixture) serving a copy of the www
+# directory whose tiles/ has only the zoom-0 tile, one solid colour, while
+# meta.json claims zoom 0..4, so every tile the map asks for above zoom 0 is
+# missing and the page must fall back to an enlarged zoom-0 tile.
+tiles_www="$tmp/www-tiles"
+cp -r "$www" "$tiles_www" && rm -rf "$tiles_www/tiles" && mkdir -p "$tiles_www/tiles/0/0" || fail "tiles www copy"
+python3 -I - "$tiles_www/tiles/0/0/0.png" <<'EOP' || fail "tiles fixture PNG"
+import struct, sys, zlib
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+row = b"\x00" + bytes((0x2e, 0x8b, 0x57)) * 256
+png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 256, 256, 8, 2, 0, 0, 0)) +
+       chunk(b"IDAT", zlib.compress(row * 256)) + chunk(b"IEND", b""))
+open(sys.argv[1], "wb").write(png)
+EOP
+printf '%s\n' '{"minZoom":0,"maxZoom":4,"bbox":[-180,-85,180,85],"regions":[{"name":"fixture","bbox":[-180,-85,180,85],"minZoom":0,"maxZoom":4}]}' \
+  > "$tiles_www/tiles/meta.json"
+tiles_port=$(free_port)
+sed -e "s/^WEB_PORT=.*/WEB_PORT=$tiles_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/tiles.conf"
+bash -c "echo \$\$ > '$tmp/fisb-tiles.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/tiles.conf' --www-dir '$tiles_www' >>'$tmp/tiles.log' 2>&1" </dev/null >/dev/null 2>&1 &
+tiles_base="http://127.0.0.1:$tiles_port"
+up=0
+for (( i=0; i<100; i++ )); do
+  python3 -I -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)' "$tiles_base/api/stats" 2>/dev/null && { up=1; break; }
+  sleep 0.1
+done
+[ "$up" = 1 ] || fail "tiles skycued did not come up"
+
 out_dir=$(dirname "$www")/ui-test-results
 rm -rf "$out_dir"
 export SKYCUE_BASE_URL="$base"
@@ -135,6 +163,7 @@ export SKYCUE_START_CMD="$start_cmd"
 export SKYCUE_PID_FILE="$pidfile"
 export SKYCUE_FISB_URL="$fisb_base"
 export SKYCUE_RADAR_URL="$radar_base"
+export SKYCUE_TILES_URL="$tiles_base"
 export SKYCUE_UI_OUT="$out_dir"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 (cd "$here" && npx --no-install playwright test)

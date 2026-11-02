@@ -22,11 +22,16 @@ struct Config {
     enum class Transport { tcp, udp, tcp_listen } transport = Transport::tcp;
     std::string host = "127.0.0.1"; // tcp: server to connect to; udp, tcp_listen: local bind address
     uint16_t port = 30500;          // tcp_listen, udp: 0 picks an ephemeral port (tcp_listen: see localPort)
+    // tcp: fixed delay before every redial (no backoff). tcp_listen, udp:
+    // delay before retrying a bind (or an accept, or a receive) that failed.
     std::chrono::milliseconds reconnect_interval{2000};
-    std::chrono::milliseconds default_keyframe_interval{10000}; // until a Hello says otherwise
+    // Used for the stale check until a Hello says otherwise; at least 10 ms.
+    std::chrono::milliseconds default_keyframe_interval{10000};
     // Liveness (see "Liveness" below): udp: no frame for this long ->
     // source_lost. tcp, tcp_listen: the minimum per-connection timeout.
     std::chrono::milliseconds heartbeat_timeout{3000};
+    // true: start() spawns an I/O thread. false: nothing happens except
+    // inside poll(), which the owner must call often (see Liveness).
     bool run_io_thread = true;
 };
 

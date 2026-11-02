@@ -77,7 +77,7 @@
         minZoom: typeof tiles.minZoom === 'number' ? tiles.minZoom : 0,
         maxNativeZoom: typeof tiles.maxZoom === 'number' ? tiles.maxZoom : 10,
         maxZoom: 14,
-        attribution: 'Map data &copy; OpenStreetMap contributors'
+        attribution: 'Made with Natural Earth' // scripts/make-tiles.sh
       }).addTo(map);
     } else {
       graticule = L.layerGroup().addTo(map);

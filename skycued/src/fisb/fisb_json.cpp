@@ -182,6 +182,7 @@ std::string twgoRecordJson(const TwgoRecord& r)
     w.add("has_graphics", r.has_graphics);
     w.add("complete", r.complete);
     w.add("cancelled", r.cancelled);
+    w.add("pending", r.pending);
     if (r.start)
         w.add("start", iso(*r.start));
     if (r.graphics_end)

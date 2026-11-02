@@ -446,6 +446,7 @@ std::string formatSummary(const Gathered& g, const FisbDecoder& decoder, const F
         {"store.ignored_after_cancel", ss.ignored_after_cancel},
         {"store.no_product_time", ss.no_product_time},
         {"store.twgo_pending", ss.twgo_pending},
+        {"store.wrong_year", ss.wrong_year},
     };
     o += "\n== Decoder counters\n";
     for (const auto& kv : counters)

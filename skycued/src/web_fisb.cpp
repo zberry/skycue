@@ -210,6 +210,7 @@ void appendFeatures(const TwgoRecord& r, std::vector<std::string>& out)
             p.add("text_end", iso(*r.text_end));
         p.add("expires", iso(r.expires));
         p.add("cancelled", r.cancelled);
+        p.add("pending", r.pending);
         p.add("geom", fisb::shapeGeomName(s.geom));
         if (s.geom == Shape::circle || s.geom == Shape::prism)
             p.addRaw("radius_nm", deg(s.radius_nm));

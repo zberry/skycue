@@ -597,7 +597,7 @@ BOOST_AUTO_TEST_CASE(expiry_table_values)
     BOOST_TEST(expiry::kTwgoUnmatched.count() == 720);
 }
 
-BOOST_AUTO_TEST_CASE(twgo_expiry_uses_latest_end_time)
+BOOST_AUTO_TEST_CASE(twgo_expiry_latest_end_capped_by_reception)
 {
     BOOST_TEST((notamTextEnd("!EYE 10/028 EYE RWY 03/21 CLSD 2011010100-2011011100") == iso("2020-11-01T11:00:00Z")));
     BOOST_TEST((notamTextEnd("!CVG 0/3733 ODP 2010162111-2107162111EST") == iso("2021-07-16T21:11:00Z")));
@@ -607,26 +607,27 @@ BOOST_AUTO_TEST_CASE(twgo_expiry_uses_latest_end_time)
 
     FisbStore st;
     const std::string body = "NOTAM-FDC KCVG.0/3733 Z !FDC 0/3733 CVG ODP 1501162111-1507162111";
-    // Text end (2015-07-16) later than the graphics end (2015-01-24 05:00): the text wins.
+    // A text end months ahead: 70 min after the last reception comes first.
     auto ev = st.apply(twgoText(8, 3733, body, kT0), kT0);
     BOOST_REQUIRE_EQUAL(ev.size(), 1u);
     BOOST_TEST((ev[0].twgo->text_end == iso("2015-07-16T21:11:00Z")));
-    BOOST_TEST((ev[0].expires == iso("2015-07-16T21:11:00Z")));
+    BOOST_TEST((ev[0].expires == kT0 + 70min));
     const TimePoint g_end = iso("2015-01-24T05:00:00Z");
     ev = st.apply(twgoGraphics(8, 3733, {square(39, -84)}, kT0 + 10s, 15, g_end), kT0 + 10s);
     BOOST_REQUIRE_EQUAL(ev.size(), 1u);
     BOOST_TEST((ev[0].kind == FisbEvent::Kind::twgo));
     BOOST_TEST((ev[0].twgo->graphics_end == g_end));
-    BOOST_TEST((ev[0].twgo->expires == iso("2015-07-16T21:11:00Z")));
+    BOOST_TEST((ev[0].twgo->expires == kT0 + 10s + 70min));  // the text end is the latest end
     BOOST_TEST(st.sweep(g_end + 1min).empty());  // still held after the graphics end
 
-    // A graphics end later than the text end wins.
+    // An end before the 70 min: the end.
     ev = st.apply(twgoText(8, 1, "NOTAM-D !X 1/1 X RWY CLSD 1501240400-1501240500", kT0), kT0);
     BOOST_REQUIRE_EQUAL(ev.size(), 1u);
     BOOST_TEST((ev[0].expires == iso("2015-01-24T05:00:00Z")));
+    // A later graphics end makes the end later; the 70 min still caps it.
     ev = st.apply(twgoGraphics(8, 1, {square(1, 1)}, kT0, 15, iso("2015-01-24T08:00:00Z")), kT0);
     BOOST_REQUIRE_EQUAL(ev.size(), 1u);
-    BOOST_TEST((ev[0].twgo->expires == iso("2015-01-24T08:00:00Z")));
+    BOOST_TEST((ev[0].twgo->expires == kT0 + 70min));
 
     // No end at all (PERM, non-NOTAM text): 70 min after the last reception.
     ev = st.apply(twgoText(8, 2, "NOTAM-FDC !FDC 0/2 AIRSPACE 1501240400-PERM", kT0), kT0);
@@ -635,12 +636,142 @@ BOOST_AUTO_TEST_CASE(twgo_expiry_uses_latest_end_time)
     // The text end is read for NOTAM products only.
     ev = st.apply(twgoText(11, 4, "AIRMET 1501240400-1501250400", kT0), kT0);
     BOOST_TEST((ev.at(0).expires == kT0 + 70min));
+    // SUA keeps its end, however far.
+    st.apply(twgoText(13, 5, "SUA b", kT0), kT0);
+    ev = st.apply(twgoGraphics(13, 5, {square(1, 1)}, kT0, 15, kT0 + 6h), kT0);
+    BOOST_TEST((ev.at(0).twgo->expires == kT0 + 6h));
 
     auto j = skycued::JsonObject::parse(twgoRecordJson(*findTwgo(st.snapshot(), 3733)));
     BOOST_REQUIRE(j.has_value());
     BOOST_TEST(*j->getString("text_end") == "2015-07-16T21:11:00.000Z");
     BOOST_TEST(*j->getString("graphics_end") == "2015-01-24T05:00:00.000Z");
     BOOST_TEST(!j->getString("end").has_value());
+}
+
+namespace {
+FisbProduct withYear(FisbProduct p, uint8_t year)
+{
+    std::get<TwgoParsed>(p.body).key.year = year;
+    return p;
+}
+}  // namespace
+
+// Final review: a report of another year is not current (a stuck SIGMET, a
+// foreign-year recording); across New Year the neighbouring year is allowed.
+BOOST_AUTO_TEST_CASE(twgo_wrong_year_rejected)
+{
+    FisbStore st;  // kT0: 2015-01-24
+    BOOST_TEST(st.apply(withYear(twgoText(12, 1, "SIGMET a", kT0), 15), kT0).size() == 1u);
+    BOOST_TEST(st.apply(withYear(twgoText(12, 2, "SIGMET b", kT0), 14), kT0).size() == 1u);  // January
+    BOOST_TEST(st.apply(withYear(twgoText(12, 3, "SIGMET c", kT0), 13), kT0).empty());
+    BOOST_TEST(st.apply(withYear(twgoText(12, 4, "SIGMET d", kT0), 16), kT0).empty());
+    BOOST_TEST(st.apply(withYear(twgoText(8, 5, "NOTAM-TFR e", kT0), 5), kT0).size() == 1u);  // one digit
+    BOOST_TEST(st.apply(withYear(twgoText(12, 6, "SIGMET f", kT0), 5), kT0).empty());
+    // Graphics, cancels and keep-alives of another year are dropped as well.
+    BOOST_TEST(st.apply(withYear(twgoGraphics(14, 7, {square(1, 1)}, kT0), 13), kT0).empty());
+    BOOST_TEST(st.apply(withYear(twgoText(12, 1, "", kT0, true), 13), kT0).empty());
+    BOOST_TEST(st.stats().wrong_year == 5u);
+    BOOST_TEST(st.snapshot().twgo.size() == 3u);
+    BOOST_TEST(!findTwgo(st.snapshot(), 3));
+
+    const TimePoint dec = iso("2015-12-31T23:00:00Z"), jun = iso("2015-06-15T12:00:00Z");
+    FisbStore d;
+    BOOST_TEST(d.apply(withYear(twgoText(11, 1, "AIRMET a", dec), 16), dec).size() == 1u);  // December
+    BOOST_TEST(d.apply(withYear(twgoText(11, 2, "AIRMET b", dec), 14), dec).empty());
+    BOOST_TEST(d.apply(withYear(twgoText(11, 3, "AIRMET c", jun), 14), jun).empty());
+    BOOST_TEST(d.apply(withYear(twgoText(11, 4, "AIRMET d", jun), 16), jun).empty());
+    BOOST_TEST(d.stats().wrong_year == 3u);
+}
+
+// Final review: a start still ahead is published pending, then again when it
+// comes into force.
+BOOST_AUTO_TEST_CASE(twgo_future_start_pending_then_active)
+{
+    FisbStore st;
+    auto ev = st.apply(twgoText(12, 77, "SIGMET 77 VALID 240512/240912", kT0), kT0);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST(!ev[0].twgo->pending);
+    FisbProduct g = twgoGraphics(12, 77, {square(39, -100)}, kT0 + 1s, 15, kT0 + 4h);
+    std::get<TwgoParsed>(g.body).start = kT0 + 1h;
+    ev = st.apply(g, kT0 + 1s);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].kind == FisbEvent::Kind::twgo));
+    BOOST_TEST(ev[0].twgo->pending);
+    auto j = skycued::JsonObject::parse(twgoRecordJson(*ev[0].twgo));
+    BOOST_REQUIRE(j.has_value());
+    BOOST_TEST(*j->getString("pending") == "true");
+    // A repeat while pending changes nothing.
+    g.received = kT0 + 10min;
+    BOOST_TEST(st.apply(g, kT0 + 10min).empty());
+    BOOST_TEST(st.sweep(kT0 + 1h - 1s).empty());
+    ev = st.sweep(kT0 + 1h);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].kind == FisbEvent::Kind::twgo));
+    BOOST_TEST(!ev[0].twgo->pending);
+    BOOST_TEST(ev[0].twgo->has_graphics);
+    BOOST_TEST(!findTwgo(st.snapshot(), 77)->pending);
+    BOOST_TEST(st.sweep(kT0 + 1h + 1s).empty());  // once
+    // Received again after its start: no longer pending, no event.
+    g.received = kT0 + 61min;
+    BOOST_TEST(st.apply(g, kT0 + 61min).empty());
+}
+
+// Final review: SIGMET (and AIRMET, G-AIRMET, CWA) end 70 min after the last
+// reception even when the graphics end is later.
+BOOST_AUTO_TEST_CASE(sigmet_lifetime_capped_by_last_reception)
+{
+    for (uint16_t pid : {uint16_t{11}, uint16_t{12}, uint16_t{14}, uint16_t{15}}) {
+        BOOST_TEST_CONTEXT("product " << pid)
+        {
+            FisbStore st;
+            if (pid != 14)
+                st.apply(twgoText(pid, 9, "WX a", kT0), kT0);
+            auto ev = st.apply(twgoGraphics(pid, 9, {square(39, -100)}, kT0, 15, kT0 + 4h), kT0);
+            BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+            BOOST_TEST((ev[0].twgo->expires == kT0 + 70min));
+            // Heard again at +60 min: renewed to +130.
+            st.apply(twgoGraphics(pid, 9, {square(39, -100)}, kT0 + 60min, 15, kT0 + 4h), kT0 + 60min);
+            BOOST_TEST((findTwgo(st.snapshot(), 9)->expires == kT0 + 130min));
+            BOOST_TEST(st.sweep(kT0 + 130min - 1s).empty());
+            ev = st.sweep(kT0 + 130min);
+            BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+            BOOST_TEST(ev[0].reason == "expired");
+            BOOST_TEST(!findTwgo(st.snapshot(), 9));
+        }
+    }
+    // A graphics end before the 70 min still ends it first.
+    FisbStore st;
+    st.apply(twgoText(12, 10, "SIGMET b", kT0), kT0);
+    auto ev = st.apply(twgoGraphics(12, 10, {square(39, -100)}, kT0, 15, kT0 + 30min), kT0);
+    BOOST_TEST((ev.at(0).twgo->expires == kT0 + 30min));
+}
+
+// Final review: a TFR's keep-alives are what keeps it; without them it goes
+// 70 min after the last one, whatever end its text gives.
+BOOST_AUTO_TEST_CASE(tfr_expires_70min_after_last_keepalive_even_with_far_text_end)
+{
+    FisbStore st;
+    const std::string body = "NOTAM-TFR 5/5116 240100Z ... 1501240400-1509010000";
+    auto ev = st.apply(twgoText(8, 5116, body, kT0), kT0);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].twgo->text_end == iso("2015-09-01T00:00:00Z")));
+    BOOST_TEST((ev[0].expires == kT0 + 70min));
+    // Keep-alives (empty text) at +30 and +60 min renew it, silently.
+    BOOST_TEST(st.apply(twgoText(8, 5116, "", kT0 + 30min), kT0 + 30min).empty());
+    BOOST_TEST(st.apply(twgoText(8, 5116, "", kT0 + 60min), kT0 + 60min).empty());
+    const auto snap = st.snapshot();
+    const TwgoRecord* r = findTwgo(snap, 5116);
+    BOOST_REQUIRE(r);
+    BOOST_TEST((r->last_received == kT0 + 60min));
+    BOOST_TEST((r->expires == kT0 + 130min));
+    BOOST_TEST(*r->text == body);
+    // Then nothing more: gone 70 min after the last keep-alive.
+    BOOST_TEST(st.sweep(kT0 + 130min - 1s).empty());
+    ev = st.sweep(kT0 + 130min);
+    BOOST_REQUIRE_EQUAL(ev.size(), 1u);
+    BOOST_TEST((ev[0].kind == FisbEvent::Kind::expired));
+    BOOST_TEST(ev[0].reason == "expired");
+    BOOST_TEST(!findTwgo(st.snapshot(), 5116));
 }
 
 BOOST_AUTO_TEST_CASE(summary_and_json_fields)

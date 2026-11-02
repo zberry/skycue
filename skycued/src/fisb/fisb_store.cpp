@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdio>
 #include <iterator>
+#include <ratio>
 #include <utility>
 
 namespace skycued {
@@ -84,6 +85,29 @@ int64_t epochSeconds(TimePoint t)
 {
     return std::chrono::duration_cast<std::chrono::seconds>(t.time_since_epoch()).count();
 }
+
+bool isNotam(uint16_t pid) { return pid == 8 || pid == 16 || pid == 17; }
+
+// The TWGO report year against the data clock's (reference §6.5, §7): the
+// clock's year, or the year before in January, the year after in December.
+// The key holds the year's last two digits, or for some NOTAMs its last one.
+bool plausibleYear(const TwgoKey& k, TimePoint now)
+{
+    using Days = std::chrono::duration<int64_t, std::ratio<86400>>;
+    const detail::Civil c = detail::civilFromDays(std::chrono::floor<Days>(now.time_since_epoch()).count());
+    for (int64_t dy = -1; dy <= 1; ++dy) {
+        if ((dy == -1 && c.m != 1) || (dy == 1 && c.m != 12))
+            continue;
+        const int64_t y = c.y + dy;
+        if (k.year == y % 100 || (isNotam(k.pid) && k.year < 10 && k.year == y % 10))
+            return true;
+    }
+    return false;
+}
+
+// §10.3 (amended at the final review): these products are re-sent every
+// cycle, so a report not heard for 70 min is gone whatever end it carries.
+bool cappedByReception(uint16_t pid) { return pid != 13; }
 
 }  // namespace
 
@@ -181,6 +205,10 @@ void FisbStore::applyText(const FisbProduct& p, const std::vector<TextRecord>& r
 
 void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint now, std::vector<FisbEvent>& out)
 {
+    if (!plausibleYear(t.key, now)) {
+        ++stats_.wrong_year;
+        return;
+    }
     auto it = twgo_.find(t.key);
     if (it == twgo_.end()) {
         // A keep-alive or a cancel for a report not held creates nothing.
@@ -223,6 +251,7 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
         r.start.reset();
         r.graphics_end.reset();
         r.text_end.reset();
+        r.pending = false;
         r.expires = now + expiry::kCancelled;
         ++stats_.cancelled;
         s.published = true;  // listed (flagged cancelled) until it expires
@@ -262,17 +291,20 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
     r.complete = p.id == 14 ? r.has_graphics : (r.text && !r.text->empty());
     if (r.complete) {
         // The latest end time the record carries (fisb-decode uses the NOTAM
-        // text's; a graphics end can be earlier), else 70 min after the last
-        // reception.
+        // text's; a graphics end can be earlier); all but SUA also end 70 min
+        // after the last reception (a keep-alive renews).
         std::optional<TimePoint> end = r.text_end;
         if (r.graphics_end && (!end || *r.graphics_end > *end))
             end = r.graphics_end;
-        r.expires = end ? *end : now + expiry::kTwgo;
+        const TimePoint live = r.last_received + expiry::kTwgo;
+        r.expires = !end ? live : cappedByReception(p.id) ? std::min(*end, live) : *end;
     } else {
         r.expires = now + expiry::kTwgoUnmatched;
         if (r.graphics_end && *r.graphics_end < r.expires)
             r.expires = *r.graphics_end;
     }
+    const bool was_pending = r.pending;
+    r.pending = r.start && *r.start > now;
     if (r.expires <= now) {
         ++stats_.stale;
         if (s.published) {
@@ -288,7 +320,7 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
         twgo_.erase(it);
         return;
     }
-    if (r.complete && (changed || !was_complete || !s.published)) {
+    if (r.complete && (changed || !was_complete || !s.published || r.pending != was_pending)) {
         s.published = true;
         event(FisbEvent::Kind::twgo, "");
     }
@@ -461,14 +493,28 @@ std::vector<FisbEvent> FisbStore::sweep(TimePoint now)
         }
     }
     for (auto it = twgo_.begin(); it != twgo_.end();) {
-        const TwgoState& s = it->second;
+        TwgoState& s = it->second;
         if (s.rec.expires <= now) {
             if (s.published)
                 expired(FisbEvent::Kind::twgo, s.rec.key.pid, s.rec.key.str(), s.rec.expires);
             it = twgo_.erase(it);
-        } else {
-            ++it;
+            continue;
         }
+        if (s.rec.pending && s.rec.start && *s.rec.start <= now) {
+            // In force now: published again, no longer pending.
+            s.rec.pending = false;
+            if (s.published && s.rec.complete && !s.rec.cancelled) {
+                FisbEvent e;
+                e.kind = FisbEvent::Kind::twgo;
+                e.expired_kind = FisbEvent::Kind::twgo;
+                e.product = s.rec.key.pid;
+                e.key = s.rec.key.str();
+                e.twgo = s.rec;
+                e.expires = s.rec.expires;
+                out.push_back(std::move(e));
+            }
+        }
+        ++it;
     }
     for (auto it = stations_.begin(); it != stations_.end();)
         it = now - it->second.last_heard > kStationForget ? stations_.erase(it) : std::next(it);

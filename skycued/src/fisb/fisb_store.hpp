@@ -23,12 +23,19 @@
 // by (kind, station, issued, FNV-1a of the text); a repeat changes nothing.
 //
 // TWGO (§10.2). Records are keyed by TwgoKey (pid-year-report-location-
-// month). The text and graphics halves arrive in separate APDUs and are
+// month). A record whose report year is not the data clock's year (the year
+// before also accepted in January, the year after in December; a one-digit
+// NOTAM year, products 8/16/17, matched on its last digit) is rejected and
+// counted (wrong_year): a stuck or foreign-year report is not current. The
+// text and graphics halves arrive in separate APDUs and are
 // paired. A non-empty text that differs from the stored one replaces it and
 // drops the old graphics (reference §6.5); an empty text (TFR keep-alive)
 // only renews. A record is complete when it has non-empty text (G-AIRMET,
 // product 14, which has no text: when it has graphics); only complete records
-// are published and listed. Cancellation (text status 0 or object_status 13)
+// are published and listed. A record whose graphics start is still ahead of
+// the clock is published flagged pending (not yet in force), and published
+// again, no longer pending, once the clock reaches the start (sweep).
+// Cancellation (text status 0 or object_status 13)
 // flags the record cancelled, clears its text and graphics, publishes an
 // expired event with reason "cancelled", and keeps only that cancellation for
 // 30 min: every APDU for the key meanwhile (a repeated cancel, a keep-alive,
@@ -39,9 +46,12 @@
 // NEXRAD 63/64 and lightning 103 75 min from product time (reference §7);
 // other rasters (70/71/84/90/91) 105 min from product time; METAR 120 min from issued; TAF at the end of its ddhh/ddhh validity
 // (else 120 min from issued); PIREP 120 min from issued; winds 12 h from
-// their valid time unless replaced by the next issue first; TWGO at the
-// latest of its end times (the NOTAM text's end of validity, the graphics
-// end) when it has one, else 70 min after the last reception; an unmatched
+// their valid time unless replaced by the next issue first. TWGO: its end
+// is the latest of its end times (the NOTAM text's end of validity, the
+// graphics end); NOTAMs (8/16/17), AIRMET, SIGMET, G-AIRMET and CWA
+// (11/12/14/15) expire at the earlier of that end and 70 min after the last
+// reception (a keep-alive or a repeat renews), SUA (13) at its end; with no
+// end, 70 min after the last reception. An unmatched
 // half 720 min after its last reception (or its graphics end if earlier);
 // cancelled 30 min after the cancel. A product already expired when it
 // arrives is not stored (counted as stale). Every removal of a published
@@ -96,6 +106,7 @@ struct TwgoRecord {
     bool cancelled = false;
     std::optional<TimePoint> start, graphics_end;  // graphics applicability
     std::optional<TimePoint> text_end;  // NOTAM text "yymmddhhmm-yymmddhhmm" end of validity (not PERM)
+    bool pending = false;  // start still ahead of the data clock: not yet in force
     std::string location, label;
     TimePoint received{}, last_received{}, expires{};
 };
@@ -159,6 +170,7 @@ struct FisbStoreStats {
     uint64_t ignored_after_cancel = 0;  // TWGO halves for a key in its 30 min cancelled window
     uint64_t no_product_time = 0;   // raster products whose APDU time did not resolve: dropped
     uint64_t twgo_pending = 0;      // gauge (computed by stats()): TWGO halves held, not yet complete
+    uint64_t wrong_year = 0;        // TWGO halves whose report year is not the data clock's: dropped
 };
 
 struct FisbSnapshot {

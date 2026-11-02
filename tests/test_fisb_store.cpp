@@ -11,6 +11,7 @@
 #include "time_util.hpp"
 
 #include <algorithm>
+#include <map>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -695,4 +696,80 @@ BOOST_AUTO_TEST_CASE(summary_and_json_fields)
     BOOST_TEST(*wj->getString("issued") == "2015-01-24T02:06:00.000Z");
     BOOST_TEST(*wj->getString("valid") == "2015-01-25T00:00:00.000Z");
     BOOST_TEST(*wj->getString("expires") == "2015-01-25T12:00:00.000Z");
+}
+
+// The summary (what /api/state, the WebSocket snapshot and /api/fisb/status
+// are built from) carries mosaic heads and counts without copying a block;
+// mosaic() copies only the mosaic asked for.
+BOOST_AUTO_TEST_CASE(status_does_not_copy_blocks)
+{
+    FisbStore st;
+    const TimePoint pt = iso("2015-01-24T04:10:00Z");
+    for (uint32_t i = 0; i < kMosaicMaxBlocks; ++i)
+        st.apply(blocks(63, pt, kT0, {block(200000 + i, 0, 1)}), kT0);
+    for (uint8_t code : {uint8_t{5}, uint8_t{2}})
+        st.apply(blocks(70, pt, kT0, {block(249640, 1, code)}, {}, 1, code), kT0);
+    st.apply(textProduct(kT0, {text(TextRecord::metar, "KSFO", pt, "METAR KSFO 240410Z"),
+                               text(TextRecord::taf, "KSFO", pt, "TAF KSFO 240410Z")}),
+             kT0);
+    BOOST_REQUIRE_EQUAL(st.blocksCopied(), 0u);
+
+    const FisbSummary sum = st.summary(kT0 + 1s);
+    BOOST_TEST(st.blocksCopied() == 0u);
+    BOOST_REQUIRE_EQUAL(sum.radar.size(), 1u);
+    BOOST_TEST(sum.radar[0].key == "63");
+    BOOST_TEST(sum.radar[0].block_count == kMosaicMaxBlocks);
+    BOOST_TEST((sum.radar[0].product_time == pt));
+    BOOST_REQUIRE_EQUAL(sum.rasters.size(), 2u);
+    BOOST_TEST(sum.metar == 1u);
+    BOOST_TEST(sum.taf == 1u);
+    BOOST_TEST(sum.heard.size() == 1u);
+
+    // One mosaic: only its blocks.
+    const auto m = st.mosaic(63);
+    BOOST_REQUIRE(m.has_value());
+    BOOST_TEST(m->blocks.size() == kMosaicMaxBlocks);
+    BOOST_TEST(st.blocksCopied() == kMosaicMaxBlocks);
+    // A layered raster: the lowest altitude code unless one is named.
+    const auto low = st.mosaic(70);
+    BOOST_REQUIRE(low.has_value());
+    BOOST_TEST(*low->altitude_code == 2u);
+    BOOST_TEST(*st.mosaic(70, uint8_t{5})->altitude_code == 5u);
+    BOOST_TEST(!st.mosaic(70, uint8_t{3}).has_value());
+    BOOST_TEST(!st.mosaic(64).has_value());
+    BOOST_TEST(st.blocksCopied() == kMosaicMaxBlocks + 2);
+
+    // The full snapshot copies everything.
+    const auto before = st.blocksCopied();
+    (void)st.snapshot();
+    BOOST_TEST(st.blocksCopied() == before + kMosaicMaxBlocks + 2);
+}
+
+// Expired events say what left, without the key having to be parsed.
+BOOST_AUTO_TEST_CASE(expired_events_carry_their_kind)
+{
+    FisbStore st;
+    const TimePoint pt = iso("2015-01-24T04:10:00Z");
+    st.apply(blocks(63, pt, kT0, {block(200000, 0, 1)}), kT0);
+    st.apply(blocks(70, pt, kT0, {block(249640, 1, 1)}, {}, 1, uint8_t{0}), kT0);
+    st.apply(textProduct(kT0, {text(TextRecord::metar, "KSFO", pt, "METAR KSFO 240410Z")}), kT0);
+    st.apply(twgoText(8, 1, "NOTAM-D a", kT0), kT0);
+    st.sweep(kT0 + 30s);  // publish the mosaics
+    std::map<std::string, FisbEvent> expired;
+    for (const auto& e : st.sweep(kT0 + 24h))
+        if (e.kind == FisbEvent::Kind::expired)
+            expired[e.key] = e;
+    BOOST_REQUIRE_EQUAL(expired.size(), 4u);
+    BOOST_TEST((expired.at("63").expired_kind == FisbEvent::Kind::radar));
+    BOOST_TEST((expired.at("70-0").expired_kind == FisbEvent::Kind::raster));
+    BOOST_TEST((expired.at("metar:KSFO").expired_kind == FisbEvent::Kind::text));
+    BOOST_REQUIRE(expired.at("metar:KSFO").text.has_value());
+    BOOST_TEST(expired.at("metar:KSFO").text->station == "KSFO");
+    BOOST_TEST((expired.at(key(8, 1).str()).expired_kind == FisbEvent::Kind::twgo));
+
+    // A cancel is a twgo expiry too.
+    st.apply(twgoText(8, 2, "NOTAM-D b", kT0 + 24h), kT0 + 24h);
+    const auto ev = st.apply(twgoText(8, 2, "", kT0 + 24h + 1s, true), kT0 + 24h + 1s);
+    BOOST_REQUIRE_EQUAL(countKind(ev, FisbEvent::Kind::expired), 1u);
+    BOOST_TEST((ev.back().expired_kind == FisbEvent::Kind::twgo));
 }

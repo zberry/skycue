@@ -197,6 +197,7 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
     auto event = [&](FisbEvent::Kind kind, const char* reason) {
         FisbEvent e;
         e.kind = kind;
+        e.expired_kind = FisbEvent::Kind::twgo;
         e.product = p.id;
         e.key = r.key.str();
         e.twgo = r;
@@ -277,6 +278,7 @@ void FisbStore::applyTwgo(const FisbProduct& p, const TwgoParsed& t, TimePoint n
         if (s.published) {
             FisbEvent e;
             e.kind = FisbEvent::Kind::expired;
+            e.expired_kind = FisbEvent::Kind::twgo;
             e.product = p.id;
             e.key = r.key.str();
             e.reason = "expired";
@@ -422,10 +424,14 @@ void FisbStore::publish(MosaicState& m, TimePoint now, std::vector<FisbEvent>& o
 std::vector<FisbEvent> FisbStore::sweep(TimePoint now)
 {
     std::vector<FisbEvent> out;
-    auto expired = [&](uint16_t product, const std::string& key, TimePoint due) {
+    auto expired = [&](FisbEvent::Kind of, uint16_t product, const std::string& key, TimePoint due,
+                       const TextRecord* text = nullptr) {
         ++stats_.expired;
         FisbEvent e;
         e.kind = FisbEvent::Kind::expired;
+        e.expired_kind = of;
+        if (text)
+            e.text = *text;
         e.product = product;
         e.key = key;
         e.reason = "expired";
@@ -437,7 +443,8 @@ std::vector<FisbEvent> FisbStore::sweep(TimePoint now)
         MosaicState& m = it->second;
         if (m.head.expires <= now) {
             if (m.head.published)  // never published: nobody was told of it
-                expired(m.head.product, it->first, m.head.expires);
+                expired(isNexrad(m.head.product) ? FisbEvent::Kind::radar : FisbEvent::Kind::raster,
+                        m.head.product, it->first, m.head.expires);
             it = mosaics_.erase(it);
             continue;
         }
@@ -447,7 +454,7 @@ std::vector<FisbEvent> FisbStore::sweep(TimePoint now)
     }
     for (auto it = text_.begin(); it != text_.end();) {
         if (it->second.expires <= now) {
-            expired(413, it->first, it->second.expires);
+            expired(FisbEvent::Kind::text, 413, it->first, it->second.expires, &it->second);
             it = text_.erase(it);
         } else {
             ++it;
@@ -457,7 +464,7 @@ std::vector<FisbEvent> FisbStore::sweep(TimePoint now)
         const TwgoState& s = it->second;
         if (s.rec.expires <= now) {
             if (s.published)
-                expired(s.rec.key.pid, s.rec.key.str(), s.rec.expires);
+                expired(FisbEvent::Kind::twgo, s.rec.key.pid, s.rec.key.str(), s.rec.expires);
             it = twgo_.erase(it);
         } else {
             ++it;
@@ -473,8 +480,10 @@ std::vector<FisbEvent> FisbStore::sweep(TimePoint now)
 FisbSnapshot FisbStore::snapshot() const
 {
     FisbSnapshot s;
-    for (const auto& m : mosaics_)
+    for (const auto& m : mosaics_) {
         (isNexrad(m.second.head.product) ? s.radar : s.rasters).push_back(view(m.second));
+        blocks_copied_ += m.second.blocks.size();
+    }
     for (const auto& t : text_) {
         switch (t.second.kind) {
         case TextRecord::metar: s.metar.push_back(t.second); break;
@@ -491,6 +500,22 @@ FisbSnapshot FisbStore::snapshot() const
         s.stations.push_back(st.second);
     s.stats = stats();
     return s;
+}
+
+std::optional<Mosaic> FisbStore::mosaic(uint16_t product, std::optional<uint8_t> altitude_code) const
+{
+    const MosaicState* best = nullptr;
+    for (const auto& m : mosaics_) {
+        const Mosaic& h = m.second.head;
+        if (h.product != product || (altitude_code && h.altitude_code != altitude_code))
+            continue;
+        if (!best || (h.altitude_code && best->head.altitude_code && *h.altitude_code < *best->head.altitude_code))
+            best = &m.second;
+    }
+    if (!best)
+        return std::nullopt;
+    blocks_copied_ += best->blocks.size();
+    return view(*best);
 }
 
 FisbStoreStats FisbStore::stats() const
@@ -520,6 +545,34 @@ FisbSummary FisbStore::summary(TimePoint now) const
     s.mosaics = mosaics_.size();
     s.mosaic_blocks = mosaicBlocks();
     s.stations = stations_.size();
+    for (const auto& t : text_) {
+        switch (t.second.kind) {
+        case TextRecord::metar: ++s.metar; break;
+        case TextRecord::taf: ++s.taf; break;
+        case TextRecord::pirep: ++s.pirep; break;
+        case TextRecord::winds: ++s.winds; break;
+        case TextRecord::other: ++s.other; break;
+        }
+    }
+    for (const auto& t : twgo_)
+        s.twgo_cancelled += t.second.published && t.second.rec.cancelled ? 1 : 0;
+    for (const auto& st : stations_)
+        s.heard.push_back(st.second);
+    for (const auto& m : mosaics_) {
+        const Mosaic& h = m.second.head;
+        MosaicHead mh;
+        mh.key = m.first;
+        mh.product = h.product;
+        mh.altitude_code = h.altitude_code;
+        mh.scale = h.scale;
+        mh.product_time = h.product_time;
+        mh.updated = h.updated;
+        mh.expires = h.expires;
+        mh.published = h.published;
+        mh.block_count = m.second.blocks.size();
+        mh.evicted = h.evicted;
+        (isNexrad(h.product) ? s.radar : s.rasters).push_back(std::move(mh));
+    }
     for (const auto& m : mosaics_) {
         if (!isNexrad(m.second.head.product))
             continue;

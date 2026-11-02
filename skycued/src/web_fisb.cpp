@@ -79,17 +79,17 @@ ApiResponse fail(unsigned status, const std::string& message) { return reply(sta
 
 // ---- status ----
 
-std::string mosaicHead(const Mosaic& m, TimePoint now)
+std::string mosaicHead(const fisb::MosaicHead& m, TimePoint now)
 {
     JsonWriter w;
-    w.add("key", m.key());
+    w.add("key", m.key);
     w.add("product", static_cast<int64_t>(m.product));
     w.add("name", fisb::productName(m.product));
     if (m.altitude_code)
         w.add("altitude_code", static_cast<int64_t>(*m.altitude_code));
     w.add("product_time", iso(m.product_time));
     w.add("age_s", std::round(std::chrono::duration<double>(now - m.product_time).count() * 10) / 10);
-    w.add("blocks", num(m.blocks.size()));
+    w.add("blocks", num(m.block_count));
     if (m.published)
         w.add("published", iso(*m.published));
     w.add("expires", iso(m.expires));
@@ -103,7 +103,7 @@ std::string siteId(uint64_t key)
     return buf;
 }
 
-const Mosaic* findRadar(const fisb::FisbSnapshot& s, uint16_t product)
+const fisb::MosaicHead* findRadar(const fisb::FisbSummary& s, uint16_t product)
 {
     for (const auto& m : s.radar)
         if (m.product == product)
@@ -427,7 +427,9 @@ std::string withPaletteLegend(std::string mosaic, const std::string& palette, co
 
 // ---- routes ----
 
-ApiResponse textRoute(const std::map<std::string, std::string>& params, const fisb::FisbSnapshot& s)
+}  // namespace
+
+ApiResponse fisbTextRoute(const std::map<std::string, std::string>& params, const fisb::FisbSnapshot& s)
 {
     const std::string type = param(params, "type");
     const std::string station = upper(param(params, "station"));
@@ -468,6 +470,8 @@ ApiResponse textRoute(const std::map<std::string, std::string>& params, const fi
     return reply(200, JsonWriter().addRaw("records", jsonArray(records)).str());
 }
 
+namespace {
+
 ApiResponse shapesRoute(const std::map<std::string, std::string>& params, const fisb::FisbSnapshot& s)
 {
     std::set<unsigned> products;
@@ -491,7 +495,7 @@ ApiResponse shapesRoute(const std::map<std::string, std::string>& params, const 
                  JsonWriter().add("type", "FeatureCollection").addRaw("features", jsonArray(features)).str());
 }
 
-ApiResponse radarRoute(const std::map<std::string, std::string>& params, const fisb::FisbSnapshot& s)
+ApiResponse radarRoute(const std::map<std::string, std::string>& params, const Engine& engine)
 {
     const std::string which = param(params, "product");
     uint16_t product = 0;
@@ -501,13 +505,13 @@ ApiResponse radarRoute(const std::map<std::string, std::string>& params, const f
         product = kConus;
     else
         return fail(400, "product must be regional or conus");
-    const Mosaic* m = findRadar(s, product);
+    const auto m = engine.fisbMosaic(product, std::nullopt);
     if (!m)
         return fail(404, std::string("no ") + fisb::productName(product) + " mosaic");
     return reply(200, withPaletteLegend(fisb::mosaicJson(*m), nexradPalette(product), nexradLegend(product)));
 }
 
-ApiResponse rasterRoute(const std::map<std::string, std::string>& params, const fisb::FisbSnapshot& s)
+ApiResponse rasterRoute(const std::map<std::string, std::string>& params, const Engine& engine)
 {
     const auto product = parseUnsigned(param(params, "product"), 65535);
     static const std::set<unsigned> kRasters{70, 71, 84, 90, 91, 103};
@@ -519,16 +523,10 @@ ApiResponse rasterRoute(const std::map<std::string, std::string>& params, const 
         if (!altitude)
             return fail(400, "altitude must be an altitude code, 0-7");
     }
-    const Mosaic* best = nullptr;
-    for (const auto& m : s.rasters) {
-        if (m.product != *product)
-            continue;
-        if (altitude && (!m.altitude_code || *m.altitude_code != *altitude))
-            continue;
-        // Without ?altitude=, the lowest layer.
-        if (!best || (m.altitude_code && best->altitude_code && *m.altitude_code < *best->altitude_code))
-            best = &m;
-    }
+    // Without ?altitude=, the lowest layer.
+    const auto best = engine.fisbMosaic(static_cast<uint16_t>(*product),
+                                        altitude ? std::optional<uint8_t>(static_cast<uint8_t>(*altitude))
+                                                 : std::nullopt);
     if (!best)
         return fail(404, "no " + std::string(fisb::productName(static_cast<uint16_t>(*product))) + " mosaic" +
                              (altitude ? " at altitude code " + std::to_string(*altitude) : std::string()));
@@ -536,16 +534,15 @@ ApiResponse rasterRoute(const std::map<std::string, std::string>& params, const 
     return reply(200, withPaletteLegend(fisb::mosaicJson(*best), pl.first, pl.second));
 }
 
+// What left the store, as the store said (FisbEvent::expired_kind).
 const char* expiredKind(const FisbNotice& n)
 {
-    if (n.key.find(':') != std::string::npos || n.product == 413)
-        return "text";
-    switch (fisb::productFamily(n.product)) {
-    case fisb::ProductFamily::twgo: return "twgo";
-    case fisb::ProductFamily::global_block:
-        return n.product == kRegional || n.product == kConus ? "radar" : "raster";
-    case fisb::ProductFamily::generic_text: return "text";
-    case fisb::ProductFamily::other: break;
+    switch (n.expired_kind) {
+    case fisb::FisbEvent::Kind::text: return "text";
+    case fisb::FisbEvent::Kind::twgo: return "twgo";
+    case fisb::FisbEvent::Kind::radar: return "radar";
+    case fisb::FisbEvent::Kind::raster: return "raster";
+    case fisb::FisbEvent::Kind::expired: break;
     }
     return "other";
 }
@@ -559,11 +556,12 @@ std::string twgoFeaturesJson(const TwgoRecord& record)
     return jsonArray(out);
 }
 
-std::string fisbStatusJson(const Snapshot& snap, const fisb::FisbSnapshot& f)
+std::string fisbStatusJson(const Snapshot& snap)
 {
     const EngineStats& st = snap.stats;
+    const fisb::FisbSummary& f = snap.fisb;
     JsonWriter w;
-    w.add("enabled", snap.fisb.enabled);
+    w.add("enabled", f.enabled);
     w.add("uplinks", num(st.fisb_uplinks));
     w.add("products", num(st.fisb_products));
     w.add("bad_frames", num(st.fisb_bad_frames));
@@ -572,11 +570,11 @@ std::string fisbStatusJson(const Snapshot& snap, const fisb::FisbSnapshot& f)
     if (st.fisb_last_uplink)
         w.add("last_uplink_time", iso(*st.fisb_last_uplink));
     w.add("now", iso(snap.now));
-    if (snap.fisb.radar_age_s)
-        w.add("radar_age_s", std::round(*snap.fisb.radar_age_s * 10) / 10);
+    if (f.radar_age_s)
+        w.add("radar_age_s", std::round(*f.radar_age_s * 10) / 10);
 
     std::vector<std::string> stations;
-    for (const auto& s : f.stations)
+    for (const auto& s : f.heard)
         stations.push_back(JsonWriter()
                                .add("site_id", siteId(s.key))
                                .addRaw("lat", deg(s.lat))
@@ -586,13 +584,11 @@ std::string fisbStatusJson(const Snapshot& snap, const fisb::FisbSnapshot& f)
                                .str());
     w.addRaw("stations", jsonArray(stations));
 
-    const Mosaic* regional = findRadar(f, kRegional);
-    const Mosaic* conus = findRadar(f, kConus);
     // An absent mosaic is left out, not null (the API's convention).
     JsonWriter radar;
-    if (regional)
+    if (const auto* regional = findRadar(f, kRegional))
         radar.addRaw("regional", mosaicHead(*regional, snap.now));
-    if (conus)
+    if (const auto* conus = findRadar(f, kConus))
         radar.addRaw("conus", mosaicHead(*conus, snap.now));
     w.addRaw("radar", radar.str());
     std::vector<std::string> rasters;
@@ -600,17 +596,14 @@ std::string fisbStatusJson(const Snapshot& snap, const fisb::FisbSnapshot& f)
         rasters.push_back(mosaicHead(m, snap.now));
     w.addRaw("rasters", jsonArray(rasters));
 
-    std::size_t twgo = 0, cancelled = 0;
-    for (const auto& r : f.twgo)
-        ++(r.cancelled ? cancelled : twgo);
     w.addRaw("counts", JsonWriter()
-                           .add("metar", num(f.metar.size()))
-                           .add("taf", num(f.taf.size()))
-                           .add("pirep", num(f.pirep.size()))
-                           .add("winds", num(f.winds.size()))
-                           .add("other", num(f.other.size()))
-                           .add("twgo", num(twgo))
-                           .add("cancelled", num(cancelled))
+                           .add("metar", num(f.metar))
+                           .add("taf", num(f.taf))
+                           .add("pirep", num(f.pirep))
+                           .add("winds", num(f.winds))
+                           .add("other", num(f.other))
+                           .add("twgo", num(f.twgo_records - f.twgo_cancelled))
+                           .add("cancelled", num(f.twgo_cancelled))
                            .str());
     return w.str();
 }
@@ -657,13 +650,8 @@ std::string fisbEventJson(const EngineEvent& event)
         const char* kind = expiredKind(n);
         w.add("type", "fisb_expired").add("kind", kind).add("product", static_cast<int64_t>(n.product));
         w.add("key", n.key);
-        if (std::string(kind) == "text") {
-            const std::size_t a = n.key.find(':');
-            if (a != std::string::npos) {
-                const std::size_t b = n.key.find(':', a + 1);
-                w.add("station", n.key.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1));
-            }
-        }
+        if (n.text)
+            w.add("station", n.text->station);
         w.add("reason", n.reason);
         if (n.expires)
             w.add("expires", iso(*n.expires));
@@ -700,13 +688,14 @@ ApiResponse handleFisbApi(const ApiRequest& request, const Engine& engine)
         return r;
     }
     const auto params = queryParams(request.query);
-    const fisb::FisbSnapshot snap = engine.fisbSnapshot();
     switch (route) {
-    case Route::status: return reply(200, fisbStatusJson(engine.snapshot(), snap));
-    case Route::text: return textRoute(params, snap);
-    case Route::shapes: return shapesRoute(params, snap);
-    case Route::radar: return radarRoute(params, snap);
-    case Route::raster: return rasterRoute(params, snap);
+    case Route::status: return reply(200, fisbStatusJson(engine.snapshot()));
+    // Text and shapes read the records, so the whole store; radar and
+    // raster copy only the one mosaic asked for.
+    case Route::text: return fisbTextRoute(params, engine.fisbSnapshot());
+    case Route::shapes: return shapesRoute(params, engine.fisbSnapshot());
+    case Route::radar: return radarRoute(params, engine);
+    case Route::raster: return rasterRoute(params, engine);
     }
     return fail(404, "no such API path: " + path);
 }

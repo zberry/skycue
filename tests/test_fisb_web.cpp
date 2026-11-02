@@ -10,6 +10,7 @@
 #include "runtime_config.hpp"
 #include "time_util.hpp"
 #include "web_api.hpp"
+#include "web_fisb.hpp"
 #include "web_server.hpp"
 
 #include <boost/beast/core.hpp>
@@ -349,6 +350,13 @@ BOOST_AUTO_TEST_CASE(fisb_status_shape)
     // /api/state carries it too.
     BOOST_TEST(has(get(f.port, "/api/state").body, "\"fisb\":{\"enabled\":true"));
 
+    // None of status, state or the snapshot copied a block out of the store;
+    // the radar route copies its one mosaic.
+    const uint64_t copied = f.t.call([&] { return f.engine->fisbBlocksCopied(); });
+    BOOST_TEST(copied == 0u);
+    get(f.port, "/api/fisb/radar?product=regional");
+    BOOST_TEST(f.t.call([&] { return f.engine->fisbBlocksCopied(); }) == 671u);
+
     // GET only.
     const Reply post = request(f.port, http::verb::post, "/api/fisb/status");
     BOOST_TEST(post.status == 405u);
@@ -660,6 +668,10 @@ BOOST_AUTO_TEST_CASE(event_json_items)
     n.product = 413;
     n.key = "metar:KSFO";
     n.reason = "expired";
+    n.expired_kind = skycued::fisb::FisbEvent::Kind::text;  // as the store sets it
+    n.text = skycued::fisb::TextRecord();
+    n.text->kind = skycued::fisb::TextRecord::metar;
+    n.text->station = "KSFO";
     n.expires = std::chrono::system_clock::time_point(std::chrono::seconds(1446000000));
     ev.fisb = n;
     const pt::ptree e = parseJson(skycued::webapi::eventJson(ev));
@@ -673,6 +685,8 @@ BOOST_AUTO_TEST_CASE(event_json_items)
     n.product = 8;
     n.key = "8-15-12045-KSCK-1";
     n.reason = "cancelled";
+    n.expired_kind = skycued::fisb::FisbEvent::Kind::twgo;
+    n.text.reset();
     ev.fisb = n;
     const pt::ptree c = parseJson(skycued::webapi::eventJson(ev));
     BOOST_TEST(c.get<std::string>("kind") == "twgo");
@@ -682,6 +696,7 @@ BOOST_AUTO_TEST_CASE(event_json_items)
     n.product = 70;
     n.key = "70-3";
     n.reason = "expired";
+    n.expired_kind = skycued::fisb::FisbEvent::Kind::raster;
     ev.fisb = n;
     BOOST_TEST(parseJson(skycued::webapi::eventJson(ev)).get<std::string>("kind") == "raster");
 
@@ -758,4 +773,23 @@ BOOST_AUTO_TEST_CASE(raster_routes_on_tg30)
         if (r.status == 200u)
             BOOST_TEST(parseJson(r.body).count("legend") == 1u);
     }
+}
+
+// Text with quotes, backslashes and control characters comes back intact
+// through the text route's JSON.
+BOOST_AUTO_TEST_CASE(text_route_escapes)
+{
+    skycued::fisb::FisbSnapshot snap;
+    skycued::fisb::TextRecord r;
+    r.kind = skycued::fisb::TextRecord::metar;
+    r.station = "KXYZ";
+    r.text = "METAR KXYZ 241200Z \"quoted\" back\\slash\ttab\nline \x01 end";
+    r.issued = std::chrono::system_clock::time_point(std::chrono::seconds(1422100800));
+    r.expires = r.issued + std::chrono::hours(2);
+    snap.metar.push_back(r);
+    const auto res = skycued::webapi::fisbTextRoute({{"station", "kx"}}, snap);
+    BOOST_REQUIRE_EQUAL(res.status, 200u);
+    const pt::ptree t = parseJson(res.body);
+    BOOST_REQUIRE_EQUAL(count(t.get_child("records")), 1u);
+    BOOST_TEST(t.get_child("records").front().second.get<std::string>("text") == r.text);
 }

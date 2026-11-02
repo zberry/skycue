@@ -112,12 +112,26 @@ struct Mosaic {
     std::string key() const;  // "63", "70-3" (product-altitude code)
 };
 
+// One mosaic without its blocks (FisbSummary).
+struct MosaicHead {
+    std::string key;  // Mosaic::key()
+    uint16_t product = 0;
+    std::optional<uint8_t> altitude_code;
+    uint8_t scale = 0;
+    TimePoint product_time{}, updated{}, expires{};
+    std::optional<TimePoint> published;
+    std::size_t block_count = 0;
+    uint64_t evicted = 0;
+};
+
 struct FisbEvent {
     enum class Kind { text, twgo, radar, raster, expired };
     Kind kind = Kind::text;
+    // expired: what kind of item left (text, twgo, radar or raster).
+    Kind expired_kind = Kind::text;
     uint16_t product = 0;
     std::string key;  // the item's store key (textKey / TwgoKey::str() / Mosaic::key())
-    std::optional<TextRecord> text;   // text
+    std::optional<TextRecord> text;   // text (and expired, for a text record)
     std::optional<TwgoRecord> twgo;   // twgo (and expired with reason "cancelled")
     std::optional<Mosaic> mosaic;     // radar (63, 64) / raster: the published mosaic
     std::string reason;               // expired: "expired" | "cancelled"
@@ -156,11 +170,16 @@ struct FisbSnapshot {
     FisbStoreStats stats;
 };
 
-// What Engine::snapshot() carries: counts only.
+// What Engine::snapshot() carries: counts and mosaic heads, never a block
+// or a record (cheap: no copy of the store's contents).
 struct FisbSummary {
     bool enabled = false;
     std::size_t text_records = 0, twgo_records = 0, mosaics = 0, mosaic_blocks = 0, stations = 0;
     std::optional<double> radar_age_s;  // now - the newest NEXRAD (63/64) product time
+    std::size_t metar = 0, taf = 0, pirep = 0, winds = 0, other = 0;  // text_records by kind
+    std::size_t twgo_cancelled = 0;  // of twgo_records, in their cancelled window
+    std::vector<MosaicHead> radar, rasters;  // as FisbSnapshot, heads only
+    std::vector<StationHeard> heard;         // the stations
 };
 
 // The text store key: "metar:KSFO", "taf:KSFO", "winds:SFO:6",
@@ -176,6 +195,12 @@ public:
     std::vector<FisbEvent> sweep(TimePoint now);
     FisbSnapshot snapshot() const;
     FisbSummary summary(TimePoint now) const;
+    // One mosaic with its blocks: product and altitude code; without an
+    // altitude code, the product's lowest layer. nullopt when none is held.
+    std::optional<Mosaic> mosaic(uint16_t product, std::optional<uint8_t> altitude_code = std::nullopt) const;
+    // Blocks copied out by snapshot() and mosaic() so far (a diagnostic: the
+    // cost of the readers).
+    uint64_t blocksCopied() const { return blocks_copied_; }
     FisbStoreStats stats() const;
     std::size_t mosaicBlocks() const;  // blocks held across every mosaic
 
@@ -210,6 +235,7 @@ private:
     std::map<uint64_t, StationHeard> stations_;
     FisbStoreStats stats_;
     uint64_t seq_ = 0;
+    mutable uint64_t blocks_copied_ = 0;
 };
 
 }  // namespace fisb

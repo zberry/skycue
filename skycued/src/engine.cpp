@@ -247,7 +247,9 @@ void Engine::handleFisbEvents(std::vector<fisb::FisbEvent>& events)
             }
             break;
         case fisb::FisbEvent::Kind::expired:
+            n.expired_kind = e.expired_kind;
             n.twgo = e.twgo;
+            n.text = e.text;
             break;
         }
         EngineEvent ev = kindEvent(kind);
@@ -611,6 +613,18 @@ fisb::FisbSnapshot Engine::fisbSnapshot() const
 {
     return fisb_decoder_ ? fisb_store_.snapshot() : fisb::FisbSnapshot{};
 }
+
+fisb::FisbSummary Engine::fisbSummary() const
+{
+    return fisb_decoder_ ? fisb_store_.summary(dataNow()) : fisb::FisbSummary{};
+}
+
+std::optional<fisb::Mosaic> Engine::fisbMosaic(uint16_t product, std::optional<uint8_t> altitude_code) const
+{
+    return fisb_decoder_ ? fisb_store_.mosaic(product, altitude_code) : std::nullopt;
+}
+
+uint64_t Engine::fisbBlocksCopied() const { return fisb_store_.blocksCopied(); }
 
 std::string Engine::statsLine() const
 {

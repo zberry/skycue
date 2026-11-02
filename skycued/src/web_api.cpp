@@ -385,7 +385,7 @@ std::string stateJson(const Engine& engine, const RuntimeConfig& runtime, const 
     }
     tracks += ']';
     w.addRaw("tracks", tracks);
-    w.addRaw("fisb", fisbStatusJson(snap, engine.fisbSnapshot()));
+    w.addRaw("fisb", fisbStatusJson(snap));
     return w.str();
 }
 

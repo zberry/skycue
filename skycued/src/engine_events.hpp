@@ -83,8 +83,10 @@ struct FisbNotice {
     std::optional<std::chrono::system_clock::time_point> product_time;  // radar/raster; text: issued
     std::size_t block_count = 0;                                        // radar/raster
     std::string reason;  // fisb_expired: "expired" | "cancelled"
+    // fisb_expired: what left: text, twgo, radar or raster (fisb::FisbEvent::expired_kind).
+    fisb::FisbEvent::Kind expired_kind = fisb::FisbEvent::Kind::text;
     std::optional<std::chrono::system_clock::time_point> expires;  // the item's expiry (fisb_expired: when due)
-    std::optional<fisb::TextRecord> text;  // fisb_text from product 413
+    std::optional<fisb::TextRecord> text;  // fisb_text from product 413; fisb_expired of a text record
     std::optional<fisb::TwgoRecord> twgo;  // fisb_text / fisb_shape from TWGO; fisb_expired "cancelled"
 };
 

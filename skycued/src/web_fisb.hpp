@@ -9,6 +9,7 @@
 #include "engine_events.hpp"
 #include "fisb/fisb_store.hpp"
 
+#include <map>
 #include <string>
 
 namespace skycued {
@@ -21,9 +22,10 @@ struct ApiRequest;
 struct ApiResponse;
 
 // The FIS-B status object (GET /api/fisb/status, the snapshot's "fisb"):
-// counters, stations, mosaic heads and record counts, never blocks. `snap`
-// gives the data clock and the counters, `fisb` the products.
-std::string fisbStatusJson(const Snapshot& snap, const fisb::FisbSnapshot& fisb);
+// counters, stations, mosaic heads and record counts, never blocks: all
+// from `snap` (its data clock, stats and FisbSummary), nothing copied from
+// the store.
+std::string fisbStatusJson(const Snapshot& snap);
 
 // One fisb_* item of an {"type":"events"} message; "" for another kind or
 // an event without its notice.
@@ -31,6 +33,9 @@ std::string fisbEventJson(const EngineEvent& event);
 
 // The GeoJSON Features of one TWGO record, one per shape: "[...]".
 std::string twgoFeaturesJson(const fisb::TwgoRecord& record);
+
+// GET /api/fisb/text on these products (`params` from queryParams).
+ApiResponse fisbTextRoute(const std::map<std::string, std::string>& params, const fisb::FisbSnapshot& snapshot);
 
 // True for every path under "/api/fisb/".
 bool isFisbPath(const std::string& path);

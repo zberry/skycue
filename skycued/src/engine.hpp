@@ -110,8 +110,15 @@ public:
     // Every track in the table with its filter decision now, the filters and
     // the stats. Changes nothing.
     Snapshot snapshot() const;
-    // The current FIS-B products (empty with FISB_ENABLE=no).
+    // The current FIS-B products (empty with FISB_ENABLE=no): a copy of
+    // everything, every mosaic's blocks included.
     fisb::FisbSnapshot fisbSnapshot() const;
+    // Counts and mosaic heads only (what snapshot().fisb holds), cheap.
+    fisb::FisbSummary fisbSummary() const;
+    // One mosaic with its blocks (FisbStore::mosaic); nullopt when none.
+    std::optional<fisb::Mosaic> fisbMosaic(uint16_t product, std::optional<uint8_t> altitude_code) const;
+    // FisbStore::blocksCopied (a diagnostic for tests).
+    uint64_t fisbBlocksCopied() const;
 
     // Live changes (see the top of this file). `origin` names who made the
     // change in the record ("ui", say). Ignored after stop().

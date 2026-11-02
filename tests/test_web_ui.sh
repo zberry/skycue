@@ -2,7 +2,8 @@
 # The web UI's files as skycued serves them from the staged www directory:
 # /, /app.js, /app_pure.js, /style.css and (when Leaflet was staged)
 # /vendor/leaflet/leaflet.js with their content types, /api/state with the
-# fixture's 12 tracks, a path escaping the www directory rejected; then, when
+# fixture's 12 tracks, a path escaping the www directory rejected, the
+# page's scripts free of post-ES2017 syntax; then, when
 # node is installed, `node --check` on the page's scripts and the pure-function
 # tests (tests/js/app_pure.test.js). Prints SKIP for the parts it cannot run.
 # usage: test_web_ui.sh SKYCUED FIXTURE_DIR WWW_STAGE JS_TEST_DIR
@@ -82,6 +83,17 @@ for (( i=0; i<100; i++ )); do
   sleep 0.1
 done
 [ "$n" = 12 ] || fail "/api/state has $n tracks, want 12"
+
+# The page's own scripts stay plain ES2017 (as app.js says), checked
+# with or without node: optional chaining `?.`, `??`, `.at(`,
+# private `#names` and static class fields/blocks are later syntax. (`**`
+# is ES2016: fine.)
+es2017_bad='\?\.|\?\?|\.at\(|\.#[A-Za-z_]|^\s*(static\s+)?#[A-Za-z_]|\bstatic\s+[A-Za-z_$][A-Za-z0-9_$]*\s*[=;]|\bstatic\s*\{'
+for js in "$www"/*.js; do
+  if grep -nE "$es2017_bad" "$js"; then
+    fail "$(basename "$js") uses syntax newer than ES2017 (lines above)"
+  fi
+done
 
 if command -v node >/dev/null 2>&1; then
   for js in app_pure.js app.js; do

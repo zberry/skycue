@@ -7,6 +7,7 @@ set -u
 rawrec=$1 rawplay=$2 fixtures=$3 readsb=${4:-}
 csv="$fixtures/raw/modes-120s.csv.gz"
 uat="$fixtures/raw/uat-sample.txt.gz"
+stratux="$fixtures/raw/stratux-uat-2015.log.gz"
 tmp=$(mktemp -d)
 bg_pids=()
 cleanup() {
@@ -16,7 +17,7 @@ cleanup() {
 }
 trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-for f in "$rawrec" "$rawplay" "$csv" "$uat"; do [ -e "$f" ] || fail "$f missing"; done
+for f in "$rawrec" "$rawplay" "$csv" "$uat" "$stratux"; do [ -e "$f" ] || fail "$f missing"; done
 
 now() { date +%s.%N; }
 wait_file() { # wait_file FILE TENTHS: until FILE is non-empty
@@ -135,6 +136,21 @@ wall=$(play_uat "$tmp/c7.out" "$tmp/uat-ts.txt")
 cmp -s "$tmp/c7.out" "$tmp/uat-ts.want" || fail "(c) timestamped lines not stripped"
 awk -v w="$wall" 'BEGIN { exit !(w >= 0.96 && w <= 3.0) }' || fail "(c) 1.2 s of timestamped lines took ${wall}s"
 echo "ok (c) pacing: untimestamped and timestamped"
+
+# ---- (c2) stratux "<ns>," lines: prefix stripped, paced by the offsets ----------
+# The fixture's first 7 lines with their offsets replaced by 0, 200 ms, ..., 1.2 s,
+# after its "START,..." header and the blank lines between records.
+zcat "$stratux" | grep -E '^[0-9]+,[-+]' | head -n 7 > "$tmp/stx7.src"
+[ "$(wc -l < "$tmp/stx7.src")" -eq 7 ] || fail "(c2) fixture has fewer than 7 stratux lines"
+{ echo "START,Wed Sep 2 04:23:37 +0000 UTC 2015"
+  awk -F, '{ printf "%d,%s\n\n", (NR - 1) * 200000000, substr($0, index($0, ",") + 1) }' "$tmp/stx7.src"
+} > "$tmp/stx7.log"
+cut -d, -f2- "$tmp/stx7.src" > "$tmp/stx7.want"
+wall=$(play_uat "$tmp/stx7.out" --speed 1 "$tmp/stx7.log")
+cmp -s "$tmp/stx7.out" "$tmp/stx7.want" || { head -c 300 "$tmp/stx7.out"; fail "(c2) stratux lines not stripped to their dump978 text"; }
+awk -v w="$wall" 'BEGIN { exit !(w >= 1.1 && w <= 3.0) }' || fail "(c2) 1.2 s of stratux lines took ${wall}s"
+grep -q '1 lines skipped' "$tmp/play.err" || { cat "$tmp/play.err"; fail "(c2) the START line was not counted as skipped"; }
+echo "ok (c2) stratux lines paced by their offsets (${wall}s)"
 
 # ---- (d) rawrec: byte-identical Beast capture across a reconnect; UAT lines ----
 # beast_server.py PORTFILE SENT FRAMES CONNS: serve CONNS connections, each

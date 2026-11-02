@@ -88,12 +88,16 @@ struct AvrMessage {
 // inverse of avrLine(). Never throws.
 std::optional<AvrMessage> parseAvrLine(const std::string& line);
 
-// A dump978 raw line, optionally "<epoch_ms> "-prefixed as skycue-rawrec writes it.
+// A dump978 raw line, optionally "<epoch_ms> "-prefixed as skycue-rawrec writes
+// it, or "<ns>,"-prefixed as stratux's UAT logs write it (a nanosecond offset
+// from an arbitrary start, not an epoch).
 struct UatLine {
     std::optional<int64_t> epoch_ms;
+    std::optional<int64_t> offset_ns;
     std::string text;  // starts with '-' (downlink) or '+' (uplink); no line end
 };
-// nullopt for anything else (blank lines, comments, ...). Trailing CR/LF dropped.
+// nullopt for anything else (blank lines, comments, stratux "START,..." lines,
+// an <ns> beyond int64_t, ...). Trailing CR/LF dropped.
 std::optional<UatLine> parseUatLine(const std::string& line);
 
 }  // namespace skycued

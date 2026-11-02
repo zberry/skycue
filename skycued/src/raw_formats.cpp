@@ -245,13 +245,17 @@ std::optional<UatLine> parseUatLine(const std::string& raw)
     std::string line = chomp(raw);
     UatLine u;
     if (!line.empty() && isDigit(line[0])) {
+        // At most 19 digits: below 10^19 < 2^64, so v cannot wrap.
         std::size_t i = 0;
-        int64_t ms = 0;
-        for (; i < line.size() && isDigit(line[i]) && i < 18; ++i)
-            ms = ms * 10 + (line[i] - '0');
-        if (i >= line.size() || line[i] != ' ')
+        uint64_t v = 0;
+        for (; i < line.size() && isDigit(line[i]) && i < 19; ++i)
+            v = v * 10 + static_cast<uint64_t>(line[i] - '0');
+        if (i < line.size() && line[i] == ' ' && i <= 18)
+            u.epoch_ms = static_cast<int64_t>(v);  // "<epoch_ms> " (skycue-rawrec)
+        else if (i < line.size() && line[i] == ',' && v <= static_cast<uint64_t>(INT64_MAX))
+            u.offset_ns = static_cast<int64_t>(v);  // "<ns>," (stratux)
+        else
             return std::nullopt;
-        u.epoch_ms = ms;
         line.erase(0, i + 1);
     }
     if (line.empty() || (line[0] != '-' && line[0] != '+'))

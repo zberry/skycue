@@ -324,6 +324,27 @@ BOOST_AUTO_TEST_CASE(uat_lines)
     BOOST_TEST(u->text == "+3514c952;rs=3;");
     for (const char* bad : {"", "\n", "# comment", "123 x;", "123", "123 ", "abc -00;", " -00;", "12a -00;"})
         BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+    BOOST_TEST(!parseUatLine("1793536496789 +3514c952;")->offset_ns.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(stratux_uat_lines)
+{
+    auto u = parseUatLine("1441566520123456789,-00a66ef135445d525a0c0519119021204800;rs=2;\n");
+    BOOST_REQUIRE(u);
+    BOOST_TEST(!u->epoch_ms);
+    BOOST_TEST(*u->offset_ns == 1441566520123456789LL);
+    BOOST_TEST(u->text == "-00a66ef135445d525a0c0519119021204800;rs=2;");
+    for (const char* bad : {"123,", "123,x;", ",+00;", "12a,+00;"})
+        BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+    // The stratux log's session header, and an <ns> past int64_t.
+    for (const char* bad : {"START,Wed Sep 2 04:23:37 +0000 UTC 2015", "9223372036854775808,+00;",
+                            "12345678901234567890,+00;"})
+        BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+    u = parseUatLine("9223372036854775807,+00;");
+    BOOST_REQUIRE(u);
+    BOOST_TEST(*u->offset_ns == INT64_MAX);
+    // 19 digits are an <ns> only: an epoch_ms has at most 18.
+    BOOST_TEST(!parseUatLine("1234567890123456789 +00;").has_value());
 }
 
 BOOST_AUTO_TEST_CASE(rotating_file_names_and_rotation)

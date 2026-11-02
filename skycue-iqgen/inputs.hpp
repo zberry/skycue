@@ -21,8 +21,9 @@ struct TimedFrame {
 
 struct InputStats {
     // Lines (or Beast frames) skipped: malformed Mode S lines, Mode A/C
-    // lines and frames, and lines of a UAT file that are not UAT. Blank lines
-    // and '#' comments are not counted.
+    // lines and frames, lines of a UAT file that are not UAT (stratux "START,"
+    // headers included) and stratux lines with an unusable payload. Blank
+    // lines and '#' comments are not counted.
     uint64_t skipped = 0;
 };
 
@@ -42,8 +43,10 @@ struct InputError : std::runtime_error {
 std::vector<TimedFrame> readModesFile(const std::string& path, InputStats& stats);
 
 // .txt[.gz]/.log[.gz]: parseUatLine; payload = the hex between the sign and
-// the first ';'; time = epoch_ms * 1e6 when the line has one. A payload that
-// is not 18, 34 or 432 bytes of hex throws InputError naming FILE:LINE.
+// the first ';'; time = epoch_ms * 1e6 when the line has one, offset_ns on a
+// stratux "<ns>," line. A payload that is not 18, 34 or 432 bytes of hex
+// throws InputError naming FILE:LINE, except on a stratux line: that line is
+// skipped and counted.
 std::vector<TimedFrame> readUatFile(const std::string& path, InputStats& stats);
 
 }  // namespace iqgen

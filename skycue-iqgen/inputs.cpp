@@ -190,10 +190,18 @@ std::vector<TimedFrame> readUatFile(const std::string& path, InputStats& stats)
         const std::size_t semi = u->text.find(';');
         const std::string hex = u->text.substr(1, semi == std::string::npos ? std::string::npos : semi - 1);
         TimedFrame t;
-        if (!parseHex(hex, t.payload) || !uatKindForPayload(t.payload.size()))
+        if (!parseHex(hex, t.payload) || !uatKindForPayload(t.payload.size())) {
+            // A stratux log keeps whatever the radio handed on; skip such lines there.
+            if (u->offset_ns) {
+                ++stats.skipped;
+                continue;
+            }
             throw InputError(where + ": UAT payload is not 18, 34 or 432 bytes of hex (" +
                              std::to_string(hex.size()) + " characters)");
-        if (u->epoch_ms) {
+        }
+        if (u->offset_ns) {
+            t.time = *u->offset_ns;
+        } else if (u->epoch_ms) {
             if (*u->epoch_ms > INT64_MAX / 1000000)
                 throw InputError(where + ": timestamp out of range");
             t.time = *u->epoch_ms * 1000000;

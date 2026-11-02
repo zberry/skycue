@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # skycue-iqgen end to end: help and usage errors, a 1 s Mode S slice (summary,
-# sidecar, determinism, info), a 5 s slice's time and size, UAT, resample
+# sidecar, determinism, info), a 5 s slice's time and size, UAT (dump978 and
+# stratux logs), resample
 # (file and stdin), the input error paths, the size guard, no frames, and a
 # write failure.
 # usage: test_iqgen_cli.sh SKYCUE_IQGEN FIXTURE_DIR
@@ -8,10 +9,11 @@ set -u
 iqgen=$1 fixtures=$2
 modes="$fixtures/raw/modes-120s.csv.gz"
 uat="$fixtures/raw/uat-sample.txt.gz"
+stratux="$fixtures/raw/stratux-uat-2015.log.gz"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-for f in "$iqgen" "$modes" "$uat"; do [ -e "$f" ] || fail "$f missing"; done
+for f in "$iqgen" "$modes" "$uat" "$stratux"; do [ -e "$f" ] || fail "$f missing"; done
 
 # expect_exit CODE NAME CMD...: runs CMD (stdout/stderr to $tmp/NAME.out/.err).
 expect_exit() {
@@ -143,6 +145,14 @@ awk 'NR == 1 && $1 != 104167 { exit 1 } NR > 1 && $1 - prev != 41667 { exit 1 } 
   { awk '{ print $1 }' "$us" | head -3; fail "uat untimed offsets not 104167 + k * 41667"; }
 rm -f "$tmp/u.978.cu8"
 
+# ---- uat: the stratux log, timed by its "<ns>," offsets ---------------------------------
+# Its 4 "START,..." session headers are the skipped lines; every payload is 18, 34 or 432 bytes.
+expect_exit 0 s "$iqgen" uat "$stratux" --duration 2 -o "$tmp/s.978.cu8"
+grep -qE '^frames=[1-9][0-9]* expected=[0-9]+ overlaps=[0-9]+ clipped=[0-9]+ skipped=4 seconds=[0-9]+\.[0-9]{3} bytes=[0-9]+ skipped_seconds=0\.000$' \
+  "$tmp/s.out" || { cat "$tmp/s.out" "$tmp/s.err"; fail "stratux summary"; }
+grep -q 'untimed' "$tmp/s.err" && { cat "$tmp/s.err"; fail "stratux lines placed untimed"; }
+rm -f "$tmp/s.978.cu8"
+
 # ---- resample ---------------------------------------------------------------------
 expect_exit 0 r "$iqgen" resample "$tmp/a.1090.cu8" 2400000 -o "$tmp/r.cu8" --out-rate 2000000
 grep -qE '^in_samples=[0-9]+ out_samples=[0-9]+$' "$tmp/r.out" || { cat "$tmp/r.out"; fail "resample line"; }
@@ -194,6 +204,17 @@ for f in empty.csv comments.txt; do
 done
 expect_exit 2 nf_uat "$iqgen" uat "$tmp/comments.txt" -o "$tmp/nf.cu8"
 grep -q 'no frames in the input' "$tmp/nf_uat.err" || fail "uat comments-only: no 'no frames' message"
+# stratux_all_bad_lines: wrong-length stratux payloads are skipped, not fatal; none left -> no frames.
+for k in 0 1 2; do printf '%d,-%s;rs=0;\n' $((k * 1000000)) "$(printf 'ab%.0s' {1..20})"; done >"$tmp/stx_bad.log"
+expect_exit 2 stratux_all_bad_lines "$iqgen" uat "$tmp/stx_bad.log" -o "$tmp/nf.cu8"
+grep -qx 'skycue-iqgen: no frames in the input (3 lines skipped)' "$tmp/stratux_all_bad_lines.err" ||
+  { cat "$tmp/stratux_all_bad_lines.err"; fail "stratux_all_bad_lines: not 'no frames ... (3 lines skipped)'"; }
+[ -e "$tmp/nf.cu8" ] || [ -e "$tmp/nf.frames.txt" ] && fail "stratux_all_bad_lines: an output was written"
+# One good line among them: it is placed, the 3 bad ones counted.
+{ cat "$tmp/stx_bad.log"; printf '3000000,-%s;\n' "$(printf '0a%.0s' {1..18})"; } >"$tmp/stx_one.log"
+expect_exit 0 stratux_one_good "$iqgen" uat "$tmp/stx_one.log" -o "$tmp/stx_one.cu8"
+grep -q '^frames=1 .* skipped=3 ' "$tmp/stratux_one_good.out" || { cat "$tmp/stratux_one_good.out"; fail "stratux_one_good: not frames=1 skipped=3"; }
+rm -f "$tmp/stx_one.cu8"
 
 # ---- mixed timed and untimed lines: placed untimed, with a warning ----------------------
 printf '@000000000000%s;\n*%s;\n' "$df17" "$df17" >"$tmp/mixed.avr"

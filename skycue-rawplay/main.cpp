@@ -9,8 +9,10 @@
 //                           paced by the epochs
 //   FILE.txt[.gz], .log     dump978 raw UAT lines ("-..." / "+...", optionally
 //                           "<epoch_ms> "-prefixed as skycue-rawrec writes
-//                           them; the prefix is stripped and paces the lines,
-//                           untimestamped lines go at 10 per second), served
+//                           them, or "<ns>,"-prefixed as stratux's UAT logs
+//                           do, <ns> a nanosecond offset; the prefix is
+//                           stripped and paces the lines, untimestamped lines
+//                           go at 10 per second), served
 //                           to whoever connects to --uat-listen PORT (readsb
 //                           with --net-connector 127.0.0.1,PORT,uat_in)
 //
@@ -316,7 +318,7 @@ int64_t playCsv(const std::string& path, int64_t base, int64_t shift_ns, Output&
 int64_t playUat(const std::string& path, int64_t base, int64_t, Output& out, Pacer& pacer, Stats& st)
 {
     Reader in(path);
-    std::optional<int64_t> first_ms;
+    std::optional<int64_t> first_ms, first_ns;
     bool any = false;
     int64_t rel = 0;
     for (std::string line; in.getline(line);) {
@@ -330,6 +332,12 @@ int64_t playUat(const std::string& path, int64_t base, int64_t, Output& out, Pac
             if (!first_ms)
                 first_ms = *u->epoch_ms;
             rel = std::max(rel, (*u->epoch_ms - *first_ms) * 1'000'000);
+        } else if (u->offset_ns) {
+            // stratux. Like epoch_ms, a line earlier than the latest so far goes at
+            // once: a later session in the same log restarts the offsets.
+            if (!first_ns)
+                first_ns = *u->offset_ns;
+            rel = std::max(rel, *u->offset_ns - *first_ns);
         } else if (any) {
             rel += kUntimedStepNs;
         }
@@ -387,7 +395,8 @@ int main(int argc, char** argv)
     po::options_description desc(
         "usage: skycue-rawplay [--beast-in HOST:PORT] [--raw-in HOST:PORT] [--uat-listen PORT]\n"
         "                      [--speed N] [--loop] FILE...\n"
-        "Replays .bin (Beast), .csv[.gz] (epoch,HEX) and .txt[.gz]/.log (UAT) captures into readsb");
+        "Replays .bin (Beast), .csv[.gz] (epoch,HEX) and .txt[.gz]/.log[.gz] (UAT: dump978 lines,\n"
+        "optionally '<epoch_ms> ' or stratux '<ns>,' prefixed) captures into readsb");
     desc.add_options()("help,h", "show this help")(
         "beast-in", po::value(&beast_arg), "readsb Beast input for .bin files (e.g. 127.0.0.1:30004)")(
         "raw-in", po::value(&raw_arg), "readsb raw input for .csv files (e.g. 127.0.0.1:30001)")(

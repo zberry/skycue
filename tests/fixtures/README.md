@@ -34,3 +34,57 @@
   gzip-compressed. skycue-rawplay paces such files at 10 lines/s.
   First line: `-00a66ef135445d525a0c0519119021204800;`.
 - sha256: `86248797f4334a134ccf4349dabf800a7054d698828b88838dc7950a99f9ae24`
+
+## raw/stratux-uat-2015.log.gz
+
+- Origin: https://github.com/cyoung/stratux, file
+  `test-data/cyoung-09062015-noproblem-stratux-uat.log` at commit
+  `1a0d1ca9e94d1c98ae1f4305e073fdd6b5a810be` (renamed here, content
+  unchanged, compressed with `gzip -9n`); downloaded 2026-11-02.
+- Licence: BSD-3-Clause, Copyright (c) 2015 Christopher Young (the stratux
+  repository's `LICENSE` at that commit, full text below).
+- Content: 22,556 lines: 11,276 UAT messages (7,516 uplink, all 432 bytes;
+  3,760 downlink, 107 short of 18 bytes and 3,653 long of 34 bytes; none of
+  a wrong length), each followed by a blank line, and 4 `START,<date>`
+  session header lines. Two recording sessions: offsets 162.698 s to
+  2507.803 s (8,125 messages, 2,345 s), then, after the header on line
+  16,253, from 65.807 s again to 2205.878 s (3,151 messages, 2,140 s).
+- Line format: `<ns>,<+|->HEX;[rs=N;]`: `<ns>` a nanosecond offset from an
+  arbitrary start, then a dump978 raw line (`rs=` on 7,245 of them).
+  skycue-rawplay strips the offset and paces by it; skycue-iqgen sorts by
+  it, so the two sessions interleave. Both skip and count the `START` lines.
+  First line: `START,Wed Sep 2 04:23:37 +0000 UTC 2015`; first message:
+  `162698355928,-0b2b4a513c417b8875f40d9610f227401105c4e6c4e6c40a32700300000000000000;rs=4;`.
+- sha256: `53fc80938c55d777ef85929fbaef519a7ccfa41ecb37c6e23aa773daebe5d588`
+  (the uncompressed log:
+  `fd4b376c7d90fe92dd1f9d5f2f8d11a19deb81ea3dc68e9b6e10f091e33d73f5`)
+
+Licence text (stratux `LICENSE`, verbatim):
+
+```
+Copyright (c) 2015 Christopher Young.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the Christopher Young nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```

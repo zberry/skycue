@@ -70,57 +70,109 @@
   // Offline tiles may come from several make-tiles.sh regions with different
   // zoom ranges (a coarse whole world, finer areas). Where the zoom shown
   // has no tile, this layer shows the nearest lower-zoom ancestor that
-  // exists, enlarged and cropped to the square (P.parentTile), instead of a
-  // blank one. Each tile is a div clipping one img; URLs that failed are
-  // remembered, so later tiles go straight to a level that has them.
+  // exists (at most `fallbackLevels` up), enlarged and cropped to the square
+  // (P.parentTile), instead of a blank one. A tile that exists but lies on
+  // a region's edge (P.tileInsideRegions, from meta.json's regions) may be
+  // partly transparent, so its nearest ancestor is drawn underneath it.
+  // Each tile is a div clipping its img(s). URLs that 404 are remembered
+  // for TILE_MISSING_MS, so later tiles go straight to a level that has them.
+  var TILE_MISSING_MS = 60000;
   var tileLayer = null;
-  var tileMissing = new Set();
-  var tileCounts = { loaded: 0, fallback: 0, failed: 0 };
+  var tileMissing = new Map();      // URL -> Date.now() when it failed
+  var tileCounts = { loaded: 0, fallback: 0, underlay: 0, failed: 0 };
+  function tileKnownMissing(url) {
+    var t = tileMissing.get(url);
+    if (t === undefined) return false;
+    if (Date.now() - t < TILE_MISSING_MS) return true;
+    tileMissing.delete(url);
+    return false;
+  }
   var FallbackTileLayer = L.TileLayer.extend({
+    options: { fallbackMinZoom: 0, fallbackLevels: 4, regions: null },
+    // Leaflet's getTileUrl for tile p (any zoom): it takes the zoom from
+    // _getZoomForUrl, which follows _urlZoom while this runs. ({-y} would
+    // use the shown zoom's range; the URL here has none.)
+    ancestorUrl: function (p) {
+      var c = L.point(p.x, p.y);
+      c.z = p.z;
+      this._urlZoom = p.z;
+      try { return this.getTileUrl(c); } finally { this._urlZoom = null; }
+    },
+    _getZoomForUrl: function () {
+      if (this._urlZoom === null || this._urlZoom === undefined) return L.TileLayer.prototype._getZoomForUrl.call(this);
+      var z = this.options.zoomReverse ? this.options.maxZoom - this._urlZoom : this._urlZoom;
+      return z + this.options.zoomOffset;
+    },
     createTile: function (coords, done) {
-      var layer = this;
-      var size = this.getTileSize();
-      var minZ = this.options.fallbackMinZoom || 0;
+      var layer = this, o = this.options, size = this.getTileSize();
       var tile = document.createElement('div');
-      var img = document.createElement('img');
       tile.style.overflow = 'hidden';
       tile.complete = false; // Leaflet's _abortLoading drops tiles not yet complete
-      img.alt = '';
-      img.setAttribute('role', 'presentation');
-      img.style.position = 'absolute';
+      tile.setAttribute('data-tile', coords.z + '/' + coords.x + '/' + coords.y);
+      // Leaflet takes an aborted or pruned tile out of the DOM: stop there.
+      function dropped() { return !tile.parentNode; }
+      function newImg() {
+        var img = document.createElement('img');
+        img.alt = '';
+        img.setAttribute('role', 'presentation');
+        img.style.position = 'absolute';
+        return img;
+      }
+      // load(img, n, cb): img shows the first tile from n levels up that
+      // exists; cb(p) once it has loaded, cb(null) when none does (maybe
+      // synchronously).
+      function load(img, n, cb) {
+        var p = n === 0 ? { z: coords.z, x: coords.x, y: coords.y, scale: 1, offsetX: 0, offsetY: 0 }
+          : P.parentTile(coords.z, coords.x, coords.y, n);
+        if (!p || p.z < o.fallbackMinZoom || n > o.fallbackLevels) { cb(null); return; }
+        var url = layer.ancestorUrl(p);
+        if (tileKnownMissing(url)) { load(img, n + 1, cb); return; }
+        img.style.width = size.x * p.scale + 'px';
+        img.style.height = size.y * p.scale + 'px';
+        img.style.left = -p.offsetX * size.x + 'px';
+        img.style.top = -p.offsetY * size.y + 'px';
+        img.onload = function () { if (!dropped()) cb(p); };
+        img.onerror = function () {
+          tileMissing.set(url, Date.now());
+          if (!dropped()) load(img, n + 1, cb);
+        };
+        img.src = url;
+      }
+      var img = newImg();
       tile.appendChild(img);
-      function finish(err, p) {
+      load(img, 0, function (p) {
+        if (!p) {
+          // Asynchronously: Leaflet registers the tile after createTile returns.
+          setTimeout(function () {
+            tile.complete = true;
+            tileCounts.failed++;
+            done(new Error('no tile for ' + coords.z + '/' + coords.x + '/' + coords.y), tile);
+          }, 0);
+          return;
+        }
         tile.complete = true;
-        if (err) {
-          tileCounts.failed++;
-        } else if (p.scale > 1) {
+        if (p.scale > 1) {
           tileCounts.fallback++;
           tile.classList.add('tile-fallback');
           tile.setAttribute('data-fallback-zoom', String(p.z));
         } else {
           tileCounts.loaded++;
+          if (o.regions && !P.tileInsideRegions(coords.z, coords.x, coords.y, o.regions)) {
+            var under = newImg();
+            under.className = 'tile-underlay';
+            tile.insertBefore(under, img);
+            load(under, 1, function (q) {
+              if (q) {
+                tileCounts.underlay++;
+                tile.setAttribute('data-underlay-zoom', String(q.z));
+              } else if (under.parentNode) {
+                under.parentNode.removeChild(under);
+              }
+            });
+          }
         }
-        done(err, tile);
-      }
-      function tryLevel(n) {
-        var p = n === 0 ? { z: coords.z, x: coords.x, y: coords.y, scale: 1, offsetX: 0, offsetY: 0 }
-          : P.parentTile(coords.z, coords.x, coords.y, n);
-        if (!p || p.z < minZ) {
-          // Asynchronously: Leaflet registers the tile after createTile returns.
-          setTimeout(function () { finish(new Error('no tile at or below zoom ' + coords.z)); }, 0);
-          return;
-        }
-        var url = L.Util.template(layer._url, { z: p.z, x: p.x, y: p.y });
-        if (tileMissing.has(url)) { tryLevel(n + 1); return; }
-        img.style.width = size.x * p.scale + 'px';
-        img.style.height = size.y * p.scale + 'px';
-        img.style.left = -p.offsetX * size.x + 'px';
-        img.style.top = -p.offsetY * size.y + 'px';
-        img.onload = function () { finish(null, p); };
-        img.onerror = function () { tileMissing.add(url); tryLevel(n + 1); };
-        img.src = url;
-      }
-      tryLevel(0);
+        done(null, tile);
+      });
       return tile;
     }
   });
@@ -139,6 +191,7 @@
       tileLayer = new FallbackTileLayer('tiles/{z}/{x}/{y}.png', {
         minZoom: tileMinZoom,
         fallbackMinZoom: tileMinZoom,
+        regions: Array.isArray(tiles.regions) ? tiles.regions : null,
         // The overall top zoom of all regions; elsewhere FallbackTileLayer
         // enlarges the region tiles below it.
         maxNativeZoom: typeof tiles.maxZoom === 'number' ? tiles.maxZoom : 10,
@@ -1548,8 +1601,8 @@
     // Map tiles: how many showed their own image, an enlarged ancestor
     // (fallback) or nothing; null without tiles.
     tileCounts: function () {
-      return tileLayer ? { loaded: tileCounts.loaded, fallback: tileCounts.fallback, failed: tileCounts.failed,
-        missing: tileMissing.size } : null;
+      return tileLayer ? { loaded: tileCounts.loaded, fallback: tileCounts.fallback, underlay: tileCounts.underlay,
+        failed: tileCounts.failed, missing: tileMissing.size } : null;
     },
     // Moves the page's data clock to `iso` (until skycued's next newer time)
     // and redraws the radar ages; returns each drawing's opacity and fade.
@@ -1574,6 +1627,13 @@
 
   wire();
   request('GET', 'api/tiles-available').catch(function () { return { tiles: false }; }).then(function (tiles) {
+    if (!tiles.tiles) return tiles;
+    // The regions (scripts/make-tiles.sh), for the tiles on their edges.
+    return request('GET', 'tiles/meta.json').then(function (m) {
+      tiles.regions = m && Array.isArray(m.regions) ? m.regions : null;
+      return tiles;
+    }, function () { return tiles; });
+  }).then(function (tiles) {
     initMap(tiles);
     connect();
   });

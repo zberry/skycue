@@ -147,6 +147,23 @@ test('parentTile: several levels up, down to z0', () => {
     assert.ok(p.offsetX >= 0 && p.offsetX < p.scale && p.offsetY >= 0 && p.offsetY < p.scale);
   }
 });
+test('tileBounds: z0 is the Mercator world, z1/0/0 its north-west quarter', () => {
+  const w = P.tileBounds(0, 0, 0);
+  assert.deepStrictEqual([w.west, w.east, w.south], [-180, 180, -w.north]);
+  between(w.north, 85.05, 85.06, 'north');
+  const q = P.tileBounds(1, 0, 0);
+  assert.deepStrictEqual([q.west, q.east, q.south], [-180, 0, 0]);
+});
+test('tileInsideRegions: wholly inside a region with that zoom only', () => {
+  const regions = [{ name: 'conus', bbox: [-125, 24, -66, 50], minZoom: 6, maxZoom: 8 },
+    { name: 'bad' }, null, { bbox: [1, 2], minZoom: 0, maxZoom: 9 }];
+  // 6/18/24 is -78.75..-73.125, 38.82..40.98: inside conus.
+  assert.strictEqual(P.tileInsideRegions(6, 18, 24, regions), true);
+  assert.strictEqual(P.tileInsideRegions(9, 144, 192, regions), false);  // zoom 9: no region
+  assert.strictEqual(P.tileInsideRegions(6, 20, 24, regions), false);   // -67.5..-61.875: on the -66 edge
+  assert.strictEqual(P.tileInsideRegions(6, 18, 24, []), false);
+  assert.strictEqual(P.tileInsideRegions(6, 18, 24, undefined), false);
+});
 test('parentTile: x wraps around the world, y off the world and bad n give null', () => {
   assert.deepStrictEqual(P.parentTile(2, -1, 1, 1), { z: 1, x: 1, y: 0, scale: 2, offsetX: 1, offsetY: 1 });
   assert.deepStrictEqual(P.parentTile(2, 5, 1, 1), { z: 1, x: 0, y: 0, scale: 2, offsetX: 1, offsetY: 1 });

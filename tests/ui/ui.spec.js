@@ -245,6 +245,27 @@ test('reconnect_after_restart_converges', async ({ page }) => {
   for (const m of await page.evaluate(() => window.skycueApp.markers())) expect(known.has(m.hex), m.hex).toBe(true);
 });
 
+// A stopped (not exited) skycued keeps the TCP connection open, so no close
+// event comes: the page must notice the missing stats by itself.
+test('stalled_server_detected_and_reconnects', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 1);
+  const pid = Number(fs.readFileSync(process.env.SKYCUE_PID_FILE, 'utf8'));
+  process.kill(pid, 'SIGSTOP');
+  const stopped = Date.now();
+  try {
+    await expect(page.locator('#conn-banner')).toBeVisible({ timeout: 6900 });
+    expect(await page.evaluate(() => window.skycueApp.connected())).toBe(false);
+    const left = 7000 - (Date.now() - stopped);
+    if (left > 0) await page.waitForTimeout(left);
+  } finally {
+    process.kill(pid, 'SIGCONT');
+  }
+  await expect(page.locator('#conn-banner')).toBeHidden({ timeout: 15000 });
+  expect(await page.evaluate(() => window.skycueApp.connected())).toBe(true);
+  await waitMarkers(page, 1);
+});
+
 test('screenshots', async ({ page }, testInfo) => {
   await openPage(page);
   await waitMarkers(page, 10);

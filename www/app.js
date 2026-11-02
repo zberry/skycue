@@ -10,6 +10,7 @@
   var RING_ALTS_FT = [5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000];
   var DEFAULT_RING_FT = 35000;
   var SENT_FLASH_MS = 700;
+  var STATS_TIMEOUT_MS = 5000;      // no stats for this long: the connection is dead
 
   // ---- state ---------------------------------------------------------------
   var cfg = {
@@ -23,7 +24,7 @@
   var selectedKey = null;
   var map = null, rxMarker = null, rangeRing = null, elevRing = null, graticule = null;
   var haveTiles = false, fitted = false;
-  var ws = null, connected = false, attempt = 0, reconnectTimer = null;
+  var ws = null, connected = false, attempt = 0, reconnectTimer = null, lastStatsWall = 0;
   var prevStats = null, prevStatsWall = 0;
   var tableSort = { key: 'hex', dir: 1 };
   var tableDirty = true;
@@ -237,8 +238,6 @@
     }
     e.t = t;
     if (observed) e.seenWall = Date.now();
-    var ls = Date.parse(t.last_seen);
-    if (ls > dataNow()) clockOffsetMs = ls - Date.now();
     var drawable = typeof t.lat === 'number' && typeof t.lon === 'number' && P.decisionColor(t.decision) !== null;
     if (drawable && map) {
       ensureMarker(e);
@@ -619,16 +618,21 @@
     if (selectedKey && !tracks.has(selectedKey)) deselect();
     else if (selectedKey) renderDetails();
     attempt = 0;
+    lastStatsWall = Date.now();
     setConnected(true);
   }
 
   function onItem(it) {
     switch (it.type) {
-      case 'observed': onTrack(it, true); break;
+      case 'observed':
+        // Fresh by definition (unlike a snapshot's or an update's last_seen).
+        clockOffsetMs = P.nextClockOffset(clockOffsetMs, Date.parse(it.last_seen), Date.now());
+        onTrack(it, true);
+        break;
       case 'update': flashSent(onTrack(it, false)); break;
       case 'drop': onDrop(it); break;
       case 'expired': removeEntry(P.trackKey(it)); break; // never forwarded, gone from skycued's table
-      case 'stats': applyStats(it); break;
+      case 'stats': lastStatsWall = Date.now(); applyStats(it); break;
       case 'filters': applyFilters(it); break;
       case 'lists': applyLists(it); break;
       default: break;
@@ -646,7 +650,9 @@
       return;
     }
     ws = sock;
+    lastStatsWall = Date.now(); // the attempt gets STATS_TIMEOUT_MS too
     sock.onmessage = function (ev) {
+      if (ws !== sock) return; // abandoned by the watchdog
       var m;
       try { m = JSON.parse(ev.data); } catch (err) { return; }
       if (m.type === 'snapshot') onSnapshot(m);
@@ -663,6 +669,19 @@
   function scheduleReconnect() {
     if (reconnectTimer) return;
     reconnectTimer = setTimeout(connect, P.backoffMs(attempt++));
+  }
+
+  // A half-open connection (skycued stopped or the network gone without a
+  // close) never fires onclose: skycued sends stats every second, so after
+  // STATS_TIMEOUT_MS without any (or an attempt that never opened) the
+  // socket is abandoned and a new one started.
+  function watchdog() {
+    if (!ws || Date.now() - lastStatsWall <= STATS_TIMEOUT_MS) return;
+    var sock = ws;
+    ws = null;
+    try { sock.close(); } catch (err) { /* already closing */ }
+    setConnected(false);
+    scheduleReconnect();
   }
 
   // ---- wiring -------------------------------------------------------------------
@@ -716,6 +735,7 @@
       if (ev.key === 'Escape') deselect();
     });
     setInterval(prune, 2000);
+    setInterval(watchdog, 1000);
     setInterval(function () {
       if (selectedKey) renderDetails(); // ages
       if (tableDirty) renderTable();

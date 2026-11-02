@@ -62,6 +62,10 @@ stops skycued and copies the `skycue-*.png` screenshots to
 7. `reconnect_after_restart_converges`: kill and restart skycued; the
    banner appears and clears, the markers come back from the new snapshot
    and a marker skycued does not know is gone.
-8. `screenshots`: map with a selection, and the table sorted by range.
+8. `stalled_server_detected_and_reconnects`: skycued paused (SIGSTOP) for
+   7 s, so its connection stays open but silent: the banner shows
+   "disconnected" within 7 s (no stats for 5 s), and after SIGCONT the page
+   reconnects.
+9. `screenshots`: map with a selection, and the table sorted by range.
 
 Every test also fails if the page requested anything from another host.

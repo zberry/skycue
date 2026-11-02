@@ -121,13 +121,25 @@
 
   function backoffMs(attempt) { return Math.min(5000, 500 * Math.pow(2, attempt)); }
 
+  // skycued's data clock minus the browser's clock, after seeing the
+  // data-clock time `dataMs` (an observed item's last_seen) at browser time
+  // `wallMs`. It only moves forward (items reach the page late, never
+  // early), except after a jump back of more than CLOCK_RESET_MS (a replay
+  // that looped, or skycued's clock set back), which resets it.
+  var CLOCK_RESET_MS = 5000;
+  function nextClockOffset(offsetMs, dataMs, wallMs) {
+    if (typeof dataMs !== 'number' || !isFinite(dataMs)) return offsetMs;
+    var seen = dataMs - wallMs;
+    return seen > offsetMs || offsetMs - seen > CLOCK_RESET_MS ? seen : offsetMs;
+  }
+
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
     decisionColor: decisionColor, formatAlt: formatAlt, formatNum: formatNum, formatAge: formatAge,
     thousands: thousands, trackKey: trackKey, markerLabel: markerLabel, listHas: listHas,
     sortTracks: sortTracks, graticuleStep: graticuleStep, dropRemovesMarker: dropRemovesMarker,
-    backoffMs: backoffMs
+    backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

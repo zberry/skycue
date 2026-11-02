@@ -142,6 +142,24 @@ test('backoffMs grows and is capped', () => {
   assert.strictEqual(P.backoffMs(20), 5000);
 });
 
+test('nextClockOffset: forward only, small jitter back ignored', () => {
+  const wall = 1000000;
+  assert.strictEqual(P.nextClockOffset(0, wall + 200, wall), 200);       // ahead: follows
+  assert.strictEqual(P.nextClockOffset(200, wall + 100, wall), 200);     // a late item: kept
+  assert.strictEqual(P.nextClockOffset(200, wall - 4000, wall), 200);    // 4.2 s back: still kept
+  assert.strictEqual(P.nextClockOffset(200, NaN, wall), 200);            // no time: kept
+  assert.strictEqual(P.nextClockOffset(200, undefined, wall), 200);
+});
+test('nextClockOffset: a jump back of more than 5 s resets (replay loop wrap)', () => {
+  const wall = 1000000;
+  // The replay looped: the data clock is 10 minutes earlier now.
+  assert.strictEqual(P.nextClockOffset(0, wall - 600000, wall), -600000);
+  assert.strictEqual(P.nextClockOffset(1000, wall + 1000 - P.CLOCK_RESET_MS - 1, wall), -P.CLOCK_RESET_MS - 1 + 1000);
+  assert.strictEqual(P.nextClockOffset(1000, wall + 1000 - P.CLOCK_RESET_MS, wall), 1000);  // exactly 5 s: kept
+  // And forward again from there.
+  assert.strictEqual(P.nextClockOffset(-600000, wall - 599000, wall), -599000);
+});
+
 test('formatAge', () => {
   assert.strictEqual(P.formatAge(Date.parse('2026-11-01T12:00:00.000Z'), Date.parse('2026-11-01T12:00:05.400Z')), '5 s ago');
   assert.strictEqual(P.formatAge(Date.parse('2026-11-01T12:00:00.000Z'), Date.parse('2026-11-01T12:03:05.000Z')), '3 min 5 s ago');

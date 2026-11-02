@@ -32,6 +32,8 @@ struct EngineStats {
     // blocks held across every mosaic.
     uint64_t fisb_uplinks = 0, fisb_products = 0, fisb_bad_frames = 0, fisb_segments_open = 0,
              fisb_mosaic_blocks = 0;
+    // The receive time of the last uplink fed to the decoder (unset before any).
+    std::optional<std::chrono::system_clock::time_point> fisb_last_uplink;
 };
 
 // One track as the Engine sees it now.

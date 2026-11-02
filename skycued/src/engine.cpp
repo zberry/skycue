@@ -207,6 +207,7 @@ void Engine::handleUplink(std::chrono::system_clock::time_point when, const std:
     // Uplinks move the data clock too, so a recording of uplinks alone still
     // has its own clock.
     advanceDataClock(when);
+    last_uplink_ = when;
     fisb_decoder_->feed(when, hex);
 }
 
@@ -570,6 +571,7 @@ EngineStats Engine::stats() const
         s.fisb_bad_frames = c.bad_hex + c.bad_frames;
         s.fisb_segments_open = c.segments_open;
         s.fisb_mosaic_blocks = fisb_store_.mosaicBlocks();
+        s.fisb_last_uplink = last_uplink_;
     }
     return s;
 }

@@ -174,6 +174,15 @@ skycue_set_warnings(test_web_server)
 add_test(NAME web_server COMMAND test_web_server)
 set_tests_properties(web_server PROPERTIES TIMEOUT 120)
 
+# The FIS-B routes and WebSocket items over a replay of the uplink fixture.
+add_executable(test_fisb_web test_fisb_web.cpp)
+target_link_libraries(test_fisb_web PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_fisb_web PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_fisb_web)
+add_test(NAME fisb_web COMMAND test_fisb_web)
+set_tests_properties(fisb_web PROPERTIES TIMEOUT 120)
+
 # The web UI as skycued serves it from the staged www directory, plus the
 # page's pure helpers under node when node is installed.
 add_test(NAME web_ui

@@ -2,7 +2,7 @@
 
 // JSON for FIS-B items, built with JsonWriter. The field names here are the
 // one definition shared by the fisb recording stream (docs/recording-format.md)
-// and the web API (docs/web-api.md "FIS-B records (draft)"). Times are
+// and the web API (docs/web-api.md "FIS-B records"). Times are
 // ISO 8601 UTC with milliseconds; coordinates are degrees with up to 6
 // decimals; absent optionals are omitted.
 
@@ -20,6 +20,10 @@ namespace fisb {
 const char* textKindName(TextRecord::Kind kind);
 // "polygon" | "polyline" | "point" | "circle" | "prism".
 const char* shapeGeomName(Shape::Geom geom);
+
+// Degrees (or any value) to at most 6 decimals without trailing zeros,
+// locale-independent; a non-finite value as null.
+void appendFixed6(std::string& out, double v);
 
 // [[value,count],...] covering the 128 bins in order.
 std::string rleJson(const std::array<uint8_t, 128>& bins);

@@ -35,6 +35,7 @@ add_library(skycued_core STATIC
   src/time_util.cpp
   src/track_table.cpp
   src/web_api.cpp
+  src/web_fisb.cpp
   src/web_server.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(skycued_core PUBLIC skycue::skycue Boost::boost Boost::program_options)

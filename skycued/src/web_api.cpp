@@ -6,6 +6,7 @@
 #include "recorder.hpp"
 #include "runtime_config.hpp"
 #include "time_util.hpp"
+#include "web_fisb.hpp"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -384,6 +385,7 @@ std::string stateJson(const Engine& engine, const RuntimeConfig& runtime, const 
     }
     tracks += ']';
     w.addRaw("tracks", tracks);
+    w.addRaw("fisb", fisbStatusJson(snap, engine.fisbSnapshot()));
     return w.str();
 }
 
@@ -450,12 +452,12 @@ std::string eventJson(const EngineEvent& event)
     case EventKind::filters_changed:
     case EventKind::lists_changed:
         break;
-    case EventKind::fisb_text:  // FIS-B on /ws comes with the FIS-B routes (phase 4, Task 6)
+    case EventKind::fisb_text:
     case EventKind::fisb_shape:
     case EventKind::fisb_radar:
     case EventKind::fisb_raster:
     case EventKind::fisb_expired:
-        break;
+        return fisbEventJson(event);
     }
     return std::string();
 }
@@ -547,6 +549,8 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return postListRoute(path == "/api/lists/allow" ? ListKind::allow : ListKind::block, body, engine,
                                  runtime);
         }
+        if (isFisbPath(path))
+            return handleFisbApi(request, engine);
         if (path == "/api/tiles-available")
             return get ? json(200, tilesAvailableJson(www_dir)) : notAllowed("GET");
         return error(404, "no such API path: " + path);

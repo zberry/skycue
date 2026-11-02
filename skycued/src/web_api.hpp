@@ -22,7 +22,8 @@ class RuntimeConfig;
 
 namespace webapi {
 
-// Each of these is one JSON object. `type`, when given, is written first as
+// Each of these is one JSON object. stateJson includes "fisb", the FIS-B
+// status object (web_fisb.hpp). `type`, when given, is written first as
 // "type":"<type>" (for the WebSocket messages).
 std::string stateJson(const Engine& engine, const RuntimeConfig& runtime, const char* type = nullptr);
 std::string statsJson(const EngineStats& stats, const char* type = nullptr);
@@ -34,9 +35,9 @@ std::string expiredJson(skycue::TrackId id);                          // {"type"
 std::string tilesAvailableJson(const std::string& www_dir);
 std::string errorJson(const std::string& message);  // {"error":"..."}
 
-// One item of a {"type":"events"} message: observed, update, drop, expired or stats (the
-// filters/lists items are built from the current state: filtersJson,
-// listsJson).
+// One item of a {"type":"events"} message: observed, update, drop, expired,
+// stats or a fisb_* item (web_fisb.hpp); the filters/lists items are built
+// from the current state: filtersJson, listsJson.
 std::string eventJson(const EngineEvent& event);
 
 struct ApiResponse {
@@ -74,7 +75,8 @@ std::map<std::string, std::string> queryParams(const std::string& query);
 // application/json (else 415) and, when it has an Origin header, one whose
 // host:port is the Host header's (else 403): a page from another site
 // cannot change the filters through a browser. Changes go through
-// RuntimeConfig::applyUi with origin "ui". Never throws.
+// RuntimeConfig::applyUi with origin "ui". /api/fisb/* goes to
+// handleFisbApi (web_fisb.hpp). Never throws.
 ApiResponse handleApi(const ApiRequest& request, ApiContext& context);
 
 // The file path under the www directory that a request target names: the

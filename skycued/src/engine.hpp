@@ -75,6 +75,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace skycued {
@@ -166,6 +167,7 @@ private:
     Recorder* fisb_rec_;
     std::unique_ptr<fisb::FisbDecoder> fisb_decoder_;  // null with FISB_ENABLE=no
     fisb::FisbStore fisb_store_;
+    std::optional<std::chrono::system_clock::time_point> last_uplink_;
 
     FilterSet filters_;
     Thresholds thresholds_;

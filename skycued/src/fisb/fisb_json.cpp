@@ -11,35 +11,6 @@ namespace fisb {
 
 namespace {
 
-// Degrees to 6 decimals without trailing zeros, locale-independent and
-// cheap (a mosaic has thousands of these).
-void appendFixed6(std::string& out, double v)
-{
-    if (!std::isfinite(v)) {
-        out += "null";
-        return;
-    }
-    long long n = std::llround(v * 1e6);
-    if (n < 0) {
-        out += '-';
-        n = -n;
-    }
-    out += std::to_string(n / 1000000);
-    long long frac = n % 1000000;
-    if (frac == 0)
-        return;
-    char digits[7];
-    for (int i = 5; i >= 0; --i) {
-        digits[i] = static_cast<char>('0' + frac % 10);
-        frac /= 10;
-    }
-    int len = 6;
-    while (len > 0 && digits[len - 1] == '0')
-        --len;
-    out += '.';
-    out.append(digits, static_cast<std::size_t>(len));
-}
-
 std::string fixed6(double v)
 {
     std::string s;
@@ -80,6 +51,34 @@ void mosaicFields(JsonWriter& w, const Mosaic& m)
 }
 
 }  // namespace
+
+// Cheap: a mosaic has thousands of these.
+void appendFixed6(std::string& out, double v)
+{
+    if (!std::isfinite(v)) {
+        out += "null";
+        return;
+    }
+    long long n = std::llround(v * 1e6);
+    if (n < 0) {
+        out += '-';
+        n = -n;
+    }
+    out += std::to_string(n / 1000000);
+    long long frac = n % 1000000;
+    if (frac == 0)
+        return;
+    char digits[7];
+    for (int i = 5; i >= 0; --i) {
+        digits[i] = static_cast<char>('0' + frac % 10);
+        frac /= 10;
+    }
+    int len = 6;
+    while (len > 0 && digits[len - 1] == '0')
+        --len;
+    out += '.';
+    out.append(digits, static_cast<std::size_t>(len));
+}
 
 const char* textKindName(TextRecord::Kind kind)
 {

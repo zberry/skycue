@@ -158,6 +158,12 @@ add_test(NAME stats_cli
     $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-stats> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(stats_cli PROPERTIES TIMEOUT 120)
 
+# skycue-fisb on the FIS-B fixtures, including the tg30 golden output.
+add_test(NAME fisb_cli
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_fisb_cli.sh
+    $<TARGET_FILE:skycue-fisb> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(fisb_cli PROPERTIES TIMEOUT 60)
+
 add_executable(test_web_server test_web_server.cpp)
 target_link_libraries(test_web_server PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
 target_compile_definitions(test_web_server PRIVATE BOOST_TEST_DYN_LINK

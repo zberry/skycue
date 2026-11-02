@@ -348,7 +348,7 @@ test.describe('fisb radar (tg30)', () => {
     // Radar on by default, every other layer off.
     await expect(layerToggle(page, 'Radar (regional)')).toBeChecked();
     await expect(layerToggle(page, 'Radar (CONUS)')).toBeChecked();
-    for (const name of ['Other rasters', 'TFR', 'SIGMET', 'AIRMET', 'CWA', 'SUA']) {
+    for (const name of ['Other rasters', 'NOTAM / TFR', 'SIGMET', 'AIRMET', 'CWA', 'SUA']) {
       await expect(layerToggle(page, name)).not.toBeChecked();
     }
     await expect(page.locator('img.leaflet-image-layer.fisb-radar-regional')).toHaveCount(1);
@@ -429,7 +429,7 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     expect(shapes.length).toBeGreaterThan(0);
     await openFisbPage(page);
     await expect(page.locator('path.fisb-tfr')).toHaveCount(0);   // off by default
-    await layerToggle(page, 'TFR').check();
+    await layerToggle(page, 'NOTAM / TFR').check();
     await expect.poll(() => page.locator('path.fisb-tfr').count()).toBe(shapes.length);
     const i = await clickableIndex(page, 'path.fisb-tfr');
     expect(i).toBeGreaterThanOrEqual(0);
@@ -585,7 +585,7 @@ test.describe('fisb text and airspace (2015 sample)', () => {
 
   test('fisb_screenshots_weather', async ({ page }, testInfo) => {
     await openFisbPage(page);
-    await layerToggle(page, 'TFR').check();
+    await layerToggle(page, 'NOTAM / TFR').check();
     await layerToggle(page, 'SIGMET').check();
     await expect.poll(() => page.locator('path.fisb-sigmet').count()).toBeGreaterThan(0);
     const i = await clickableIndex(page, 'path.fisb-tfr');

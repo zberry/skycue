@@ -4,6 +4,9 @@
 #include "json_lite.hpp"
 #include "recorder.hpp"
 #include "time_util.hpp"
+#include "fisb/fisb_decoder.hpp"
+#include "fisb/fisb_json.hpp"
+#include "fisb/fisb_store.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -96,6 +99,113 @@ void updateMax(std::optional<StatsReport::Extreme>& max, const RecordingRecord& 
 {
     if (!max || value > max->value)
         max = StatsReport::Extreme{r.obs.id, r.time, value};
+}
+
+}  // namespace
+
+namespace {
+
+// The FIS-B section: every uat_uplink record, in time order, through one
+// FisbDecoder and FisbStore on the records' clock (the store's clock is the
+// newest record time so far, as in skycued and skycue-fisb), then a final
+// sweep kMosaicQuiet after the last, which publishes mosaics still pending.
+void computeFisb(const std::vector<const RecordingRecord*>& recs, StatsReport::Fisb& out)
+{
+    using namespace fisb;
+    FisbDecoder decoder;  // experimental layouts off, as skycued by default
+    FisbStore store;
+    std::optional<Time> clock;
+    std::map<std::string, uint64_t> published;
+    std::map<int, uint64_t> text_decoded;
+    auto take = [&](const std::vector<FisbEvent>& events) {
+        for (const auto& e : events)
+            if ((e.kind == FisbEvent::Kind::radar || e.kind == FisbEvent::Kind::raster) && e.mosaic)
+                ++published[e.mosaic->key()];
+    };
+    decoder.onProduct([&](const FisbProduct& p) {
+        ++out.products_by_id[p.id];
+        if (const auto* text = std::get_if<std::vector<TextRecord>>(&p.body)) {
+            for (const auto& r : *text)
+                ++text_decoded[r.kind];
+        } else if (const auto* t = std::get_if<TwgoParsed>(&p.body)) {
+            StatsReport::FisbTwgo& h = out.twgo[p.id];
+            if (t->cancel)
+                ++h.cancels;
+            if (t->text)
+                ++(t->text->empty() ? h.keepalive : h.text);
+            if (t->has_graphics)
+                ++h.graphics;
+        }
+        take(store.apply(p, *clock));
+    });
+    for (const RecordingRecord* r : recs) {
+        if (r->kind != RecordKind::uat_uplink)
+            continue;
+        out.present = true;
+        if (!clock || r->time > *clock)
+            clock = r->time;
+        decoder.feed(r->time, r->uplink_hex);
+        decoder.sweep(*clock);
+        take(store.sweep(*clock));
+    }
+    if (!out.present)
+        return;
+    const Time last = *clock + kMosaicQuiet;
+    decoder.sweep(last);
+    take(store.sweep(last));
+
+    const FisbDecoderCounters& c = decoder.counters();
+    out.uplinks = c.uplinks;
+    out.apdus = c.apdus;
+    out.products = c.products;
+    const FisbSnapshot snap = store.snapshot();
+    const std::pair<TextRecord::Kind, std::size_t> stored[] = {{TextRecord::metar, snap.metar.size()},
+                                                               {TextRecord::taf, snap.taf.size()},
+                                                               {TextRecord::pirep, snap.pirep.size()},
+                                                               {TextRecord::winds, snap.winds.size()},
+                                                               {TextRecord::other, snap.other.size()}};
+    for (const auto& s : stored) {
+        const auto it = text_decoded.find(s.first);
+        const uint64_t decoded = it == text_decoded.end() ? 0 : it->second;
+        if (decoded || s.second)
+            out.text[textKindName(s.first)] = {decoded, s.second};
+    }
+    for (const auto& rec : snap.twgo) {
+        StatsReport::FisbTwgo& h = out.twgo[rec.key.pid];
+        ++h.stored;
+        h.cancelled += rec.cancelled;
+    }
+    for (const auto* list : {&snap.radar, &snap.rasters})
+        for (const auto& m : *list) {
+            const auto pub = published.find(m.key());
+            out.mosaics.push_back({m.key(), m.product, m.product_time, m.blocks.size(),
+                                   pub == published.end() ? 0 : pub->second});
+        }
+    const GlobalBlockStats& bs = decoder.blockStats();
+    const FisbStoreStats ss = store.stats();
+    out.counters = {
+        {"bad_hex", c.bad_hex},
+        {"bad_frames", c.bad_frames},
+        {"not_app_data", c.not_app_data},
+        {"bad_apdu", c.bad_apdu},
+        {"unsupported_products", c.unsupported_products},
+        {"skipped_experimental", c.skipped_experimental},
+        {"segments_open", decoder.segmentsOpen()},
+        {"segments_timed_out", c.segments_timed_out},
+        {"bad_products", c.bad_products},
+        {"rejected_shapes", c.rejected_shapes},
+        {"graphics_rejected", c.graphics_rejected},
+        {"empty_text", c.empty_text},
+        {"blocks_rejected", c.blocks_rejected},
+        {"blocks.high_lat_skipped", bs.high_lat_skipped},
+        {"store.applied", ss.applied},
+        {"store.stale", ss.stale},
+        {"store.blocks_merged", ss.blocks_merged},
+        {"store.blocks_too_old", ss.blocks_too_old},
+        {"store.mosaics_published", ss.mosaics_published},
+        {"store.expired", ss.expired},
+        {"store.cancelled", ss.cancelled},
+    };
 }
 
 }  // namespace
@@ -415,6 +525,7 @@ StatsReport computeStats(const std::vector<RecordingRecord>& input, const StatsO
             if (!per_ac.count(kv.first))
                 st.never_sent.push_back(kv.first);
     }
+    computeFisb(recs, rep.fisb);
     return rep;
 }
 
@@ -506,9 +617,62 @@ std::string pct(uint64_t part, uint64_t whole)
 
 const char* kindOrder[] = {"obs", "uat_uplink", "update", "keyframe", "drop", "filter_change"};
 
+// ---- 11. FIS-B (only when the input holds uat_uplink records) ----
+std::string fisbText(const StatsReport::Fisb& f)
+{
+    std::string out = "\n== FIS-B products by ID ==\n";
+    out += fmt("Uplinks: %llu, APDUs: %llu, products decoded: %llu\n", ull(f.uplinks), ull(f.apdus),
+               ull(f.products));
+    out += "Products by ID (a segmented set counts once):\n";
+    if (f.products_by_id.empty())
+        out += "  none\n";
+    for (const auto& p : f.products_by_id)
+        out += fmt("  %5u  %-16s %8llu\n", static_cast<unsigned>(p.first), fisb::productName(p.first),
+                   ull(p.second));
+    out += "Text records (product 413):\n";
+    if (f.text.empty())
+        out += "  none\n";
+    for (const char* k : {"metar", "taf", "pirep", "winds", "other"}) {
+        const auto it = f.text.find(k);
+        if (it != f.text.end())
+            out += fmt("  %-6s decoded %6llu  stored %6llu\n", k, ull(it->second.first), ull(it->second.second));
+    }
+    out += "TWGO records by product (decoded halves; records held at the end):\n";
+    if (f.twgo.empty())
+        out += "  none\n";
+    for (const auto& t : f.twgo)
+        out += fmt("  %5u  %-16s %llu text, %llu keep-alive, %llu graphics, %llu cancel; stored %llu (%llu "
+                   "cancelled)\n",
+                   static_cast<unsigned>(t.first), fisb::productName(t.first), ull(t.second.text),
+                   ull(t.second.keepalive), ull(t.second.graphics), ull(t.second.cancels), ull(t.second.stored),
+                   ull(t.second.cancelled));
+    out += "Mosaics (held at the end):\n";
+    if (f.mosaics.empty())
+        out += "  none\n";
+    for (const auto& m : f.mosaics)
+        out += fmt("  %-5s  %-16s %s  %llu blocks, published %llu\n", m.key.c_str(), fisb::productName(m.product),
+                   timeText(m.product_time).c_str(), ull(m.blocks), ull(m.published));
+    out += "Decoder counters:\n";
+    for (const auto& c : f.counters)
+        out += fmt("  %-28s %llu\n", c.first.c_str(), ull(c.second));
+    return out;
+}
+
+std::string formatStatsTextBody(const StatsReport& rep);
+
 }  // namespace
 
 std::string formatStatsText(const StatsReport& rep)
+{
+    std::string out = formatStatsTextBody(rep);
+    if (rep.fisb.present)
+        out += fisbText(rep.fisb);
+    return out;
+}
+
+namespace {
+
+std::string formatStatsTextBody(const StatsReport& rep)
 {
     const StatsOptions& opt = rep.options;
     std::string out = "skycue-stats report\n";
@@ -729,6 +893,8 @@ std::string formatStatsText(const StatsReport& rep)
     }
     return out;
 }
+
+}  // namespace
 
 // ======================================================================
 // JSON
@@ -1010,6 +1176,53 @@ std::string formatStatsJson(const StatsReport& rep)
             w.addRaw("received_obs", "null").addRaw("compression", "null").addRaw("never_sent", "null");
         }
         top.addRaw("sent", w.str());
+    }
+
+    // ---- FIS-B ----
+    const auto& fb = rep.fisb;
+    if (!fb.present) {
+        top.addRaw("fisb", "null");
+    } else {
+        JsonWriter w;
+        w.add("uplinks", i64(fb.uplinks)).add("apdus", i64(fb.apdus)).add("products", i64(fb.products));
+        JsonWriter by_id;
+        for (const auto& p : fb.products_by_id)
+            by_id.add(std::to_string(p.first).c_str(), i64(p.second));
+        w.addRaw("products_by_id", by_id.str());
+        JsonWriter text;
+        for (const char* k : {"metar", "taf", "pirep", "winds", "other"}) {
+            const auto it = fb.text.find(k);
+            if (it == fb.text.end())
+                continue;
+            JsonWriter e;
+            e.add("decoded", i64(it->second.first)).add("stored", i64(it->second.second));
+            text.addRaw(k, e.str());
+        }
+        w.addRaw("text", text.str());
+        std::vector<std::string> twgo;
+        for (const auto& t : fb.twgo) {
+            JsonWriter e;
+            e.add("product", static_cast<int64_t>(t.first)).add("name", fisb::productName(t.first));
+            e.add("text", i64(t.second.text)).add("keepalive", i64(t.second.keepalive));
+            e.add("graphics", i64(t.second.graphics)).add("cancels", i64(t.second.cancels));
+            e.add("stored", i64(t.second.stored)).add("cancelled", i64(t.second.cancelled));
+            twgo.push_back(e.str());
+        }
+        w.addRaw("twgo", jsonArray(twgo));
+        std::vector<std::string> mosaics;
+        for (const auto& m : fb.mosaics) {
+            JsonWriter e;
+            e.add("key", m.key).add("product", static_cast<int64_t>(m.product));
+            e.add("name", fisb::productName(m.product)).add("product_time", formatIso8601Ms(m.product_time));
+            e.add("blocks", i64(m.blocks)).add("published", i64(m.published));
+            mosaics.push_back(e.str());
+        }
+        w.addRaw("mosaics", jsonArray(mosaics));
+        JsonWriter counters;
+        for (const auto& c : fb.counters)
+            counters.add(c.first.c_str(), i64(c.second));
+        w.addRaw("counters", counters.str());
+        top.addRaw("fisb", w.str());
     }
     return top.str();
 }

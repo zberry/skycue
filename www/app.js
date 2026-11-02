@@ -644,7 +644,7 @@
   var WX_DEBOUNCE_MS = 200;
   var WX_KINDS = [['metar', 'METAR'], ['taf', 'TAF'], ['pirep', 'PIREP'], ['winds', 'Winds aloft']];
   var SHAPE_LAYERS = [
-    ['tfr', 'TFR'], ['sigmet', 'SIGMET / convective'], ['airmet', 'AIRMET / G-AIRMET'], ['cwa', 'CWA'], ['sua', 'SUA']
+    ['tfr', 'NOTAM / TFR'], ['sigmet', 'SIGMET / convective'], ['airmet', 'AIRMET / G-AIRMET'], ['cwa', 'CWA'], ['sua', 'SUA']
   ];
   var RADAR_NAMES = { 63: 'regional', 64: 'conus' };
 

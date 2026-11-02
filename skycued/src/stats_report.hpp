@@ -9,7 +9,8 @@
 // included); when the input has none, the sent stream's update/keyframe
 // records stand in for them (StatsReport::basis says which). Sections 2-7
 // and 9 are computed from them; the overview, the gaps and the sent-stream
-// section from every record.
+// section from every record; the FIS-B section (11, only when there are
+// uat_uplink records) from the uplinks, through fisb::FisbDecoder/FisbStore.
 
 #include "recording_reader.hpp"
 
@@ -151,6 +152,29 @@ struct StatsReport {
         double compression = 0;                // received_obs / updates
         std::vector<skycue::TrackId> never_sent;  // received aircraft without an update/keyframe
     } sent;
+
+    // FIS-B: the received stream's uat_uplink records run through the FIS-B
+    // decoder and store (as skycued does, on the records' clock; the same
+    // counts as skycue-fisb --summary on the same input).
+    struct FisbTwgo {
+        uint64_t text = 0, keepalive = 0, graphics = 0, cancels = 0;  // decoded halves
+        uint64_t stored = 0, cancelled = 0;                           // records held at the end
+    };
+    struct FisbMosaic {
+        std::string key;  // "63", "70-3"
+        uint16_t product = 0;
+        Time product_time{};
+        uint64_t blocks = 0, published = 0;
+    };
+    struct Fisb {
+        bool present = false;  // any uat_uplink record
+        uint64_t uplinks = 0, apdus = 0, products = 0;
+        std::map<uint16_t, uint64_t> products_by_id;  // decoded products (a segmented set counts once)
+        std::map<std::string, std::pair<uint64_t, uint64_t>> text;  // kind name -> (decoded, stored)
+        std::map<uint16_t, FisbTwgo> twgo;                          // by product ID
+        std::vector<FisbMosaic> mosaics;                             // radar, then rasters
+        std::vector<std::pair<std::string, uint64_t>> counters;     // decoder and store counters, fixed order
+    } fisb;
 };
 
 // Records need not be sorted (they are ordered by time, stably, first).

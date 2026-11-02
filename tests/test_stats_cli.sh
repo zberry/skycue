@@ -145,4 +145,34 @@ assert s["updates"] > 0 and s["keyframes"] == 0, s
 assert sum(s["drops"].values()) > 0, s["drops"]
 assert s["compression"] >= 1.0, s' || fail "(h) --json sent section"
 
+# ---- (i) FIS-B section: only with uat_uplink records -------------------------
+grep -q '^== FIS-B' "$tmp/a.out" && fail "(i) FIS-B section on a recording without uplinks"
+"$stats" --json "$sample" | python3 -I -c 'import json,sys; assert json.load(sys.stdin)["fisb"] is None' ||
+  fail "(i) --json fisb not null without uplinks"
+uplinks="$fixtures/fisb/received-with-uplinks.jsonl"
+[ -e "$uplinks" ] || fail "$uplinks missing"
+"$stats" "$uplinks" >"$tmp/i.out" 2>"$tmp/i.err" || { cat "$tmp/i.err"; fail "(i) exit"; }
+fs=$(section "$tmp/i.out" "FIS-B products by ID")
+# The 2015 sample's counts (skycue-fisb --summary on the same file agrees).
+grep -qx 'Uplinks: 704, APDUs: 563, products decoded: 561' <<<"$fs" || { echo "$fs"; fail "(i) uplink counts"; }
+grep -qE '^ +413  generic text +224$' <<<"$fs" || { echo "$fs"; fail "(i) product 413"; }
+grep -qE '^ +8  NOTAM +62$' <<<"$fs" || { echo "$fs"; fail "(i) product 8"; }
+grep -qE '^ +63  NEXRAD regional +200$' <<<"$fs" || { echo "$fs"; fail "(i) product 63"; }
+grep -qE '^  metar  decoded +150  stored +127$' <<<"$fs" || { echo "$fs"; fail "(i) METAR"; }
+grep -qE '^ +8  NOTAM +27 text, 6 keep-alive, 29 graphics, 0 cancel; stored 23 \(0 cancelled\)$' <<<"$fs" ||
+  { echo "$fs"; fail "(i) TWGO 8"; }
+grep -qE '^  63 +NEXRAD regional +2015-01-24T04:10:00\.000Z  671 blocks, published 2$' <<<"$fs" ||
+  { echo "$fs"; fail "(i) mosaic 63"; }
+grep -qE '^  bad_frames +0$' <<<"$fs" || { echo "$fs"; fail "(i) counters"; }
+"$stats" "$uplinks" | cmp -s - "$tmp/i.out" || fail "(i) rerun differs"
+"$stats" --json "$uplinks" | python3 -I -c 'import json,sys; f=json.load(sys.stdin)["fisb"]
+assert f["uplinks"] == 704 and f["apdus"] == 563 and f["products"] == 561, f
+assert f["products_by_id"]["413"] == 224 and f["products_by_id"]["8"] == 62, f["products_by_id"]
+assert f["text"]["metar"] == {"decoded": 150, "stored": 127}, f["text"]
+t8 = [t for t in f["twgo"] if t["product"] == 8][0]
+assert (t8["text"], t8["keepalive"], t8["graphics"], t8["stored"]) == (27, 6, 29, 23), t8
+m = f["mosaics"][0]
+assert (m["key"], m["blocks"], m["published"]) == ("63", 671, 2), m
+assert f["counters"]["store.applied"] == 561, f["counters"]' || fail "(i) --json fisb section"
+
 echo "PASS"

@@ -18,6 +18,7 @@ add_library(skycued_core STATIC
   src/recording_reader.cpp
   src/registration.cpp
   src/replay_source.cpp
+  src/retention.cpp
   src/rotating_file.cpp
   src/runtime_config.cpp
   src/stats_report.cpp

@@ -1083,3 +1083,186 @@ BOOST_AUTO_TEST_CASE(udp_no_stale_drop_before_hello)
     BOOST_TEST(ev.drops[0].first.address == 0xAu);
     BOOST_TEST(static_cast<int>(ev.drops[0].second) == static_cast<int>(DropReason::stale));
 }
+
+namespace {
+
+// onError messages with when and on which thread they arrived.
+struct Errors {
+    std::mutex m;
+    std::condition_variable cv;
+    std::vector<std::string> messages;
+    std::vector<std::chrono::steady_clock::time_point> at;
+    std::vector<std::thread::id> threads;
+
+    void attach(Client& c, bool throw_first = false)
+    {
+        c.onError([this, throw_first](const std::string& msg) {
+            bool first = false;
+            {
+                std::lock_guard<std::mutex> lk(m);
+                first = messages.empty();
+                messages.push_back(msg);
+                at.push_back(std::chrono::steady_clock::now());
+                threads.push_back(std::this_thread::get_id());
+                cv.notify_all();
+            }
+            if (throw_first && first)
+                throw std::runtime_error("onError itself threw"); // must be ignored
+        });
+    }
+    bool waitCount(size_t n, std::chrono::milliseconds timeout = kWait)
+    {
+        std::unique_lock<std::mutex> lk(m);
+        return cv.wait_until(lk, std::chrono::system_clock::now() + timeout, [&] { return messages.size() >= n; });
+    }
+    std::vector<std::string> copy()
+    {
+        std::lock_guard<std::mutex> lk(m);
+        return messages;
+    }
+};
+
+bool contains(const std::string& s, const std::string& part) { return s.find(part) != std::string::npos; }
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(on_error_reports_bind_failure)
+{
+    // tcp_listen on a port someone else listens on.
+    asio::io_context io;
+    tcp::acceptor taken(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const uint16_t tport = taken.local_endpoint().port();
+    Config cfg = listenConfig();
+    cfg.port = tport;
+    cfg.reconnect_interval = 100ms;
+    Client client(cfg);
+    Errors errs;
+    errs.attach(client, true);
+    client.start();
+    BOOST_TEST(client.localPort() == 0);
+    BOOST_REQUIRE(errs.waitCount(2)); // retried, and reported again, despite onError throwing
+    for (const auto& m : errs.copy()) {
+        BOOST_TEST(contains(m, "127.0.0.1:" + std::to_string(tport)), m);
+        BOOST_TEST(contains(m, "cannot listen"), m);
+        BOOST_TEST(contains(m, "retrying in 100 ms"), m);
+    }
+    {
+        std::lock_guard<std::mutex> lk(errs.m);
+        for (const auto& id : errs.threads)
+            BOOST_TEST((id != std::this_thread::get_id())); // on the I/O thread
+    }
+    client.stop();
+
+    // udp on a port that is already bound.
+    udp::socket utaken(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const uint16_t uport = utaken.local_endpoint().port();
+    Config ucfg = udpConfig(uport);
+    ucfg.reconnect_interval = 100ms;
+    Client uclient(ucfg);
+    Errors uerrs;
+    uerrs.attach(uclient);
+    uclient.start();
+    BOOST_REQUIRE(uerrs.waitCount(1));
+    const auto um = uerrs.copy().at(0);
+    BOOST_TEST(contains(um, "udp"), um);
+    BOOST_TEST(contains(um, "cannot bind 127.0.0.1:" + std::to_string(uport)), um);
+    BOOST_TEST(contains(um, "retrying in 100 ms"), um);
+}
+
+BOOST_AUTO_TEST_CASE(on_error_reports_connect_failure_once_per_attempt)
+{
+    uint16_t port = 0;
+    {
+        asio::io_context io;
+        tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+        port = a.local_endpoint().port();
+    } // closed: connections are refused
+    Config cfg = tcpConfig(port);
+    cfg.reconnect_interval = 100ms;
+    Client client(cfg);
+    Errors errs;
+    errs.attach(client);
+    Events ev;
+    ev.attach(client);
+    const auto t0 = std::chrono::steady_clock::now();
+    client.start();
+    std::this_thread::sleep_for(1050ms);
+    client.stop();
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
+    const auto msgs = errs.copy();
+    // One attempt at once, then one every 100 ms: about 11, one message each.
+    const auto attempts = static_cast<size_t>(elapsed / 100ms) + 1;
+    BOOST_TEST(msgs.size() >= 5u);
+    BOOST_TEST(msgs.size() <= attempts);
+    for (const auto& m : msgs) {
+        BOOST_TEST(contains(m, "tcp: cannot connect to 127.0.0.1:" + std::to_string(port)), m);
+        BOOST_TEST(contains(m, "retrying in 100 ms"), m);
+    }
+    std::lock_guard<std::mutex> lk(errs.m);
+    for (size_t i = 1; i < errs.at.size(); ++i)
+        BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(errs.at[i] - errs.at[i - 1]).count() >= 90);
+    std::lock_guard<std::mutex> lk2(ev.m);
+    BOOST_TEST(ev.conns.empty()); // a failed attempt is not a connection change
+}
+
+BOOST_AUTO_TEST_CASE(on_error_reports_swallowed_callback_exception)
+{
+    // Thread mode: the exception is discarded, and reported.
+    {
+        TestTcpServer server;
+        Client client(tcpConfig(server.port()));
+        Errors errs;
+        errs.attach(client);
+        std::atomic<int> calls{0};
+        client.onTrackUpdate([&](const Track&) {
+            if (++calls == 1)
+                throw std::runtime_error("boom in onTrackUpdate");
+        });
+        client.onConnectionChange([](bool) { throw 42; }); // not a std::exception
+        client.start();
+        BOOST_REQUIRE(server.waitAccepted());
+        server.send(encodeTrackUpdate(mkTrack(1, true)));
+        BOOST_REQUIRE(errs.waitCount(2));
+        const auto msgs = errs.copy();
+        BOOST_TEST(std::any_of(msgs.begin(), msgs.end(), [](const std::string& m) {
+            return contains(m, "callback threw") && contains(m, "boom in onTrackUpdate");
+        }));
+        BOOST_TEST(std::any_of(msgs.begin(), msgs.end(), [](const std::string& m) {
+            return contains(m, "callback threw") && contains(m, "unknown exception");
+        }));
+        server.send(encodeTrackUpdate(mkTrack(2, true)));
+        const auto deadline = std::chrono::steady_clock::now() + kWait;
+        while (calls < 2 && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(5ms);
+        BOOST_TEST(calls == 2); // carried on
+        BOOST_TEST(errs.copy().size() == 2u);
+    }
+    // Poll mode: rethrown from poll() instead, not reported.
+    {
+        TestTcpServer server;
+        Config cfg = tcpConfig(server.port());
+        cfg.run_io_thread = false;
+        Client client(cfg);
+        Errors errs;
+        errs.attach(client);
+        client.onTrackUpdate([](const Track&) { throw std::runtime_error("poll boom"); });
+        client.start();
+        const auto deadline = std::chrono::steady_clock::now() + kWait;
+        bool thrown = false;
+        bool sent = false;
+        while (!thrown && std::chrono::steady_clock::now() < deadline) {
+            try {
+                client.poll();
+            } catch (const std::runtime_error& e) {
+                thrown = std::string(e.what()) == "poll boom";
+            }
+            if (!sent && server.waitAcceptedFor(0ms)) {
+                server.send(encodeTrackUpdate(mkTrack(1, true)));
+                sent = true;
+            }
+            std::this_thread::sleep_for(5ms);
+        }
+        BOOST_TEST(thrown);
+        BOOST_TEST(errs.copy().empty());
+    }
+}

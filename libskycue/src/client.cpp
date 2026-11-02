@@ -57,6 +57,7 @@ struct Client::Impl {
     std::function<void(TrackId, DropReason)> on_dropped;
     std::function<void(bool)> on_connection;
     std::function<void(const Frame&)> on_frame;
+    std::function<void(const std::string&)> on_error;
 
     // Declared first so it is destroyed last, after every I/O object.
     asio::io_context io;
@@ -134,11 +135,45 @@ struct Client::Impl {
     {
         try {
             f();
+        } catch (const std::exception& e) {
+            swallowed(e.what());
+        } catch (...) {
+            swallowed("unknown exception");
+        }
+    }
+    // Inside a catch block: poll mode keeps the first exception for poll();
+    // thread mode discards it and says so through onError.
+    void swallowed(const char* what)
+    {
+        if (!cfg.run_io_thread) {
+            if (!callback_error)
+                callback_error = std::current_exception();
+            return;
+        }
+        fireError(std::string("a callback threw: ") + what + " (ignored; the client carries on)");
+    }
+    // An onError that throws is not reported again (that could loop): in poll
+    // mode it is kept for poll() like any other, in thread mode dropped.
+    void fireError(const std::string& message)
+    {
+        if (!on_error)
+            return;
+        try {
+            on_error(message);
         } catch (...) {
             if (!cfg.run_io_thread && !callback_error)
                 callback_error = std::current_exception();
         }
     }
+    // "<what>; retrying in N ms", then the retry.
+    void failAndRetry(const std::string& what)
+    {
+        fireError(what + "; retrying in " + std::to_string(cfg.reconnect_interval.count()) + " ms");
+        if (stopping) // onError stopped the client
+            return;
+        scheduleReconnect();
+    }
+    std::string where() const { return cfg.host + ":" + std::to_string(cfg.port); }
     void fireUpdate(const Track& t)
     {
         if (on_update)
@@ -207,7 +242,7 @@ struct Client::Impl {
                                    if (stopping || gen != conn_gen)
                                        return;
                                    if (ec) {
-                                       scheduleReconnect();
+                                       failAndRetry("tcp: cannot resolve " + where() + ": " + ec.message());
                                        return;
                                    }
                                    asio::async_connect(tcp_sock, results,
@@ -216,7 +251,8 @@ struct Client::Impl {
                                                                return;
                                                            if (cec) {
                                                                closeTcp();
-                                                               scheduleReconnect();
+                                                               failAndRetry("tcp: cannot connect to " + where() +
+                                                                            ": " + cec.message());
                                                                return;
                                                            }
                                                            rx.clear();
@@ -350,8 +386,8 @@ struct Client::Impl {
 
     // Binds and listens if not already listening. Called once from start()
     // (owner thread, before the I/O thread exists) and on the I/O thread for
-    // retries.
-    bool openListener()
+    // retries. On failure `why` (when given) says what went wrong.
+    bool openListener(std::string* why = nullptr)
     {
         if (acceptor.is_open())
             return true;
@@ -363,8 +399,11 @@ struct Client::Impl {
         } else {
             tcp::resolver r(io);
             const auto results = r.resolve(cfg.host, std::to_string(cfg.port), ec);
-            if (ec || results.empty())
+            if (ec || results.empty()) {
+                if (why)
+                    *why = "cannot resolve: " + (ec ? ec.message() : std::string("no address"));
                 return false;
+            }
             ep = *results.begin();
         }
         acceptor.open(ep.protocol(), ec);
@@ -377,6 +416,8 @@ struct Client::Impl {
         if (!ec)
             local_port = acceptor.local_endpoint(ec).port();
         if (ec) {
+            if (why)
+                *why = ec.message();
             error_code ignored;
             acceptor.close(ignored);
             local_port = 0;
@@ -387,8 +428,9 @@ struct Client::Impl {
 
     void listenTcp()
     {
-        if (!openListener()) {
-            scheduleReconnect(); // retry the bind
+        std::string why;
+        if (!openListener(&why)) {
+            failAndRetry("tcp_listen: cannot listen on " + where() + ": " + why); // retry the bind
             return;
         }
         acceptNext();
@@ -404,7 +446,7 @@ struct Client::Impl {
             if (ec) {
                 // EMFILE and the like: keep the listener, try again later.
                 if (ec != asio::error::operation_aborted)
-                    scheduleReconnect();
+                    failAndRetry("tcp_listen: accept on " + where() + " failed: " + ec.message());
                 return;
             }
             peers.emplace(p->id, p);
@@ -485,7 +527,8 @@ struct Client::Impl {
             udp::resolver r(io);
             const auto results = r.resolve(cfg.host, std::to_string(cfg.port), ec);
             if (ec || results.empty()) {
-                scheduleReconnect();
+                failAndRetry("udp: cannot resolve " + where() + ": " +
+                             (ec ? ec.message() : std::string("no address")));
                 return;
             }
             ep = *results.begin();
@@ -496,7 +539,7 @@ struct Client::Impl {
         if (ec) {
             error_code ignored;
             udp_sock.close(ignored);
-            scheduleReconnect();
+            failAndRetry("udp: cannot bind " + where() + ": " + ec.message());
             return;
         }
         receiveUdp();
@@ -510,7 +553,7 @@ struct Client::Impl {
             if (ec) { // rebind after a socket error
                 error_code ignored;
                 udp_sock.close(ignored);
-                scheduleReconnect();
+                failAndRetry("udp: receive on " + where() + " failed: " + ec.message());
                 return;
             }
             Frame frame;
@@ -757,6 +800,7 @@ void Client::onTrackUpdate(std::function<void(const Track&)> cb) { impl_->on_upd
 void Client::onTrackDropped(std::function<void(TrackId, DropReason)> cb) { impl_->on_dropped = std::move(cb); }
 void Client::onConnectionChange(std::function<void(bool)> cb) { impl_->on_connection = std::move(cb); }
 void Client::onFrame(std::function<void(const Frame&)> cb) { impl_->on_frame = std::move(cb); }
+void Client::onError(std::function<void(const std::string&)> cb) { impl_->on_error = std::move(cb); }
 
 void Client::start()
 {

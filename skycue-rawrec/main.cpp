@@ -7,12 +7,17 @@
 //                      "<epoch_ms> <line>" to <dir>/uat-YYYYMMDD-HHMMSS.txt
 //
 // Files rotate like the Recorder's (--rotate-mb, --rotate-min); a Beast file
-// is only ever cut at a frame start. Each input reconnects with a backoff
-// from 0.5 s to 10 s. SIGINT/SIGTERM flush the files and exit 0.
+// is only ever cut at a frame start. A write failure (a full disk) drops data
+// with the Recorder's backoff (5 s doubling to 300 s, one file name reused per
+// failure streak). With --max-gb, each new file runs retention over
+// --retention-dir (default --dir) and its raw/ (see retention.hpp). Each input
+// reconnects with a backoff from 0.5 s to 10 s. SIGINT/SIGTERM flush the files
+// and exit 0.
 // Single-threaded: everything runs on one io_context.
 
 #include "log.hpp"
 #include "raw_formats.hpp"
+#include "retention.hpp"
 #include "rotating_file.hpp"
 
 #include <boost/asio/connect.hpp>
@@ -33,6 +38,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -47,7 +53,6 @@ namespace {
 constexpr std::chrono::milliseconds kMinBackoff{500};
 constexpr std::chrono::milliseconds kMaxBackoff{10000};
 constexpr std::chrono::seconds kFlushInterval{1};
-constexpr std::chrono::seconds kRetryWriteAfter{5};
 constexpr std::size_t kMaxUatLine = 64 * 1024;
 
 struct HostPort {
@@ -71,11 +76,15 @@ std::optional<HostPort> parseHostPort(const std::string& s)
     return HostPort{host, port};
 }
 
-// A RotatingFile that, after a failed write, drops data for a while instead
-// of trying (and maybe creating) a new file for every chunk.
+// One output stream. RotatingFile handles write failures (drops data with a
+// 5 s .. 300 s backoff and reuses one file name per failure streak, as the
+// Recorder does); this logs file changes and runs retention for new files.
 class Sink {
 public:
-    explicit Sink(RotatingFileConfig cfg) : name_(cfg.stream), file_(std::move(cfg)) {}
+    Sink(RotatingFileConfig cfg, std::function<void()> on_new_file)
+        : file_(std::move(cfg)), on_new_file_(std::move(on_new_file))
+    {
+    }
 
     bool rotationDue() const { return file_.rotationDue(); }
     void rotate()
@@ -87,48 +96,24 @@ public:
     }
     void write(const char* data, std::size_t n)
     {
-        if (n == 0)
+        if (!file_.write(data, n))
             return;
-        const auto now = std::chrono::steady_clock::now();
-        if (failing_ && now < retry_at_) {
-            dropped_ += n;
-            return;
-        }
-        const bool was_open = !file_.currentPath().empty();
-        if (!file_.write(data, n)) {
-            const int err = errno;
-            dropped_ += n;
-            retry_at_ = now + kRetryWriteAfter;
-            if (!failing_)
-                LOG_ERROR(name_ << ": cannot write under the output directory: " << std::strerror(err)
-                                << "; dropping data, retrying every " << kRetryWriteAfter.count() << " s");
-            failing_ = true;
-            return;
-        }
-        if (failing_) {
-            LOG_INFO(name_ << ": writing again; dropped " << dropped_ << " bytes meanwhile");
-            failing_ = false;
-            dropped_ = 0;
-        }
-        if (!was_open)
-            LOG_INFO("writing " << file_.currentPath());
-    }
-    void flush()
-    {
-        if (!file_.flush() && !failing_) {
-            const int err = errno;
-            LOG_ERROR(name_ << ": flush failed: " << std::strerror(err));
-            failing_ = true;
-            retry_at_ = std::chrono::steady_clock::now() + kRetryWriteAfter;
+        const std::string now = file_.currentPath();
+        if (now != last_path_) {  // a new file (not a streak's reopen of the same one)
+            last_path_ = now;
+            LOG_INFO("writing " << now);
+            if (on_new_file_)
+                on_new_file_();
         }
     }
+    void flush() { file_.flush(); }
+    std::string currentPath() const { return file_.currentPath(); }
+    void setFailWritesForTest(bool fail) { file_.setFailWritesForTest(fail); }
 
 private:
-    std::string name_;
     RotatingFile file_;
-    bool failing_ = false;
-    std::chrono::steady_clock::time_point retry_at_{};
-    uint64_t dropped_ = 0;
+    std::function<void()> on_new_file_;
+    std::string last_path_;
 };
 
 // One TCP input, reconnecting with backoff.
@@ -291,20 +276,32 @@ private:
 
 int main(int argc, char** argv)
 {
-    std::string beast_arg, uat_arg, dir;
-    double rotate_mb = 256, rotate_min = 60;
+    std::string beast_arg, uat_arg, dir, retention_dir;
+    double rotate_mb = 256, rotate_min = 60, max_gb = 0;
+    long reopen_ms_for_test = 0;
     po::options_description desc(
         "usage: skycue-rawrec [--beast HOST:PORT] [--uat HOST:PORT] --dir DIR [--rotate-mb N] [--rotate-min N]\n"
+        "                     [--max-gb N [--retention-dir DIR]]\n"
         "Records readsb's Beast output and dump978-fa's raw UAT lines");
     desc.add_options()("help,h", "show this help")(
         "beast", po::value(&beast_arg), "readsb Beast output to record (e.g. 127.0.0.1:30005)")(
         "uat", po::value(&uat_arg), "dump978-fa raw output to record (e.g. 127.0.0.1:30978)")(
         "dir", po::value(&dir), "output directory (created when missing)")(
         "rotate-mb", po::value(&rotate_mb)->default_value(256), "start a new file at this size (0: never)")(
-        "rotate-min", po::value(&rotate_min)->default_value(60), "start a new file at this age (0: never)");
+        "rotate-min", po::value(&rotate_min)->default_value(60), "start a new file at this age (0: never)")(
+        "max-gb", po::value(&max_gb)->default_value(0),
+        "keep the recordings within this many GB, deleting the oldest (0: no limit; RECORD_MAX_GB)")(
+        "retention-dir", po::value(&retention_dir),
+        "the directory --max-gb covers, with its raw/ (default: --dir; skycue-start.sh passes RECORD_DIR)");
+    // Test seams, not in --help.
+    po::options_description hidden;
+    hidden.add_options()("fail-writes-for-test", "every write fails as on a full disk")(
+        "reopen-ms-for-test", po::value(&reopen_ms_for_test), "write-failure backoff: N ms doubling to 4N ms");
+    po::options_description all;
+    all.add(desc).add(hidden);
     po::variables_map vm;
     try {
-        po::store(po::parse_command_line(argc, argv, desc), vm);
+        po::store(po::parse_command_line(argc, argv, all), vm);
         po::notify(vm);
     } catch (const std::exception& e) {
         std::cerr << "skycue-rawrec: " << e.what() << "\n" << desc << "\n";
@@ -331,8 +328,13 @@ int main(int argc, char** argv)
         std::cerr << "skycue-rawrec: --dir is required\n";
         return 2;
     }
-    if (!std::isfinite(rotate_mb) || rotate_mb < 0 || !std::isfinite(rotate_min) || rotate_min < 0) {
-        std::cerr << "skycue-rawrec: --rotate-mb and --rotate-min must be 0 or more\n";
+    if (!std::isfinite(rotate_mb) || rotate_mb < 0 || !std::isfinite(rotate_min) || rotate_min < 0 ||
+        !std::isfinite(max_gb) || max_gb < 0) {
+        std::cerr << "skycue-rawrec: --rotate-mb, --rotate-min and --max-gb must be 0 or more\n";
+        return 2;
+    }
+    if (reopen_ms_for_test < 0) {
+        std::cerr << "skycue-rawrec: --reopen-ms-for-test must be 0 or more\n";
         return 2;
     }
     if (!makeDirs(dir)) {
@@ -347,9 +349,32 @@ int main(int argc, char** argv)
         c.ext = ext;
         c.rotate_bytes = static_cast<uint64_t>(std::llround(rotate_mb * 1024 * 1024));
         c.rotate_after = std::chrono::seconds(std::llround(rotate_min * 60));
+        if (reopen_ms_for_test > 0) {
+            c.reopen_initial = std::chrono::milliseconds(reopen_ms_for_test);
+            c.reopen_max = 4 * c.reopen_initial;
+        }
         return c;
     };
-    Sink beast_sink(fileConfig("beast", "bin")), uat_sink(fileConfig("uat", "txt"));
+    const uint64_t max_bytes = gigabytesToBytes(max_gb);
+    if (retention_dir.empty())
+        retention_dir = dir;
+    Sink* sinks[2] = {nullptr, nullptr};
+    auto retention = [&] {
+        if (max_bytes == 0)
+            return;
+        std::set<std::string> open_files;
+        for (const Sink* k : sinks)
+            if (k && !k->currentPath().empty())
+                open_files.insert(k->currentPath());
+        enforce(retention_dir, max_bytes, open_files);
+    };
+    Sink beast_sink(fileConfig("beast", "bin"), retention), uat_sink(fileConfig("uat", "txt"), retention);
+    sinks[0] = &beast_sink;
+    sinks[1] = &uat_sink;
+    if (vm.count("fail-writes-for-test")) {
+        beast_sink.setFailWritesForTest(true);
+        uat_sink.setFailWritesForTest(true);
+    }
 
     asio::io_context io;
     std::vector<std::unique_ptr<Input>> inputs;
@@ -387,6 +412,8 @@ int main(int argc, char** argv)
         in->start();
     armFlush();
     LOG_INFO("recording to " << dir);
+    if (max_bytes > 0)
+        LOG_INFO("keeping " << retention_dir << " within " << max_gb << " GB, oldest deleted first");
     io.run();
     return 0;
 }

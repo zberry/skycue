@@ -78,6 +78,12 @@ target_compile_definitions(test_recorder PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_DOCS_DIR="${_skycue_docs_dir}")
 skycue_set_warnings(test_recorder)
 add_test(NAME recorder COMMAND test_recorder)
+
+add_executable(test_retention test_retention.cpp)
+target_link_libraries(test_retention PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_retention PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_retention)
+add_test(NAME retention COMMAND test_retention)
 set_tests_properties(recorder PROPERTIES TIMEOUT 60)
 
 # Builds a tiny consumer against libskycue through add_subdirectory(),

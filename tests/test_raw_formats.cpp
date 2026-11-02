@@ -9,11 +9,14 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 using namespace skycued;
@@ -279,4 +282,98 @@ BOOST_AUTO_TEST_CASE(unique_stem_numbers_within_a_second)
     std::string last3;
     int suffix3 = 0;
     BOOST_TEST(uniqueStem(base, {"jsonl", "txt"}, last3, suffix3) == base + "-2");
+}
+
+// The Recorder's write_failure_backs_off_and_reuses_name, for RotatingFile
+// (what skycue-rawrec writes through).
+BOOST_AUTO_TEST_CASE(rotating_file_write_failure_backs_off_and_reuses_name)
+{
+    using steady = std::chrono::steady_clock;
+    using namespace std::chrono_literals;
+    TempDir tmp;
+    RotatingFileConfig cfg;
+    cfg.dir = tmp.path;
+    cfg.stream = "uat";
+    cfg.ext = "txt";
+    cfg.reopen_initial = 40ms;
+    cfg.reopen_max = 200ms;
+    RotatingFile f(cfg);
+    BOOST_REQUIRE(f.write("a\n", 2));
+    BOOST_REQUIRE(f.flush());
+    const std::string first = f.currentPath();
+    BOOST_TEST(f.reopenDelay().count() == 0);
+    BOOST_TEST(!f.failing());
+
+    f.setFailWritesForTest(true);
+    std::vector<std::pair<steady::time_point, std::chrono::milliseconds>> changes;
+    uint64_t attempted = 0;
+    const auto until = steady::now() + 1200ms;
+    while (steady::now() < until) {
+        BOOST_TEST(!f.write("xx\n", 3));
+        attempted += 3;
+        if (changes.empty() || f.reopenDelay() != changes.back().second)
+            changes.emplace_back(steady::now(), f.reopenDelay());
+        std::this_thread::sleep_for(1ms);
+    }
+    BOOST_TEST(f.failing());
+    BOOST_TEST(f.droppedBytes() == attempted);
+    BOOST_REQUIRE(changes.size() == 4u);  // 40, 80, 160, then capped at 200
+    BOOST_TEST(changes[0].second.count() == 40);
+    BOOST_TEST(changes[1].second.count() == 80);
+    BOOST_TEST(changes[2].second.count() == 160);
+    BOOST_TEST(changes[3].second.count() == 200);
+    for (std::size_t i = 1; i < changes.size(); ++i) {
+        const auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(changes[i].first - changes[i - 1].first);
+        BOOST_CHECK_MESSAGE(gap.count() >= changes[i - 1].second.count() - 5,
+                            "attempt " << i << " after " << gap.count() << " ms");
+    }
+    // Several reopens, one extra file only.
+    const auto files = tmp.list();
+    BOOST_REQUIRE(files.size() == 2u);
+    const std::string second = tmp.path + "/" + (tmp.path + "/" + files[0] == first ? files[1] : files[0]);
+    BOOST_TEST(slurp(first) == "a\n");
+
+    // Recovery appends to the streak's file and resets the backoff.
+    f.setFailWritesForTest(false);
+    std::this_thread::sleep_for(250ms);
+    BOOST_REQUIRE(f.write("b\n", 2));
+    BOOST_TEST(!f.failing());
+    BOOST_TEST(f.reopenDelay().count() == 0);
+    BOOST_TEST(f.currentPath() == second);
+    BOOST_REQUIRE(f.write("c\n", 2));
+    BOOST_REQUIRE(f.flush());
+    BOOST_TEST(slurp(second) == "b\nc\n");
+    BOOST_TEST(tmp.list().size() == 2u);
+
+    // A new streak starts again from the initial delay; a flush failure counts too.
+    f.setFailWritesForTest(true);
+    BOOST_TEST(!f.flush());
+    BOOST_TEST(f.reopenDelay().count() == 40);
+}
+
+BOOST_AUTO_TEST_CASE(rotating_file_open_failure_retries_the_same_name)
+{
+    using namespace std::chrono_literals;
+    TempDir tmp;
+    std::ofstream(tmp.path + "/blocker").put('x');  // a file where the directory should be
+    RotatingFileConfig cfg;
+    cfg.dir = tmp.path + "/blocker/raw";
+    cfg.stream = "beast";
+    cfg.ext = "bin";
+    cfg.reopen_initial = 20ms;
+    cfg.reopen_max = 20ms;
+    RotatingFile f(cfg);
+    BOOST_TEST(!f.write("abc", 3));
+    BOOST_TEST(f.failing());
+    BOOST_TEST(f.reopenDelay().count() == 20);
+    BOOST_TEST(!f.write("abc", 3));  // not due yet: dropped without trying
+    BOOST_TEST(f.droppedBytes() == 6u);
+
+    // The directory becomes usable: the next due reopen succeeds.
+    ::remove((tmp.path + "/blocker").c_str());
+    std::this_thread::sleep_for(30ms);
+    BOOST_REQUIRE(f.write("def", 3));
+    BOOST_TEST(!f.failing());
+    BOOST_REQUIRE(f.flush());
+    BOOST_TEST(slurp(f.currentPath()) == "def");
 }

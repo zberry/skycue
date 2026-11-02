@@ -13,6 +13,7 @@
 #include "readsb_json_source.hpp"
 #include "recorder.hpp"
 #include "replay_source.hpp"
+#include "retention.hpp"
 #include "runtime_config.hpp"
 #include "web_server.hpp"
 
@@ -174,6 +175,10 @@ int main(int argc, char** argv)
         rc.dir = config.record_dir;
         rc.jsonl = config.record_formats.count("jsonl") > 0;
         rc.csv = config.record_formats.count("csv") > 0;
+        rc.max_bytes = gigabytesToBytes(config.record_max_gb);  // RECORD_DIR and RECORD_DIR/raw together
+        if (rc.max_bytes > 0)
+            LOG_INFO("recordings under " << config.record_dir << " are kept within " << config.record_max_gb
+                                         << " GB (RECORD_MAX_GB), oldest deleted first");
         try {
             received = std::make_unique<Recorder>(rc, "received");
             sent = std::make_unique<Recorder>(rc, "sent");

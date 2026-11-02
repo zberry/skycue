@@ -30,6 +30,7 @@
 
 using namespace std::chrono_literals;
 using skycued::parseReadsbLine;
+using skycued::pathExists;
 using skycued::Recorder;
 using skycued::RecorderConfig;
 using skycued::ReplaySource;
@@ -375,6 +376,55 @@ BOOST_AUTO_TEST_CASE(rotation_by_size)
     for (const auto& path : jsonl)
         suffixed = suffixed || path.find("-1.jsonl") != std::string::npos;
     BOOST_TEST(suffixed);
+}
+
+BOOST_AUTO_TEST_CASE(retention_cap_on_start_and_rotation)
+{
+    TempDir tmp;
+    ::mkdir((tmp.path + "/raw").c_str(), 0755);
+    auto put = [&](const std::string& rel, std::size_t n) { std::ofstream(tmp.path + "/" + rel) << std::string(n, 'x'); };
+    put("received-20200101-000000.jsonl", 4000);
+    put("raw/beast-20200101-000000.bin", 4000);
+    put("raw/beast-20200102-000000.bin", 100);  // the newest beast file: kept (rawrec may be writing it)
+    put("notes.txt", 50000);                     // not ours: never counted or deleted
+
+    // max_bytes 0: nothing is deleted.
+    std::string sent_jsonl;
+    {
+        RecorderConfig off{tmp.path, true, true, 1ull << 30, 3600s};
+        Recorder rec(off, "sent");
+        sent_jsonl = rec.currentPath("jsonl");
+    }
+    BOOST_TEST(pathExists(tmp.path + "/received-20200101-000000.jsonl"));
+
+    // A cap: on start the oldest files go first, then on every rotation.
+    RecorderConfig cfg{tmp.path, true, true, 2048, 3600s};
+    cfg.max_bytes = 4000;
+    Recorder rec(cfg, "received");
+    BOOST_TEST(!pathExists(tmp.path + "/received-20200101-000000.jsonl"));
+    BOOST_TEST(!pathExists(tmp.path + "/raw/beast-20200101-000000.bin"));
+    BOOST_TEST(pathExists(tmp.path + "/raw/beast-20200102-000000.bin"));
+    BOOST_TEST(pathExists(tmp.path + "/notes.txt"));
+    for (const auto& o : fixtureObservations(60)) {
+        rec.writeObservation(o);
+        // Retention never removes the files being written.
+        BOOST_REQUIRE(pathExists(rec.currentPath("jsonl")));
+        BOOST_REQUIRE(pathExists(rec.currentPath("csv")));
+    }
+    rec.flush();
+    uint64_t total = 0;
+    for (const auto& suffix : {".jsonl", ".csv"})
+        for (const auto& p : filesWithSuffix(tmp.path, suffix)) {
+            struct stat st {};
+            ::stat(p.c_str(), &st);
+            total += static_cast<uint64_t>(st.st_size);
+        }
+    // Within the cap after the last rotation, give or take the current pair's growth since.
+    BOOST_TEST(total <= 4000u + 2 * 2048u + 1024u);
+    BOOST_TEST(filesWithSuffix(tmp.path, ".jsonl").size() >= 1u);
+    BOOST_TEST(pathExists(tmp.path + "/notes.txt"));
+    // The newest sent pair (another Recorder's, maybe still open) is kept.
+    BOOST_TEST(pathExists(sent_jsonl));
 }
 
 BOOST_AUTO_TEST_CASE(rotation_by_age)

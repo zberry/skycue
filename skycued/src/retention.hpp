@@ -1,0 +1,42 @@
+#pragma once
+
+// Retention: keeps the recordings under RECORD_DIR within a byte budget
+// (RECORD_MAX_GB) by deleting the oldest files. Run by the Recorder and by
+// skycue-rawrec each time one of them starts a new file.
+//
+// Only our own file names are considered, in `dir` and `dir/raw`:
+//   (received|sent|fisb|beast|uat)-YYYYMMDD-HHMMSS[-N].(jsonl|csv|bin|txt)
+// (regular files only; anything else is neither counted nor touched). They are
+// ordered by the time stamp in the name, then the -N suffix (none first), and
+// deleted oldest first until the total is at most max_bytes. Never deleted:
+//   - a file in `open_files` (compared by device and inode, so any spelling
+//     of the path works);
+//   - the newest file of each stream and extension in each of the two
+//     directories, since another process (skycued and skycue-rawrec share the
+//     budget) may still be writing it.
+// So the total can stay above max_bytes when only protected files are left.
+// Each deletion is logged at INFO; a file that cannot be deleted is logged at
+// WARN and skipped.
+
+#include <cstdint>
+#include <set>
+#include <string>
+#include <vector>
+
+namespace skycued {
+
+struct RetentionResult {
+    uint64_t bytes_before = 0, bytes_after = 0;  // of the matching files
+    std::vector<std::string> deleted;            // paths, in deletion order
+};
+
+// max_bytes == 0: no limit; nothing is scanned or deleted (an empty result).
+RetentionResult enforce(const std::string& dir, uint64_t max_bytes, const std::set<std::string>& open_files);
+
+// The file-name rule above, for a bare name (no directory).
+bool isRecordingFileName(const std::string& name);
+
+// RECORD_MAX_GB in bytes (1 GB = 10^9 bytes); 0 stays 0.
+uint64_t gigabytesToBytes(double gb);
+
+}  // namespace skycued

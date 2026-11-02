@@ -14,6 +14,7 @@
 #include "json_lite.hpp"
 #include "observation.hpp"
 #include "recording_reader.hpp"
+#include "rotating_file.hpp"
 
 #include <skycue/types.hpp>
 
@@ -52,6 +53,11 @@ struct RecorderConfig {
     // Reopen backoff after a failure; see Recorder. Settable for tests.
     std::chrono::milliseconds reopen_initial{5000};
     std::chrono::milliseconds reopen_max{300000};
+    // RECORD_MAX_GB in bytes; 0: no limit. Each time a new file pair is
+    // started, retention::enforce(retention_dir, max_bytes, this pair) runs
+    // (see retention.hpp). retention_dir "" means `dir`.
+    uint64_t max_bytes = 0;
+    std::string retention_dir = std::string();
 };
 
 class Recorder {
@@ -95,12 +101,13 @@ public:
     // (records still in the write buffer when a failure hits are not counted).
     uint64_t droppedRecords() const { return dropped_; }
     // The current reopen delay during a failure streak; 0 when not failing.
-    std::chrono::milliseconds reopenDelay() const { return failing_ ? reopen_delay_ : std::chrono::milliseconds(0); }
+    std::chrono::milliseconds reopenDelay() const { return backoff_.delay(); }
     // Test seam: while set, every write and flush fails as on a full disk.
     void setFailWritesForTest(bool fail) { fail_writes_for_test_ = fail; }
 
 private:
     void fail(const std::string& what);  // starts or extends a failure streak; closes the files
+    void enforceRetention();  // after a new pair was started
     bool streamsGood() const;
     void flushStreams();
     void write(const std::vector<recording::Field>& record);
@@ -122,11 +129,9 @@ private:
     std::string last_base_;  // name stem without suffix, and the suffix used last
     int last_suffix_ = 0;
 
-    // Failure streak: one ERROR when it starts, one INFO when a flush succeeds again.
-    bool failing_ = false;
-    std::chrono::steady_clock::time_point next_reopen_{};
-    std::chrono::milliseconds reopen_delay_{0};
-    bool streak_has_stem_ = false;  // later reopens in this streak reuse stem_
+    // Failure streak (ReopenBackoff, shared with RotatingFile): one ERROR when
+    // it starts, one INFO when a flush succeeds again.
+    ReopenBackoff backoff_;
     uint64_t dropped_ = 0, streak_start_dropped_ = 0;
     bool fail_writes_for_test_ = false;
 };

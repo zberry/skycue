@@ -1,6 +1,7 @@
 #include "recorder.hpp"
 
 #include "log.hpp"
+#include "retention.hpp"
 #include "rotating_file.hpp"
 #include "time_util.hpp"
 
@@ -12,6 +13,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -643,7 +645,8 @@ Record withHead(std::string time, const char* kind_key, std::string kind, Record
 }  // namespace
 
 Recorder::Recorder(RecorderConfig config, std::string stream_name)
-    : config_(std::move(config)), stream_(std::move(stream_name))
+    : config_(std::move(config)), stream_(std::move(stream_name)),
+      backoff_(config_.reopen_initial, config_.reopen_max)
 {
     if (stream_ != "received" && stream_ != "sent")
         throw std::invalid_argument("recorder: stream must be \"received\" or \"sent\", not \"" + stream_ + "\"");
@@ -651,6 +654,7 @@ Recorder::Recorder(RecorderConfig config, std::string stream_name)
     if ((config_.jsonl || config_.csv) && !openFiles())
         throw std::runtime_error("recorder: cannot create " + stream_ + " files under \"" + config_.dir +
                                  "\": " + std::strerror(errno));
+    enforceRetention();
 }
 
 Recorder::~Recorder() { closeFiles(); }
@@ -749,17 +753,25 @@ bool Recorder::rotationDue() const
 void Recorder::fail(const std::string& what)
 {
     closeFiles();
-    const auto initial = std::max(config_.reopen_initial, std::chrono::milliseconds(1));
-    const auto max = std::max(config_.reopen_max, initial);
-    reopen_delay_ = failing_ ? std::min(reopen_delay_ * 2, max) : initial;
-    next_reopen_ = std::chrono::steady_clock::now() + reopen_delay_;
-    if (failing_)
+    if (!backoff_.fail())
         return;
-    failing_ = true;
     streak_start_dropped_ = dropped_;
     LOG_ERROR("recorder: " << what << "; dropping " << stream_ << " records, retrying in "
-                           << std::chrono::duration<double>(initial).count() << " s, backing off to "
-                           << std::chrono::duration<double>(max).count() << " s");
+                           << std::chrono::duration<double>(backoff_.initial()).count() << " s, backing off to "
+                           << std::chrono::duration<double>(backoff_.max()).count() << " s");
+}
+
+void Recorder::enforceRetention()
+{
+    if (config_.max_bytes == 0)
+        return;
+    std::set<std::string> open_files;
+    for (const char* ext : {"jsonl", "csv"}) {
+        const std::string p = currentPath(ext);
+        if (!p.empty())
+            open_files.insert(p);
+    }
+    enforce(config_.retention_dir.empty() ? config_.dir : config_.retention_dir, config_.max_bytes, open_files);
 }
 
 bool Recorder::streamsGood() const
@@ -771,7 +783,7 @@ void Recorder::write(const Record& record)
 {
     if (!config_.jsonl && !config_.csv)
         return;
-    if (failing_ && std::chrono::steady_clock::now() < next_reopen_) {
+    if (backoff_.waiting()) {
         ++dropped_;
         return;
     }
@@ -779,16 +791,17 @@ void Recorder::write(const Record& record)
         closeFiles();
         // Within a failure streak, reopen the streak's pair rather than
         // starting yet another one.
-        const bool reuse = failing_ && streak_has_stem_;
+        const bool reuse = backoff_.reuseName();
         const bool opened = openFiles(reuse);
         const int err = errno;
-        if (failing_ || !opened)
-            streak_has_stem_ = true;  // this pair is the one to retry
+        backoff_.opened(opened);
         if (!opened) {
             fail("cannot create files under \"" + config_.dir + "\": " + std::strerror(err));
             ++dropped_;
             return;
         }
+        if (!reuse)
+            enforceRetention();
     }
     if (fail_writes_for_test_) {
         fail("writing " + stem_ + " failed (test)");
@@ -808,17 +821,15 @@ void Recorder::write(const Record& record)
     }
     // While recovering, flush every record: the streak ends only once a
     // flush has really reached the files.
-    if (++unflushed_ >= kFlushEveryRecords || failing_)
+    if (++unflushed_ >= kFlushEveryRecords || backoff_.failing())
         flushStreams();
     if (!streamsGood()) {
         fail("writing " + stem_ + " failed: " + std::strerror(errno));
         ++dropped_;
         return;
     }
-    if (failing_ && unflushed_ == 0) {
-        failing_ = false;
-        streak_has_stem_ = false;
-        reopen_delay_ = std::chrono::milliseconds(0);
+    if (backoff_.failing() && unflushed_ == 0) {
+        backoff_.succeed();
         LOG_INFO("recorder: writing " << stream_ << " records again (" << stem_ << "); dropped "
                                       << dropped_ - streak_start_dropped_ << " meanwhile");
     }

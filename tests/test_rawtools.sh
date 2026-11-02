@@ -230,6 +230,51 @@ for f in "$tmp/rot"/beast-*.bin; do
 done
 echo "ok (e) $n rotated files"
 
+# ---- (f) write failures: backoff, at most one extra file per stream ----------
+# Every write fails (test seam) while ~2 s of Beast data arrives; with a 20 ms
+# backoff doubling to 80 ms that is dozens of reopens, yet the streak reuses
+# one name: the first file plus one per stream, and one ERROR per stream.
+rm -f "$tmp/bport" "$tmp/uport"
+python3 "$tmp/beast_server.py" "$tmp/bport" "$tmp/sent.bin" 40000 1 & bs=$!
+python3 "$tmp/uat_server.py" "$tmp/uport" & us=$!
+wait_file "$tmp/bport" 50 && wait_file "$tmp/uport" 50 || fail "(f) servers did not start"
+"$rawrec" --beast "127.0.0.1:$(cat "$tmp/bport")" --uat "127.0.0.1:$(cat "$tmp/uport")" --dir "$tmp/fail" \
+  --fail-writes-for-test --reopen-ms-for-test 20 2>"$tmp/fail.err" & rec=$!
+bg_pids+=("$rec")
+t0=$(now)
+wait "$bs" || fail "(f) beast server failed"
+wait "$us"
+sleep 0.3
+kill -TERM "$rec"
+wait "$rec"; rc=$?
+[ $rc -eq 0 ] || { cat "$tmp/fail.err"; fail "(f) rawrec exit $rc after SIGTERM"; }
+span=$(awk -v a="$t0" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }')
+awk -v s="$span" 'BEGIN { exit !(s >= 1.0) }' || fail "(f) the Beast data took only ${span}s; too short to retry often"
+nb=$(ls "$tmp/fail"/beast-*.bin 2>/dev/null | wc -l)
+nu=$(ls "$tmp/fail"/uat-*.txt 2>/dev/null | wc -l)
+[ "$nb" -le 2 ] && [ "$nu" -le 2 ] || { ls -l "$tmp/fail"; fail "(f) $nb beast and $nu uat files after many failed writes, want <= 2 each"; }
+[ "$nb" = 2 ] || { ls -l "$tmp/fail"; cat "$tmp/fail.err"; fail "(f) $nb beast files: no reopen happened"; }
+[ "$(grep -c 'ERROR beast: .*dropping data, retrying in 0.02 s, backing off to 0.08 s' "$tmp/fail.err")" = 1 ] ||
+  { cat "$tmp/fail.err"; fail "(f) want exactly one ERROR for the beast streak"; }
+[ "$(grep -c 'ERROR uat: ' "$tmp/fail.err")" -le 1 ] || { cat "$tmp/fail.err"; fail "(f) more than one uat ERROR"; }
+grep -q 'writing again' "$tmp/fail.err" && fail "(f) recovered although every write fails"
+echo "ok (f) $nb beast / $nu uat files over ${span}s of failing writes"
+
+# ---- (g) --max-gb: retention over --retention-dir and its raw/ ----------------
+mkdir -p "$tmp/ret/raw"
+head -c 30000 /dev/zero > "$tmp/ret/raw/beast-20200101-000000.bin"
+head -c 30000 /dev/zero > "$tmp/ret/received-20200101-000000.jsonl"
+head -c 100 /dev/zero > "$tmp/ret/received-20200102-000000.jsonl"  # newest of its stream: kept
+head -c 50000 /dev/zero > "$tmp/ret/notes.txt"                     # not a recording: kept, not counted
+rawrec_run "$tmp/ret/raw" 1000 1 --rotate-mb 0.005 --max-gb 0.00003 --retention-dir "$tmp/ret"
+[ -e "$tmp/ret/raw/beast-20200101-000000.bin" ] && { cat "$tmp/rec.err"; fail "(g) old beast file not deleted"; }
+[ -e "$tmp/ret/received-20200101-000000.jsonl" ] && { cat "$tmp/rec.err"; fail "(g) old received file not deleted"; }
+[ -e "$tmp/ret/received-20200102-000000.jsonl" ] || fail "(g) the newest received file was deleted"
+[ -e "$tmp/ret/notes.txt" ] || fail "(g) notes.txt was deleted"
+cat $(in_order "$tmp/ret/raw"/beast-*.bin) | cmp -s - "$tmp/sent.bin" || fail "(g) the capture lost data to retention"
+[ "$(grep -c 'INFO  retention: deleted' "$tmp/rec.err")" = 2 ] || { cat "$tmp/rec.err"; fail "(g) want 2 retention INFO lines"; }
+echo "ok (g) retention deleted the 2 oldest files"
+
 # ---- full stack: the capture through a real readsb -----------------------------
 if [ -z "$readsb" ] || [ ! -x "$readsb" ]; then
   echo "SKIP full-stack check: readsb not built (${readsb:-no path given})"

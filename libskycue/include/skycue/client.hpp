@@ -47,7 +47,7 @@ struct Config {
 // carries on as if the callback had returned. In poll mode the first such
 // exception is kept and rethrown from poll() once that call's ready handlers
 // have run (later ones are discarded until it has been rethrown); in thread
-// mode exceptions from callbacks are discarded.
+// mode exceptions from callbacks are discarded, each reported to onError.
 //
 // Track table: an update stores the track and fires onTrackUpdate; a
 // TrackDrop for a known track erases it and fires onTrackDropped. A track
@@ -95,6 +95,17 @@ struct Config {
 // and an update's frame before onTrackUpdate. It reports what arrived, not
 // what the client accepted: payloads may still fail their decoder, and
 // `type` may be unknown. Same thread and exception rules as the others.
+//
+// Errors: onError (optional, default none) gets one human-readable line for
+// each problem the client handles by itself, on the same thread as the other
+// callbacks: a failed bind (tcp_listen, udp), resolve or connect (tcp), accept
+// or receive, each with the retry delay ("...; retrying in 2000 ms"), once
+// per failed attempt; and, in thread mode, a callback exception that was
+// swallowed ("a callback threw: <what()>..."). Nothing needs to be done about
+// any of them: the client keeps retrying and carrying on. A connection that
+// goes down is not an error (onConnectionChange reports it). An onError that
+// throws is not reported again (thread mode: discarded; poll mode: kept for
+// poll() like any other callback's). The texts are for logs; do not parse them.
 class Client {
 public:
     explicit Client(Config config);
@@ -106,6 +117,7 @@ public:
     void onTrackDropped(std::function<void(TrackId, DropReason)> cb);
     void onConnectionChange(std::function<void(bool connected)> cb);
     void onFrame(std::function<void(const Frame&)> cb);
+    void onError(std::function<void(const std::string& message)> cb);
 
     // start() is effective once; later calls, and calls after stop(), do nothing.
     void start();

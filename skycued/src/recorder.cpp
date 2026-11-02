@@ -25,6 +25,8 @@ using skycue::AddressType;
 using skycue::DropReason;
 using skycue::Source;
 
+}  // namespace
+
 // ---- enum names (the text written to both formats) ----
 
 const char* addressTypeName(AddressType t)
@@ -38,6 +40,8 @@ const char* addressTypeName(AddressType t)
     return "other";
 }
 
+namespace {
+
 std::optional<AddressType> parseAddressType(const std::string& s)
 {
     for (auto t : {AddressType::icao, AddressType::non_icao, AddressType::tisb_trackfile, AddressType::other})
@@ -45,6 +49,8 @@ std::optional<AddressType> parseAddressType(const std::string& s)
             return t;
     return std::nullopt;
 }
+
+}  // namespace
 
 const char* sourceName(Source s)
 {
@@ -59,6 +65,8 @@ const char* sourceName(Source s)
     return "other";
 }
 
+namespace {
+
 std::optional<Source> parseSource(const std::string& s)
 {
     for (auto v : {Source::adsb_1090, Source::uat_978, Source::tisb, Source::adsr, Source::mlat, Source::other})
@@ -66,6 +74,8 @@ std::optional<Source> parseSource(const std::string& s)
             return v;
     return std::nullopt;
 }
+
+}  // namespace
 
 const char* dropReasonName(DropReason r)
 {
@@ -77,6 +87,17 @@ const char* dropReasonName(DropReason r)
     case DropReason::stale: return "stale";
     }
     return "timeout";
+}
+
+namespace {
+
+std::optional<DropReason> parseDropReason(const std::string& s)
+{
+    for (auto r : {DropReason::timeout, DropReason::filtered, DropReason::source_lost, DropReason::shutdown,
+                   DropReason::stale})
+        if (s == dropReasonName(r))
+            return r;
+    return std::nullopt;
 }
 
 // ---- Field builders ----
@@ -477,6 +498,81 @@ std::optional<TrackObservation> observationFromRecord(const JsonObject& record)
     if (obs.lat.has_value() != obs.lon.has_value())  // both or neither
         return std::nullopt;
     return obs;
+}
+
+namespace {
+
+bool sentKeyListed(const char* key)
+{
+    for (const char* k : kSentKeys)
+        if (std::strcmp(k, key) == 0)
+            return true;
+    return false;
+}
+
+// A JSON boolean as JsonObject sees it: absent -> true (keeps `out`).
+bool getBool(const JsonObject& j, const char* k, bool& out)
+{
+    if (!j.has(k))
+        return true;
+    auto v = j.getString(k);
+    if (v && *v == "true")
+        out = true;
+    else if (v && *v == "false")
+        out = false;
+    else
+        return false;
+    return true;
+}
+
+}  // namespace
+
+bool sentRecordFromRecord(const JsonObject& record, RecordingRecord& out)
+{
+    auto time_text = record.getString("time");
+    auto time = time_text ? parseIso8601Ms(*time_text) : std::nullopt;
+    const auto event = record.getString("event");
+    if (!time || !event)
+        return false;
+    out = RecordingRecord{};
+    out.time = *time;
+    out.obs.received_time = *time;
+    if (*event == "filter_change") {
+        out.kind = RecordKind::filter_change;
+        if (record.has("note")) {
+            auto note = record.getString("note");
+            if (!note)
+                return false;
+            out.note = *note;
+        }
+        return true;
+    }
+    if (*event == "drop") {
+        out.kind = RecordKind::drop;
+        auto reason_text = record.getString(sentKey("drop_reason"));
+        if (!reason_text || !parseDropReason(*reason_text))
+            return false;
+        out.drop_reason = *reason_text;
+        return getHex(record, "hex", out.obs) && getAddrType(record, "addr_type", out.obs);
+    }
+    if (*event != "update" && *event != "keyframe")
+        return false;
+    out.kind = *event == "update" ? RecordKind::update : RecordKind::keyframe;
+    // The sent keys shared with "obs" records read with the same getters.
+    for (const auto& k : kObsKeys)
+        if (sentKeyListed(k.key) && !k.get(record, k.key, out.obs))
+            return false;
+    if (out.obs.lat.has_value() != out.obs.lon.has_value())
+        return false;
+    if (record.has(sentKey("vrate_fpm"))) {
+        auto v = record.getDouble("vrate_fpm");
+        if (!v || std::fabs(*v) > static_cast<double>(std::numeric_limits<float>::max()))
+            return false;
+        out.vrate_fpm = static_cast<float>(*v);
+    }
+    bool alt_is_geom = false;
+    return getBool(record, sentKey("keyframe"), out.keyframe_flag) &&
+           getBool(record, sentKey("alt_is_geom"), alt_is_geom);
 }
 
 namespace {

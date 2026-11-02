@@ -241,6 +241,25 @@ JsonWriter& JsonWriter::add(const char* k, bool value)
     return *this;
 }
 
+JsonWriter& JsonWriter::addRaw(const char* k, const std::string& json)
+{
+    key(k);
+    body_ += json;
+    return *this;
+}
+
+std::string jsonArray(const std::vector<std::string>& values)
+{
+    std::string out = "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i)
+            out += ',';
+        out += values[i];
+    }
+    out += ']';
+    return out;
+}
+
 std::string JsonWriter::str() const { return "{" + body_ + "}"; }
 
 }  // namespace skycued

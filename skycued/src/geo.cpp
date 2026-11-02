@@ -33,6 +33,21 @@ double greatCircleNm(double lat1, double lon1, double lat2, double lon2)
     return centralAngleRad(lat1, lon1, lat2, lon2) * kEarthRadiusM / kMetresPerNm;
 }
 
+double bearingDeg(double lat1, double lon1, double lat2, double lon2)
+{
+    const double p1 = lat1 * kDegToRad;
+    const double p2 = lat2 * kDegToRad;
+    const double dl = (lon2 - lon1) * kDegToRad;
+    const double y = std::sin(dl) * std::cos(p2);
+    const double x = std::cos(p1) * std::sin(p2) - std::sin(p1) * std::cos(p2) * std::cos(dl);
+    if (x == 0.0 && y == 0.0)
+        return 0.0;
+    double b = std::atan2(y, x) / kDegToRad;
+    if (b < 0.0)
+        b += 360.0;
+    return b >= 360.0 ? 0.0 : b;
+}
+
 double elevationDeg(double rx_lat, double rx_lon, double rx_alt_m, double tgt_lat, double tgt_lon, double tgt_alt_m)
 {
     const double d = centralAngleRad(rx_lat, rx_lon, tgt_lat, tgt_lon) * kEarthRadiusM;

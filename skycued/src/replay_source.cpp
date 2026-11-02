@@ -1,9 +1,6 @@
 #include "replay_source.hpp"
 
-#include "json_lite.hpp"
 #include "log.hpp"
-#include "readsb_json_source.hpp"
-#include "recorder.hpp"
 
 #include <boost/asio/post.hpp>
 
@@ -15,11 +12,6 @@
 
 namespace skycued {
 namespace {
-
-bool blank(const std::string& line)
-{
-    return line.find_first_not_of(" \t\r") == std::string::npos;
-}
 
 // Far enough out to be "never" while keeping steady_clock arithmetic safe.
 constexpr double kMaxDelaySeconds = 1e9;
@@ -39,25 +31,13 @@ ReplaySource::ReplaySource(boost::asio::io_context& io, std::string path, double
     std::size_t line_no = 0, first_bad = 0;
     while (std::getline(in, line)) {
         ++line_no;
-        if (blank(line))
+        RecordingRecord record;
+        const LineKind kind = parseRecordingLine(line, record);
+        if (kind == LineKind::ignore || (kind == LineKind::received && record.kind == RecordKind::uat_uplink))
             continue;
-        bool ok = false;
-        if (auto record = JsonObject::parse(line)) {
-            const std::string type = record->getString("type").value_or("");
-            if (type == "uat_uplink")
-                continue;
-            if (type == "obs") {
-                if (auto obs = recording::observationFromRecord(*record)) {
-                    records_.push_back(Record{obs->received_time, std::move(*obs)});
-                    ok = true;
-                }
-            } else if (!record->has("time") && record->getDouble("now")) {
-                if (auto obs = parseReadsbLine(line)) {  // a readsb JSON-port capture
-                    records_.push_back(Record{obs->received_time, std::move(*obs)});
-                    ok = true;
-                }
-            }
-        }
+        const bool ok = kind == LineKind::received || kind == LineKind::readsb_raw;
+        if (ok)
+            records_.push_back(std::move(record));
         if (!ok && ++skipped_ == 1)
             first_bad = line_no;
     }
@@ -77,7 +57,7 @@ ReplaySource::ReplaySource(boost::asio::io_context& io, std::string path, double
         }
         const auto min_gap = std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::milliseconds(1));
         // max - min, not back - front: a hand-edited file need not be in order.
-        const auto by_time = [](const Record& a, const Record& b) { return a.time < b.time; };
+        const auto by_time = [](const RecordingRecord& a, const RecordingRecord& b) { return a.time < b.time; };
         const auto range = std::minmax_element(records_.begin(), records_.end(), by_time);
         const auto span = range.second->time - range.first->time;
         loop_shift_ = span + std::max(median, min_gap);
@@ -150,7 +130,7 @@ void ReplaySource::scheduleNext()
 
 void ReplaySource::emitNext()
 {
-    const Record& record = records_[next_++];
+    const RecordingRecord& record = records_[next_++];
     std::weak_ptr<char> alive = alive_;
     if (on_observation_) {
         if (pass_ == 0) {

@@ -129,3 +129,15 @@ add_test(NAME dump
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_dump.sh
     $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-dump> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(dump PROPERTIES TIMEOUT 60)
+
+add_executable(test_stats test_stats.cpp)
+target_link_libraries(test_stats PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_stats PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_stats)
+add_test(NAME stats COMMAND test_stats)
+
+# skycue-stats on the readsb JSON fixture and on recordings of a skycued replaying it.
+add_test(NAME stats_cli
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_stats_cli.sh
+    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-stats> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(stats_cli PROPERTIES TIMEOUT 120)

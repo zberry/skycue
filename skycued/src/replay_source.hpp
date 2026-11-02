@@ -17,6 +17,7 @@
 // thread. Destroying the source stops it (pending handlers do nothing).
 
 #include "observation.hpp"
+#include "recording_reader.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -53,11 +54,6 @@ public:
     std::size_t skippedLines() const { return skipped_; }        // bad lines (not uplinks or blanks)
 
 private:
-    struct Record {
-        std::chrono::system_clock::time_point time;  // the record's "time"
-        TrackObservation obs;
-    };
-
     void scheduleNext();
     void emitNext();
 
@@ -66,7 +62,7 @@ private:
     std::string path_;
     double speed_;
     bool loop_;
-    std::vector<Record> records_;
+    std::vector<RecordingRecord> records_;  // obs records only
     std::size_t skipped_ = 0;
     std::chrono::system_clock::duration loop_shift_{};  // added per completed pass
 

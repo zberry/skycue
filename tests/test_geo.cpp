@@ -68,3 +68,22 @@ BOOST_AUTO_TEST_CASE(ft_to_m)
 {
     BOOST_TEST(geo::ftToM(1000.0) == 304.8, boost::test_tools::tolerance(1e-9));
 }
+
+BOOST_AUTO_TEST_CASE(bearing_cardinal_directions)
+{
+    namespace tt = boost::test_tools;
+    // Short distances (0.01 deg), so the parallel and the great circle agree to well under 0.1 deg.
+    BOOST_TEST(geo::bearingDeg(38.9, -77.0, 38.91, -77.0) == 0.0, tt::tolerance(1e-9));
+    BOOST_TEST(geo::bearingDeg(38.9, -77.0, 38.9, -76.99) == 90.0, tt::tolerance(0.1 / 90.0));
+    BOOST_TEST(geo::bearingDeg(38.9, -77.0, 38.89, -77.0) == 180.0, tt::tolerance(1e-9));
+    BOOST_TEST(geo::bearingDeg(38.9, -77.0, 38.9, -77.01) == 270.0, tt::tolerance(0.1 / 270.0));
+}
+
+BOOST_AUTO_TEST_CASE(bearing_is_in_0_360)
+{
+    // Just west of north: close to 360, never negative, never 360 itself.
+    const double b = geo::bearingDeg(38.9, -77.0, 39.9, -77.0001);
+    BOOST_TEST(b > 359.9);
+    BOOST_TEST(b < 360.0);
+    BOOST_TEST(geo::bearingDeg(38.9, -77.0, 38.9, -77.0) == 0.0);  // same point
+}

@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace skycued {
 
@@ -42,7 +43,7 @@ private:
     boost::property_tree::ptree tree_;
 };
 
-// Builds one flat JSON object. Keys and strings are escaped; doubles are
+// Builds one JSON object (flat, or nested with addRaw). Keys and strings are escaped; doubles are
 // written like printf %.7g (non-finite ones as null) and integers like %lld,
 // both independent of the global locale.
 class JsonWriter {
@@ -56,12 +57,18 @@ public:
     // formatRoundTrip); for recordings, where %.7g would lose precision.
     JsonWriter& addExact(const char* key, double value);
     JsonWriter& addExact(const char* key, float value);
+    // `json` is an already-serialised JSON value (another JsonWriter's str(),
+    // a jsonArray(), "null", ...), inserted verbatim: no checks, no escaping.
+    JsonWriter& addRaw(const char* key, const std::string& json);
     std::string str() const;  // "{...}"
 
 private:
     void key(const char* k);
     std::string body_;
 };
+
+// "[a,b,...]" from already-serialised JSON values, inserted verbatim.
+std::string jsonArray(const std::vector<std::string>& values);
 
 // Appends s to out as a JSON string literal, quotes included.
 void appendJsonString(std::string& out, const std::string& s);

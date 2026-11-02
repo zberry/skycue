@@ -13,6 +13,10 @@ constexpr double ftToM(double ft) { return ft * 0.3048; }
 // nautical miles of 1852 m, on a sphere of radius kEarthRadiusM.
 double greatCircleNm(double lat1, double lon1, double lat2, double lon2);
 
+// Initial great-circle bearing from point 1 to point 2, degrees clockwise
+// from true north, in [0, 360). 0 when the points coincide.
+double bearingDeg(double lat1, double lon1, double lat2, double lon2);
+
 // Elevation angle in degrees from the receiver antenna (lat/lon in degrees,
 // alt_m = site altitude plus antenna height, metres) to a target (lat/lon in
 // degrees, alt_m in metres). Positive above the horizontal, negative below.

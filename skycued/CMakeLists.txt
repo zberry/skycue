@@ -14,9 +14,11 @@ add_library(skycued_core STATIC
   src/raw_formats.cpp
   src/readsb_json_source.cpp
   src/recorder.cpp
+  src/recording_reader.cpp
   src/registration.cpp
   src/replay_source.cpp
   src/rotating_file.cpp
+  src/stats_report.cpp
   src/time_util.cpp
   src/track_table.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)

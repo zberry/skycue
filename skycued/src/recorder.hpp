@@ -13,6 +13,7 @@
 
 #include "json_lite.hpp"
 #include "observation.hpp"
+#include "recording_reader.hpp"
 
 #include <skycue/types.hpp>
 
@@ -144,6 +145,17 @@ std::string sentCsvHeader();
 // "obs" ("raw" becomes raw_line when present). nullopt when "time" or "hex"
 // is missing or any present field has the wrong form or range.
 std::optional<TrackObservation> observationFromRecord(const JsonObject& record);
+
+// Fills `out` (reset first) from a sent-stream record: "time" and a known
+// "event" are required; update/keyframe need "hex", drop needs "hex" and a
+// known "drop_reason". false when any of that is missing or a present field
+// has the wrong form or range. `out.file` is 0.
+bool sentRecordFromRecord(const JsonObject& record, RecordingRecord& out);
+
+// The enum texts both formats use ("adsb_1090", "non_icao", "source_lost", ...).
+const char* addressTypeName(skycue::AddressType type);
+const char* sourceName(skycue::Source source);
+const char* dropReasonName(skycue::DropReason reason);
 
 }  // namespace recording
 

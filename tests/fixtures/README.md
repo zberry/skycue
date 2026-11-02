@@ -6,6 +6,8 @@
   `skycue-start.sh replay-raw`. They are third-party data, committed unchanged
   under their own licences; this repository is private and does not
   redistribute them. Do not ship them in release bundles.
+- `fisb/`: FIS-B uplink test data (fisb-decode's `tg30.978`), used by
+  `test_fisb_frame`; origin, licence and contents in `fisb/README.md`.
 
 ## raw/modes-120s.csv.gz
 

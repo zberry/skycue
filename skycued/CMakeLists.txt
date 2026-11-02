@@ -6,6 +6,9 @@ add_library(skycued_core STATIC
   src/config.cpp
   src/dump978_raw_source.cpp
   src/engine.cpp
+  src/fisb/apdu.cpp
+  src/fisb/dlac.cpp
+  src/fisb/uplink_frame.cpp
   src/filters.cpp
   src/forwarder.cpp
   src/geo.cpp

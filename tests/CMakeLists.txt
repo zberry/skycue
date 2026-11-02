@@ -184,3 +184,13 @@ if(SKYCUE_UI_TESTS)
       $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE})
   set_tests_properties(ui_playwright PROPERTIES TIMEOUT 300)
 endif()
+
+# FIS-B uplink frame, APDU header and DLAC parsers on hand-built vectors and
+# the two uplink fixtures (zlib only for reading the .gz sample).
+find_package(ZLIB REQUIRED)
+add_executable(test_fisb_frame test_fisb_frame.cpp)
+target_link_libraries(test_fisb_frame PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
+target_compile_definitions(test_fisb_frame PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_fisb_frame)
+add_test(NAME fisb_frame COMMAND test_fisb_frame)

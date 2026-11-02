@@ -1,0 +1,11 @@
+{
+  "name": "skycue-ui-tests",
+  "private": true,
+  "description": "Headless Chromium tests of the skycued web UI (dev machines only)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1"
+  }
+}

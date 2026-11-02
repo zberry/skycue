@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skycue</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="stats" aria-label="Statistics">
+  <span class="brand">skycue</span>
+  <span class="stat">tracks <b id="stat-tracks-total">–</b> / fwd <b id="stat-tracks-forwarded">–</b></span>
+  <span class="stat">obs/s <b id="stat-obs-rate">–</b></span>
+  <span class="stat">readsb <b id="stat-readsb" class="dot">–</b></span>
+  <span class="stat">dump978 <b id="stat-dump978" class="dot">–</b></span>
+  <span class="stat">UAT dl/ul per min <b id="stat-uat">–</b></span>
+  <span class="stat">TCP clients <b id="stat-tcp">–</b></span>
+  <span class="stat">UDP targets <b id="stat-udp">–</b></span>
+  <span class="stat">recorder drops <b id="stat-rec-drops">–</b></span>
+  <span class="stat">web clients <b id="stat-web">–</b></span>
+  <button id="table-toggle" type="button" aria-pressed="false">Table</button>
+</header>
+<div id="conn-banner" role="alert" hidden>Disconnected from skycued, reconnecting…</div>
+<main id="layout">
+  <aside id="filters" aria-label="Filters and lists">
+    <section>
+      <h2>Filters</h2>
+      <label for="max-range">Max range (nm)</label>
+      <div class="row">
+        <input id="max-range" type="number" min="0.1" step="any" inputmode="decimal">
+        <button type="button" class="reset" data-reset="max_range_nm" title="Back to the skycue.conf value">↺</button>
+      </div>
+      <label for="min-elevation">Min elevation (°)</label>
+      <div class="row">
+        <input id="min-elevation" type="number" min="-90" max="90" step="any" inputmode="decimal">
+        <button type="button" class="reset" data-reset="min_elevation_deg" title="Back to the skycue.conf value">↺</button>
+      </div>
+      <label for="ring-alt">Elevation-mask ring for aircraft at</label>
+      <select id="ring-alt"></select>
+      <p id="filter-msg" class="msg" role="status"></p>
+    </section>
+    <section>
+      <h2>Allow list</h2>
+      <ul id="list-allow" class="list"></ul>
+      <form class="row list-add" data-list="allow">
+        <input type="text" placeholder="hex or registration" aria-label="Add to allow list" maxlength="10">
+        <button type="submit">Add</button>
+      </form>
+    </section>
+    <section>
+      <h2>Block list</h2>
+      <ul id="list-block" class="list"></ul>
+      <form class="row list-add" data-list="block">
+        <input type="text" placeholder="hex or registration" aria-label="Add to block list" maxlength="10">
+        <button type="submit">Add</button>
+      </form>
+    </section>
+    <section>
+      <p id="overlay-indicator" hidden>Unsaved changes: the running filters differ from skycue.conf and the list files.</p>
+      <button id="save-baseline" type="button" disabled>Save as baseline</button>
+      <p id="save-msg" class="msg" role="status"></p>
+    </section>
+    <section class="legend" aria-label="Legend">
+      <span><i class="sw decision-sent"></i>sent</span>
+      <span><i class="sw decision-allow_listed"></i>allow listed</span>
+      <span><i class="sw decision-out_of_range"></i>out of range</span>
+      <span><i class="sw decision-below_elevation"></i>below elevation</span>
+      <span><i class="sw decision-blocked"></i>blocked</span>
+    </section>
+  </aside>
+  <div id="map-wrap">
+    <div id="map" aria-label="Map"></div>
+    <div id="table-view" hidden>
+      <table>
+        <thead><tr>
+          <th data-key="hex" tabindex="0">hex</th>
+          <th data-key="callsign" tabindex="0">callsign</th>
+          <th data-key="registration" tabindex="0">reg</th>
+          <th data-key="alt" tabindex="0">alt (ft)</th>
+          <th data-key="gs_kt" tabindex="0">gs (kt)</th>
+          <th data-key="range_nm" tabindex="0">range (nm)</th>
+          <th data-key="elevation_deg" tabindex="0">elev (°)</th>
+          <th data-key="decision" tabindex="0">decision</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <aside id="details" tabindex="-1" aria-label="Selected aircraft" hidden>
+    <div class="details-head">
+      <h2 id="details-title"></h2>
+      <button type="button" id="details-close" aria-label="Close (Esc)">×</button>
+    </div>
+    <div id="details-actions"></div>
+    <table id="details-fields"><tbody></tbody></table>
+  </aside>
+</main>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="app_pure.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

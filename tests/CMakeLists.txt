@@ -161,3 +161,20 @@ add_dependencies(test_web_server skycued)
 skycue_set_warnings(test_web_server)
 add_test(NAME web_server COMMAND test_web_server)
 set_tests_properties(web_server PROPERTIES TIMEOUT 120)
+
+# The web UI as skycued serves it from the staged www directory, plus the
+# page's pure helpers under node when node is installed.
+add_test(NAME web_ui
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_web_ui.sh
+    $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/js)
+set_tests_properties(web_ui PROPERTIES TIMEOUT 60)
+
+# Headless Chromium against a live skycued (dev machines only; see
+# tests/ui/README.md). Says SKIP and passes without node_modules/@playwright/test.
+if(SKYCUE_UI_TESTS)
+  add_test(NAME ui_playwright
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/ui/run.sh
+      $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE})
+  set_tests_properties(ui_playwright PROPERTIES TIMEOUT 300)
+endif()

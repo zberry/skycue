@@ -238,6 +238,35 @@ test('shapeStyle dashes a cancelled shape', () => {
   assert.match(s.className, /\bcancelled\b/);
   assert.doesNotMatch(P.shapeStyle(8, false).className, /\bcancelled\b/);
 });
+test('shapeStyle: a pending shape (not yet in force) is dashed and dimmed', () => {
+  const active = P.shapeStyle(12, false, false), pending = P.shapeStyle(12, false, true);
+  assert.match(pending.className, /\bpending\b/);
+  assert.doesNotMatch(active.className, /\bpending\b/);
+  assert.ok(typeof pending.dashArray === 'string' && pending.dashArray.length > 0);
+  assert.strictEqual(active.dashArray, undefined);
+  assert.ok(pending.opacity < active.opacity);
+  assert.ok(pending.fillOpacity < active.fillOpacity);
+  assert.strictEqual(pending.color, active.color);
+  // Cancelled wins over pending.
+  const both = P.shapeStyle(12, true, true);
+  assert.strictEqual(both.dashArray, P.shapeStyle(12, true).dashArray);
+  assert.doesNotMatch(both.className, /\bpending\b/);
+});
+
+test('radarOpacity: half past 15 min (regional) / 30 min (CONUS)', () => {
+  const min = 60000;
+  assert.strictEqual(P.radarOpacity(0, 63, 0.7), 0.7);
+  assert.strictEqual(P.radarOpacity(15 * min, 63, 0.7), 0.7);
+  assert.strictEqual(P.radarOpacity(15 * min + 1, 63, 0.7), 0.35);
+  assert.strictEqual(P.radarOpacity(29 * min, 64, 0.8), 0.8);
+  assert.strictEqual(P.radarOpacity(30 * min + 1, 64, 0.8), 0.4);
+  assert.strictEqual(P.radarOpacity(70 * min, 64, 1), 0.5);
+  assert.strictEqual(P.radarOpacity(NaN, 63, 0.7), 0.7);   // no product time: as is
+  assert.strictEqual(P.radarFaded(16 * min, 63), true);
+  assert.strictEqual(P.radarFaded(16 * min, 64), false);
+  assert.strictEqual(P.RADAR_FADE_MS[63], 15 * min);
+  assert.strictEqual(P.RADAR_FADE_MS[64], 30 * min);
+});
 
 test('ageClass boundaries: fresh < 30 min, aging < 90 min, else old', () => {
   const issued = '2015-01-24T03:50:00.000Z';

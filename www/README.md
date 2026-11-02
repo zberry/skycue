@@ -44,15 +44,19 @@ From the `fisb` status in the snapshot the page GETs `/api/fisb/text`,
 WebSocket items (docs/web-api.md, FIS-B). Map layers (the layer control,
 top right): "Radar (regional)" and "Radar (CONUS)" (on by default), "Other
 rasters" (lightning, icing, turbulence, cloud tops: one at a time from a
-dropdown, legend marked approximate) and one layer per shape family (TFR,
+dropdown, legend marked approximate) and one layer per shape family (NOTAM / TFR,
 SIGMET, AIRMET/G-AIRMET, CWA, SUA; off by default). A mosaic's blocks are
 expanded from their RLE and painted on one canvas over their box (rows
 spaced in Web Mercator, at most 4096 x 4096), shown as an image overlay;
 the opacity slider and radar age sit bottom right, and a radar older than
-75 min is drawn at half opacity. Clicking a shape shows its text, times and
+15 min (regional) or 30 min (CONUS) is drawn at half opacity
+(`radarOpacity`). Cancelled shapes are dashed, shapes not yet in force
+(`pending`) dotted and dimmed (`shapeStyle`). Clicking a shape shows its text, times and
 altitudes in the side panel's Weather tab, which also lists METAR, TAF,
-PIREP and winds aloft with a station-prefix filter and age colouring (fresh
-< 30 min, aging < 90 min, old).
+PIREP, winds aloft and the TWGO reports without graphics ("NOTAM / SIGMET
+text") with a station-prefix filter and age colouring (fresh < 30 min,
+aging < 90 min, old). A TWGO text item without graphics clears the shapes
+drawn for its key (an amended text drops the old graphics).
 
 ## Geometry
 

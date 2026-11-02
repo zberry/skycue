@@ -204,6 +204,9 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .wx-control input[type="range"] { width: 120px; vertical-align: middle; padding: 0; }
 .wx-control select { max-width: 200px; font-size: 12px; margin: 4px 0; }
 #radar-age { color: var(--text); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.legend-note { margin-top: 4px; }
+.legend-note span { color: var(--text); border-bottom: 2px dashed var(--muted); }
+.legend-note .ln-pending { opacity: .55; border-bottom-style: dotted; }
 .legend-row { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 4px; }
 #raster-box { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 4px; }
 #raster-legend { display: flex; flex-direction: column; gap: 1px; max-height: 150px; overflow-y: auto; }

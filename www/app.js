@@ -639,7 +639,6 @@
   // them current (radar/raster items are notifications: GET the mosaic).
   var PX_PER_BIN = 4;               // canvas pixels per smallest bin
   var CANVAS_CAP = 4096;            // canvas width/height limit
-  var RADAR_FADE_MS = 75 * 60000;   // older than this: drawn at half opacity
   var FISB_POLL_MS = 5000;          // /api/fisb/status for the strip's rates
   var WX_DEBOUNCE_MS = 200;
   var WX_KINDS = [['metar', 'METAR'], ['taf', 'TAF'], ['pirep', 'PIREP'], ['winds', 'Winds aloft'],
@@ -699,6 +698,8 @@
           '<label for="radar-opacity">Opacity</label> ' +
           '<input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7">' +
           '<div id="radar-legend" class="legend-row"></div>' +
+          '<div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span> not yet in force · ' +
+          '<span class="ln-cancelled">dashed</span> cancelled</div>' +
           '<div id="raster-box" hidden>' +
           '<label for="raster-select">Raster</label> <select id="raster-select"></select>' +
           '<div id="raster-legend"></div></div>';
@@ -804,8 +805,9 @@
     Object.keys(radar).forEach(function (w) {
       var d = radar[w].drawn;
       if (!d) return;
-      var faded = productAgeMs(d.head) > RADAR_FADE_MS;
-      d.overlay.setOpacity(base * (faded ? 0.5 : 1));
+      var age = productAgeMs(d.head);
+      var faded = P.radarFaded(age, radar[w].product);
+      d.overlay.setOpacity(P.radarOpacity(age, radar[w].product, base));
       var el = d.overlay.getElement();
       if (el) el.classList.toggle('faded', faded);
     });
@@ -906,7 +908,7 @@
   function shapeLayer(f, key) {
     var p = f.properties || {}, g = f.geometry;
     if (!g || !g.coordinates) return null;
-    var style = P.shapeStyle(p.product, !!p.cancelled);
+    var style = P.shapeStyle(p.product, !!p.cancelled, !!p.pending);
     var layer, kind;
     if (g.type === 'Point') {
       var ll = [g.coordinates[1], g.coordinates[0]];
@@ -998,6 +1000,7 @@
       ['key', 'Key', key],
       ['location', 'Location', p.location || null],
       ['start', 'Start', p.start ? fmtWhen(p.start) : null],
+      ['pending', 'In force', p.pending ? 'not yet (dashed, dimmed until its start)' : null],
       ['text_end', 'Text end', p.text_end ? fmtWhen(p.text_end) : null],
       ['graphics_end', 'Graphics end', p.graphics_end ? fmtWhen(p.graphics_end) : null],
       ['alt', 'Altitudes', altText(p)],
@@ -1125,7 +1128,7 @@
       var age = productAgeMs(d.head);
       if (!(newest <= age)) newest = age;
       parts.push((w === 'conus' ? 'CONUS' : 'regional') + ' ' + hhmm(d.head.product_time) + ' · ' +
-        shortAge(Date.parse(d.head.product_time), dataNow()) + (age > RADAR_FADE_MS ? ' (stale)' : ''));
+        shortAge(Date.parse(d.head.product_time), dataNow()) + (P.radarFaded(age, radar[w].product) ? ' (stale)' : ''));
     });
     $('radar-age').textContent = parts.length ? 'Radar ' + parts.join(', ') : 'No radar';
     setStat('stat-radar-age', isNaN(newest) ? '–' : shortAge(dataNow() - newest, dataNow()));
@@ -1434,6 +1437,19 @@
       return out;
     },
     radarBounds: function (w) { return radar[w] && radar[w].drawn ? radar[w].drawn.bounds : null; },
+    // Moves the page's data clock to `iso` (until skycued's next newer time)
+    // and redraws the radar ages; returns each drawing's opacity and fade.
+    setDataClock: function (iso) {
+      clockOffsetMs = Date.parse(iso) - Date.now();
+      radarAgeTick();
+      var out = {};
+      Object.keys(radar).forEach(function (w) {
+        var d = radar[w].drawn, el = d && d.overlay.getElement();
+        out[w] = el ? { opacity: Number(el.style.opacity), faded: el.classList.contains('faded') } : null;
+      });
+      out.label = $('radar-age').textContent;
+      return out;
+    },
     shapeLayers: function (key) {
       var s = fisb.shapes.get(key);
       return s ? s.layers.map(function (l) {

@@ -393,6 +393,36 @@ test.describe('fisb radar (tg30)', () => {
     await expect(page.locator('img.fisb-radar-conus')).toHaveCSS('opacity', '0.2');
   });
 
+  // Regional radar fades to half opacity past 15 min, CONUS past 30 min
+  // (the page's data clock moved through the test hook).
+  test('radar_fades_with_age', async ({ page }) => {
+    const status = (await apiAt(RADAR_BASE, '/api/fisb/status')).body;
+    await openFisbPage(page);
+    await expect(page.locator('img.leaflet-image-layer.fisb-radar-regional')).toHaveCount(1);
+    await expect(page.locator('img.leaflet-image-layer.fisb-radar-conus')).toHaveCount(1);
+    const at = (iso) => page.evaluate((t) => window.skycueApp.setDataClock(t), iso);
+    const plus = (iso, min) => new Date(Date.parse(iso) + min * 60000).toISOString();
+    const reg = status.radar.regional.product_time, conus = status.radar.conus.product_time;
+    const base = Number(await page.locator('#radar-opacity').inputValue());
+    let o = await at(plus(reg, 14));
+    expect(o.regional).toEqual({ opacity: base, faded: false });
+    o = await at(plus(reg, 16));
+    expect(o.regional.opacity).toBeCloseTo(base / 2, 5);
+    expect(o.regional.faded).toBe(true);
+    expect(o.label).toMatch(/regional .*\(stale\)/);
+    if (Date.parse(plus(conus, 29)) > Date.parse(plus(reg, 16))) {
+      o = await at(plus(conus, 29));
+      expect(o.conus).toEqual({ opacity: base, faded: false });
+    }
+    o = await at(plus(conus, 31));
+    expect(o.conus.opacity).toBeCloseTo(base / 2, 5);
+    expect(o.conus.faded).toBe(true);
+    await expect(page.locator('img.fisb-radar-conus')).toHaveClass(/\bfaded\b/);
+    // Back on skycued's clock: drawn as before.
+    o = await at(status.now);
+    expect(o.regional.faded).toBe(false);
+  });
+
   test('other_rasters_layer_and_legend', async ({ page }) => {
     await openFisbPage(page);
     await layerToggle(page, 'Other rasters').check();
@@ -491,6 +521,34 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     await expect(page.locator('path.fisb-tfr.cancelled')).toHaveCount(0);
     await expect(card).toBeHidden();
     await expect(page.locator('path.fisb-tfr')).toHaveCount(shapes.length);
+    expect(errors).toEqual([]);
+  });
+
+  // A report whose start is still ahead (pending) is drawn dashed and dim,
+  // then solid once republished in force.
+  test('pending_shape_drawn_dashed_and_dim', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openFisbPage(page);
+    await layerToggle(page, 'SIGMET').check();
+    await expect(page.locator('#shape-legend')).toContainText('not yet in force');
+    const key = '12-15-996--1';
+    const item = (pending) => ({ type: 'fisb_shape', product: 12, key, features: [{ type: 'Feature', id: key + '/0',
+      geometry: { type: 'Polygon', coordinates: [[[-120.2, 36.2], [-119.8, 36.2], [-119.8, 36.5], [-120.2, 36.2]]] },
+      properties: { key, product: 12, name: 'SIGMET', text: 'SIGMET TEST', geom: 'polygon', cancelled: false,
+        pending, start: '2015-01-24T06:00:00.000Z', agl: false, shape: 0 } }] });
+    const path = page.locator(`path.fisb-sigmet[data-key="${key}"]`);
+    await page.evaluate((it) => window.skycueApp.injectFisbItems([it]), item(true));
+    await expect(path).toHaveCount(1);
+    await expect(path).toHaveClass(/\bpending\b/);
+    await expect(path).toHaveAttribute('stroke-dasharray', /\d/);
+    const dim = Number(await path.getAttribute('stroke-opacity'));
+    await page.evaluate((it) => window.skycueApp.injectFisbItems([it]), item(false));
+    await expect(path).not.toHaveClass(/\bpending\b/);
+    expect(await path.getAttribute('stroke-dasharray')).toBeNull();
+    expect(Number(await path.getAttribute('stroke-opacity'))).toBeGreaterThan(dim);
+    await page.evaluate((k) => window.skycueApp.injectFisbItems([
+      { type: 'fisb_expired', kind: 'twgo', product: 12, key: k, reason: 'expired' }]), key);
+    await expect(path).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 

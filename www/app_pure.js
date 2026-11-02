@@ -176,19 +176,36 @@
   function shapeFamily(product) {
     return Object.prototype.hasOwnProperty.call(SHAPE_FAMILY, product) ? SHAPE_FAMILY[product] : null;
   }
-  // Leaflet path options for a shape of `product`; cancelled ones dashed.
-  function shapeStyle(product, cancelled) {
+  // Leaflet path options for a shape of `product`: cancelled ones dashed;
+  // pending ones (not yet in force) dashed finer and dimmed.
+  function shapeStyle(product, cancelled, pending) {
     var fam = shapeFamily(product) || 'other';
     var color = SHAPE_COLORS[fam] || '#d2a8ff';
     var s = {
-      className: 'fisb-shape fisb-' + fam + (cancelled ? ' cancelled' : ''),
+      className: 'fisb-shape fisb-' + fam + (cancelled ? ' cancelled' : '') + (pending && !cancelled ? ' pending' : ''),
       color: color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: fam === 'tfr' ? 0.18 : fam === 'airmet' ? 0.04 : 0.08
     };
     if (cancelled) {
       s.dashArray = '6 6';
       s.fillOpacity = 0.03;
+    } else if (pending) {
+      s.dashArray = '2 5';
+      s.opacity = 0.45;
+      s.fillOpacity = s.fillOpacity / 3;
     }
     return s;
+  }
+
+  // Radar fades to half its opacity past these ages (a regional mosaic is
+  // re-sent every few minutes, CONUS less often); it expires at 75 min.
+  var RADAR_FADE_MS = { 63: 15 * 60000, 64: 30 * 60000 };
+  function radarFaded(ageMs, product) {
+    var fade = RADAR_FADE_MS[product] || RADAR_FADE_MS[63];
+    return ageMs > fade;
+  }
+  // The opacity to draw a radar mosaic `ageMs` old at, `base` the slider's.
+  function radarOpacity(ageMs, product, base) {
+    return radarFaded(ageMs, product) ? base * 0.5 : base;
   }
 
   // Age colouring of a text report: fresh < 30 min, aging < 90 min, else old
@@ -250,6 +267,7 @@
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,
+    RADAR_FADE_MS: RADAR_FADE_MS, radarFaded: radarFaded, radarOpacity: radarOpacity,
     mercY: mercY, mosaicCanvasSize: mosaicCanvasSize, stationMatches: stationMatches
   };
   root.skycuePure = api;

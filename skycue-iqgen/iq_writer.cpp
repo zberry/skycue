@@ -69,6 +69,9 @@ void IqWriter::write(const std::complex<float>* x, std::size_t n)
         for (std::size_t k = 0; k < count; ++k) {
             double re = static_cast<double>(x[done + k].real());
             double im = static_cast<double>(x[done + k].imag());
+            // The CFO phase is accumulated per sample and wrapped to [-pi, pi)
+            // each step, so it stays exact-to-rounding over any file length
+            // (no n * step product losing precision late in long files).
             if (phase_step_ != 0.0) {
                 const double c = std::cos(phase_), s = std::sin(phase_);
                 const double r = re * c - im * s;

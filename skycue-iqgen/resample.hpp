@@ -17,6 +17,7 @@ constexpr unsigned kResampleTapsPerPhase = 32;
 
 struct ResampleCounts {
     uint64_t in_samples, out_samples;  // out_samples = floor(in_samples * up / down)
+    uint64_t clipped;                  // output I and Q values clipped to 0..255, counted separately
 };
 
 // Throws std::invalid_argument for a zero rate or when up or down exceeds

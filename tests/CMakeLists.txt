@@ -265,3 +265,7 @@ target_compile_definitions(test_iqgen PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_iqgen)
 add_test(NAME iqgen COMMAND test_iqgen)
+add_test(NAME iqgen_cli
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
+    $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180)

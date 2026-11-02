@@ -213,6 +213,33 @@ std::string avrLine(int64_t epoch_ns, const std::string& hex)
     return out;
 }
 
+std::optional<AvrMessage> parseAvrLine(const std::string& raw)
+{
+    const std::string line = chomp(raw);
+    if (line.size() < 2 || (line[0] != '@' && line[0] != '*') || line.back() != ';')
+        return std::nullopt;
+    const bool timed = line[0] == '@';
+    const std::size_t digits = line.size() - 2;
+    const std::size_t n = digits - (timed ? 12 : 0);
+    if ((timed && digits < 12) || (n != 14 && n != 28))
+        return std::nullopt;
+    AvrMessage m;
+    uint64_t ticks = 0;
+    m.hex.reserve(n);
+    for (std::size_t i = 1; i + 1 < line.size(); ++i) {
+        const int v = hexValue(line[i]);
+        if (v < 0)
+            return std::nullopt;
+        if (timed && i <= 12)
+            ticks = (ticks << 4) | static_cast<uint64_t>(v);
+        else
+            m.hex += static_cast<char>(v < 10 ? '0' + v : 'A' + v - 10);
+    }
+    if (timed)
+        m.ticks = ticks;
+    return m;
+}
+
 std::optional<UatLine> parseUatLine(const std::string& raw)
 {
     std::string line = chomp(raw);

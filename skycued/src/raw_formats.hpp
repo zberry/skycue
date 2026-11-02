@@ -78,6 +78,16 @@ std::optional<CsvMessage> parseCsvMessage(const std::string& line);
 // 12 uppercase hex digits, the AVR-with-timestamp form readsb's raw input reads.
 std::string avrLine(int64_t epoch_ns, const std::string& hex);
 
+// One AVR line as readsb's raw output writes it.
+struct AvrMessage {
+    std::optional<uint64_t> ticks;  // the 48-bit 12 MHz counter of an "@" line; nullopt for "*"
+    std::string hex;                // uppercase, 14 or 28 digits
+};
+// "@<12 hex ticks><HEX>;" or "*<HEX>;" with HEX 14 or 28 hex digits (trailing
+// CR/LF ok); nullopt for anything else, Mode A/C (4 digits) included. The
+// inverse of avrLine(). Never throws.
+std::optional<AvrMessage> parseAvrLine(const std::string& line);
+
 // A dump978 raw line, optionally "<epoch_ms> "-prefixed as skycue-rawrec writes it.
 struct UatLine {
     std::optional<int64_t> epoch_ms;

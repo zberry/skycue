@@ -122,7 +122,7 @@ ResampleCounts resampleCu8(std::istream& in, uint64_t in_rate, uint64_t out_rate
     }
     const auto in_samples = static_cast<uint64_t>(total_in);
     emit(in_samples * up / down, true);
-    return {in_samples, m};
+    return {in_samples, m, clipped};
 }
 
 }  // namespace iqgen

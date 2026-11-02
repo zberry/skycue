@@ -4,17 +4,24 @@
 #include "gz_line_reader.hpp"
 
 #include "bits.hpp"
+#include "inputs.hpp"
 #include "iq_writer.hpp"
 #include "modes_crc.hpp"
+#include "placement.hpp"
 #include "reed_solomon.hpp"
 #include "resample.hpp"
 #include "synth.hpp"
 #include "uat_frame.hpp"
 
+#include <stdlib.h>
+#include <unistd.h>
+
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -597,6 +604,8 @@ BOOST_AUTO_TEST_CASE(writer_seed_determinism)
     BOOST_TEST((a != c));
     // Known answer: the same bytes from every compiler and standard library
     // (mt19937_64 is fully specified; Box-Muller is ours).
+    // A failure seen only on another libm or architecture: suspect the
+    // last-bit rounding of log/sqrt/cos/sin before the generator.
     BOOST_TEST(fnv1a(a) == 0x38638F09A663D608ULL);
 }
 
@@ -646,6 +655,14 @@ BOOST_AUTO_TEST_CASE(resample_2M_to_2M4_count)
     const std::string bytes = out.str();
     BOOST_TEST(bytes.size() == 2 * n.out_samples);
     BOOST_TEST(bytes.find_first_not_of(static_cast<char>(128)) == std::string::npos);  // zero stays zero
+    BOOST_TEST(n.clipped == 0u);
+
+    // A full-scale step rings (Gibbs) past 0..255: the overshoot is counted.
+    std::string step(2 * 1000, static_cast<char>(0));
+    step.append(2 * 1000, static_cast<char>(255));
+    std::istringstream step_in(step);
+    std::ostringstream step_out;
+    BOOST_TEST(resampleCu8(step_in, 2000000, 2400000, step_out).clipped > 0u);
 
     std::istringstream none("");
     BOOST_CHECK_THROW(resampleCu8(none, 2083333, 2400000, out), std::invalid_argument);  // 2400000/2083333
@@ -715,5 +732,262 @@ BOOST_AUTO_TEST_CASE(info_numbers)
         BOOST_TEST(i.samples == 100000u);
         BOOST_TEST(std::fabs(i.dc_i - 10.0) <= 1.0);
         BOOST_TEST(std::fabs(i.dc_q + 5.0) <= 1.0);
+    }
+}
+
+// ---- inputs and placement -----------------------------------------------------
+
+namespace {
+
+// Mode S placement as skycue-iqgen does it with --pad-ms 0.05 and
+// --spacing-us 2000: pad 600 ticks, spacing 24000 ticks, times in ticks.
+PlaceOptions modesOptions()
+{
+    PlaceOptions o;
+    o.pad = 600;
+    o.spacing = 24000;
+    o.grid_per_time = 1.0;
+    o.length = [](const std::vector<uint8_t>& p) { return static_cast<int64_t>(modesFrameTicks(p.size())); };
+    return o;
+}
+
+// A 112-bit frame filled with tag, so frames can be told apart.
+TimedFrame frameAt(std::optional<int64_t> t, uint8_t tag, std::size_t bytes = 14)
+{
+    return TimedFrame{t, std::vector<uint8_t>(bytes, tag), "test"};
+}
+
+std::vector<int64_t> starts(const Placement& p)
+{
+    std::vector<int64_t> out;
+    for (const auto& f : p.frames)
+        out.push_back(f.start);
+    return out;
+}
+
+// A fresh directory, removed (with its files) at scope exit.
+struct TempDir {
+    std::string path;
+    std::vector<std::string> files;
+    TempDir()
+    {
+        const char* base = std::getenv("TMPDIR");
+        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/test_iqgen.XXXXXX";
+        BOOST_REQUIRE(mkdtemp(&tmpl[0]) != nullptr);
+        path = tmpl;
+    }
+    ~TempDir()
+    {
+        for (const auto& f : files)
+            ::unlink(f.c_str());
+        ::rmdir(path.c_str());
+    }
+    std::string write(const std::string& name, const std::string& bytes)
+    {
+        const std::string p = path + "/" + name;
+        std::ofstream(p, std::ios::binary) << bytes;
+        files.push_back(p);
+        return p;
+    }
+};
+
+// One Beast frame: 0x1a, type, 6-byte timestamp, signal, payload; 0x1a
+// bytes in the body doubled.
+std::string beastFrame(char type, uint64_t ts, const std::vector<uint8_t>& payload)
+{
+    std::vector<uint8_t> body;
+    for (int k = 5; k >= 0; --k)
+        body.push_back(static_cast<uint8_t>(ts >> (8 * k)));
+    body.push_back(0x80);  // signal
+    body.insert(body.end(), payload.begin(), payload.end());
+    std::string out{'\x1a', type};
+    for (uint8_t b : body) {
+        out += static_cast<char>(b);
+        if (b == 0x1a)
+            out += '\x1a';
+    }
+    return out;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(frames_100us_apart_start_240_samples_apart)
+{
+    // 56-bit frames (768 ticks long), so 1200 ticks apart they do not overlap.
+    const Placement p = place({{frameAt(0, 1, 7), frameAt(1200, 2, 7)}}, modesOptions());
+    BOOST_REQUIRE(p.frames.size() == 2u);
+    BOOST_TEST(p.frames[0].start == 600);  // shifted by pad
+    BOOST_TEST(p.frames[1].start / 5 - p.frames[0].start / 5 == 240);
+    BOOST_TEST(p.overlaps == 0u);
+    BOOST_TEST(p.end == 1800 + 768 + 600);  // last frame end + pad
+}
+
+BOOST_AUTO_TEST_CASE(overlap_marks_both_and_counts_once)
+{
+    Placement p = place({{frameAt(0, 1), frameAt(700, 2)}}, modesOptions());
+    BOOST_REQUIRE(p.frames.size() == 2u);
+    BOOST_TEST(p.overlaps == 1u);
+    BOOST_TEST(p.frames[0].overlap);
+    BOOST_TEST(p.frames[1].overlap);
+
+    p = place({{frameAt(0, 1), frameAt(1440, 2)}}, modesOptions());  // back to back: [0,1440) [1440,2880)
+    BOOST_TEST(p.overlaps == 0u);
+    BOOST_TEST(!p.frames[0].overlap);
+    BOOST_TEST(!p.frames[1].overlap);
+
+    // Three on top of each other: three pairs.
+    p = place({{frameAt(0, 1), frameAt(10, 2), frameAt(20, 3, 7)}}, modesOptions());
+    BOOST_TEST(p.overlaps == 3u);
+}
+
+BOOST_AUTO_TEST_CASE(identical_and_reordered_timestamps)
+{
+    // A at 5000, B and C both at 0: stable sort gives B, C, A; B and C overlap.
+    const Placement p = place({{frameAt(5000, 'A'), frameAt(0, 'B'), frameAt(0, 'C')}}, modesOptions());
+    BOOST_REQUIRE(p.frames.size() == 3u);
+    BOOST_TEST(p.frames[0].payload.front() == 'B');
+    BOOST_TEST(p.frames[1].payload.front() == 'C');
+    BOOST_TEST(p.frames[2].payload.front() == 'A');
+    BOOST_TEST(starts(p) == (std::vector<int64_t>{600, 600, 5600}), tt::per_element());
+    BOOST_TEST(p.frames[0].overlap);
+    BOOST_TEST(p.frames[1].overlap);
+    BOOST_TEST(!p.frames[2].overlap);
+    BOOST_TEST(p.overlaps == 1u);
+
+    // The same frames in time order give the identical placement.
+    const Placement q = place({{frameAt(0, 'B'), frameAt(0, 'C'), frameAt(5000, 'A')}}, modesOptions());
+    BOOST_REQUIRE(q.frames.size() == p.frames.size());
+    for (std::size_t i = 0; i < p.frames.size(); ++i) {
+        BOOST_TEST(q.frames[i].start == p.frames[i].start);
+        BOOST_TEST((q.frames[i].payload == p.frames[i].payload));
+        BOOST_TEST(q.frames[i].overlap == p.frames[i].overlap);
+    }
+    BOOST_TEST(q.overlaps == p.overlaps);
+    BOOST_TEST(q.end == p.end);
+}
+
+BOOST_AUTO_TEST_CASE(beast_counter_wrap)
+{
+    TempDir dir;
+    const uint64_t wrap = uint64_t{1} << 48;
+    const auto df17 = hex("8D4840D6202CC371C32CE0576098");
+    std::vector<uint8_t> escaped = df17;
+    escaped[3] = 0x1a;  // exercises the escape on the way in
+    const std::string bin = dir.write(
+        "wrap.bin", beastFrame('3', wrap - 1200, df17) + beastFrame('1', wrap - 600, {0x12, 0x34}) +
+                        beastFrame('3', 1200, escaped));
+    InputStats st;
+    const auto frames = readModesFile(bin, st);
+    BOOST_REQUIRE(frames.size() == 2u);
+    BOOST_TEST(st.skipped == 1u);  // the Mode A/C frame
+    BOOST_TEST((frames[0].payload == df17));
+    BOOST_TEST((frames[1].payload == escaped));
+    BOOST_TEST(frames[0].where.find("wrap.bin@0") != std::string::npos);
+    Placement p = place({frames}, modesOptions());
+    BOOST_REQUIRE(p.frames.size() == 2u);
+    BOOST_TEST(p.frames[1].start - p.frames[0].start == 2400);
+    BOOST_TEST(p.frames[1].start / 5 - p.frames[0].start / 5 == 480);
+
+    // The AVR "@" counter is the same 12 MHz 48-bit clock: same unwrap.
+    const std::string avr =
+        dir.write("wrap.avr", "@FFFFFFFFFB508D4840D6202CC371C32CE0576098;\n@0000000004B08D4840D6202CC371C32CE0576098;\n");
+    InputStats st2;
+    const auto lines = readModesFile(avr, st2);
+    BOOST_REQUIRE(lines.size() == 2u);
+    BOOST_TEST(st2.skipped == 0u);
+    BOOST_TEST(*lines[1].time - *lines[0].time == 2400);
+    p = place({lines}, modesOptions());
+    BOOST_REQUIRE(p.frames.size() == 2u);
+    BOOST_TEST(p.frames[1].start / 5 - p.frames[0].start / 5 == 480);
+    BOOST_TEST(lines[1].where == avr + ":2");
+}
+
+BOOST_AUTO_TEST_CASE(untimed_frames_use_spacing)
+{
+    const Placement p = place({{frameAt(std::nullopt, 1), frameAt(std::nullopt, 2), frameAt(std::nullopt, 3)}},
+                              modesOptions());
+    BOOST_TEST(starts(p) == (std::vector<int64_t>{600, 24600, 48600}), tt::per_element());
+    BOOST_TEST(p.overlaps == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(limit_and_duration)
+{
+    std::vector<TimedFrame> five;
+    for (uint8_t k = 0; k < 5; ++k)
+        five.push_back(frameAt(std::nullopt, k));
+    PlaceOptions o = modesOptions();
+    o.limit = 2;
+    Placement p = place({five}, o);
+    BOOST_TEST(p.frames.size() == 2u);
+    BOOST_TEST(p.end == 24600 + 1440 + 600);
+
+    o = modesOptions();
+    o.duration = 30000;  // starts (before pad) 0 and 24000 are in, 48000 is not
+    p = place({five}, o);
+    BOOST_TEST(starts(p) == (std::vector<int64_t>{600, 24600}), tt::per_element());
+
+    o.duration = 24000;  // start - pad >= duration is dropped
+    BOOST_TEST(place({five}, o).frames.size() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(files_concatenate)
+{
+    // File 1 timed (last start 1200), file 2 timed far later, file 3 untimed.
+    const Placement p = place({{frameAt(0, 1, 7), frameAt(1200, 2, 7)},
+                               {frameAt(1000000000, 3), frameAt(1000000100, 4)},
+                               {frameAt(std::nullopt, 5), frameAt(std::nullopt, 6)}},
+                              modesOptions());
+    BOOST_TEST(starts(p) == (std::vector<int64_t>{600, 1800, 25800, 25900, 49900, 73900}), tt::per_element());
+    BOOST_TEST(p.frames[2].payload.front() == 3);
+    BOOST_TEST(p.frames[4].payload.front() == 5);
+    BOOST_TEST(p.frames[2].overlap);  // 3 and 4 are 100 ticks apart
+    BOOST_TEST(p.overlaps == 1u);
+    BOOST_TEST(place({}, modesOptions()).frames.empty());
+    BOOST_TEST(place({{}, {}}, modesOptions()).end == 0);
+}
+
+BOOST_AUTO_TEST_CASE(readers_skip_count_and_reject)
+{
+    TempDir dir;
+    // csv: a Mode A/C line and a malformed line are skipped and counted;
+    // blank lines and comments are not counted.
+    const std::string csv = dir.write("m.csv",
+                                      "# capture\n\n1.0,5F406A936F50F0\n1.5,1234\nnot a line\n"
+                                      "2.000001,8D4840D6202CC371C32CE0576098\r\n");
+    InputStats st;
+    const auto m = readModesFile(csv, st);
+    BOOST_REQUIRE(m.size() == 2u);
+    BOOST_TEST(st.skipped == 2u);
+    BOOST_TEST(*m[0].time == 12000000);
+    BOOST_TEST(*m[1].time == 24000012);
+    BOOST_TEST(m[1].where == csv + ":6");
+
+    // AVR: Mode A/C and "*" untimed.
+    const std::string txt = dir.write("m.txt", "*5F406A936F50F0;\n@000000B71B001234;\n");
+    InputStats st2;
+    const auto a = readModesFile(txt, st2);
+    BOOST_REQUIRE(a.size() == 1u);
+    BOOST_TEST(!a[0].time);
+    BOOST_TEST(st2.skipped == 1u);
+
+    BOOST_CHECK_THROW(readModesFile(dir.path + "/in.xyz", st), InputError);
+    BOOST_CHECK_THROW(readModesFile(dir.path + "/nope.csv", st), InputError);
+    BOOST_CHECK_THROW(readUatFile(dir.path + "/u.csv", st), InputError);
+
+    // UAT: payload, ms timestamps, and a bad length naming FILE:LINE.
+    const std::string uat = dir.write(
+        "u.txt", "1700000000123 -00a66ef135445d525a0c0519119021204800;rs=1;\n-00a66ef135445d525a0c0519119021204800\n");
+    InputStats st3;
+    const auto u = readUatFile(uat, st3);
+    BOOST_REQUIRE(u.size() == 2u);
+    BOOST_TEST(u[0].payload.size() == 18u);
+    BOOST_TEST(*u[0].time == 1700000000123LL * 1000000);
+    BOOST_TEST(!u[1].time);
+    const std::string bad = dir.write("bad.txt", "-" + std::string(40, 'a') + ";\n");
+    try {
+        readUatFile(bad, st3);
+        BOOST_FAIL("a 20-byte payload was accepted");
+    } catch (const InputError& e) {
+        BOOST_TEST(std::string(e.what()).find(bad + ":1") != std::string::npos, e.what());
     }
 }

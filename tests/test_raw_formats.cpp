@@ -294,6 +294,24 @@ BOOST_AUTO_TEST_CASE(avr_lines)
     BOOST_TEST(avrLine(1783963099005369000LL, "AB") == std::string("@") + want + "AB;");
 }
 
+BOOST_AUTO_TEST_CASE(avr_input_lines)
+{
+    auto m = parseAvrLine("@000000B71B005F406A936F50F0;\r\n");
+    BOOST_REQUIRE(m);
+    BOOST_TEST(*m->ticks == 0xB71B00u);
+    BOOST_TEST(m->hex == "5F406A936F50F0");
+    m = parseAvrLine("*8d4840d6202cc371c32ce0576098;");
+    BOOST_REQUIRE(m);
+    BOOST_TEST(!m->ticks);
+    BOOST_TEST(m->hex == "8D4840D6202CC371C32CE0576098");
+    BOOST_TEST(parseAvrLine(avrLine(1783963099005369000LL, "5D486258DD7987"))->hex == "5D486258DD7987");
+    for (const char* bad : {"", "@12;", "*ABC;", "@000000B71B005F406A936F50F0", "#x", "*5F406A936F50FZ;"})
+        BOOST_TEST(!parseAvrLine(bad).has_value(), "accepted: " << bad);
+    // Mode A/C (4 digits) is not a Mode S frame.
+    BOOST_TEST(!parseAvrLine("@000000B71B001234;").has_value());
+    BOOST_TEST(!parseAvrLine("*1234;").has_value());
+}
+
 BOOST_AUTO_TEST_CASE(uat_lines)
 {
     auto u = parseUatLine("-00a66ef135445d525a0c0519119021204800;\n");

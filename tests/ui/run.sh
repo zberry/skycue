@@ -127,6 +127,45 @@ radar_base=$(start_fisb fisb-tg30 "$radar_rec" 40.04 -86.26) || fail "FIS-B skyc
 wait_fisb "$fisb_base" "$(grep -c '"uat_uplink"' "$fisb_rec")" || fail "2015 uplinks not decoded"
 wait_fisb "$radar_base" "$(grep -c '"uat_uplink"' "$radar_rec")" || fail "tg30 uplinks not decoded"
 
+# Map tiles: one more skycued (the readsb fixture) serving a copy of the www
+# directory (without its own tiles/) with generated tiles while meta.json
+# claims zoom 0..6: 2/1/1 in four coloured quadrants (the fallback for the
+# zoom-6 tiles around the receiver, 4 levels up) and one native zoom-6
+# tile, 6/18/24 (the receiver's), transparent in its west half, which is
+# outside the "spot" region's bbox, so the page draws 2/1/1 underneath it.
+tiles_www="$tmp/www-tiles"
+mkdir -p "$tiles_www/tiles/2/1" "$tiles_www/tiles/6/18" || fail "tiles www dir"
+for f in "$www"/* "$www"/.[!.]*; do
+  [ -e "$f" ] || continue
+  [ "$(basename "$f")" = tiles ] && continue
+  cp -r "$f" "$tiles_www/" || fail "tiles www copy"
+done
+python3 -I - "$tiles_www/tiles" <<'EOP' || fail "tiles fixture PNGs"
+import os, struct, sys, zlib
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+def png(path, pixel):  # 256x256 RGBA, pixel(x, y) -> (r, g, b, a)
+    raw = b"".join(b"\x00" + b"".join(bytes(pixel(x, y)) for x in range(256)) for y in range(256))
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 256, 256, 8, 6, 0, 0, 0)) +
+                chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+quad = [[(0x2e, 0x8b, 0x57, 255), (0x1e, 0x90, 0xff, 255)], [(0xff, 0xa5, 0x00, 255), (0x80, 0x00, 0x80, 255)]]
+png(os.path.join(sys.argv[1], "2/1/1.png"), lambda x, y: quad[y // 128][x // 128])
+png(os.path.join(sys.argv[1], "6/18/24.png"), lambda x, y: (0, 0, 0, 0) if x < 128 else (0xff, 0x00, 0xff, 255))
+EOP
+printf '%s\n' '{"minZoom":0,"maxZoom":6,"bbox":[-180,-85,180,85],"regions":[{"name":"coarse","bbox":[-180,-85,180,85],"minZoom":0,"maxZoom":2},{"name":"spot","bbox":[-75.9375,30,-73.125,45],"minZoom":6,"maxZoom":6}]}' \
+  > "$tiles_www/tiles/meta.json"
+tiles_port=$(free_port)
+sed -e "s/^WEB_PORT=.*/WEB_PORT=$tiles_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/tiles.conf"
+bash -c "echo \$\$ > '$tmp/fisb-tiles.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/tiles.conf' --www-dir '$tiles_www' >>'$tmp/tiles.log' 2>&1" </dev/null >/dev/null 2>&1 &
+tiles_base="http://127.0.0.1:$tiles_port"
+up=0
+for (( i=0; i<100; i++ )); do
+  python3 -I -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)' "$tiles_base/api/stats" 2>/dev/null && { up=1; break; }
+  sleep 0.1
+done
+[ "$up" = 1 ] || fail "tiles skycued did not come up"
+
 out_dir=$(dirname "$www")/ui-test-results
 rm -rf "$out_dir"
 export SKYCUE_BASE_URL="$base"
@@ -135,6 +174,7 @@ export SKYCUE_START_CMD="$start_cmd"
 export SKYCUE_PID_FILE="$pidfile"
 export SKYCUE_FISB_URL="$fisb_base"
 export SKYCUE_RADAR_URL="$radar_base"
+export SKYCUE_TILES_URL="$tiles_base"
 export SKYCUE_UI_OUT="$out_dir"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 (cd "$here" && npx --no-install playwright test)

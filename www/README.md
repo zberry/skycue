@@ -35,7 +35,12 @@ only; the build never copies them.
 
 When `www/tiles/<z>/<x>/<y>.png` exist (see `/api/tiles-available`) the page
 shows them; otherwise it draws a plain background with a 1°/5° graticule
-and a scale bar.
+and a scale bar. The tiles may come from several regions with different
+zoom ranges (`scripts/make-tiles.md`); where the zoom shown has no tile, the
+page's tile layer (`FallbackTileLayer` in `app.js`) shows the nearest
+lower-zoom ancestor that exists (at most 4 levels down), enlarged
+(`parentTile` in `app_pure.js`), and draws that ancestor underneath a tile
+on a region's edge (`tileInsideRegions`, from `tiles/meta.json`).
 
 ## FIS-B weather
 

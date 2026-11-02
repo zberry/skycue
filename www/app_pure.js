@@ -133,6 +133,43 @@
 
   function graticuleStep(zoom) { return zoom < 6 ? 5 : 1; }
 
+  // Map tiles: the ancestor `n` levels up of XYZ tile z/x/y (n >= 1, at
+  // most z), and where the child sits in it. Drawn `scale` times its size
+  // and shifted by (-offsetX, -offsetY) child tiles, the parent covers
+  // exactly the child's square. null when there is no such ancestor.
+  // x wraps around the world as Leaflet's tile coordinates may not.
+  function parentTile(z, x, y, n) {
+    if (!(n >= 1) || n > z || n !== Math.floor(n) || z !== Math.floor(z)) return null;
+    var size = Math.pow(2, z);
+    if (y < 0 || y >= size) return null;
+    x = ((x % size) + size) % size;
+    var scale = Math.pow(2, n);
+    var px = Math.floor(x / scale), py = Math.floor(y / scale);
+    return { z: z - n, x: px, y: py, scale: scale, offsetX: x - px * scale, offsetY: y - py * scale };
+  }
+
+  // The lon/lat box of XYZ tile z/x/y (Web Mercator).
+  function tileBounds(z, x, y) {
+    var size = Math.pow(2, z);
+    var lat = function (yy) { return Math.atan(Math.sinh(Math.PI * (1 - 2 * yy / size))) / DEG; };
+    return { west: x / size * 360 - 180, east: (x + 1) / size * 360 - 180, north: lat(y), south: lat(y + 1) };
+  }
+
+  // True when tile z/x/y lies wholly inside the bbox of a meta.json region
+  // ({bbox: [w, s, e, n], minZoom, maxZoom}) that has zoom z: such a tile is
+  // opaque. A tile only partly inside every region with zoom z sits on a
+  // region's edge and may be partly transparent there. Entries that are not
+  // well-formed regions are ignored.
+  function tileInsideRegions(z, x, y, regions) {
+    var t = tileBounds(z, x, y);
+    var eps = 1e-9;
+    return (regions || []).some(function (r) {
+      var b = r && r.bbox;
+      if (!b || b.length !== 4 || !(r.minZoom <= z && z <= r.maxZoom)) return false;
+      return b[0] <= t.west + eps && t.east <= b[2] + eps && b[1] <= t.south + eps && t.north <= b[3] + eps;
+    });
+  }
+
   // A drop for `filtered` only stops forwarding: the aircraft is still
   // observed (and shown, recoloured). Any other reason ends the track.
   function dropRemovesMarker(reason) { return reason !== 'filtered'; }
@@ -301,7 +338,9 @@
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
     decisionColor: decisionColor, formatAlt: formatAlt, formatNum: formatNum, formatAge: formatAge,
     thousands: thousands, trackKey: trackKey, markerLabel: markerLabel, listHas: listHas,
-    sortTracks: sortTracks, graticuleStep: graticuleStep, dropRemovesMarker: dropRemovesMarker,
+    sortTracks: sortTracks, graticuleStep: graticuleStep, parentTile: parentTile,
+    tileBounds: tileBounds, tileInsideRegions: tileInsideRegions,
+    dropRemovesMarker: dropRemovesMarker,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,

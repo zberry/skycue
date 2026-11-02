@@ -27,7 +27,9 @@ void usage(std::FILE* out, const char* argv0)
                  "  (default)  connect over TCP to skycued at HOST:PORT (127.0.0.1:30500)\n"
                  "  --listen   listen on HOST:PORT for skycued to connect (its CUE_TCP_CONNECT)\n"
                  "  --udp      receive cue datagrams on HOST:PORT (its CUE_UDP_TARGETS)\n"
-                 "  --seconds  exit 0 after N seconds (default: run until SIGINT/SIGTERM)\n",
+                 "  --seconds  exit 0 after N seconds; 0 (the default) runs until SIGINT/SIGTERM\n"
+                 "Exit status 0 does not mean data arrived: connection and transport errors\n"
+                 "are only printed (\"error: ...\" on stderr) while the client keeps retrying.\n",
                  argv0);
 }
 
@@ -96,6 +98,7 @@ int main(int argc, char** argv)
     std::atomic<unsigned long> drops{0};
     skycue::Client client(cfg);
     client.onConnectionChange([](bool up) { std::printf("connection %s\n", up ? "up" : "down"); });
+    client.onError([](const std::string& message) { std::fprintf(stderr, "error: %s\n", message.c_str()); });
     client.onTrackUpdate([&updates](const skycue::Track& t) {
         ++updates;
         std::printf("track updated %06x %s %.5f,%.5f\n", static_cast<unsigned>(t.id.address),
@@ -109,8 +112,11 @@ int main(int argc, char** argv)
     std::signal(SIGINT, onSignal);
     std::signal(SIGTERM, onSignal);
     client.start();
-    if (cfg.transport == Transport::tcp_listen)
-        std::printf("listening on port %u\n", static_cast<unsigned>(client.localPort()));
+    if (cfg.transport == Transport::tcp_listen) {
+        const uint16_t port = client.localPort(); // 0: not bound yet, retrying
+        if (port != 0)
+            std::printf("listening on port %u\n", static_cast<unsigned>(port));
+    }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
     while (!g_stop && (seconds == 0 || std::chrono::steady_clock::now() < deadline))
         std::this_thread::sleep_for(std::chrono::milliseconds(50));

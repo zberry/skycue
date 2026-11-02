@@ -1,16 +1,16 @@
 # client_demo: a stand-in for a larger client program that vendors skycue/
 # and builds libskycue with add_subdirectory(). Not part of the skycue build:
 # configure it on its own (see README.md).
-cmake_minimum_required(VERSION 3.20)
+# 3.26: skycue's own minimum, which configuring skycue/ needs anyway.
+cmake_minimum_required(VERSION 3.26)
 project(client_demo CXX)
 
-# The parent's own settings. They apply to its targets and are what a real
-# parent would set; skycue's directory sets its own standard and warnings.
+# The parent's own settings. The standard is set here for the parent's
+# directory (skycue's directory sets its own); PIC, visibility and warnings
+# are set on client_demo only, so none of them reach skycue's targets.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
@@ -34,6 +34,9 @@ add_subdirectory("${SKYCUE_SOURCE_DIR}" skycue)
 
 add_executable(client_demo client_demo.cpp)
 target_link_libraries(client_demo PRIVATE skycue::skycue)
+set_target_properties(client_demo PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+  CXX_VISIBILITY_PRESET hidden)
 target_compile_options(client_demo PRIVATE -Wall -Wextra)
 if(CLIENT_DEMO_WERROR)
   target_compile_options(client_demo PRIVATE -Werror)

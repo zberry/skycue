@@ -26,10 +26,13 @@ only skycue sources compiled are libskycue's two, and the only build
 dependencies are a C++17 compiler, CMake 3.26 or newer (skycue's own
 minimum), Boost 1.66 or newer (headers and `system`) and threads.
 
-The parent's own settings (C++17 without extensions, PIC, hidden visibility,
-`-Wall -Wextra -Werror` on `client_demo` only, the `CLIENT_DEMO_WERROR`
-option) do not leak into skycue, and skycue's warnings do not leak into the
-parent's targets.
+The parent's own settings: CMake 3.26 minimum (skycue's own, needed to
+configure `skycue/` anyway), C++17 without extensions for its directory
+(skycue's directory sets its own standard), and on `client_demo` only, as
+target properties and options: PIC, hidden visibility, `-Wall -Wextra`, and
+`-Werror` under the `CLIENT_DEMO_WERROR` option. None of the target-level
+settings reach skycue's targets, and skycue's warning flags (private to its
+targets) do not reach the parent's.
 
 `SKYCUE_SOURCE_DIR` defaults to `../..` from this directory, i.e. the
 `skycue/` that contains it; point it at your vendored copy otherwise.
@@ -46,5 +49,9 @@ build-client/client_demo --udp --port 30600          # skycued: CUE_UDP_TARGETS=
 ```
 
 It prints `connection up|down`, `track updated <addr> <callsign> <lat>,<lon>`
-and `track dropped <addr> <reason>` lines, and exits 0 after `--seconds N`
-(or on SIGINT/SIGTERM when `--seconds` is not given).
+and `track dropped <addr> <reason>` lines, and exits 0 after `--seconds N`;
+`--seconds 0` (the default) runs until SIGINT/SIGTERM. Exit status 0 does
+not mean any data arrived: connection and transport errors (refused
+connection, port in use, ...) are only printed, as `error: ...` on stderr,
+while the client keeps retrying. Check for `track updated` lines if you need
+to know that data flowed.

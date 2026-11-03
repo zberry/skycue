@@ -92,3 +92,45 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
+
+## fisb/pireps.txt
+
+- **What it is:** the 19 distinct PIREP texts skycue-fisb decodes from three
+  captures, one per line (the decoder's newlines replaced by spaces), after a
+  2-line `#` header; used by `tests/js/app_pure.test.js` for the PIREP `/OV`
+  forms (id, id + `rrrddd`, `id rrrddd`, 4-character id, a route, free text).
+- **Origin and licence, by line:**
+  - lines 1-14: decoded from `raw/stratux-uat-2015.log.gz` (above),
+    BSD-3-Clause, Copyright (c) 2015 Christopher Young; licence text in the
+    `raw/stratux-uat-2015.log.gz` section of this file;
+  - lines 15-17: decoded from `fisb/received-tg30.jsonl`, derived from
+    fisb-decode's `tg30.978` (BSD-2-Clause Plus Patent,
+    `fisb/LICENSE.fisb-decode`);
+  - lines 18-19: decoded from `fisb/received-with-uplinks.jsonl`, derived
+    from the dump978 sample `raw/uat-sample.txt.gz` (BSD-2-Clause).
+- **How it is made** (from the repository root, with a staged skycue-fisb;
+  the stratux log's `<ns>,` prefix is stripped first and `--ref-date` dates
+  its untimestamped uplinks; the JSONL inputs carry their own times):
+
+```bash
+tmp=$(mktemp -d)
+zcat skycue/tests/fixtures/raw/stratux-uat-2015.log.gz | sed -n 's/^[0-9][0-9]*,\([+-]\)/\1/p' > "$tmp/stratux.txt"
+for f in "$tmp/stratux.txt" skycue/tests/fixtures/fisb/received-tg30.jsonl skycue/tests/fixtures/fisb/received-with-uplinks.jsonl; do
+  build/stage/bin/skycue-fisb --json --ref-date 2015-09-02 "$f"
+done | python3 -I -c '
+import json, sys
+seen = []
+for line in sys.stdin:
+    e = json.loads(line)
+    if e.get("type") == "fisb_text" and e.get("kind") == "pirep" and e["text"] not in seen:
+        seen.append(e["text"])
+for t in seen:
+    print(t.replace("\n", " "))
+' > "$tmp/pireps.body"
+{ printf '%s\n' '# Real PIREPs decoded by skycue-fisb: lines 1-14 from raw/stratux-uat-2015.log.gz (BSD-3-Clause,' \
+    '# see README.md), 15-17 from fisb/received-tg30.jsonl, 18-19 from fisb/received-with-uplinks.jsonl.'; cat "$tmp/pireps.body"; } \
+  > skycue/tests/fixtures/fisb/pireps.txt
+grep -vc '^#' skycue/tests/fixtures/fisb/pireps.txt; rm -rf "$tmp"   # prints 19
+```
+
+- sha256: `27ea53f031c2d735ba8514fe8045695fc74548e61508ac9b073ee9030cdd52eb`

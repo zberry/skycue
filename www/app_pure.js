@@ -562,6 +562,232 @@
     return out;
   }
 
+  // ---- FIS-B weather text (spec §3.2-§3.3) ----
+
+  // Flight category from the standard thresholds: ceiling (lowest BKN/OVC/VV
+  // layer, ft) and prevailing visibility (statute miles); the worse wins.
+  var FLIGHT_CATEGORIES = ['VFR', 'MVFR', 'IFR', 'LIFR', 'unknown'];
+  var METRES_PER_SM = 1609.344;
+
+  // A report's whitespace tokens, the trailing '=' removed, up to (not
+  // including) the remarks.
+  function reportBody(text) {
+    var out = [];
+    var toks = String(text || '').split(/\s+/);
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i].replace(/=+$/, '');
+      if (t === 'RMK') break;
+      if (t) out.push(t);
+    }
+    return out;
+  }
+
+  // The first visibility group, in statute miles: 'P6SM' (6), 'M1/4SM' (just
+  // under 1/4), '3/4SM', mixed '1 1/2SM', a 4-digit metric group (metres;
+  // 9999 is 10 km or more), CAVOK (10 km or more). '////SM' is null.
+  function visibilitySm(tokens) {
+    for (var i = 0; i < tokens.length; i++) {
+      var t = tokens[i], m;
+      if (t === 'CAVOK') return 9999 / METRES_PER_SM;
+      if (/^\d{4}$/.test(t)) return Number(t) / METRES_PER_SM;
+      if (/^\/+SM$/.test(t)) return null;
+      m = /^([PM])?(?:(\d+)|(\d+)\/(\d+))SM$/.exec(t);
+      if (!m) continue;
+      var v = m[2] !== undefined ? Number(m[2]) : Number(m[3]) / Number(m[4]);
+      if (m[2] === undefined && i > 0 && /^\d$/.test(tokens[i - 1])) v += Number(tokens[i - 1]);
+      return m[1] === 'M' ? v - 0.01 : v;
+    }
+    return null;
+  }
+
+  // The lowest BKN/OVC/VV height in ft; Infinity when there are sky groups
+  // (or CAVOK) but no ceiling; null when there is no sky group or a ceiling
+  // layer's height is '///'.
+  function ceilingFt(tokens) {
+    var sky = false, ceil = Infinity;
+    for (var i = 0; i < tokens.length; i++) {
+      var t = tokens[i];
+      if (/^(CLR|SKC|NSC|NCD|CAVOK)$/.test(t)) { sky = true; continue; }
+      var m = /^(FEW|SCT|BKN|OVC|VV)(\d{3}|\/\/\/)(CB|TCU|\/\/\/)?$/.exec(t);
+      if (!m) continue;
+      sky = true;
+      if (m[1] === 'FEW' || m[1] === 'SCT') continue;
+      if (m[2] === '///') return null;
+      ceil = Math.min(ceil, Number(m[2]) * 100);
+    }
+    return sky ? ceil : null;
+  }
+
+  function flightCategory(visSm, ceilFt) {
+    if (visSm === null || visSm === undefined || ceilFt === null || ceilFt === undefined) return 'unknown';
+    if (ceilFt < 500 || visSm < 1) return 'LIFR';
+    if (ceilFt < 1000 || visSm < 3) return 'IFR';
+    if (ceilFt <= 3000 || visSm <= 5) return 'MVFR';
+    return 'VFR';
+  }
+
+  // The first wind group (knots): dddssKT, dddssGggKT, VRBssKT, 00000KT.
+  function windGroup(tokens) {
+    for (var i = 0; i < tokens.length; i++) {
+      var m = /^(\d{3}|VRB)(\d{2,3})(?:G(\d{2,3}))?KT$/.exec(tokens[i]);
+      if (!m) continue;
+      var kt = Number(m[2]);
+      var variable = m[1] === 'VRB', calm = !variable && Number(m[1]) === 0 && kt === 0;
+      return {
+        dir: variable || calm ? null : Number(m[1]), kt: kt,
+        gust: m[3] !== undefined ? Number(m[3]) : null, calm: calm, variable: variable
+      };
+    }
+    return null;
+  }
+
+  function weatherSummary(station, groups) {
+    var vis = visibilitySm(groups), ceil = ceilingFt(groups);
+    return { station: station, category: flightCategory(vis, ceil), visSm: vis, ceilFt: ceil, wind: windGroup(groups) };
+  }
+
+  // A METAR or SPECI: its groups are searched only after the ddhhmmZ token.
+  function parseMetar(text) {
+    var toks = reportBody(text);
+    if (toks[0] !== 'METAR' && toks[0] !== 'SPECI') return null;
+    var i = 1;
+    if (toks[i] === 'COR') i++;
+    var station = toks[i] || null;
+    var t = i + 1;
+    while (t < toks.length && !/^\d{6}Z$/.test(toks[t])) t++;
+    return weatherSummary(station, t < toks.length ? toks.slice(t + 1) : toks.slice(i + 1));
+  }
+
+  var TAF_HEAD = /^(TAF|TAF\.AMD|AMD|COR)$/;
+  var TAF_CHANGE = /^(FM\d{6}|TEMPO|BECMG|PROB\d\d)$/;
+  function tafStart(toks) {
+    var i = 0;
+    while (i < toks.length && TAF_HEAD.test(toks[i])) i++;
+    return i;
+  }
+
+  // A TAF's first group: the tokens after the valid period (dddd/dddd), up
+  // to the first change group.
+  function tafFirstGroup(text) {
+    var toks = reportBody(text);
+    var i = tafStart(toks) + 1;
+    if (i < toks.length && /^\d{6}Z$/.test(toks[i])) i++;
+    if (!(i < toks.length && /^\d{4}\/\d{4}$/.test(toks[i]))) return [];
+    var out = [];
+    for (i++; i < toks.length && !TAF_CHANGE.test(toks[i]); i++) out.push(toks[i]);
+    return out;
+  }
+
+  function parseTafFirst(text) {
+    var toks = reportBody(text);
+    return weatherSummary(toks[tafStart(toks)] || null, tafFirstGroup(text));
+  }
+
+  // The daemon's winds-aloft record: 'WINDS <stn> <ddhhmm>Z FT <level>...'
+  // then a line of values matched to the levels by order. Values: 'ddss',
+  // 'ddss+tt' / 'ddss-tt', or 'ddsstt' (sign implied negative); '9900' is
+  // light and variable; a direction code of 51..86 means speed >= 100 kt.
+  var WINDS_LEVELS_FT = [3000, 6000, 9000, 12000, 18000, 24000, 30000, 34000, 39000];
+  function parseWinds(text) {
+    var lines = String(text || '').split('\n');
+    var head = lines[0].trim().split(/\s+/);
+    var vals = lines.slice(1).join(' ').trim().split(/\s+/).filter(Boolean);
+    var tm = /^(\d{6})Z$/.exec(head[2] || '');
+    if (head[0] !== 'WINDS' || !head[1] || !tm || head[3] !== 'FT') return null;
+    var fts = head.slice(4);
+    if (!fts.length || fts.length !== vals.length) return null;
+    var levels = [];
+    for (var i = 0; i < fts.length; i++) {
+      var m = /^(\d{2})(\d{2})([+-]\d{2}|\d{2})?$/.exec(vals[i]);
+      if (!/^\d+$/.test(fts[i]) || !m) return null;
+      var d = Number(m[1]), s = Number(m[2]);
+      var temp = m[3] === undefined ? null : (/^[+-]/.test(m[3]) ? Number(m[3]) : -Number(m[3]));
+      var lv = d === 99 && s === 0;
+      if (!lv && d >= 51) { d -= 50; s += 100; }
+      levels.push({ ft: Number(fts[i]), dir: lv ? null : d * 10, kt: lv ? 0 : s, temp: temp, lv: lv });
+    }
+    return { station: head[1], valid: tm[1], levels: levels };
+  }
+
+  function windsLevel(parsed, ft) {
+    if (!parsed) return null;
+    for (var i = 0; i < parsed.levels.length; i++) if (parsed.levels[i].ft === ft) return parsed.levels[i];
+    return null;
+  }
+
+  // records [{period_h, valid (ISO)}]: the period_h whose valid time is
+  // nearest nowMs (the first on a tie).
+  function nearestWindsPeriod(records, nowMs) {
+    var best = null, bestD = Infinity;
+    (records || []).forEach(function (r) {
+      var d = Math.abs(Date.parse(r.valid) - nowMs);
+      if (d < bestD) { bestD = d; best = r.period_h; }
+    });
+    return best;
+  }
+
+  // A PIREP: its station, UUA (urgent) or UA, and the /OV group when it is a
+  // location id optionally followed by rrrddd (radial, nm); routes and
+  // free-text positions ('SJX-GRB', '4 W CVG') give ov null.
+  function parsePirep(text) {
+    var s = String(text || '');
+    var toks = s.split(/\s+/).filter(Boolean);
+    var station = (toks[0] === 'PIREP' ? toks[1] : toks[0]) || null;
+    var headToks = s.split('/')[0].split(/\s+/);
+    var ov = null;
+    var g = /\/OV([^/]*)/.exec(s);
+    var m = g && /^([A-Z0-9]{3,4})(?:\s?(\d{3})(\d{3}))?$/.exec(g[1].trim());
+    if (m) {
+      ov = { id: m[1], radial: m[2] !== undefined ? Number(m[2]) : null, nm: m[3] !== undefined ? Number(m[3]) : null };
+    }
+    return { station: station, urgent: headToks.indexOf('UUA') >= 0, ov: ov };
+  }
+
+  // Station resolution (spec §3.2), first hit wins: METAR/TAF ids verbatim;
+  // winds ids and 3-character PIREP /OV ids as K, P, C + id, then verbatim.
+  var WINDS_PREFIXES = ['K', 'P', 'C'];
+  function stationCandidates(kind, id) {
+    var prefixed = kind === 'winds' || (kind === 'pirep' && String(id).length === 3);
+    if (!prefixed) return [id];
+    return WINDS_PREFIXES.map(function (p) { return p + id; }).concat([id]);
+  }
+
+  function resolveStation(kind, id, index) {
+    var c = stationCandidates(kind, id);
+    for (var i = 0; i < c.length; i++) {
+      if (index && Object.prototype.hasOwnProperty.call(index, c[i])) return index[c[i]];
+    }
+    return null;
+  }
+
+  // The point nm along a great circle from lat/lon on the initial bearing,
+  // on the same sphere as rangeNm.
+  function destinationPoint(lat, lon, brgDeg, nm) {
+    var d = nm * METRES_PER_NM / EARTH_RADIUS_M, b = brgDeg * DEG, p1 = lat * DEG, l1 = lon * DEG;
+    var sp2 = Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b);
+    var p2 = Math.asin(Math.max(-1, Math.min(1, sp2)));
+    var l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * sp2);
+    var lonOut = ((l2 / DEG + 540) % 360) - 180;
+    return [p2 / DEG, lonOut];
+  }
+
+  function pirepPosition(parsed, index) {
+    if (!parsed || !parsed.ov) return null;
+    var pos = resolveStation('pirep', parsed.ov.id, index);
+    if (!pos) return null;
+    if (parsed.ov.radial === null || parsed.ov.nm === null) return pos;
+    return destinationPoint(pos[0], pos[1], parsed.ov.radial, parsed.ov.nm);
+  }
+
+  // A wind barb's parts: speed rounded to the nearest 5 kt, then 50 kt
+  // pennants, 10 kt full barbs and a 5 kt half barb; calm when it rounds to 0.
+  function barbParts(kt) {
+    var r = Math.round(kt / 5) * 5;
+    if (!(r > 0)) return { calm: true, pennants: 0, full: 0, half: 0 };
+    var pennants = Math.floor(r / 50), rem = r - pennants * 50;
+    return { calm: false, pennants: pennants, full: Math.floor(rem / 10), half: rem % 10 ? 1 : 0 };
+  }
+
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
@@ -584,7 +810,14 @@
     INPUT_TYPES: INPUT_TYPES, validateInputDef: validateInputDef, inputFields: inputFields, inputDot: inputDot,
     inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, rejectedText: rejectedText,
     inputsSummary: inputsSummary,
-    gpsStatusText: gpsStatusText, receiverStatusText: receiverStatusText
+    gpsStatusText: gpsStatusText, receiverStatusText: receiverStatusText,
+    FLIGHT_CATEGORIES: FLIGHT_CATEGORIES, reportBody: reportBody, visibilitySm: visibilitySm,
+    ceilingFt: ceilingFt, flightCategory: flightCategory, windGroup: windGroup, parseMetar: parseMetar,
+    tafFirstGroup: tafFirstGroup, parseTafFirst: parseTafFirst,
+    WINDS_LEVELS_FT: WINDS_LEVELS_FT, parseWinds: parseWinds, windsLevel: windsLevel,
+    nearestWindsPeriod: nearestWindsPeriod, parsePirep: parsePirep,
+    WINDS_PREFIXES: WINDS_PREFIXES, stationCandidates: stationCandidates, resolveStation: resolveStation,
+    destinationPoint: destinationPoint, pirepPosition: pirepPosition, barbParts: barbParts
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

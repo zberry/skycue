@@ -3,6 +3,7 @@
 // test framework. usage: node app_pure.test.js [path/to/app_pure.js]
 // The geometry values are the ones tests/test_geo.cpp checks geo.cpp with:
 // the page's copy of elevationDeg must agree with skycued's.
+const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
@@ -621,6 +622,169 @@ test('gpsStatusText and receiverStatusText: the ICD codes, else the number', () 
   assert.strictEqual(P.gpsStatusText(7), '7');
   assert.deepStrictEqual([0, 1, 2].map(P.receiverStatusText), ['normal', 'comm errors', 'not transmitting']);
   assert.strictEqual(P.receiverStatusText(5), '5');
+});
+
+const FIX = {
+ "metar:K2G4": "METAR K2G4 300855Z AUTO 35005KT 1/2SM OVC001 03/03 A2972 RMK AO1=",
+ "metar:K0A9": "METAR K0A9 300835Z AUTO VRB05G13KT 1 1/2SM BR FEW004 BKN011 OVC024 11/10\n     A2986 RMK AO2=",
+ "metar:KTVK": "METAR KTVK 300835Z AUTO 00000KT 10SM CLR M03/M03 A3022 RMK AO2=",
+ "metar:KPVE": "METAR KPVE 300835Z AUTO 33009KT 280V360 10SM OVC020 08/06 A3012 RMK\n     A01=",
+ "metar:KFKL": "SPECI KFKL 300814Z AUTO 02004KT 10SM OVC008 05/04 A2982 RMK AO2 CIG\n     007V011=",
+ "metar:K6L4": "METAR K6L4 300835Z AUTO 2SM BR BKN006 OVC010 08/08 A2986 RMK AO2=",
+ "metar:KCVG": "METAR KCVG 300852Z 33011KT 10SM OVC019 07/04 A3001 RMK AO2 SLP161\n     T00670039 51022=",
+ "metar:KDAY": "SPECI KDAY 300833Z 35009KT 10SM FEW009 BKN014 OVC020 06/06 A3000 RMK AO2\n     RAE23 CIG 010 RWY 6L P0001 T00610056 $=",
+ "metar:KCEY": "METAR KCEY 300835Z AUTO 29004KT 10SM 04/03 A3014 RMK AO1=",
+ "metar:KUKF": "METAR KUKF 300835Z AUTO 31012G19KT 10SM CLR 15/08 A2974 RMK AO2=",
+ "metar:KM08": "METAR KM08 300835Z AUTO VRB04KT 10SM OVC019 08/05 A3014 RMK A01=",
+ "metar:KPRG": "METAR KPRG 300815Z 10SM CLR 02/00 A3014 RMK AO2 T00201005=",
+ "taf:KCVG": "TAF.AMD KCVG 300857Z 3009/3112 33012KT P6SM OVC025\n      TEMPO 3009/3010 OVC019\n     FM301400 33011KT P6SM OVC035\n     FM310000 02004KT P6SM SCT250=",
+ "taf:KHOP": "TAF KHOP 300800Z 3008/3114 33006KT 9999 SCT020 510063 QNH3007INS\n     BECMG 3010/3011 32006KT 9000 BR BKN007 OVC014 QNH3015INS\n     BECMG 3015/3016 34009KT 9999 NSW SKC QNH3022INS TX10/3020Z\n     TN03/3011Z=",
+ "taf:KLOZ": "TAF KLOZ 300524Z 3006/3106 33008G15KT 6SM -DZ BR OVC008\n      TEMPO 3006/3010 P6SM NSW OVC015\n     FM301600 33007KT P6SM BKN015\n     FM302100 VRB04KT P6SM SCT030=",
+ "winds:TUL:12": "WINDS TUL 301800Z  FT 3000 6000      9000   12000       18000   24000   30000    34000  39000\n   2808 9900+08 3509+05 2818+02 2835-10 2746-22 274738 274548 275656",
+ "winds:ACK:6": "WINDS ACK 301200Z  FT 3000 6000      9000   12000       18000   24000   30000    34000  39000\n   0544 0817+00 2634+04 2535-01 2392-12 7327-21 724633 735141 735851",
+ "winds:FWA:12": "WINDS FWA 301800Z  FT 3000 6000      9000   12000       18000   24000   30000    34000  39000\n   3309 3224-07 3134-05 3041-11 3186-13 3094-24 309638 800348 800057",
+ "winds:GLD:6": "WINDS GLD 301200Z  FT      6000      9000   12000       18000   24000   30000    34000  39000\n        3107    3114+05 3117+00 2737-12 2648-25 275439 275547 274855",
+ "metar:KMER": "METAR KMER 240355Z AUTO 10005KT 1 3/4SM OVC002 08/08 A3031 RMK AO1=",
+ "taf:KBAB": "TAF KBAB 2403/2509 VRB06KT 9999 SKC QNH3022INS\n     BECMG 2405/2406 VRB06KT 4800 BR SCT010 QNH3018INS\n     BECMG 2410/2411 VRB06KT 0800 FG VV001 QNH3030INS\n     BECMG 2418/2419 VRB06KT 4800 BR SCT010 QNH3037INS\n     BECMG 2421/2422 33009KT 9999 NSW SKC QNH3028INS TX19/2421Z\n     TN06/2413Z=",
+ "taf:KSTS": "TAF KSTS 232339Z 2400/2424 00000KT P6SM SKC\n     FM240700 00000KT 1/4SM FG VV002\n     FM241700 35003KT P6SM FEW002=",
+ "winds:BCE:24": "WINDS BCE 250000Z  FT                       12000       18000   24000   30000    34000  39000\n                        3522+00 3631-13 0141-27 035046 046656 365258",
+ "winds:RKS:24": "WINDS RKS 250000Z  FT                9000   12000       18000   24000   30000    34000  39000\n                3233    3221-05 3349-15 3461-28 356446 018956 335960",
+ "metar:KJXN": "METAR KJXN 062056Z 24006KT 10SM CLR 30/19 A3009 RMK AO2 SLP182 6////\n    T03000189 58013="
+};
+
+const M = (k) => P.parseMetar(FIX[k]);
+test('metar_categories_from_fixture_text', () => {
+  const want = { 'metar:K2G4': 'LIFR', 'metar:K0A9': 'IFR', 'metar:KMER': 'LIFR', 'metar:KTVK': 'VFR', 'metar:KPVE': 'MVFR',
+    'metar:KFKL': 'IFR', 'metar:K6L4': 'IFR', 'metar:KCVG': 'MVFR', 'metar:KDAY': 'MVFR' };
+  for (const k of Object.keys(want)) assert.strictEqual(M(k).category, want[k], k);
+  assert.strictEqual(M('metar:K0A9').visSm, 1.5); assert.strictEqual(M('metar:K0A9').ceilFt, 1100);
+  assert.strictEqual(M('metar:KDAY').ceilFt, 1400);   // FEW009 is not a ceiling
+  assert.strictEqual(M('metar:K2G4').station, 'K2G4');
+});
+test('metar_no_sky_group_is_unknown', () => {
+  assert.strictEqual(M('metar:KCEY').ceilFt, null); assert.strictEqual(M('metar:KCEY').category, 'unknown');
+});
+test('metar_remarks_ignored', () => { assert.strictEqual(M('metar:KJXN').category, 'VFR'); });
+test('metar_wind_forms', () => {
+  assert.deepStrictEqual(M('metar:KTVK').wind, { dir: null, kt: 0, gust: null, calm: true, variable: false });
+  assert.deepStrictEqual(M('metar:KUKF').wind, { dir: 310, kt: 12, gust: 19, calm: false, variable: false });
+  assert.deepStrictEqual(M('metar:KM08').wind, { dir: null, kt: 4, gust: null, calm: false, variable: true });
+  assert.deepStrictEqual(M('metar:KCVG').wind, { dir: 330, kt: 11, gust: null, calm: false, variable: false });
+  assert.strictEqual(M('metar:KPRG').wind, null); assert.strictEqual(M('metar:KPRG').category, 'VFR');
+});
+test('flight_category_threshold_edges', () => {
+  const F = P.flightCategory;
+  assert.strictEqual(F(10, 499), 'LIFR'); assert.strictEqual(F(10, 500), 'IFR');
+  assert.strictEqual(F(10, 999), 'IFR');  assert.strictEqual(F(10, 1000), 'MVFR');
+  assert.strictEqual(F(10, 3000), 'MVFR'); assert.strictEqual(F(10, 3100), 'VFR');
+  assert.strictEqual(F(0.75, Infinity), 'LIFR'); assert.strictEqual(F(1, Infinity), 'IFR');
+  assert.strictEqual(F(2.75, Infinity), 'IFR'); assert.strictEqual(F(3, Infinity), 'MVFR');
+  assert.strictEqual(F(5, Infinity), 'MVFR'); assert.strictEqual(F(6, Infinity), 'VFR');
+  assert.strictEqual(F(6, 800), 'IFR');
+  assert.strictEqual(F(null, Infinity), 'unknown'); assert.strictEqual(F(10, null), 'unknown');
+});
+test('visibility_forms', () => {   // synthetic token lists
+  const V = (s) => P.visibilitySm(s.split(' '));
+  assert.strictEqual(V('P6SM'), 6); assert.ok(V('M1/4SM') < 0.25); assert.strictEqual(V('1 1/2SM'), 1.5);
+  assert.strictEqual(V('3/4SM'), 0.75); assert.ok(V('9999') > 5); assert.ok(Math.abs(V('4800') - 4800 / 1609.344) < 1e-9);
+  assert.ok(Math.abs(V('0800') - 800 / 1609.344) < 1e-9); assert.strictEqual(V('////SM'), null);
+  assert.strictEqual(P.ceilingFt(['CAVOK']), Infinity); assert.ok(P.visibilitySm(['CAVOK']) > 5);
+  assert.strictEqual(P.ceilingFt(['BKN///']), null); assert.strictEqual(P.ceilingFt(['VV002']), 200);
+});
+test('taf_first_group_categories', () => {
+  const T = (k) => P.parseTafFirst(FIX[k]);
+  assert.strictEqual(T('taf:KCVG').station, 'KCVG'); assert.strictEqual(T('taf:KCVG').category, 'MVFR');
+  assert.strictEqual(T('taf:KCVG').wind.dir, 330);
+  assert.strictEqual(T('taf:KBAB').station, 'KBAB'); assert.strictEqual(T('taf:KBAB').category, 'VFR');   // no issue time; 9999
+  assert.strictEqual(T('taf:KHOP').category, 'VFR');   // 9999 SCT020; later BECMG ignored
+  assert.strictEqual(T('taf:KSTS').category, 'VFR');   // FM240700 1/4SM VV002 not in the first group
+  assert.strictEqual(T('taf:KLOZ').category, 'IFR');   // OVC008
+  // synthetic first groups built from the KBAB BECMG groups (metric visibility)
+  assert.strictEqual(P.parseTafFirst('TAF KBAB 2405/2406 VRB06KT 4800 BR SCT010 QNH3018INS=').category, 'IFR');
+  assert.strictEqual(P.parseTafFirst('TAF KBAB 2410/2411 VRB06KT 0800 FG VV001 QNH3030INS=').category, 'LIFR');
+});
+const W = (k) => P.parseWinds(FIX[k]);
+test('winds_record_tul', () => {
+  const w = W('winds:TUL:12');
+  assert.strictEqual(w.station, 'TUL'); assert.strictEqual(w.valid, '301800');
+  assert.deepStrictEqual(w.levels.map((l) => l.ft), P.WINDS_LEVELS_FT);
+  assert.deepStrictEqual(P.windsLevel(w, 3000), { ft: 3000, dir: 280, kt: 8, temp: null, lv: false });
+  assert.deepStrictEqual(P.windsLevel(w, 6000), { ft: 6000, dir: null, kt: 0, temp: 8, lv: true });
+  assert.deepStrictEqual(P.windsLevel(w, 30000), { ft: 30000, dir: 270, kt: 47, temp: -38, lv: false });
+  assert.deepStrictEqual(P.windsLevel(w, 39000), { ft: 39000, dir: 270, kt: 56, temp: -56, lv: false });
+});
+test('winds_100kt_encodings', () => {
+  const ack = W('winds:ACK:6');
+  assert.deepStrictEqual(P.windsLevel(ack, 18000), { ft: 18000, dir: 230, kt: 92, temp: -12, lv: false });
+  assert.deepStrictEqual(P.windsLevel(ack, 24000), { ft: 24000, dir: 230, kt: 127, temp: -21, lv: false });
+  assert.deepStrictEqual(P.windsLevel(ack, 30000), { ft: 30000, dir: 220, kt: 146, temp: -33, lv: false });
+  assert.deepStrictEqual(P.windsLevel(W('winds:FWA:12'), 39000), { ft: 39000, dir: 300, kt: 100, temp: -57, lv: false });
+  const lv = P.parseWinds('WINDS XYZ 301800Z  FT 39000\n   990042');   // synthetic
+  assert.deepStrictEqual(P.windsLevel(lv, 39000), { ft: 39000, dir: null, kt: 0, temp: -42, lv: true });
+});
+test('winds_records_starting_above_3000', () => {
+  const gld = W('winds:GLD:6');
+  assert.strictEqual(gld.levels.length, 8); assert.strictEqual(P.windsLevel(gld, 3000), null);
+  assert.deepStrictEqual(P.windsLevel(gld, 6000), { ft: 6000, dir: 310, kt: 7, temp: null, lv: false });
+  const bce = W('winds:BCE:24');
+  assert.strictEqual(bce.levels[0].ft, 12000);
+  assert.deepStrictEqual(P.windsLevel(bce, 12000), { ft: 12000, dir: 350, kt: 22, temp: 0, lv: false });
+  assert.deepStrictEqual(P.windsLevel(bce, 39000), { ft: 39000, dir: 360, kt: 52, temp: -58, lv: false });
+  assert.deepStrictEqual(P.windsLevel(W('winds:RKS:24'), 9000), { ft: 9000, dir: 320, kt: 33, temp: null, lv: false });
+});
+test('winds_column_count_mismatch_is_null', () => {
+  assert.strictEqual(P.parseWinds(FIX['winds:TUL:12'].replace(' 275656', '')), null);
+  assert.strictEqual(P.parseWinds(FIX['winds:TUL:12'].replace('2808', '28X8')), null);
+});
+test('nearest_winds_period', () => {
+  const recs = [{ period_h: 6, valid: '2020-10-30T12:00:00.000Z' }, { period_h: 12, valid: '2020-10-30T18:00:00.000Z' },
+    { period_h: 24, valid: '2020-10-31T06:00:00.000Z' }];
+  assert.strictEqual(P.nearestWindsPeriod(recs, Date.parse('2020-10-30T09:00:17Z')), 6);
+  assert.strictEqual(P.nearestWindsPeriod(recs, Date.parse('2020-10-30T16:00:00Z')), 12);
+  assert.strictEqual(P.nearestWindsPeriod([], 0), null);
+});
+test('pirep_ov_forms_from_fixture', () => {
+  const lines = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'fisb', 'pireps.txt'), 'utf8')
+    .split('\n').filter((l) => l && l[0] !== '#');
+  assert.strictEqual(lines.length, 19);
+  const parsed = lines.map(P.parsePirep);
+  assert.ok(parsed.every((p) => p && p.urgent === false));
+  assert.strictEqual(parsed.filter((p) => p.ov).length, 17);
+  assert.deepStrictEqual(parsed[0], { station: 'ROD', urgent: false, ov: { id: 'ROD', radial: 40, nm: 30 } });
+  const by = (s) => P.parsePirep(lines.find((l) => l.indexOf(s) >= 0));
+  assert.deepStrictEqual(by('/OV DKK062005').ov, { id: 'DKK', radial: 62, nm: 5 });
+  assert.deepStrictEqual(by('/OV YXU 315020').ov, { id: 'YXU', radial: 315, nm: 20 });
+  assert.deepStrictEqual(by('/OV KCWA/').ov, { id: 'KCWA', radial: null, nm: null });
+  assert.strictEqual(by('/OV SJX-GRB').ov, null);
+  assert.strictEqual(by('/OV 4 W CVG').ov, null);
+  assert.strictEqual(P.parsePirep(lines[0].replace(' UA ', ' UUA ')).urgent, true);
+});
+test('station_resolution_rules', () => {   // synthetic index
+  const idx = { KIND: [39.717, -86.294], CYXU: [43.03, -81.15], '2XG': [30.3, -78.5], KMEM: [35.04, -89.98] };
+  assert.deepStrictEqual(P.stationCandidates('winds', 'IND'), ['KIND', 'PIND', 'CIND', 'IND']);
+  assert.deepStrictEqual(P.stationCandidates('metar', 'KIND'), ['KIND']);
+  assert.deepStrictEqual(P.resolveStation('winds', 'IND', idx), [39.717, -86.294]);
+  assert.deepStrictEqual(P.resolveStation('winds', 'ANC', Object.assign({ PANC: [61.174, -149.996] }, idx)), [61.174, -149.996]);
+  assert.deepStrictEqual(P.resolveStation('winds', 'YXU', idx), [43.03, -81.15]);
+  assert.deepStrictEqual(P.resolveStation('winds', '2XG', idx), [30.3, -78.5]);
+  assert.strictEqual(P.resolveStation('metar', 'IND', idx), null);
+  assert.strictEqual(P.resolveStation('taf', 'KXYZ', idx), null);
+  assert.deepStrictEqual(P.pirepPosition({ ov: { id: 'KMEM', radial: null, nm: null } }, idx), [35.04, -89.98]);
+  assert.strictEqual(P.pirepPosition({ ov: null }, idx), null);
+  const d = P.pirepPosition({ ov: { id: 'MEM', radial: 360, nm: 2 } }, idx);
+  between(P.rangeNm(35.04, -89.98, d[0], d[1]), 1.99, 2.01, 'distance'); assert.ok(d[0] > 35.04);
+});
+test('destination_point_geodesic', () => {
+  const p = P.destinationPoint(0, 0, 90, 60);
+  between(p[1], 0.999, 1.001, 'lon'); between(p[0], -1e-9, 1e-9, 'lat');
+  between(P.bearingDeg(39.7, -86.3, ...P.destinationPoint(39.7, -86.3, 40, 30)), 39.9, 40.1, 'bearing');
+});
+test('barb_parts', () => {
+  assert.deepStrictEqual(P.barbParts(0), { calm: true, pennants: 0, full: 0, half: 0 });
+  assert.deepStrictEqual(P.barbParts(2), { calm: true, pennants: 0, full: 0, half: 0 });
+  assert.deepStrictEqual(P.barbParts(16), { calm: false, pennants: 0, full: 1, half: 1 });
+  assert.deepStrictEqual(P.barbParts(65), { calm: false, pennants: 1, full: 1, half: 1 });
+  assert.deepStrictEqual(P.barbParts(127), { calm: false, pennants: 2, full: 2, half: 1 });
 });
 
 console.log(passed + ' passed, ' + failed + ' failed');

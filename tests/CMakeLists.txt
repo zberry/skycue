@@ -399,6 +399,29 @@ else()
   set_tests_properties(static_analysis PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
 endif()
 
+# soak_eval: the soak pass rule (tests/soak/soak_eval.py) on synthetic series.
+add_test(NAME soak_eval
+  COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/soak/soak_eval.py --self-test)
+set_tests_properties(soak_eval PROPERTIES TIMEOUT 60)
+
+# soak_short: tests/soak/soak.sh for 2 minutes. It proves the CSV is written
+# and the rule evaluates; a 2-minute RSS series says nothing about leaks, so
+# its growth limit is 1.0 (the 4-hour run uses the default, docs/hardening.md).
+if(NOT SKYCUE_SOAK_TESTS)
+  skycue_skip_test(soak_short "SKYCUE_SOAK_TESTS is OFF")
+else()
+  add_test(NAME soak_short
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/soak/soak.sh
+      --skycued $<TARGET_FILE:skycued>
+      --pingsim $<TARGET_FILE:skycue-pingsim>
+      --dump $<TARGET_FILE:skycue-dump>
+      --www ${SKYCUE_WWW_STAGE}
+      --fixtures ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+      --minutes 2 --interval 5 --growth 1.0
+      --out ${CMAKE_CURRENT_BINARY_DIR}/soak-short)
+  set_tests_properties(soak_short PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
+endif()
+
 # Instrumented builds (SKYCUE_SANITIZE or SKYCUE_FUZZ): every test gets its
 # timeout and its waits (SKYCUE_TEST_SLOW, tests/test_slow.hpp) scaled by the
 # slow factor. The sanitizer options and suppression files are not set here:

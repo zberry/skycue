@@ -5,7 +5,8 @@
 namespace skycued {
 namespace asterix {
 
-Cat021StreamFramer::Cat021StreamFramer(Edition edition) : edition_(edition) {}
+Cat021StreamFramer::Cat021StreamFramer(Edition edition, bool accept_other_categories)
+    : edition_(edition), accept_other_categories_(accept_other_categories) {}
 
 void Cat021StreamFramer::reset() {
   buf_.clear();
@@ -72,7 +73,8 @@ void Cat021StreamFramer::feed(const uint8_t* data, std::size_t size,
       continue;
     }
 
-    if (in_sync_ && cat != 0 && len >= 3 && len <= kMaxOtherCategoryLen) {
+    if (accept_other_categories_ && in_sync_ && cat != 0 && len >= 3 &&
+        len <= kMaxOtherCategoryLen) {
       ++other_category_blocks_;
       const std::size_t take = std::min(len, avail);
       pos += take;

@@ -689,7 +689,7 @@ BOOST_AUTO_TEST_CASE(framer_skips_other_category_in_sync) {
   const Bytes a = encodeBlock({icdRecord()});
   const Bytes cat48 = hex("30 00 06 01 02 03");
   const Bytes stream = join({a, cat48, a});
-  Cat021StreamFramer f(Edition::e2_6);
+  Cat021StreamFramer f(Edition::e2_6, true);
   std::vector<Bytes> out;
   // Split inside the CAT 48 block so the skip spans two feeds.
   f.feed(stream.data(), a.size() + 4, out);
@@ -698,6 +698,22 @@ BOOST_AUTO_TEST_CASE(framer_skips_other_category_in_sync) {
   BOOST_CHECK_EQUAL(f.otherCategoryBlocks(), 1u);
   BOOST_CHECK_EQUAL(f.droppedRuns(), 0u);
   BOOST_CHECK_EQUAL(f.droppedBytes(), 0u);
+}
+
+// By default (a CAT 21-only feed) another CAT is garbage: its 6 bytes are
+// dropped one at a time in one run, and both CAT 21 blocks still come out.
+BOOST_AUTO_TEST_CASE(framer_default_drops_other_category) {
+  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes stream = join({a, hex("30 00 06 01 02 03"), a});
+  Cat021StreamFramer f(Edition::e2_6);
+  std::vector<Bytes> out;
+  f.feed(stream.data(), stream.size(), out);
+  BOOST_CHECK_EQUAL(out.size(), 2u);
+  BOOST_CHECK_EQUAL(f.otherCategoryBlocks(), 0u);
+  BOOST_CHECK_EQUAL(f.skippedBytes(), 0u);
+  BOOST_CHECK_EQUAL(f.droppedRuns(), 1u);
+  BOOST_CHECK_EQUAL(f.droppedBytes(), 6u);
+  BOOST_CHECK(f.inSync());
 }
 
 // A, then a CAT 21 block whose only record has an empty FSPEC, then B. In sync
@@ -723,8 +739,6 @@ BOOST_AUTO_TEST_CASE(framer_passed_blocks_always_decode) {
   auto pick = [&rng](uint32_t n) { return static_cast<uint32_t>(rng() % n); };
   Bytes stream;
   std::vector<Bytes> good;
-  std::vector<bool> good_after_garbage;
-  bool after_garbage = false;
   for (int i = 0; i < 2000; ++i) {
     Cat021Record r = icdRecord();
     r.address = pick(0x1000000);
@@ -735,75 +749,83 @@ BOOST_AUTO_TEST_CASE(framer_passed_blocks_always_decode) {
       case 0: {  // garbage run
         const uint32_t n = 1 + pick(24);
         for (uint32_t k = 0; k < n; ++k) stream.push_back(static_cast<uint8_t>(pick(256)));
-        after_garbage = true;
         break;
       }
       case 1:  // a block cut short (a sender that died mid-write)
         if (pick(2)) {
           const std::size_t cut = 1 + pick(static_cast<uint32_t>(blk.size() - 1));
           stream.insert(stream.end(), blk.begin(), blk.begin() + static_cast<std::ptrdiff_t>(cut));
-          after_garbage = true;
-          break;
+            break;
         }
         // or a corrupted block (one byte past the header changed)
         blk[3 + pick(static_cast<uint32_t>(blk.size() - 3))] ^= static_cast<uint8_t>(1 + pick(255));
         stream.insert(stream.end(), blk.begin(), blk.end());
-        after_garbage = false;
         break;
       default:
         stream.insert(stream.end(), blk.begin(), blk.end());
         good.push_back(blk);
-        good_after_garbage.push_back(after_garbage);
-        after_garbage = false;
         break;
     }
   }
-  Cat021StreamFramer f(Edition::e2_6);
-  std::vector<Bytes> out;
-  std::size_t off = 0;
-  while (off < stream.size()) {
-    const std::size_t n = std::min<std::size_t>(1 + pick(97), stream.size() - off);
-    f.feed(stream.data() + off, n, out);
-    off += n;
-  }
-  // Match the good blocks, in stream order, against what came out.
-  std::size_t next = 0, lost = 0, lost_bytes = 0, false_bytes = 0;
-  for (std::size_t g = 0; g < good.size(); ++g) {
-    std::size_t k = next;
-    while (k < out.size() && out[k] != good[g]) ++k;
-    if (k < out.size()) {
-      for (std::size_t u = next; u < k; ++u) false_bytes += out[u].size();
-      next = k + 1;
-    } else {
-      ++lost;
-      lost_bytes += good[g].size();
+  std::vector<std::size_t> lost_by_setting;
+  for (bool accept_other : {false, true}) {
+  BOOST_TEST_CONTEXT("accept_other_categories " << accept_other) {
+    Cat021StreamFramer f(Edition::e2_6, accept_other);
+    std::vector<Bytes> out;
+    std::mt19937 chunks(97);  // the same chunking for both settings
+    std::size_t off = 0;
+    while (off < stream.size()) {
+      const std::size_t n = std::min<std::size_t>(1 + chunks() % 97, stream.size() - off);
+      f.feed(stream.data() + off, n, out);
+      off += n;
+    }
+    // Match the good blocks, in stream order, against what came out.
+    std::size_t next = 0, lost = 0, lost_bytes = 0, false_bytes = 0;
+    for (std::size_t g = 0; g < good.size(); ++g) {
+      std::size_t k = next;
+      while (k < out.size() && out[k] != good[g]) ++k;
+      if (k < out.size()) {
+        for (std::size_t u = next; u < k; ++u) false_bytes += out[u].size();
+        next = k + 1;
+      } else {
+        ++lost;
+        lost_bytes += good[g].size();
+      }
+    }
+    for (std::size_t u = next; u < out.size(); ++u) false_bytes += out[u].size();
+    BOOST_TEST_MESSAGE("accept_other " << accept_other << ": good " << good.size() << " out " << out.size() << " lost " << lost
+                               << " runs " << f.droppedRuns() << " dropped " << f.droppedBytes()
+                               << " other " << f.otherCategoryBlocks() << " skipped " << f.skippedBytes()
+                               << " false_bytes "
+                               << false_bytes);
+    // Where the bytes of lost good blocks went. Only three things consume input:
+    // a counted dropped byte, a counted in-sync other-category skip, and an
+    // emitted block. A lost block's bytes that were emitted belong to emitted
+    // blocks that are not good blocks (damage that happened to walk cleanly).
+    // So this is exact accounting, not a tolerance: nothing else may lose data.
+    BOOST_CHECK_LE(lost_bytes, f.droppedBytes() + f.skippedBytes() + false_bytes);
+    // And every input byte is accounted for (the rest is the buffered tail).
+    std::size_t out_bytes = 0;
+    for (const Bytes& b : out) out_bytes += b.size();
+    BOOST_CHECK_LE(out_bytes + f.droppedBytes() + f.skippedBytes(), stream.size());
+    BOOST_CHECK_LT(stream.size() - (out_bytes + f.droppedBytes() + f.skippedBytes()), 65536u);
+    // Corrupted or cut blocks that still walk cleanly are passed (they decode).
+    BOOST_CHECK_GT(false_bytes, 0u);
+    lost_by_setting.push_back(lost);
+    if (!accept_other) {
+      BOOST_CHECK_EQUAL(f.otherCategoryBlocks(), 0u);
+      BOOST_CHECK_EQUAL(f.skippedBytes(), 0u);
+    }
+    BOOST_CHECK_GT(f.droppedRuns(), 0u);
+    for (const Bytes& b : out) {
+      const DecodedBlock d = decode(b);
+      BOOST_CHECK(!d.error);
+      BOOST_CHECK(!d.records.empty());
     }
   }
-  for (std::size_t u = next; u < out.size(); ++u) false_bytes += out[u].size();
-  BOOST_TEST_MESSAGE("good " << good.size() << " out " << out.size() << " lost " << lost
-                             << " runs " << f.droppedRuns() << " dropped " << f.droppedBytes()
-                             << " other " << f.otherCategoryBlocks() << " skipped " << f.skippedBytes()
-                             << " false_bytes "
-                             << false_bytes);
-  // Where the bytes of lost good blocks went. Only three things consume input:
-  // a counted dropped byte, a counted in-sync other-category skip, and an
-  // emitted block. A lost block's bytes that were emitted belong to emitted
-  // blocks that are not good blocks (damage that happened to walk cleanly).
-  // So this is exact accounting, not a tolerance: nothing else may lose data.
-  BOOST_CHECK_LE(lost_bytes, f.droppedBytes() + f.skippedBytes() + false_bytes);
-  // And every input byte is accounted for (the rest is the buffered tail).
-  std::size_t out_bytes = 0;
-  for (const Bytes& b : out) out_bytes += b.size();
-  BOOST_CHECK_LE(out_bytes + f.droppedBytes() + f.skippedBytes(), stream.size());
-  BOOST_CHECK_LT(stream.size() - (out_bytes + f.droppedBytes() + f.skippedBytes()), 65536u);
-  // Corrupted or cut blocks that still walk cleanly are passed (they decode).
-  BOOST_CHECK_GT(false_bytes, 0u);
-  BOOST_CHECK_GT(f.droppedRuns(), 0u);
-  for (const Bytes& b : out) {
-    const DecodedBlock d = decode(b);
-    BOOST_CHECK(!d.error);
-    BOOST_CHECK(!d.records.empty());
   }
+  // A CAT 21-only feed loses far fewer good blocks when other CATs are garbage.
+  BOOST_CHECK_LT(lost_by_setting[0] * 3, lost_by_setting[1]);
 }
 
 
@@ -900,14 +922,15 @@ BOOST_AUTO_TEST_CASE(framer_in_sync_bad_prefix_drops_at_once) {
   BOOST_CHECK(f.inSync());
 }
 
-// Other-category blocks are skipped in sync only up to LEN 4096.
+// With accept_other_categories, other-category blocks are skipped in sync only
+// up to LEN 4096.
 BOOST_AUTO_TEST_CASE(framer_other_category_len_limit) {
   const Bytes a = encodeBlock({icdRecord()});
   {
     Bytes cat48 = hex("30 10 00");  // LEN 4096: skipped
     cat48.resize(4096, 0x15);
     const Bytes stream = join({a, cat48, a});
-    Cat021StreamFramer f(Edition::e2_6);
+    Cat021StreamFramer f(Edition::e2_6, true);
     std::vector<Bytes> out;
     f.feed(stream.data(), stream.size(), out);
     BOOST_CHECK_EQUAL(out.size(), 2u);
@@ -918,7 +941,7 @@ BOOST_AUTO_TEST_CASE(framer_other_category_len_limit) {
   {
     // LEN 4097: drop `30` and leave sync; `10 01` are dropped out of sync.
     const Bytes stream = join({a, hex("30 10 01"), a});
-    Cat021StreamFramer f(Edition::e2_6);
+    Cat021StreamFramer f(Edition::e2_6, true);
     std::vector<Bytes> out;
     f.feed(stream.data(), stream.size(), out);
     BOOST_CHECK_EQUAL(out.size(), 2u);

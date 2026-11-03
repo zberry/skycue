@@ -5,6 +5,8 @@
 skycue_add_fuzzer(readsb_line SOURCES fuzz_readsb_line.cpp)
 skycue_add_fuzzer(raw_formats SOURCES fuzz_raw_formats.cpp)
 skycue_add_fuzzer(recording SOURCES fuzz_recording.cpp)
+skycue_add_fuzzer(fisb_decoder SOURCES fuzz_fisb_decoder.cpp)
+skycue_add_fuzzer(iqgen_coding SOURCES fuzz_iqgen_coding.cpp LIBS skycue_iqgen_core)
 
 # The harness names, one per line, for scripts/run-fuzz.sh --bin-dir.
 get_property(_skycue_fuzz_names GLOBAL PROPERTY SKYCUE_FUZZ_TARGETS)

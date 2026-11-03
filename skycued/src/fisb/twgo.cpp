@@ -254,6 +254,7 @@ void emitShapes(const Graphic& g, std::vector<Shape>& out)
         const std::size_t first = out.size();
         for (const auto& ring : rings(g.verts)) {
             std::vector<std::pair<double, double>> pts;
+            pts.reserve(ring.size());
             for (const auto& v : ring)
                 pts.emplace_back(v.lat, v.lon);
             Shape* same = nullptr;

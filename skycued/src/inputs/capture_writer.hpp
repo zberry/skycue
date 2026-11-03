@@ -53,7 +53,7 @@ private:
 
 class CaptureWriter {
 public:
-    CaptureWriter(std::string record_dir, std::string input_id, uint64_t max_bytes);
+    CaptureWriter(std::string record_dir, const std::string& input_id, uint64_t max_bytes);
     bool write(const CaptureLine& line);  // false when dropped
     void flush() { sink_.flush(); }
     std::string currentPath() const { return sink_.currentPath(); }
@@ -67,7 +67,7 @@ private:
 
 class RawFrameWriter {
 public:
-    RawFrameWriter(std::string record_dir, std::string input_id, uint64_t max_bytes);
+    RawFrameWriter(std::string record_dir, const std::string& input_id, uint64_t max_bytes);
     // False when dropped by a failed write (a frame before 1970 has no line
     // format and is skipped: true).
     bool write(const RawFrame& frame);

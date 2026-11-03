@@ -391,6 +391,7 @@ InputDef InputManager::normalized(const InputDef& def)
 void InputManager::checkSet(const std::vector<InputDef>& user) const
 {
     std::vector<InputDef> all;
+    all.reserve(builtin_count_ + user.size());
     for (std::size_t i = 0; i < builtin_count_; ++i)
         all.push_back(slots_[i].def);
     all.insert(all.end(), user.begin(), user.end());

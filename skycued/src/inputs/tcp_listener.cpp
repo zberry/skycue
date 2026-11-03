@@ -24,7 +24,7 @@ struct Session {
 }  // namespace
 
 struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
-    Impl(asio::io_context& io_, std::string bind_, uint16_t port_, std::string peer_,
+    Impl(asio::io_context& io_, std::string bind_, uint16_t port_, const std::string& peer_,
          std::chrono::milliseconds rebind_delay_)
         : io(io_), acceptor(io_), timer(io_), bind(std::move(bind_)), port(port_), peer(parsePeerFilter(peer_)),
           rebind_delay(rebind_delay_)
@@ -175,9 +175,9 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
     }
 };
 
-TcpListener::TcpListener(asio::io_context& io, std::string bind, uint16_t port, std::string peer,
+TcpListener::TcpListener(asio::io_context& io, std::string bind, uint16_t port, const std::string& peer,
                          std::chrono::milliseconds rebind_delay)
-    : impl_(std::make_shared<Impl>(io, std::move(bind), port, std::move(peer), rebind_delay))
+    : impl_(std::make_shared<Impl>(io, std::move(bind), port, peer, rebind_delay))
 {
     state_ = impl_;
 }

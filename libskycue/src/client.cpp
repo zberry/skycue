@@ -238,7 +238,7 @@ struct Client::Impl {
     {
         const unsigned gen = ++conn_gen;
         resolver.async_resolve(cfg.host, std::to_string(cfg.port),
-                               [this, gen](const error_code& ec, tcp::resolver::results_type results) {
+                               [this, gen](const error_code& ec, const tcp::resolver::results_type& results) {
                                    if (stopping || gen != conn_gen)
                                        return;
                                    if (ec) {

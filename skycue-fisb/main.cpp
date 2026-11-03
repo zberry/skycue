@@ -372,6 +372,7 @@ std::string formatSummary(const Gathered& g, const FisbDecoder& decoder, const F
 
     o += "\n== Mosaics (held at the end; empty: every bin at the no-data level, 1 for CONUS)\n";
     std::vector<const Mosaic*> mosaics;
+    mosaics.reserve(snap.radar.size() + snap.rasters.size());
     for (const auto& m : snap.radar)
         mosaics.push_back(&m);
     for (const auto& m : snap.rasters)

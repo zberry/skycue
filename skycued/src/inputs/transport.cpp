@@ -38,7 +38,7 @@ std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer)
     if (peer.empty())
         return std::nullopt;
     boost::system::error_code ec;
-    const auto addr = boost::asio::ip::make_address(peer, ec);
+    auto addr = boost::asio::ip::make_address(peer, ec);
     if (ec)
         throw std::invalid_argument("peer is not an IP address: " + peer);
     return addr;

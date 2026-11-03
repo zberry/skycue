@@ -16,7 +16,7 @@ using asio::ip::udp;
 using boost::system::error_code;
 
 struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
-    Impl(asio::io_context& io_, std::string bind_, uint16_t port_, std::string peer_,
+    Impl(asio::io_context& io_, std::string bind_, uint16_t port_, const std::string& peer_,
          std::chrono::milliseconds rebind_delay_)
         : io(io_), sock(io_), timer(io_), bind(std::move(bind_)), port(port_), peer(parsePeerFilter(peer_)),
           rebind_delay(rebind_delay_), buf(kBufferBytes)
@@ -129,9 +129,9 @@ struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
     }
 };
 
-UdpListener::UdpListener(asio::io_context& io, std::string bind, uint16_t port, std::string peer,
+UdpListener::UdpListener(asio::io_context& io, std::string bind, uint16_t port, const std::string& peer,
                          std::chrono::milliseconds rebind_delay)
-    : impl_(std::make_shared<Impl>(io, std::move(bind), port, std::move(peer), rebind_delay))
+    : impl_(std::make_shared<Impl>(io, std::move(bind), port, peer, rebind_delay))
 {
     state_ = impl_;
 }

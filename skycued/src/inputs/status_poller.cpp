@@ -125,7 +125,7 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
         std::weak_ptr<Impl> weak = shared_from_this();
         ++resolves_pending;
         a->resolver.async_resolve(url.host, std::to_string(url.port),
-                                  [weak, a](const error_code& ec, tcp::resolver::results_type results) {
+                                  [weak, a](const error_code& ec, const tcp::resolver::results_type& results) {
                                       if (auto p = weak.lock())
                                           --p->resolves_pending;
                                       auto self = live(weak, a);

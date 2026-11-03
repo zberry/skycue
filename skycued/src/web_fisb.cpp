@@ -593,6 +593,7 @@ std::string fisbStatusJson(const Snapshot& snap)
         w.add("clock_skew_s", std::round(*f.clock_skew_s * 10) / 10);
 
     std::vector<std::string> stations;
+    stations.reserve(f.heard.size());
     for (const auto& s : f.heard)
         stations.push_back(JsonWriter()
                                .add("site_id", siteId(s.key))
@@ -611,6 +612,7 @@ std::string fisbStatusJson(const Snapshot& snap)
         radar.addRaw("conus", mosaicHead(*conus, snap.now));
     w.addRaw("radar", radar.str());
     std::vector<std::string> rasters;
+    rasters.reserve(f.rasters.size());
     for (const auto& m : f.rasters)
         rasters.push_back(mosaicHead(m, snap.now));
     w.addRaw("rasters", jsonArray(rasters));

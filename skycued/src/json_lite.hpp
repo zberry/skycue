@@ -56,7 +56,9 @@ public:
     bool has(const char* key) const;
 
 private:
-    explicit JsonObject(boost::property_tree::ptree tree) : tree_(std::move(tree)) {}
+    explicit JsonObject(const boost::property_tree::ptree& tree) : tree_(tree) {}
+    // ptree has no move constructor (Boost 1.75): swap the parsed tree in.
+    explicit JsonObject(boost::property_tree::ptree&& tree) { tree_.swap(tree); }
     const boost::property_tree::ptree* scalar(const char* key) const;
 
     boost::property_tree::ptree tree_;

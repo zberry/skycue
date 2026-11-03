@@ -88,7 +88,7 @@ enum class Mode { udp, tcp, tcp_listen };
 // Where the records go. Blocking, on the one io_context.
 class Output {
 public:
-    Output(asio::io_context& io, Mode mode, HostPort to, asio::ip::address bind, uint16_t listen_port)
+    Output(asio::io_context& io, Mode mode, HostPort to, const asio::ip::address& bind, uint16_t listen_port)
         : io_(io), mode_(mode), to_(std::move(to)), tcp_(io), udp_(io)
     {
         if (mode_ == Mode::tcp_listen) {
@@ -210,7 +210,7 @@ struct StatusOptions {
 class Pacer {
 public:
     Pacer(asio::io_context& io, double speed, Output& out, std::optional<StatusOptions> status)
-        : timer_(io), speed_(speed), out_(out), status_(std::move(status))
+        : timer_(io), speed_(speed), out_(out), status_(status)
     {
     }
 

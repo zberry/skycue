@@ -301,7 +301,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         auto self = shared_from_this();
         l->resolver.async_resolve(
             l->host, std::to_string(l->port),
-            [self, l, gen](const error_code& ec, tcp::resolver::results_type results) {
+            [self, l, gen](const error_code& ec, const tcp::resolver::results_type& results) {
                 if (self->stopping || gen != l->gen)
                     return;
                 if (ec) {
@@ -606,6 +606,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         }
         LOG_INFO("forwarder: stopping, flushing " << sessions.size() << " TCP client(s)");
         std::vector<std::shared_ptr<Session>> all;
+        all.reserve(sessions.size());
         for (const auto& kv : sessions)
             all.push_back(kv.second);
         for (const auto& s : all) {
@@ -651,6 +652,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         cancelLinks();
         udp_sock.close(ignored);
         std::vector<std::shared_ptr<Session>> all;
+        all.reserve(sessions.size());
         for (const auto& kv : sessions)
             all.push_back(kv.second);
         for (const auto& s : all) {

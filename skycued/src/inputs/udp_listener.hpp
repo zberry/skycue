@@ -21,7 +21,7 @@ public:
     // Larger than any UDP payload, so the input can tell a datagram over 64 KiB.
     static constexpr std::size_t kBufferBytes = 65537;
 
-    UdpListener(boost::asio::io_context& io, std::string bind, uint16_t port, std::string peer,
+    UdpListener(boost::asio::io_context& io, std::string bind, uint16_t port, const std::string& peer,
                 std::chrono::milliseconds rebind_delay = std::chrono::seconds(5));
     ~UdpListener() override;
 

@@ -57,7 +57,7 @@ struct LineClient::Impl : std::enable_shared_from_this<Impl> {
         const unsigned g = ++gen;
         auto self = shared_from_this();
         resolver.async_resolve(host, std::to_string(port),
-                               [self, g](const error_code& ec, tcp::resolver::results_type results) {
+                               [self, g](const error_code& ec, const tcp::resolver::results_type& results) {
                                    if (self->stopping || g != self->gen)
                                        return;
                                    if (ec) {

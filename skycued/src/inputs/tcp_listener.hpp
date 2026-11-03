@@ -26,7 +26,7 @@ public:
     static constexpr std::size_t kMaxPeers = 16;
     static constexpr std::size_t kChunkBytes = 16384;
 
-    TcpListener(boost::asio::io_context& io, std::string bind, uint16_t port, std::string peer,
+    TcpListener(boost::asio::io_context& io, std::string bind, uint16_t port, const std::string& peer,
                 std::chrono::milliseconds rebind_delay = std::chrono::seconds(5));
     ~TcpListener() override;
 

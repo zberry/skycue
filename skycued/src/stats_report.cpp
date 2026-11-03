@@ -451,6 +451,7 @@ StatsReport computeStats(const std::vector<RecordingRecord>& input, const StatsO
     // ---- top N ----
     {
         std::vector<std::pair<TrackId, const Acc*>> order;
+        order.reserve(acc.size());
         for (const auto& kv : acc)
             order.emplace_back(kv.first, &kv.second);
         std::stable_sort(order.begin(), order.end(),

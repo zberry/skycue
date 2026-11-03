@@ -49,7 +49,7 @@ bool RecordSink::write(const std::string& data)
     return true;
 }
 
-CaptureWriter::CaptureWriter(std::string record_dir, std::string input_id, uint64_t max_bytes)
+CaptureWriter::CaptureWriter(std::string record_dir, const std::string& input_id, uint64_t max_bytes)
     : dir_(std::move(record_dir)), max_bytes_(max_bytes),
       sink_(fileConfig(dir_, "capture-" + input_id, "jsonl"), [this] {
           if (max_bytes_)
@@ -60,7 +60,7 @@ CaptureWriter::CaptureWriter(std::string record_dir, std::string input_id, uint6
 
 bool CaptureWriter::write(const CaptureLine& line) { return sink_.write(captureLineJson(line) + "\n"); }
 
-RawFrameWriter::RawFrameWriter(std::string record_dir, std::string input_id, uint64_t max_bytes)
+RawFrameWriter::RawFrameWriter(std::string record_dir, const std::string& input_id, uint64_t max_bytes)
     : dir_(std::move(record_dir)), max_bytes_(max_bytes),
       csv_(fileConfig(dir_, "raw-" + input_id, "csv"), [this] { enforceRetention(); }),
       txt_(fileConfig(dir_, "raw-" + input_id, "txt"), [this] { enforceRetention(); })

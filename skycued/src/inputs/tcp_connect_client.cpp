@@ -45,7 +45,7 @@ struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Imp
             return;
         std::weak_ptr<Impl> weak = shared_from_this();
         resolver.async_resolve(host, std::to_string(port),
-                               [weak](const error_code& ec, tcp::resolver::results_type results) {
+                               [weak](const error_code& ec, const tcp::resolver::results_type& results) {
                                    auto self = weak.lock();
                                    if (!self || self->stopping)
                                        return;

@@ -143,7 +143,7 @@ private:
     {
         if (stopping_)
             return;
-        resolver_.async_resolve(where_.host, where_.port, [this](const error_code& ec, tcp::resolver::results_type r) {
+        resolver_.async_resolve(where_.host, where_.port, [this](const error_code& ec, const tcp::resolver::results_type& r) {
             if (stopping_)
                 return;
             if (ec) {

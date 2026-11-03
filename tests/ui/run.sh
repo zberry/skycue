@@ -6,10 +6,13 @@
 # fisb/received-with-uplinks.jsonl (2015: text, NOTAMs) and
 # fisb/received-tg30.jsonl (2020: NEXRAD, rasters). Dev machines only:
 # prints "SKIP: playwright not installed" and passes when
-# node_modules/@playwright/test is missing (see README.md).
-# usage: run.sh SKYCUED FIXTURE_DIR WWW_STAGE
+# node_modules/@playwright/test is missing (see README.md). One more, the
+# "receivers" skycued, runs no built-in decoder inputs and one
+# pingstation_json input, ps-sim, that skycue-pingsim feeds the readsb
+# fixture to (with a device status every 2 s), for the Receiver tab cases.
+# usage: run.sh SKYCUED FIXTURE_DIR WWW_STAGE PINGSIM
 set -u
-skycued=$1 fixtures=$2 www=$3
+skycued=$1 fixtures=$2 www=$3 pingsim=$4
 here=$(cd "$(dirname "$0")" && pwd)
 shots_dir=${SKYCUE_UI_SCREENSHOTS:-"$here/../../../.superpowers/sdd/2026-11-01-skycue-ui/screenshots"}
 fisb_shots_dir=${SKYCUE_FISB_SCREENSHOTS:-"$here/../../../.superpowers/sdd/2026-11-02-skycue-fisb/screenshots"}
@@ -27,7 +30,7 @@ tmp=$(mktemp -d)
 pidfile="$tmp/skycued.pid"
 cleanup() {
   local f p i
-  for f in "$pidfile" "$tmp"/fisb-*.pid; do
+  for f in "$tmp"/*.pid; do
     p=$(cat "$f" 2>/dev/null)
     [ -n "$p" ] || continue
     kill "$p" 2>/dev/null
@@ -200,6 +203,25 @@ for (( i=0; i<100; i++ )); do
 done
 [ "$up" = 1 ] || fail "overlays-only skycued did not come up"
 
+# Receivers: skycued without readsb/dump978, its inputs file holding ps-sim
+# (pingstation_json on a free UDP port), and skycue-pingsim sending to it.
+rx_port=$(free_port)
+ps_port=$(python3 -I -c 'import socket; s = socket.socket(type=socket.SOCK_DGRAM); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+mkdir -p "$tmp/rx-record" || fail "receivers RECORD_DIR"
+sed -e "s/^WEB_PORT=.*/WEB_PORT=$rx_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/receivers.conf"
+echo "RECORD_DIR=$tmp/rx-record" >> "$tmp/receivers.conf"
+printf '{"version":1,"inputs":[{"id":"ps-sim","name":"pingsim","type":"pingstation_json","bind":"127.0.0.1","port":%s}]}\n' \
+  "$ps_port" > "$tmp/receivers.inputs.json"
+bash -c "echo \$\$ > '$tmp/receivers.pid'; exec '$skycued' --config '$tmp/receivers.conf' --no-readsb --no-uat --inputs-file '$tmp/receivers.inputs.json' --www-dir '$www' >>'$tmp/receivers.log' 2>&1" </dev/null >/dev/null 2>&1 &
+rx_base="http://127.0.0.1:$rx_port"
+up=0
+for (( i=0; i<100; i++ )); do
+  python3 -I -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)' "$rx_base/api/stats" 2>/dev/null && { up=1; break; }
+  sleep 0.1
+done
+[ "$up" = 1 ] || fail "receivers skycued did not come up"
+bash -c "echo \$\$ > '$tmp/pingsim.pid'; exec '$pingsim' --udp '127.0.0.1:$ps_port' --as json --loop --speed 5 --status-interval 2 --status-lat 38.9 --status-lon -77.0 '$fixtures/readsb-sample.jsonl' >>'$tmp/pingsim.log' 2>&1" </dev/null >/dev/null 2>&1 &
+
 out_dir=$(dirname "$www")/ui-test-results
 rm -rf "$out_dir"
 export SKYCUE_BASE_URL="$base"
@@ -210,6 +232,7 @@ export SKYCUE_FISB_URL="$fisb_base"
 export SKYCUE_RADAR_URL="$radar_base"
 export SKYCUE_TILES_URL="$tiles_base"
 export SKYCUE_OVERLAYS_URL="$ov_base"
+export SKYCUE_RECEIVERS_URL="$rx_base"
 export SKYCUE_UI_OUT="$out_dir"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 (cd "$here" && npx --no-install playwright test)

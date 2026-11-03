@@ -189,10 +189,11 @@ FilterResult FilterSet::evaluate(const TrackState& t) const
     const bool has_position = o.lat && o.lon;
     // An airborne target that reports no altitude at all has no usable
     // elevation: the elevation filter is not applied to it (elevation NaN).
-    const bool elevation_known = o.on_ground || o.alt_geom_ft || o.alt_baro_ft;
+    const bool on_ground = o.on_ground.value_or(false);  // unset: airborne
+    const bool elevation_known = on_ground || o.alt_geom_ft || o.alt_baro_ft;
     if (has_position) {
         double tgt_alt_m = rx_.alt_m;  // on the ground
-        if (!o.on_ground) {
+        if (!on_ground) {
             if (o.alt_geom_ft) {
                 tgt_alt_m = geo::ftToM(*o.alt_geom_ft);
                 r.alt_is_geom = true;

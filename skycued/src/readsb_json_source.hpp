@@ -35,6 +35,8 @@ public:
     uint64_t linesParsed() const { return parsed_; }
     // Lines that did not parse plus oversize lines the LineClient discarded.
     uint64_t linesRejected() const { return bad_ + client_.linesRejected(); }
+    uint64_t rejected() const override { return linesRejected(); }
+    uint64_t bytesRead() const override { return client_.bytesRead(); }
 
 private:
     LineClient client_;

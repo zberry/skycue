@@ -32,6 +32,7 @@ public:
     bool connected() const { return client_.connected(); }
     uint64_t downlinkFrames() const { return downlink_; }
     uint64_t uplinkFrames() const { return uplink_; }
+    uint64_t bytesRead() const { return client_.bytesRead(); }
 
 private:
     void handleLine(const std::string& line);

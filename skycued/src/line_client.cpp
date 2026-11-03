@@ -19,6 +19,7 @@ using asio::ip::tcp;
 using boost::system::error_code;
 
 namespace {
+// inputs/tcp_connect_client.cpp copies this backoff; keep the two in step.
 constexpr std::chrono::milliseconds kMinBackoff{500};
 constexpr std::chrono::milliseconds kMaxBackoff{10000};
 }  // namespace
@@ -47,6 +48,7 @@ struct LineClient::Impl : std::enable_shared_from_this<Impl> {
     bool quiet = false;  // a failed attempt was already logged at WARN
     unsigned gen = 0;    // bumped per connection attempt; stale handlers compare it
     uint64_t rejected = 0;
+    uint64_t bytes_read = 0, connect_count = 0;
 
     void connect()
     {
@@ -80,6 +82,7 @@ struct LineClient::Impl : std::enable_shared_from_this<Impl> {
         LOG_INFO(name << ": connected to " << host << ":" << port);
         backoff = kMinBackoff;
         quiet = false;
+        ++connect_count;
         line.clear();
         discarding = false;
         is_connected = true;
@@ -117,6 +120,7 @@ struct LineClient::Impl : std::enable_shared_from_this<Impl> {
         sock.async_read_some(asio::buffer(buf), [self, g](const error_code& ec, std::size_t n) {
             if (self->stopping || g != self->gen)
                 return;
+            self->bytes_read += n;
             if (n > 0 && !self->feed(self->buf.data(), n, g))
                 return;  // stopped or reconnected from a callback
             if (ec) {
@@ -217,5 +221,9 @@ void LineClient::stop() { impl_->shutdown(); }
 bool LineClient::connected() const { return impl_->is_connected; }
 
 uint64_t LineClient::linesRejected() const { return impl_->rejected; }
+
+uint64_t LineClient::bytesRead() const { return impl_->bytes_read; }
+
+uint64_t LineClient::connects() const { return impl_->connect_count; }
 
 }  // namespace skycued

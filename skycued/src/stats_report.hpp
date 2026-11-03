@@ -83,6 +83,7 @@ struct StatsReport {
     struct Aircraft {
         uint64_t distinct = 0, observations = 0, on_ground = 0, airborne = 0;
         std::map<std::string, Count> by_source, by_addr_type;  // by name
+        std::map<std::string, Count> by_input;                 // by input id; "(none)" for records without one
         uint64_t with_callsign = 0, with_registration = 0;     // aircraft
         std::vector<SquawkHit> emergency_squawks;              // 7500/7600/7700, by first occurrence
     } aircraft;

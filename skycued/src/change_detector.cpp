@@ -37,7 +37,7 @@ SendReason shouldSend(const TrackState& s, std::chrono::steady_clock::time_point
     const skycue::Track& p = *s.last_sent;
 
     if (l.callsign != p.callsign || l.squawk != p.squawk || l.emergency != s.last_sent_emergency ||
-        l.on_ground != p.on_ground)
+        l.on_ground.value_or(false) != p.on_ground)
         return SendReason::identity;
 
     const double elapsed = std::chrono::duration<double>(now - s.last_sent_at).count();
@@ -72,7 +72,7 @@ skycue::Track toTrack(const TrackState& s, bool keyframe, bool alt_is_geom)
     t.position_time = s.last_position_time;
     t.lat_deg = l.lat.value_or(0.0);
     t.lon_deg = l.lon.value_or(0.0);
-    t.on_ground = l.on_ground;
+    t.on_ground = l.on_ground.value_or(false);
     t.keyframe = keyframe;
     t.alt_is_geom = alt_is_geom;
     t.alt_baro_ft = l.alt_baro_ft;

@@ -1,5 +1,7 @@
 #include "json_lite.hpp"
 
+#include "json_nesting.hpp"
+
 #include <boost/property_tree/json_parser.hpp>
 
 #include <charconv>
@@ -9,35 +11,6 @@
 #include <sstream>
 
 namespace skycued {
-namespace {
-
-// PropertyTree's parser recurses once per nesting level, so deep input would
-// overflow the stack (a crash, not an exception). This linear scan finds the
-// maximum {/[ depth outside string literals so such input is refused first.
-bool nestingWithin(const std::string& text, int max_depth)
-{
-    int depth = 0;
-    bool in_string = false;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char c = text[i];
-        if (in_string) {
-            if (c == '\\')
-                ++i;  // skip the escaped character, so \" does not end the string
-            else if (c == '"')
-                in_string = false;
-        } else if (c == '"') {
-            in_string = true;
-        } else if (c == '{' || c == '[') {
-            if (++depth > max_depth)
-                return false;
-        } else if (c == '}' || c == ']') {
-            --depth;
-        }
-    }
-    return true;
-}
-
-}  // namespace
 
 std::optional<JsonObject> JsonObject::parse(const std::string& text, std::size_t max_bytes)
 {
@@ -115,6 +88,35 @@ std::optional<std::vector<std::string>> JsonObject::getStringArray(const char* k
     return out;
 }
 
+std::optional<std::vector<JsonObject>> JsonObject::getObjectArray(const char* key) const
+{
+    auto it = tree_.find(key);
+    if (it == tree_.not_found())
+        return std::nullopt;
+    const auto& node = it->second;
+    std::vector<JsonObject> out;
+    if (node.empty()) {
+        if (!node.data().empty())  // a scalar
+            return std::nullopt;
+        return out;
+    }
+    for (const auto& child : node) {
+        if (!child.first.empty())  // `key` is an object, not an array
+            return std::nullopt;
+        const auto& element = child.second;
+        if (element.empty()) {
+            if (!element.data().empty())  // a non-empty scalar
+                return std::nullopt;
+        } else {
+            for (const auto& member : element)
+                if (member.first.empty())  // an array element
+                    return std::nullopt;
+        }
+        out.push_back(JsonObject(element));
+    }
+    return out;
+}
+
 std::optional<std::string> JsonObject::getString(const char* key) const
 {
     const auto* node = scalar(key);
@@ -152,6 +154,18 @@ std::optional<int64_t> JsonObject::getInt(const char* key) const
     if (s.empty() || result.ec != std::errc() || result.ptr != end)
         return std::nullopt;
     return value;
+}
+
+std::optional<bool> JsonObject::getBool(const char* key) const
+{
+    const auto* node = scalar(key);
+    if (!node)
+        return std::nullopt;
+    if (node->data() == "true")
+        return true;
+    if (node->data() == "false")
+        return false;
+    return std::nullopt;
 }
 
 void appendJsonString(std::string& out, const std::string& s)

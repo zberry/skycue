@@ -18,13 +18,14 @@ struct TrackObservation {
     std::chrono::system_clock::time_point received_time{};               // readsb "now"
     std::optional<std::chrono::system_clock::time_point> position_time;  // now - seen_pos; set with lat/lon
     std::optional<double> lat, lon;                                      // both or neither
-    bool on_ground = false;
+    std::optional<bool> on_ground;  // unset: the input did not say
     std::optional<int32_t> alt_baro_ft, alt_geom_ft;
     std::optional<float> gs_kt, track_deg, baro_rate_fpm, geom_rate_fpm;
     std::optional<std::string> callsign, squawk, registration, emergency, category;
     std::optional<uint8_t> nic, nac_p;
     std::optional<double> rssi;
     std::string raw_line;  // kept for the received recording
+    std::string input_id;  // the input that produced it; empty when not known
 };
 
 // Where the Engine gets its observations: readsb's JSON port or a replay.
@@ -42,6 +43,11 @@ public:
     virtual void onUplink(std::function<void(std::chrono::system_clock::time_point, const std::string& hex)>) {}
     virtual void start() = 0;
     virtual void stop() = 0;
+    // Lines or records that did not parse (counted in the input's messages
+    // and rejected). Most sources have none.
+    virtual uint64_t rejected() const { return 0; }
+    // Bytes received (the input's `bytes` counter). 0 when not counted.
+    virtual uint64_t bytesRead() const { return 0; }
 };
 
 }  // namespace skycued

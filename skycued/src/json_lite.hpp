@@ -35,6 +35,10 @@ public:
     // The array `key` of scalars, each as its text; nullopt when absent, not
     // an array, or holding an array/object. ([] and {} read as empty arrays.)
     std::optional<std::vector<std::string>> getStringArray(const char* key) const;
+    // The array `key` of objects; nullopt when absent, not an array, or when an
+    // element is not an object. ({} reads as an empty array; an element {} and
+    // an element "" cannot be told apart and read as an empty object.)
+    std::optional<std::vector<JsonObject>> getObjectArray(const char* key) const;
 
     // The value's text when it is a scalar (string, number, true/false/null);
     // nullopt when absent or an array/object.
@@ -44,6 +48,9 @@ public:
     std::optional<double> getDouble(const char* key) const;
     // As getDouble, for integers written without fraction or exponent.
     std::optional<int64_t> getInt(const char* key) const;
+    // true for the text "true", false for "false"; nullopt otherwise (absent,
+    // not a scalar, 1/0, ...). The string "true" reads as true too.
+    std::optional<bool> getBool(const char* key) const;
     bool has(const char* key) const;
 
 private:

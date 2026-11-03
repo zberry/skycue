@@ -84,22 +84,67 @@ BOOST_AUTO_TEST_CASE(on_ground_kept_when_alt_baro_absent)
     TrackTable table;
     auto ground = obs(0xABC124, kT0, true);
     ground.on_ground = true; // alt_baro "ground"
-    BOOST_TEST(table.apply(ground).latest.on_ground);
+    BOOST_TEST((table.apply(ground).latest.on_ground == true));
 
     // No alt_baro at all: says nothing about on_ground, which stays true.
     auto silent = obs(0xABC124, kT0 + 1s, true);
-    BOOST_TEST(table.apply(silent).latest.on_ground);
+    BOOST_TEST((table.apply(silent).latest.on_ground == true));
 
-    // A numeric alt_baro means airborne.
+    // A numeric alt_baro means airborne (the readsb parser asserts false).
     auto airborne = obs(0xABC124, kT0 + 2s, true);
     airborne.alt_baro_ft = 1200;
-    BOOST_TEST(!table.apply(airborne).latest.on_ground);
+    airborne.on_ground = false;
+    BOOST_TEST(!table.apply(airborne).latest.on_ground.value_or(true));
 
     // And again absent alt_baro keeps it airborne; "ground" flips it back.
-    BOOST_TEST(!table.apply(obs(0xABC124, kT0 + 3s, true)).latest.on_ground);
+    BOOST_TEST(!table.apply(obs(0xABC124, kT0 + 3s, true)).latest.on_ground.value_or(true));
     auto back = obs(0xABC124, kT0 + 4s, true);
     back.on_ground = true;
-    BOOST_TEST(table.apply(back).latest.on_ground);
+    BOOST_TEST((table.apply(back).latest.on_ground == true));
+}
+
+BOOST_AUTO_TEST_CASE(on_ground_absent_keeps_last_value)
+{
+    TrackTable table;
+    auto ground = obs(0xABC125, kT0, true);
+    ground.on_ground = true;
+    table.apply(ground);
+
+    // An input that does not carry the flag (unset) but has an altitude
+    // leaves the last known value alone.
+    auto silent = obs(0xABC125, kT0 + 1s, true);
+    silent.alt_baro_ft = 1200;
+    const auto& s = table.apply(silent);
+    BOOST_TEST((s.latest.on_ground == true));
+    BOOST_TEST(*s.latest.alt_baro_ft == 1200);
+}
+
+BOOST_AUTO_TEST_CASE(on_ground_false_asserted_clears)
+{
+    TrackTable table;
+    auto ground = obs(0xABC126, kT0, true);
+    ground.on_ground = true;
+    table.apply(ground);
+
+    auto airborne = obs(0xABC126, kT0 + 1s, true);
+    airborne.on_ground = false;
+    BOOST_TEST((table.apply(airborne).latest.on_ground == false));
+}
+
+BOOST_AUTO_TEST_CASE(last_input_follows_newest)
+{
+    TrackTable table;
+    auto a = obs(0xABC127, kT0, true);
+    a.input_id = "readsb";
+    BOOST_TEST(table.apply(a).last_input == "readsb");
+
+    auto b = obs(0xABC127, kT0 + 1s, true);
+    b.input_id = "ps-north";
+    BOOST_TEST(table.apply(b).last_input == "ps-north");
+
+    auto c = obs(0xABC127, kT0 + 2s, false);
+    c.input_id = "readsb";
+    BOOST_TEST(table.apply(c).last_input == "readsb");
 }
 
 BOOST_AUTO_TEST_CASE(new_track_fields)

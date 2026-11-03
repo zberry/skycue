@@ -43,7 +43,7 @@ namespace {
 
 const std::string kReceivedHeader =
     "time,type,hex,addr_type,source,pos_time,lat,lon,on_ground,alt_baro_ft,alt_geom_ft,gs_kt,track_deg,"
-    "baro_rate_fpm,geom_rate_fpm,callsign,squawk,registration,nic,nac_p,rssi,uplink_hex";
+    "baro_rate_fpm,geom_rate_fpm,callsign,squawk,registration,nic,nac_p,rssi,uplink_hex,input";
 const std::string kSentHeader =
     "time,event,hex,addr_type,source,pos_time,lat,lon,on_ground,alt_is_geom,alt_baro_ft,alt_geom_ft,gs_kt,"
     "track_deg,vrate_fpm,callsign,squawk,registration,nic,nac_p,keyframe,drop_reason,note";
@@ -320,6 +320,7 @@ BOOST_AUTO_TEST_CASE(csv_empty_for_absent_optionals)
     TempDir tmp;
     Recorder rec(RecorderConfig{tmp.path, true, true, 1ull << 20, 3600s}, "received");
     auto obs = minimalObservation(sys_clock::now());
+    obs.on_ground = false;
     obs.callsign = std::string("A,\"B\"");
     rec.writeObservation(obs);
     rec.flush();
@@ -348,6 +349,92 @@ BOOST_AUTO_TEST_CASE(csv_empty_for_absent_optionals)
     BOOST_TEST(!j->has("alt_baro_ft"));
     BOOST_TEST(!j->has("rssi"));
     BOOST_TEST(*j->getString("on_ground") == "false");
+}
+
+BOOST_AUTO_TEST_CASE(obs_input_round_trips)
+{
+    TempDir tmp;
+    Recorder rec(RecorderConfig{tmp.path, true, true, 1ull << 20, 3600s}, "received");
+    auto obs = minimalObservation(sys_clock::now());
+    obs.input_id = "ps-north";
+    rec.writeObservation(obs);
+    rec.flush();
+
+    auto csv = readLines(rec.currentPath("csv"));
+    BOOST_REQUIRE(csv.size() == 2u);
+    auto row = splitCsv(csv[1]);
+    BOOST_REQUIRE(row.size() == splitCsv(kReceivedHeader).size());
+    BOOST_TEST(column(kReceivedHeader, "input") == row.size() - 1);  // the last column
+    BOOST_TEST(row[column(kReceivedHeader, "input")] == "ps-north");
+
+    auto jsonl = readLines(rec.currentPath("jsonl"));
+    BOOST_REQUIRE(jsonl.size() == 1u);
+    auto j = skycued::JsonObject::parse(jsonl[0]);
+    BOOST_REQUIRE(j);
+    BOOST_TEST(j->getString("input").value_or("") == "ps-north");
+    auto back = skycued::recording::observationFromRecord(*j);
+    BOOST_REQUIRE(back);
+    BOOST_TEST(back->input_id == "ps-north");
+
+    // A record without the key reads as no input.
+    auto none = skycued::JsonObject::parse(R"({"time":"2026-11-01T00:00:00.000Z","type":"obs","hex":"abc123"})");
+    BOOST_REQUIRE(none);
+    auto plain = skycued::recording::observationFromRecord(*none);
+    BOOST_REQUIRE(plain);
+    BOOST_TEST(plain->input_id.empty());
+}
+
+BOOST_AUTO_TEST_CASE(obs_without_on_ground_omits_key)
+{
+    TempDir tmp;
+    Recorder rec(RecorderConfig{tmp.path, true, true, 1ull << 20, 3600s}, "received");
+    auto obs = minimalObservation(sys_clock::now());
+    BOOST_REQUIRE(!obs.on_ground.has_value());
+    rec.writeObservation(obs);
+    rec.flush();
+
+    auto jsonl = readLines(rec.currentPath("jsonl"));
+    BOOST_REQUIRE(jsonl.size() == 1u);
+    auto j = skycued::JsonObject::parse(jsonl[0]);
+    BOOST_REQUIRE(j);
+    BOOST_TEST(!j->has("on_ground"));
+    BOOST_TEST(!j->has("input"));  // no input id either
+
+    auto csv = readLines(rec.currentPath("csv"));
+    BOOST_REQUIRE(csv.size() == 2u);
+    auto row = splitCsv(csv[1]);
+    BOOST_REQUIRE(row.size() == splitCsv(kReceivedHeader).size());
+    BOOST_TEST(row[column(kReceivedHeader, "on_ground")] == "");
+    BOOST_TEST(row[column(kReceivedHeader, "input")] == "");
+}
+
+BOOST_AUTO_TEST_CASE(on_ground_key_absent_reads_unset)
+{
+    auto j = skycued::JsonObject::parse(
+        R"({"time":"2026-11-01T00:00:00.000Z","type":"obs","hex":"abc123","alt_baro_ft":12000})");
+    BOOST_REQUIRE(j);
+    auto obs = skycued::recording::observationFromRecord(*j);
+    BOOST_REQUIRE(obs);
+    BOOST_TEST(!obs->on_ground.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(on_ground_present_reads_as_written)
+{
+    // No heuristic: a present key is the value, whatever else the record has
+    // (old recordings always carry the key, so their meaning is unchanged).
+    auto f = skycued::JsonObject::parse(
+        R"({"time":"2026-11-01T00:00:00.000Z","type":"obs","hex":"abc123","on_ground":false})");
+    BOOST_REQUIRE(f);
+    auto airborne = skycued::recording::observationFromRecord(*f);
+    BOOST_REQUIRE(airborne);
+    BOOST_TEST((airborne->on_ground == false));
+
+    auto t = skycued::JsonObject::parse(
+        R"({"time":"2026-11-01T00:00:00.000Z","type":"obs","hex":"abc123","on_ground":true})");
+    BOOST_REQUIRE(t);
+    auto ground = skycued::recording::observationFromRecord(*t);
+    BOOST_REQUIRE(ground);
+    BOOST_TEST((ground->on_ground == true));
 }
 
 BOOST_AUTO_TEST_CASE(rotation_by_size)
@@ -545,7 +632,7 @@ BOOST_AUTO_TEST_CASE(replay_roundtrip)
             }
             BOOST_TEST((b.lat == a.lat));
             BOOST_TEST((b.lon == a.lon));
-            BOOST_TEST(b.on_ground == a.on_ground);
+            BOOST_TEST((b.on_ground == a.on_ground));
             BOOST_TEST((b.alt_baro_ft == a.alt_baro_ft));
             BOOST_TEST((b.alt_geom_ft == a.alt_geom_ft));
             BOOST_TEST((b.gs_kt == a.gs_kt));
@@ -594,7 +681,7 @@ BOOST_AUTO_TEST_CASE(replay_reads_hand_edited_records_and_skips_bad_lines)
     BOOST_TEST(got[0].id.address == 0xabcdefu);
     BOOST_TEST(static_cast<int>(got[0].id.type) == static_cast<int>(skycue::AddressType::non_icao));
     BOOST_TEST(static_cast<int>(got[0].source) == static_cast<int>(skycue::Source::tisb));
-    BOOST_TEST(got[0].on_ground);
+    BOOST_TEST((got[0].on_ground == true));
     BOOST_TEST(*got[0].lat == 1.5);
     BOOST_TEST(*got[0].callsign == "X");
     BOOST_TEST(got[0].raw_line == "{\"hex\":\"000000\"}");  // raw is carried, never parsed

@@ -20,6 +20,9 @@ struct Config {
     std::vector<std::pair<std::string, uint16_t>> cue_udp_targets;  // from "host:port host:port"
     std::string record_dir;
     std::set<std::string> record_formats{"jsonl", "csv"};
+    // RECORD_RAW: skycue-start.sh runs skycue-rawrec; skycued writes the
+    // pingStation JSON rawData frames to RECORD_DIR/raw-<id>-*.
+    bool record_raw = false;
     double max_range_nm = 150, min_elevation_deg = 0;
     std::string allow_list_file, block_list_file;
     double min_interval_s = 1, max_interval_s = 10, track_timeout_s = 60, keyframe_interval_s = 10;
@@ -28,6 +31,7 @@ struct Config {
     int trail_seconds = 120;             // seconds of track history the web map shows, 0-3600
     bool fisb_enable = true;             // FISB_ENABLE: decode FIS-B weather from the UAT uplinks
     bool fisb_experimental = false;      // FISB_EXPERIMENTAL: APDU time options 1/3, radar blocks >= 60 N
+    std::string inputs_file;             // INPUTS_FILE as written; see resolveInputsFile
     // Accepted (they are skycue-start.sh's), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";
 };
@@ -42,5 +46,10 @@ struct ConfigError : std::runtime_error {
 Config parseConfigFile(const std::string& path);  // throws ConfigError
 Config parseConfigText(const std::string& text, const std::string& name_for_errors);
 const std::vector<std::string>& knownConfigKeys();  // exactly the keys of etc/skycue.conf.example
+
+// The inputs file for INPUTS_FILE `value` of the config at `conf_path`:
+// skycue.inputs.json next to the config when empty, `value` resolved against
+// the config's directory when relative, `value` itself when absolute.
+std::string resolveInputsFile(const std::string& conf_path, const std::string& value);
 
 }  // namespace skycued

@@ -535,6 +535,7 @@ BOOST_AUTO_TEST_CASE(api_state_shape)
         BOOST_TEST(t.get<std::string>("source") == "adsb_1090");
         BOOST_TEST(std::regex_match(t.get<std::string>("first_seen"), iso));
         BOOST_TEST(std::regex_match(t.get<std::string>("last_seen"), iso));
+        BOOST_TEST(t.get<std::string>("input", "") == "readsb");  // the input that emitted them
         if (t.get<std::string>("hex") == "a1b2c3") {
             saw_a = true;
             BOOST_TEST(t.get<double>("lat") == 38.95);
@@ -594,6 +595,16 @@ BOOST_AUTO_TEST_CASE(api_state_shape)
     BOOST_TEST(get(f.port, "/api/lists/allow").allow == "POST");
     BOOST_TEST(get(f.port, "/api/filters/save-baseline").status == 405u);
     BOOST_TEST(get(f.port, "/ws").status == 400u);  // not an upgrade
+}
+
+BOOST_AUTO_TEST_CASE(track_json_input_present_when_known)
+{
+    skycued::TrackSnapshot ts;
+    ts.track.id = skycue::TrackId{0xa1b2c3, skycue::AddressType::icao};
+    ts.input = "readsb";
+    BOOST_TEST(parseJson(skycued::webapi::trackJson(ts)).get<std::string>("input") == "readsb");
+    ts.input.clear();
+    BOOST_TEST(parseJson(skycued::webapi::trackJson(ts)).count("input") == 0u);
 }
 
 // Review Focus 1, end to end: a PUT from the UI drops the tracks it excludes
@@ -768,6 +779,65 @@ BOOST_AUTO_TEST_CASE(ws_snapshot_then_events)
         BOOST_TEST(!c.closed);
     }
     BOOST_TEST(pollUntil([&] { return f.webClients() == 0u; }));
+}
+
+BOOST_AUTO_TEST_CASE(ws_inputs_item_on_change)
+{
+    WebFx f;
+    WsClient c(f.port);
+    BOOST_TEST(c.waitFor([&] { return !c.msgs.empty(); }));
+    {
+        std::lock_guard<std::mutex> lk(c.m);
+        const pt::ptree s = parseJson(c.msgs.front());
+        BOOST_TEST(s.get_child("inputs").size() == 1u);
+        BOOST_TEST(s.get_child("inputs").front().second.get<std::string>("id") == "readsb");
+    }
+    BOOST_TEST(pollUntil([&] { return f.webClients() == 1u; }));
+
+    asio::io_context uio;
+    asio::ip::udp::socket probe(uio, asio::ip::udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const uint16_t uport = probe.local_endpoint().port();
+    probe.close();
+    const auto r = request(f.port, http::verb::post, "/api/inputs",
+                           R"({"id":"ps-ws","type":"pingstation_json","bind":"127.0.0.1","port":)" +
+                               std::to_string(uport) + "}");
+    BOOST_TEST(r.status == 201u, r.body);
+    const std::string m = c.waitForMessage({"\"type\":\"inputs\"", "\"id\":\"ps-ws\""});
+    BOOST_REQUIRE(!m.empty());
+    const pt::ptree e = parseJson(m);
+    for (const auto& kv : e.get_child("items"))
+        if (kv.second.get<std::string>("type") == "inputs") {
+            const auto& list = kv.second.get_child("inputs");
+            BOOST_TEST(list.size() == 2u);
+            BOOST_TEST(list.back().second.get<std::string>("id") == "ps-ws");
+            BOOST_TEST(list.back().second.count("state") == 1u);
+        }
+
+    // Several changes in one turn of the event loop: one inputs item.
+    f.fx->t.call([&] {
+        f.fx->engine->inputs().setEnabled("ps-ws", false);
+        f.fx->engine->inputs().setEnabled("ps-ws", true);
+        f.fx->engine->inputs().setEnabled("readsb", false);
+    });
+    const std::string one = c.waitForMessage({"\"type\":\"inputs\"", "\"id\":\"readsb\",\"name\":\"\",\"type\":\"readsb\",\"enabled\":false"});
+    BOOST_REQUIRE(!one.empty());
+    BOOST_TEST(countOf(one, "\"type\":\"inputs\"") == 1u, one);
+
+    // DELETE over HTTP: 204 without a body, then an inputs item without it.
+    size_t before = 0;
+    {
+        std::lock_guard<std::mutex> lk(c.m);
+        before = c.msgs.size();
+    }
+    const auto d = requestWith(f.port, http::verb::delete_, "/api/inputs/ps-ws", "", {});
+    BOOST_TEST(d.status == 204u);
+    BOOST_TEST(d.body.empty());
+    BOOST_TEST(c.waitFor([&] {
+        for (size_t i = before; i < c.msgs.size(); ++i)
+            if (has(c.msgs[i], "\"type\":\"inputs\"") && !has(c.msgs[i], "ps-ws"))
+                return true;
+        return false;
+    }));
 }
 
 BOOST_AUTO_TEST_CASE(ws_observed_events_for_filtered_tracks)

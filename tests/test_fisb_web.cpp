@@ -179,7 +179,7 @@ struct FisbWebFx {
                 source = std::make_unique<skycued::ReplayObservationSource>(t.io, o.recording, 0, false);
             else
                 source = fakeSource(src)(t.io);
-            engine = std::make_unique<Engine>(t.io, cfg, std::move(source), nullptr, *fwd, nullptr, nullptr);
+            engine = std::make_unique<Engine>(t.io, cfg, sourceInputs(t.io, std::move(source)), *fwd, nullptr, nullptr);
             rc = std::make_unique<RuntimeConfig>(t.io, conf, *engine);
             rc->load();
             WebConfig wc;

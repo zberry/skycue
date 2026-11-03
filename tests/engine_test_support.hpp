@@ -6,6 +6,9 @@
 #include "config.hpp"
 #include "engine.hpp"
 #include "forwarder.hpp"
+#include "inputs/input.hpp"
+#include "inputs/input_manager.hpp"
+#include "inputs/source_input.hpp"
 #include "observation.hpp"
 #include "recorder.hpp"
 #include "replay_source.hpp"
@@ -29,6 +32,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -51,6 +55,10 @@ using skycued::Config;
 using skycued::Engine;
 using skycued::Forwarder;
 using skycued::ForwarderConfig;
+using skycued::Input;
+using skycued::InputDef;
+using skycued::InputManager;
+using skycued::InputType;
 using skycued::ObservationSource;
 using skycued::TrackObservation;
 namespace asio = boost::asio;
@@ -249,6 +257,96 @@ struct FakeSource : ObservationSource {
     }
 };
 
+// An InputManager (in-memory when inputs_file is empty) with one built-in
+// SourceInput over `source`, loaded and not started (Engine::start does).
+// The id "replay" makes it a replay input, any other a readsb one.
+inline std::unique_ptr<InputManager> sourceInputs(asio::io_context& io, std::unique_ptr<ObservationSource> source,
+                                                  const std::string& id = "readsb",
+                                                  const std::string& inputs_file = "")
+{
+    skycued::InputManagerConfig mc;
+    mc.inputs_file = inputs_file;
+    auto inputs = std::make_unique<InputManager>(io, mc);
+    InputDef def;
+    def.id = id;
+    def.type = id == "replay" ? InputType::replay : InputType::readsb;
+    def.host = "127.0.0.1";
+    def.port = 1;
+    inputs->addBuiltin(std::make_unique<skycued::SourceInput>(def, std::move(source)));
+    inputs->load();
+    return inputs;
+}
+
+// An Input driven by the test (on the io thread). Whether it is a track input
+// follows its def's type (dump978 is not). start() after stop() runs it again.
+struct FakeInput : Input {
+    bool running = false;
+    int starts = 0;
+
+    explicit FakeInput(InputDef def) : Input(std::move(def)) {}
+    void start() override
+    {
+        running = true;
+        ++starts;
+    }
+    void stop() override
+    {
+        running = false;
+        markStopped();
+    }
+
+    void emit(TrackObservation o)
+    {
+        if (running) {
+            noteData(0);
+            emitObservation(std::move(o));
+        }
+    }
+    void connection(bool up)
+    {
+        if (running) {
+            if (up)
+                ++counters_.connects;
+            setConnected(up);
+        }
+    }
+    void uplink(std::chrono::system_clock::time_point t, const std::string& hex)
+    {
+        if (running) {
+            noteData(0);
+            ++counters_.uplinks;
+            emitUplink(t, hex);
+        }
+    }
+};
+
+inline InputDef fakeDef(const std::string& id, InputType type = InputType::readsb)
+{
+    InputDef d;
+    d.id = id;
+    d.type = type;
+    d.host = "127.0.0.1";
+    d.port = 1;
+    return d;
+}
+
+// A factory for the multi-input EngineFx: an in-memory InputManager with a
+// FakeInput per definition (as built-ins), each also stored in `out` by id.
+inline std::function<std::unique_ptr<InputManager>(asio::io_context&)>
+fakeInputs(std::vector<InputDef> defs, std::map<std::string, FakeInput*>& out)
+{
+    return [defs, &out](asio::io_context& io) {
+        auto inputs = std::make_unique<InputManager>(io, skycued::InputManagerConfig{});
+        for (const auto& d : defs) {
+            auto in = std::make_unique<FakeInput>(d);
+            out[d.id] = in.get();
+            inputs->addBuiltin(std::move(in));
+        }
+        inputs->load();
+        return inputs;
+    };
+}
+
 inline TrackObservation nearbyObservation(uint32_t address, double lat_offset)
 {
     TrackObservation o;
@@ -273,6 +371,14 @@ struct EngineFx {
 
     EngineFx(const Config& cfg, std::function<std::unique_ptr<ObservationSource>(asio::io_context&)> make_source,
              std::chrono::milliseconds keyframe_interval = 10s, const std::string& record_dir = "")
+        : EngineFx(
+              cfg, [make_source](asio::io_context& io) { return sourceInputs(io, make_source(io)); },
+              keyframe_interval, record_dir)
+    {
+    }
+    // Several inputs: `make_inputs` builds the manager (not started).
+    EngineFx(const Config& cfg, std::function<std::unique_ptr<InputManager>(asio::io_context&)> make_inputs,
+             std::chrono::milliseconds keyframe_interval = 10s, const std::string& record_dir = "")
     {
         t.call([&] {
             ForwarderConfig fc;
@@ -286,7 +392,7 @@ struct EngineFx {
                 received = std::make_unique<skycued::Recorder>(rc, "received");
                 sent = std::make_unique<skycued::Recorder>(rc, "sent");
             }
-            engine = std::make_unique<Engine>(t.io, cfg, make_source(t.io), nullptr, *fwd, received.get(), sent.get());
+            engine = std::make_unique<Engine>(t.io, cfg, make_inputs(t.io), *fwd, received.get(), sent.get());
             engine->start();
         });
     }

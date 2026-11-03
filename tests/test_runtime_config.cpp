@@ -451,6 +451,22 @@ BOOST_AUTO_TEST_CASE(watch_detects_conf_edit_within_2s)
     BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().max_range_nm; }) == 98.0);
 }
 
+BOOST_AUTO_TEST_CASE(record_raw_and_fisb_edits_need_restart)
+{
+    RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\n");
+    f.start(true);
+    StderrCapture err(f.path("stderr.txt"));
+    writeFile(f.conf, std::string(kConfHead) +
+                          "MAX_RANGE_NM=97\nRECORD_RAW=yes\nFISB_ENABLE=no\nFISB_EXPERIMENTAL=yes\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().max_range_nm == 97.0; }, 2600ms));
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "FISB_EXPERIMENTAL"); }, 500ms));
+    err.restore();
+    const std::string text = err.text();
+    BOOST_TEST(has(text, "requires restart"), text);
+    BOOST_TEST(has(text, "RECORD_RAW"), text);
+    BOOST_TEST(has(text, "FISB_ENABLE"), text);
+}
+
 BOOST_AUTO_TEST_CASE(conf_edit_overridden_by_overlay_warns)
 {
     RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\nMIN_ELEVATION_DEG=0\n");

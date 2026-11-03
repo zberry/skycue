@@ -294,7 +294,7 @@ BOOST_AUTO_TEST_CASE(fuzz_products_stay_in_range)
         auto b = payloads[rng() % payloads.size()];
         const int flips = 1 + static_cast<int>(rng() % 8);
         for (int k = 0; k < flips; ++k)
-            b[8 + rng() % (b.size() - 8)] ^= static_cast<uint8_t>(1u << (rng() % 8));
+            { const auto flipMask_ = static_cast<uint8_t>(1u << (rng() % 8)); auto& flipCell_ = b[8 + rng() % (b.size() - 8)]; flipCell_ = static_cast<uint8_t>(flipCell_ ^ flipMask_); }
         std::string line = "+";
         for (uint8_t v : b) {
             line += hex[v >> 4];
@@ -343,8 +343,8 @@ struct ReplayFx {
                 fisb = std::make_unique<skycued::Recorder>(rc, "fisb");
             }
             auto src = std::make_unique<skycued::ReplayObservationSource>(t.io, kReceivedWithUplinks, 0, false);
-            engine = std::make_unique<Engine>(t.io, cfg, std::move(src), nullptr, *fwd, received.get(), sent.get(),
-                                              fisb.get());
+            engine = std::make_unique<Engine>(t.io, cfg, sourceInputs(t.io, std::move(src)), *fwd, received.get(),
+                                              sent.get(), fisb.get());
             engine->onEvent([this](const EngineEvent& e) {
                 if (!e.fisb)
                     return;
@@ -514,7 +514,7 @@ BOOST_AUTO_TEST_CASE(fisb_disabled_decodes_nothing)
         fc.tcp_listen_ephemeral = true;
         fwd = std::make_unique<Forwarder>(t.io, fc);
         auto src = std::make_unique<skycued::ReplayObservationSource>(t.io, kReceivedWithUplinks, 0, false);
-        engine = std::make_unique<Engine>(t.io, cfg, std::move(src), nullptr, *fwd, nullptr, nullptr);
+        engine = std::make_unique<Engine>(t.io, cfg, sourceInputs(t.io, std::move(src)), *fwd, nullptr, nullptr);
         engine->start();
     });
     const auto end = steady::now() + 10s;

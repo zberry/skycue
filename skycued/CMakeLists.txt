@@ -1,5 +1,18 @@
 # skycued: the daemon. skycued_core holds everything except main.cpp so the
 # tests can link it.
+
+# ASTERIX CAT021 codec, stream framer and the capture-file line: pure code,
+# no I/O. skycue-dump links it without skycued_core, hence time_util here.
+add_library(skycued_asterix STATIC
+  src/asterix/capture_line.cpp
+  src/asterix/cat021.cpp
+  src/asterix/cat021_encode.cpp
+  src/asterix/cat021_framer.cpp
+  src/time_util.cpp)
+target_include_directories(skycued_asterix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(skycued_asterix PUBLIC Boost::boost)
+skycue_set_warnings(skycued_asterix)
+
 add_library(skycued_core STATIC
   src/change_detector.cpp
   src/conf_rewrite.cpp
@@ -16,9 +29,28 @@ add_library(skycued_core STATIC
   src/fisb/text_products.cpp
   src/fisb/twgo.cpp
   src/fisb/uplink_frame.cpp
+  src/file_util.cpp
   src/filters.cpp
   src/forwarder.cpp
   src/geo.cpp
+  src/inputs/capture_writer.cpp
+  src/inputs/cat021_map.cpp
+  src/inputs/device_time.cpp
+  src/inputs/dump978_input.cpp
+  src/inputs/input.cpp
+  src/inputs/input_def.cpp
+  src/inputs/input_manager.cpp
+  src/inputs/inputs_file.cpp
+  src/inputs/ping_cat021_input.cpp
+  src/inputs/ping_encode.cpp
+  src/inputs/ping_json.cpp
+  src/inputs/ping_json_input.cpp
+  src/inputs/source_input.cpp
+  src/inputs/status_poller.cpp
+  src/inputs/tcp_connect_client.cpp
+  src/inputs/tcp_listener.cpp
+  src/inputs/transport.cpp
+  src/inputs/udp_listener.cpp
   src/json_lite.cpp
   src/line_client.cpp
   src/log.cpp
@@ -32,13 +64,13 @@ add_library(skycued_core STATIC
   src/rotating_file.cpp
   src/runtime_config.cpp
   src/stats_report.cpp
-  src/time_util.cpp
   src/track_table.cpp
   src/web_api.cpp
   src/web_fisb.cpp
+  src/web_inputs.cpp
   src/web_server.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(skycued_core PUBLIC skycue::skycue Boost::boost Boost::program_options)
+target_link_libraries(skycued_core PUBLIC skycued_asterix skycue::skycue Boost::boost Boost::program_options)
 skycue_set_warnings(skycued_core)
 
 add_executable(skycued src/main.cpp)

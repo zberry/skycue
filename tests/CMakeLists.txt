@@ -158,6 +158,14 @@ add_test(NAME dump
     $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-dump> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(dump PROPERTIES TIMEOUT 60)
 
+# skycue-pingsim (CAT021, JSON with status, capture replay, --tcp-listen) into
+# one skycued, and skycue-dump --capture on the capture file.
+add_test(NAME pingsim
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pingsim.sh
+    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-pingsim> $<TARGET_FILE:skycue-dump>
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(pingsim PROPERTIES TIMEOUT 120)
+
 add_executable(test_stats test_stats.cpp)
 target_link_libraries(test_stats PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_stats PRIVATE BOOST_TEST_DYN_LINK)
@@ -208,7 +216,8 @@ set_tests_properties(web_ui PROPERTIES TIMEOUT 60)
 if(SKYCUE_UI_TESTS)
   add_test(NAME ui_playwright
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/ui/run.sh
-      $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE})
+      $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
+      $<TARGET_FILE:skycue-pingsim>)
   set_tests_properties(ui_playwright PROPERTIES TIMEOUT 300)
 endif()
 
@@ -269,3 +278,63 @@ add_test(NAME iqgen_cli
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
     $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180)
+
+# ASTERIX CAT021 decoder, test encoder and TCP stream framer (pure).
+add_executable(test_cat021 test_cat021.cpp)
+target_link_libraries(test_cat021 PRIVATE skycued_asterix Boost::unit_test_framework)
+target_compile_definitions(test_cat021 PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_cat021)
+add_test(NAME cat021 COMMAND test_cat021)
+
+# pingStation 3 adapters, pure part: device time, JSON parser, CAT021 mapping.
+add_executable(test_pingstation test_pingstation.cpp)
+target_link_libraries(test_pingstation PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_pingstation PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_pingstation)
+add_test(NAME pingstation COMMAND test_pingstation)
+
+# Input definitions, their validation, the inputs file and the settled-file watcher.
+add_executable(test_input_def test_input_def.cpp)
+target_link_libraries(test_input_def PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_input_def PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_input_def)
+add_test(NAME input_def COMMAND test_input_def)
+
+# pingStation transports: UDP listener, TCP connect client, TCP listener.
+add_executable(test_transports test_transports.cpp)
+target_link_libraries(test_transports PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_transports PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_transports)
+add_test(NAME transports COMMAND test_transports)
+set_tests_properties(transports PROPERTIES TIMEOUT 60)
+
+# Inputs and the InputManager: pingStation inputs over real sockets, the
+# inputs file, hand edits and the lifecycle.
+add_executable(test_inputs test_inputs.cpp)
+target_link_libraries(test_inputs PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_inputs PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_inputs)
+add_test(NAME inputs COMMAND test_inputs)
+set_tests_properties(inputs PROPERTIES TIMEOUT 120)
+
+# The pingStation status poll over HTTP against an in-test server.
+add_executable(test_status_poller test_status_poller.cpp)
+target_link_libraries(test_status_poller PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_status_poller PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_status_poller)
+add_test(NAME status_poller COMMAND test_status_poller)
+set_tests_properties(status_poller PROPERTIES TIMEOUT 60)
+
+# pingStation raw capture (capture: true) and the RECORD_RAW frames of JSON
+# mode, in the formats skycue-rawplay replays.
+add_executable(test_capture test_capture.cpp)
+target_link_libraries(test_capture PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_capture PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_capture)
+add_test(NAME capture COMMAND test_capture)
+set_tests_properties(capture PROPERTIES TIMEOUT 60)

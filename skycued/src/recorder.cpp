@@ -287,11 +287,17 @@ bool getPosTime(const JsonObject& j, const char* k, Obs& o)
     return true;
 }
 
-void putOnGround(const Obs& o, Record& r, const char* k) { r.push_back(boolField(k, o.on_ground)); }
+// Unset (the input did not say) is written as no key and read back from one;
+// a present key is the value written, with no heuristic.
+void putOnGround(const Obs& o, Record& r, const char* k)
+{
+    if (o.on_ground)
+        r.push_back(boolField(k, *o.on_ground));
+}
 bool getOnGround(const JsonObject& j, const char* k, Obs& o)
 {
     if (!j.has(k))
-        return true;
+        return true;  // unset
     auto v = j.getString(k);
     if (v && *v == "true")
         o.on_ground = true;
@@ -314,9 +320,25 @@ bool getRaw(const JsonObject& j, const char* k, Obs& o)
     return true;
 }
 
+void putInput(const Obs& o, Record& r, const char* k)
+{
+    if (!o.input_id.empty())
+        r.push_back(textField(k, o.input_id));
+}
+bool getInput(const JsonObject& j, const char* k, Obs& o)
+{
+    if (!j.has(k))
+        return true;  // no input id
+    auto v = j.getString(k);
+    if (!v)
+        return false;
+    o.input_id = *v;
+    return true;
+}
+
 struct ObsKey {
     const char* key;
-    bool csv;  // also a column of the received CSV
+    bool csv;  // also a column of the received CSV, in table order before uplink_hex
     Put put;
     Get get;
 };
@@ -345,6 +367,7 @@ const ObsKey kObsKeys[] = {
     {"nac_p", true, putInt<uint8_t, &Obs::nac_p>, getInt<uint8_t, &Obs::nac_p>},
     {"rssi", true, putReal<&Obs::rssi>, getReal<&Obs::rssi>},
     {"raw", false, putRaw, getRaw},
+    {"input", false, putInput, getInput},  // the received CSV's last column (receivedColumns)
 };
 
 // ---- the sent-stream keys (write only) ----
@@ -410,6 +433,7 @@ const std::vector<const char*>& receivedColumns()
             if (k.csv)
                 c.push_back(k.key);
         c.push_back("uplink_hex");
+        c.push_back("input");  // after uplink_hex, so the older columns keep their positions
         return c;
     }();
     return cols;

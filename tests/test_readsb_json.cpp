@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <string>
 
 using skycue::AddressType;
@@ -47,7 +48,7 @@ BOOST_AUTO_TEST_CASE(parses_minimal_line)
     BOOST_REQUIRE(obs->lat && obs->lon);
     BOOST_TEST(*obs->lat == 38.912345);
     BOOST_TEST(*obs->lon == -75.987654);
-    BOOST_TEST(!obs->on_ground);
+    BOOST_TEST((obs->on_ground == false));  // a numeric alt_baro asserts airborne
     BOOST_TEST(obs->alt_baro_ft.value_or(0) == 36000);
     BOOST_TEST(obs->alt_geom_ft.value_or(0) == 36525);
     BOOST_TEST(obs->gs_kt.value_or(0) == 460.2f);
@@ -71,11 +72,20 @@ BOOST_AUTO_TEST_CASE(ground_altitude)
         R"({"now":1793545200.0,"hex":"a7d3e6","type":"adsb_icao","flight":"UAL455  ","alt_baro":"ground",)"
         R"("gs":14.6,"true_heading":181.4,"lat":38.85,"lon":-77.04,"nic":8,"rc":186,"seen_pos":0.1})");
     BOOST_REQUIRE(obs);
-    BOOST_TEST(obs->on_ground);
+    BOOST_TEST((obs->on_ground == true));
     BOOST_TEST(!obs->alt_baro_ft);
     BOOST_TEST(!obs->alt_geom_ft);
     BOOST_TEST(obs->gs_kt.value_or(0) == 14.6f);
     BOOST_TEST(obs->lat.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(on_ground_unset_without_alt_baro)
+{
+    // No alt_baro: the line says nothing about whether the target is on the ground.
+    auto obs = parseReadsbLine(R"({"now":1793545200.0,"hex":"a7d3e6","type":"adsb_icao","lat":38.85,"lon":-77.04})");
+    BOOST_REQUIRE(obs);
+    BOOST_TEST(!obs->on_ground.has_value());
+    BOOST_TEST(!obs->alt_baro_ft);
 }
 
 BOOST_AUTO_TEST_CASE(no_position_line)
@@ -300,7 +310,7 @@ BOOST_AUTO_TEST_CASE(sample_fixture_parses_fully)
         if (!obs)
             continue;
         ++parsed;
-        on_ground += obs->on_ground ? 1 : 0;
+        on_ground += obs->on_ground.value_or(false) ? 1 : 0;
         with_position += obs->lat ? 1 : 0;
         uat += obs->source == Source::uat_978 ? 1 : 0;
         tisb += obs->source == Source::tisb ? 1 : 0;
@@ -340,4 +350,39 @@ BOOST_AUTO_TEST_CASE(json_writer_escapes)
     BOOST_TEST(o->getString("s").value_or("") == "a\"b\n");
     BOOST_TEST(o->getString("bs").value_or("") == "c\\d\t\x01");
     BOOST_TEST(o->getInt("i").value_or(0) == -1234567890123);
+}
+
+BOOST_AUTO_TEST_CASE(json_object_array)
+{
+    auto o = JsonObject::parse(
+        R"({"a":[{"x":1},{"x":"2"}],"empty":[],"eobj":{},"scalars":[1,2],"nested":[[1]],)"
+        R"("obj":{"k":{"x":1}},"s":"v","mixed":[{"x":1},3]})");
+    BOOST_REQUIRE(o);
+    auto a = o->getObjectArray("a");
+    BOOST_REQUIRE(a);
+    BOOST_REQUIRE(a->size() == 2u);
+    BOOST_TEST((*a)[0].getInt("x").value_or(0) == 1);
+    BOOST_TEST((*a)[1].getInt("x").value_or(0) == 2);
+    BOOST_TEST(o->getObjectArray("empty").value().empty());
+    BOOST_TEST(o->getObjectArray("eobj").value().empty());  // {} reads as an empty array
+    BOOST_TEST(!o->getObjectArray("scalars"));
+    BOOST_TEST(!o->getObjectArray("nested"));
+    BOOST_TEST(!o->getObjectArray("obj"));
+    BOOST_TEST(!o->getObjectArray("s"));
+    BOOST_TEST(!o->getObjectArray("mixed"));
+    BOOST_TEST(!o->getObjectArray("absent"));
+}
+
+BOOST_AUTO_TEST_CASE(json_bool)
+{
+    auto o = JsonObject::parse(R"({"t":true,"f":false,"one":1,"s":"yes","o":{},"st":"true"})");
+    BOOST_REQUIRE(o);
+    BOOST_TEST((o->getBool("t") == std::optional<bool>(true)));
+    BOOST_TEST((o->getBool("f") == std::optional<bool>(false)));
+    BOOST_TEST(!o->getBool("one"));
+    BOOST_TEST(!o->getBool("s"));
+    BOOST_TEST(!o->getBool("o"));
+    BOOST_TEST(!o->getBool("absent"));
+    // PropertyTree keeps scalars as text, so the string "true" reads the same.
+    BOOST_TEST((o->getBool("st") == std::optional<bool>(true)));
 }

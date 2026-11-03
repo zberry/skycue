@@ -4,6 +4,7 @@
 #include "log.hpp"
 #include "runtime_config.hpp"
 #include "web_api.hpp"
+#include "web_inputs.hpp"
 
 // Boost.Beast as of Boost 1.66 (the oldest supported): http::async_read with
 // a request_parser, http::async_write, websocket::stream<tcp::socket> with
@@ -296,7 +297,8 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
         res->version(version);
         res->result(status);
         res->set(http::field::server, "skycued");
-        res->set(http::field::content_type, content_type);
+        if (!content_type.empty())  // a 204 has none
+            res->set(http::field::content_type, content_type);
         res->set(http::field::cache_control, cache_control);
         if (!allow.empty())
             res->set(http::field::allow, allow);
@@ -305,6 +307,8 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
         if (!head)
             res->body() = std::move(body);
         res->prepare_payload();
+        if (status == 204)
+            res->erase(http::field::content_length);  // RFC 7230 3.3.2: none on a 204
         if (head)
             res->content_length(size);  // the GET's length, no body
         const bool close_after = res->need_eof();
@@ -638,7 +642,8 @@ void WebServer::Impl::onEvent(const EngineEvent& ev)
     if (stopped || ws_open == 0)
         return;
     Item item{ev.kind, webapi::eventJson(ev)};
-    if (item.json.empty() && ev.kind != EventKind::filters_changed && ev.kind != EventKind::lists_changed)
+    if (item.json.empty() && ev.kind != EventKind::filters_changed && ev.kind != EventKind::lists_changed &&
+        ev.kind != EventKind::inputs_changed)
         return;
     enqueue(std::move(item));
 }
@@ -670,20 +675,35 @@ void WebServer::Impl::flush()
         pending.clear();
         return;
     }
-    for (auto& item : pending) {
+    // One inputs item per batch, at the place of the last change: the earlier
+    // ones stay "" and are left out (a client that joined in between has the
+    // earlier changes in its snapshot and still gets the last one).
+    size_t last_inputs = pending.size();
+    for (size_t i = 0; i < pending.size(); ++i) {
+        auto& item = pending[i];
         if (item.kind == EventKind::filters_changed)
             item.json = webapi::filtersJson(runtime, "filters");
         else if (item.kind == EventKind::lists_changed)
             item.json = webapi::listsJson(engine, runtime, "lists");
+        else if (item.kind == EventKind::inputs_changed)
+            last_inputs = i;
     }
-    // The items from `from` on, as one message.
-    auto message = [this](size_t from) {
+    if (last_inputs < pending.size())
+        pending[last_inputs].json = webapi::inputsJson(engine.inputs(), "inputs");
+    // The items from `from` on, as one message; null when none has JSON.
+    auto message = [this](size_t from) -> std::shared_ptr<const std::string> {
         std::string msg = "{\"type\":\"events\",\"items\":[";
+        bool first = true;
         for (size_t i = from; i < pending.size(); ++i) {
-            if (i > from)
+            if (pending[i].json.empty())
+                continue;
+            if (!first)
                 msg += ',';
+            first = false;
             msg += pending[i].json;
         }
+        if (first)
+            return nullptr;
         msg += "]}";
         return std::make_shared<const std::string>(std::move(msg));
     };
@@ -694,11 +714,12 @@ void WebServer::Impl::flush()
         if (!s || !s->open)
             continue;
         if (s->skip_batch != this_batch) {
-            targets.emplace_back(std::move(s), all);
+            if (all)
+                targets.emplace_back(std::move(s), all);
         } else if (s->skip_items < pending.size()) {
             // Joined during this batch: only what happened after its snapshot.
-            auto rest = message(s->skip_items);
-            targets.emplace_back(std::move(s), std::move(rest));
+            if (auto rest = message(s->skip_items))
+                targets.emplace_back(std::move(s), std::move(rest));
         }
     }
     pending.clear();

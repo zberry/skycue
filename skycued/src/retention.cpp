@@ -36,38 +36,64 @@ bool allDigits(const std::string& s, std::size_t from, std::size_t n)
                        [](char c) { return c >= '0' && c <= '9'; });
 }
 
+// "YYYYMMDD-HHMMSS" at name[at].
+bool isStamp(const std::string& name, std::size_t at)
+{
+    return allDigits(name, at, 8) && name[at + 8] == '-' && allDigits(name, at + 9, 6);
+}
+
+// A stream prefix and the extensions it may have: a fixed stream (any of the
+// four), capture-<id> (.jsonl) or raw-<id> (.csv, .txt), id [a-z0-9-]{1,32}.
+bool streamAllows(const std::string& stream, const std::string& ext)
+{
+    static const char* const kStreams[] = {"received", "sent", "fisb", "beast", "uat"};
+    if (std::any_of(std::begin(kStreams), std::end(kStreams), [&](const char* s) { return stream == s; }))
+        return ext == "jsonl" || ext == "csv" || ext == "bin" || ext == "txt";
+    auto idAfter = [&](const std::string& head) {
+        if (stream.compare(0, head.size(), head) != 0)
+            return false;
+        const std::size_t n = stream.size() - head.size();
+        return n >= 1 && n <= 32 && std::all_of(stream.begin() + static_cast<std::ptrdiff_t>(head.size()), stream.end(),
+                                                [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
+    };
+    if (idAfter("capture-"))
+        return ext == "jsonl";
+    if (idAfter("raw-"))
+        return ext == "csv" || ext == "txt";
+    return false;
+}
+
+// <stream>-YYYYMMDD-HHMMSS[-N].<ext>, parsed from the end (an input id may
+// hold dashes and digits).
 NameParts parseName(const std::string& name)
 {
     NameParts p;
-    const std::size_t dash = name.find('-');
-    if (dash == std::string::npos)
+    const std::size_t dot = name.rfind('.');
+    if (dot == std::string::npos)
         return p;
-    p.stream = name.substr(0, dash);
-    static const char* const kStreams[] = {"received", "sent", "fisb", "beast", "uat"};
-    if (std::none_of(std::begin(kStreams), std::end(kStreams), [&](const char* s) { return p.stream == s; }))
+    const std::string ext = name.substr(dot + 1);
+    // The stamp ends at `end`: right before the dot, or before a -N suffix.
+    auto tryStamp = [&](std::size_t end, long suffix) {
+        if (end < 16 + 1 || name[end - 16] != '-' || !isStamp(name, end - 15))
+            return false;
+        const std::string stream = name.substr(0, end - 16);
+        if (!streamAllows(stream, ext))
+            return false;
+        p.ok = true;
+        p.stream = stream;
+        p.stamp = name.substr(end - 15, 15);
+        p.ext = ext;
+        p.suffix = suffix;
+        return true;
+    };
+    if (tryStamp(dot, 0))
         return p;
-    // YYYYMMDD-HHMMSS
-    std::size_t i = dash + 1;
-    if (!allDigits(name, i, 8) || i + 8 >= name.size() || name[i + 8] != '-' || !allDigits(name, i + 9, 6))
-        return p;
-    p.stamp = name.substr(i, 15);
-    i += 15;
-    if (i < name.size() && name[i] == '-') {
-        std::size_t j = i + 1;
-        while (j < name.size() && name[j] >= '0' && name[j] <= '9')
-            ++j;
-        if (j == i + 1 || j - i - 1 > 9)
-            return p;
-        p.suffix = std::stol(name.substr(i + 1, j - i - 1));
-        i = j;
-    }
-    if (i >= name.size() || name[i] != '.')
-        return p;
-    p.ext = name.substr(i + 1);
-    static const char* const kExts[] = {"jsonl", "csv", "bin", "txt"};
-    if (std::none_of(std::begin(kExts), std::end(kExts), [&](const char* e) { return p.ext == e; }))
-        return p;
-    p.ok = true;
+    std::size_t j = dot;
+    while (j > 0 && name[j - 1] >= '0' && name[j - 1] <= '9')
+        --j;
+    const std::size_t digits = dot - j;
+    if (digits >= 1 && digits <= 9 && j > 0 && name[j - 1] == '-')
+        tryStamp(j - 1, std::stol(name.substr(j, digits)));
     return p;
 }
 

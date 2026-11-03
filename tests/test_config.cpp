@@ -357,6 +357,17 @@ BOOST_AUTO_TEST_CASE(web_bind_record_max_gb_trail_seconds)
     BOOST_TEST(contains(e.what(), "WEB_BIND"));
 }
 
+BOOST_AUTO_TEST_CASE(record_raw_parsed)
+{
+    BOOST_TEST(!parseConfigText(kLatLon, "t").record_raw);
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "RECORD_RAW=yes\n", "t").record_raw);
+    BOOST_TEST(!parseConfigText(std::string(kLatLon) + "RECORD_RAW=no\n", "t").record_raw);
+    ConfigError e = expectError(std::string(kLatLon) + "RECORD_RAW=maybe\n");
+    BOOST_TEST(e.line == 3);
+    BOOST_TEST(contains(e.what(), "RECORD_RAW"));
+    BOOST_TEST(contains(e.what(), "yes or no"));
+}
+
 BOOST_AUTO_TEST_CASE(fisb_enable_and_experimental)
 {
     Config c = parseConfigText(kLatLon, "t");
@@ -370,6 +381,26 @@ BOOST_AUTO_TEST_CASE(fisb_enable_and_experimental)
         BOOST_TEST(e.line == 3, line);
         BOOST_TEST(contains(e.what(), "yes or no"), line);
     }
+}
+
+BOOST_AUTO_TEST_CASE(inputs_file_key)
+{
+    BOOST_TEST(parseConfigText(kLatLon, "t").inputs_file.empty());
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "INPUTS_FILE=/var/lib/skycue/inputs.json\n", "t").inputs_file ==
+               "/var/lib/skycue/inputs.json");
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "INPUTS_FILE=my.json\n", "t").inputs_file == "my.json");
+}
+
+BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_the_config)
+{
+    using skycued::resolveInputsFile;
+    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "") == "/etc/skycue/skycue.inputs.json");
+    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "mine.json") == "/etc/skycue/mine.json");
+    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "sub/mine.json") == "/etc/skycue/sub/mine.json");
+    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "/srv/inputs.json") == "/srv/inputs.json");
+    BOOST_TEST(resolveInputsFile("skycue.conf", "") == "skycue.inputs.json");
+    BOOST_TEST(resolveInputsFile("skycue.conf", "mine.json") == "mine.json");
+    BOOST_TEST(resolveInputsFile("/skycue.conf", "") == "/skycue.inputs.json");
 }
 
 BOOST_AUTO_TEST_CASE(known_keys_match_example)

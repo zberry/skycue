@@ -199,6 +199,42 @@ BOOST_AUTO_TEST_CASE(newest_of_each_stream_and_extension_is_kept)
     BOOST_TEST(r.bytes_after == 500u);
 }
 
+BOOST_AUTO_TEST_CASE(capture_and_raw_names_recognised)
+{
+    for (const char* ok :
+         {"capture-ps-north-20261102-101500.jsonl", "raw-ps-north-20261102-101500-2.csv",
+          "raw-ps-north-20261102-101500.txt", "capture-a-20261102-101500-12.jsonl",
+          "raw-0123456789abcdefghijklmnopqrstuv-20261102-101500.csv", "capture-20261101-20261102-101500.jsonl"})
+        BOOST_TEST(isRecordingFileName(ok), ok);
+    for (const char* bad :
+         {"capture-PS-20261102-101500.jsonl", "raw--20261102-101500.csv", "capture-20261102-101500.jsonl",
+          "capture-ps-20261102-101500.csv", "raw-ps-20261102-101500.jsonl", "raw-ps-20261102-101500.bin",
+          "raw-ps_n-20261102-101500.csv", "raw-0123456789abcdefghijklmnopqrstuvw-20261102-101500.csv",
+          "capture-ps-20261102-101500-.jsonl", "capture-ps-2026110-101500.jsonl", "rawx-ps-20261102-101500.csv",
+          "capture-ps.jsonl", "beast-ps-20261102-101500.bin"})
+        BOOST_TEST(!isRecordingFileName(bad), bad);
+}
+
+// The newest file of each input's stream is protected on its own: raw-a's
+// newest does not shield raw-b's older files, nor the other way round.
+BOOST_AUTO_TEST_CASE(newest_is_kept_per_input_prefix)
+{
+    TempDir t;
+    t.file("raw-a-20261101-090000.csv", 100);
+    t.file("raw-a-20261101-100000.csv", 100);
+    t.file("raw-b-20261101-080000.csv", 100);
+    t.file("raw-b-20261101-110000.csv", 100);
+    t.file("capture-a-20261101-070000.jsonl", 100);
+    t.file("capture-a-20261101-120000.jsonl", 100);
+    const auto r = enforce(t.path, 1, {});
+    const std::vector<std::string> want{"capture-a-20261101-070000.jsonl", "raw-b-20261101-080000.csv",
+                                        "raw-a-20261101-090000.csv"};
+    BOOST_TEST(names(t, r.deleted) == want, boost::test_tools::per_element());
+    BOOST_TEST(t.has("raw-a-20261101-100000.csv"));
+    BOOST_TEST(t.has("raw-b-20261101-110000.csv"));
+    BOOST_TEST(t.has("capture-a-20261101-120000.jsonl"));
+}
+
 BOOST_AUTO_TEST_CASE(retention_never_deletes_recently_modified_file)
 {
     TempDir t;

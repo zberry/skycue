@@ -1,5 +1,6 @@
 #include "engine.hpp"
 
+#include "inputs/dump978_input.hpp"
 #include "log.hpp"
 
 #include <cctype>
@@ -62,13 +63,11 @@ EngineEvent kindEvent(EventKind kind)
 
 }  // namespace
 
-Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_ptr<ObservationSource> source,
-               std::unique_ptr<Dump978RawSource> uat, Forwarder& forwarder, Recorder* received, Recorder* sent,
-               Recorder* fisb)
+Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_ptr<InputManager> inputs,
+               Forwarder& forwarder, Recorder* received, Recorder* sent, Recorder* fisb)
     : io_(io),
       config_(config),
-      source_(std::move(source)),
-      uat_(std::move(uat)),
+      inputs_(std::move(inputs)),
       forwarder_(forwarder),
       received_(received),
       sent_(sent),
@@ -80,10 +79,10 @@ Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_pt
       stats_timer_(io),
       lost_timer_(io)
 {
-    if (!source_)
-        throw std::invalid_argument("Engine: a source is required");
-    source_->onObservation([this](const TrackObservation& obs) { handleObservation(obs); });
-    source_->onConnection([this](bool up) { handleConnection(up); });
+    if (!inputs_)
+        throw std::invalid_argument("Engine: an input manager is required");
+    inputs_->onObservation([this](const TrackObservation& obs) { handleObservation(obs); });
+    inputs_->onChanged([this] { inputsChanged(); });
     if (config_.fisb_enable) {
         fisb_decoder_ = std::make_unique<fisb::FisbDecoder>(config_.fisb_experimental);
         fisb_decoder_->onProduct([this](const fisb::FisbProduct& p) {
@@ -91,15 +90,16 @@ Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_pt
             handleFisbEvents(events);
         });
     }
-    source_->onUplink([this](std::chrono::system_clock::time_point when, const std::string& hex) {
-        handleUplink(when, hex);
-    });
-    if (uat_) {
-        uat_->onUplink([this](std::chrono::system_clock::time_point when, const std::string& hex) {
+    inputs_->onUplink(
+        [this](const std::string& input_id, std::chrono::system_clock::time_point when, const std::string& hex) {
+            if (stopped_)
+                return;
+            if (dedupe_.duplicate(input_id, steady::now(), hex)) {
+                ++uplink_duplicates_;
+                return;
+            }
             handleUplink(when, hex);
         });
-        uat_->onConnection([this](bool up) { uat_connected_ = up; });
-    }
     forwarder_.setKeyframeProvider([this] {
         std::vector<skycue::Track> out;
         table_.forEach([&](TrackState& s) {
@@ -140,9 +140,7 @@ void Engine::start()
     LOG_INFO("filters " << description);
     if (sent_)
         sent_->writeFilterChange(description);
-    source_->start();
-    if (uat_)
-        uat_->start();
+    inputs_->start();
     armTick();
     armStats();
 }
@@ -155,9 +153,7 @@ void Engine::stop()
     sink_ = nullptr;  // no event from here on
     if (!started_)
         return;
-    source_->stop();
-    if (uat_)
-        uat_->stop();
+    inputs_->stop();
     ++lost_gen_;
     error_code ignored;
     tick_timer_.cancel(ignored);
@@ -423,29 +419,33 @@ void Engine::dropAllForwarded(skycue::DropReason reason)
     });
 }
 
-void Engine::handleConnection(bool up)
+void Engine::inputsChanged()
 {
     if (stopped_)
         return;
-    const bool was = source_connected_;
-    source_connected_ = up;
+    const bool up = inputs_->anyTrackInputConnected();
+    const bool was = track_connected_;
+    track_connected_ = up;
     error_code ignored;
-    if (up) {
-        if (!was)
-            LOG_INFO("source connected");
+    if (up && !was) {
+        LOG_INFO("source connected");
         ++lost_gen_;
         lost_timer_.cancel(ignored);
-        return;
+    } else if (!up && was) {
+        armLost();
     }
-    if (!was)
-        return;  // already down; the timer from the first loss keeps running
+    emit(kindEvent(EventKind::inputs_changed));
+}
+
+void Engine::armLost()
+{
     LOG_WARN("source lost; forwarded tracks are dropped if it is not back within " << track_timeout_.count()
                                                                                     << " s");
     const unsigned gen = ++lost_gen_;
     lost_timer_.expires_after(track_timeout_);  // the same value expire() uses
     std::weak_ptr<char> alive = alive_;
     lost_timer_.async_wait([this, gen, alive](const error_code& ec) {
-        if (ec || alive.expired() || gen != lost_gen_ || stopped_ || source_connected_)
+        if (ec || alive.expired() || gen != lost_gen_ || stopped_ || track_connected_)
             return;
         size_t n = 0;
         table_.forEach([&](TrackState& s) { n += s.currently_forwarded ? 1 : 0; });
@@ -464,8 +464,8 @@ void Engine::tick()
             if (s.currently_forwarded)
                 forwarded.insert(s.id);
         });
-        // A track that ages out while the source is down went because of it.
-        const auto reason = source_connected_ ? skycue::DropReason::timeout : skycue::DropReason::source_lost;
+        // A track that ages out while the inputs are lost went because of it.
+        const auto reason = track_connected_ ? skycue::DropReason::timeout : skycue::DropReason::source_lost;
         for (const auto& id : table_.expire(now, track_timeout_)) {
             if (!forwarded.count(id)) {
                 if (sink_) {
@@ -552,12 +552,19 @@ EngineStats Engine::stats() const
     s.sent_drops = sent_drops_;
     s.tracks_total = table_.size();
     table_.forEach([&](const TrackState& t) { s.tracks_forwarded += t.currently_forwarded ? 1 : 0; });
-    if (uat_) {
-        s.uat_downlink = uat_->downlinkFrames();
-        s.uat_uplink = uat_->uplinkFrames();
+    const Input* readsb = inputs_->builtin("readsb");
+    if (!readsb)
+        readsb = inputs_->builtin("replay");
+    s.readsb_connected = readsb && readsb->state().connected;
+    if (const Input* uat = inputs_->builtin("dump978")) {
+        s.dump978_connected = uat->state().connected;
+        if (const auto* d = dynamic_cast<const Dump978Input*>(uat)) {
+            s.uat_downlink = d->downlinkFrames();
+            s.uat_uplink = d->uplinkFrames();
+        }
     }
-    s.readsb_connected = source_connected_;
-    s.dump978_connected = uat_ && uat_connected_;
+    s.inputs = inputs_->statsLines();
+    s.fisb_uplink_duplicates = uplink_duplicates_;
     s.tcp_clients = forwarder_.tcpClientCount();
     s.udp_targets = forwarder_.udpTargetCount();
     s.drops_timeout = drops_timeout_;
@@ -591,6 +598,7 @@ TrackSnapshot Engine::trackSnapshot(const TrackState& state, const FilterResult&
     t.emergency = state.latest.emergency;
     t.category = state.latest.category;
     t.rssi = state.latest.rssi.value_or(std::numeric_limits<double>::quiet_NaN());
+    t.input = state.last_input;
     return t;
 }
 
@@ -631,6 +639,12 @@ std::optional<fisb::Mosaic> Engine::fisbMosaic(uint16_t product, std::optional<u
 
 uint64_t Engine::fisbBlocksCopied() const { return fisb_store_.blocksCopied(); }
 
+bool Engine::dump978Off() const
+{
+    const auto d = inputs_->find("dump978");
+    return !d || !d->def.enabled;  // the id is reserved for the built-in
+}
+
 std::string Engine::statsLine() const
 {
     const EngineStats s = stats();
@@ -638,7 +652,8 @@ std::string Engine::statsLine() const
     ss << "stats obs=" << s.observations << " sent=" << s.sent_updates << " drops=" << s.sent_drops
        << " tracks=" << s.tracks_total << " fwd=" << s.tracks_forwarded << " uat_dl=" << s.uat_downlink
        << " uat_ul=" << s.uat_uplink << " readsb=" << (s.readsb_connected ? "up" : "down")
-       << " dump978=" << (!uat_ ? "off" : s.dump978_connected ? "up" : "down");
+       << " dump978=" << (dump978Off() ? "off" : s.dump978_connected ? "up" : "down") << " inputs="
+       << inputs_->connectedCount() << "/" << inputs_->enabledCount();
     return ss.str();
 }
 

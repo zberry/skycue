@@ -3,6 +3,8 @@
 # entry point, never a socket or a file; seeds are in seeds/<name>/.
 
 skycue_add_fuzzer(readsb_line SOURCES fuzz_readsb_line.cpp)
+skycue_add_fuzzer(raw_formats SOURCES fuzz_raw_formats.cpp)
+skycue_add_fuzzer(recording SOURCES fuzz_recording.cpp)
 
 # The harness names, one per line, for scripts/run-fuzz.sh --bin-dir.
 get_property(_skycue_fuzz_names GLOBAL PROPERTY SKYCUE_FUZZ_TARGETS)

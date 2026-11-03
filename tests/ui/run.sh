@@ -5,8 +5,10 @@
 # FIS-B cases, each replaying a received recording with uplinks unpaced:
 # fisb/received-with-uplinks.jsonl (2015: text, NOTAMs) and
 # fisb/received-tg30.jsonl (2020: NEXRAD, rasters). Dev machines only:
-# prints "SKIP: playwright not installed" and passes when
-# node_modules/@playwright/test is missing (see README.md). One more, the
+# prints "SKIP: playwright not installed" and exits 77 (ctest: skipped) when
+# @playwright/test is missing from ${SKYCUE_UI_NODE_MODULES:-<here>/node_modules}
+# (see README.md); a node_modules given that way goes first on PATH (its
+# .bin) and NODE_PATH. One more, the
 # "receivers" skycued, runs no built-in decoder inputs and one
 # pingstation_json input, ps-sim, that skycue-pingsim feeds the readsb
 # fixture to (with a device status every 2 s), for the Receiver tab cases.
@@ -21,13 +23,19 @@ here=$(cd "$(dirname "$0")" && pwd)
 shots_dir=${SKYCUE_UI_SCREENSHOTS:-"$here/../../../.superpowers/sdd/2026-11-01-skycue-ui/screenshots"}
 fisb_shots_dir=${SKYCUE_FISB_SCREENSHOTS:-"$here/../../../.superpowers/sdd/2026-11-02-skycue-fisb/screenshots"}
 
-if ! command -v node >/dev/null 2>&1 || [ ! -d "$here/node_modules/@playwright/test" ]; then
+# A whole-test skip exits 77, which ctest reports as skipped (SKIP_RETURN_CODE).
+node_modules=${SKYCUE_UI_NODE_MODULES:-$here/node_modules}
+if ! command -v node >/dev/null 2>&1 || [ ! -d "$node_modules/@playwright/test" ]; then
   echo "SKIP: playwright not installed"
-  exit 0
+  exit 77
+fi
+if [ "$node_modules" != "$here/node_modules" ]; then
+  export PATH="$node_modules/.bin:$PATH"
+  export NODE_PATH="$node_modules${NODE_PATH:+:$NODE_PATH}"
 fi
 if [ ! -e "$www/vendor/leaflet/leaflet.js" ]; then
   echo "SKIP: Leaflet not staged in $www (configure with -DSKYCUE_LEAFLET_DIR)"
-  exit 0
+  exit 77
 fi
 
 tmp=$(mktemp -d)
@@ -255,9 +263,10 @@ export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # In the background, so a signal is acted on at once (bash defers its traps
 # while a foreground child runs), and in its own process group (job control
 # on for this one start: the group id is its PID) so cleanup stops npx, the
-# Playwright runner and Chromium together.
+# Playwright runner and Chromium together. Its stdin is /dev/null: a
+# background job that reads the terminal would be stopped (SIGTTIN).
 set -m
-(cd "$here" && exec npx --no-install playwright test "$@") &
+(cd "$here" && exec npx --no-install playwright test "$@") </dev/null &
 pw=$!
 set +m
 echo "$pw" > "$tmp/playwright.pgid"

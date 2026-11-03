@@ -213,13 +213,14 @@ add_test(NAME web_ui
 set_tests_properties(web_ui PROPERTIES TIMEOUT 60)
 
 # Headless Chromium against a live skycued (dev machines only; see
-# tests/ui/README.md). Says SKIP and passes without node_modules/@playwright/test.
+# tests/ui/README.md). Says SKIP and exits 77 (skipped) without
+# node_modules/@playwright/test or a staged Leaflet.
 if(SKYCUE_UI_TESTS)
   add_test(NAME ui_playwright
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/ui/run.sh
       $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
       $<TARGET_FILE:skycue-pingsim>)
-  set_tests_properties(ui_playwright PROPERTIES TIMEOUT 300)
+  set_tests_properties(ui_playwright PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 endif()
 
 # FIS-B uplink frame, APDU header and DLAC parsers on hand-built vectors and

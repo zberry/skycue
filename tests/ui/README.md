@@ -5,8 +5,10 @@ real skycued replaying `../fixtures/readsb-sample.jsonl` in real time. It
 is a development check: node, npm and Playwright are never needed by the
 superbuild, the offline bundle or the containers. The superbuild configures
 skycue with `-DSKYCUE_UI_TESTS=OFF`, and in a standalone build the ctest
-`ui_playwright` prints `SKIP: playwright not installed` and passes when
-`node_modules/@playwright/test` is missing.
+`ui_playwright` prints `SKIP: playwright not installed` and is reported as
+skipped (exit 77) when `node_modules/@playwright/test` is missing.
+`SKYCUE_UI_NODE_MODULES=/path/to/node_modules` points it at another
+`node_modules` (put first on `PATH` and `NODE_PATH`) instead.
 
 ## One-time setup (needs the network)
 

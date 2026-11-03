@@ -182,6 +182,7 @@ struct FisbWebOptions {
     // Non-empty: engine->loadLocations(locations_dir + "/fisb-locations.json", locations_csv) before start().
     std::string locations_dir{};
     std::string locations_csv{};
+    std::chrono::seconds locations_save_interval{skycued::kLocationsSaveInterval};
 };
 
 // Engine (+ Forwarder, RuntimeConfig, WebServer) on an IoThread.
@@ -216,7 +217,10 @@ struct FisbWebFx {
                 source = fakeSource(src)(t.io);
             engine = std::make_unique<Engine>(t.io, cfg, sourceInputs(t.io, std::move(source)), *fwd, nullptr, nullptr);
             if (!o.locations_dir.empty())
+            {
                 engine->loadLocations(o.locations_dir + "/fisb-locations.json", o.locations_csv);
+                engine->setLocationsSaveInterval(o.locations_save_interval);
+            }
             rc = std::make_unique<RuntimeConfig>(t.io, conf, *engine);
             rc->load();
             WebConfig wc;
@@ -989,6 +993,126 @@ BOOST_AUTO_TEST_CASE(malformed_locations_file_renamed_rejected)
         }
     BOOST_TEST(errors == 1u, err.text());
     BOOST_TEST(get(f->port, "/api/fisb/locations").body == "{}");
+}
+
+// Polls `done` every 50 ms until it is true or `timeout` passes.
+template <class F> bool eventually(F done, std::chrono::milliseconds timeout = 10s)
+{
+    const auto end = steady::now() + timeout;
+    while (!done()) {
+        if (steady::now() >= end)
+            return false;
+        std::this_thread::sleep_for(50ms);
+    }
+    return true;
+}
+
+std::size_t linesWith(const std::string& text, const std::string& needle)
+{
+    std::size_t n = 0;
+    std::istringstream lines(text);
+    for (std::string line; std::getline(lines, line);)
+        n += has(line, needle) ? 1u : 0u;
+    return n;
+}
+
+// The 1 s tick saves once the interval has passed (0 here), before any stop().
+BOOST_AUTO_TEST_CASE(locations_saved_on_the_tick)
+{
+    TempDir dir;
+    std::size_t uplinks = 0;
+    FisbWebOptions o = tg30Options(dir, uplinks);
+    o.locations_save_interval = std::chrono::seconds(0);
+    FisbWebFx f(o);
+    BOOST_REQUIRE(f.waitReplayed(uplinks, 0));
+    const std::string file = dir.path + "/fisb-locations.json";
+    BOOST_REQUIRE(eventually([&] { return exists(file) && savedIds(file).size() == 42u; }));
+}
+
+// A save that keeps failing is warned about once, and the recovery is logged.
+BOOST_AUTO_TEST_CASE(locations_save_failure_warned_once)
+{
+    TempDir dir;
+    std::size_t uplinks = 0;
+    FisbWebOptions o = tg30Options(dir, uplinks);
+    const std::string sub = dir.path + "/later";  // not there yet: every save fails
+    o.locations_dir = sub;
+    o.locations_save_interval = std::chrono::seconds(0);
+    StderrCapture err(dir.path + "/stderr.txt");
+    FisbWebFx f(o);
+    BOOST_REQUIRE(f.waitReplayed(uplinks, 0));
+    std::this_thread::sleep_for(3s);  // three more ticks, each retrying
+    BOOST_TEST(linesWith(err.text(), "fisb locations not saved") == 1u);
+    BOOST_REQUIRE(::mkdir(sub.c_str(), 0755) == 0);
+    BOOST_TEST(eventually([&] { return exists(sub + "/fisb-locations.json"); }));
+    BOOST_TEST(eventually([&] { return linesWith(err.text(), "saved again") == 1u; }));
+    err.restore();
+    BOOST_TEST(linesWith(err.text(), "fisb locations not saved") == 1u, err.text());
+}
+
+// A directory where a locations file should be: LOCATIONS_FILE throws; the learned path is left alone.
+BOOST_AUTO_TEST_CASE(locations_paths_that_are_directories)
+{
+    TempDir dir;
+    const std::string learned = dir.path + "/fisb-locations.json";
+    BOOST_REQUIRE(::mkdir(learned.c_str(), 0755) == 0);
+    FisbWebOptions o;
+    o.replay = false;
+    o.start_engine = false;
+    FisbWebFx f(o);
+    std::string what;
+    try {
+        f.t.call([&] { f.engine->loadLocations(dir.path + "/none.json", dir.path); });
+    } catch (const std::runtime_error& e) {
+        what = e.what();
+    }
+    BOOST_TEST(has(what, dir.path + ": cannot read"), what);
+
+    StderrCapture err(dir.path + "/stderr.txt");
+    BOOST_CHECK_NO_THROW(f.t.call([&] { f.engine->loadLocations(learned, ""); }));
+    f.t.call([&] { f.engine->stop(); });
+    err.restore();
+    BOOST_TEST(linesWith(err.text(), " ERROR ") == 1u, err.text());
+    BOOST_TEST(has(err.text(), learned + ": not a regular file"), err.text());
+    struct stat st {};
+    BOOST_TEST((::stat(learned.c_str(), &st) == 0 && S_ISDIR(st.st_mode)));
+    BOOST_TEST(!exists(learned + ".rejected"));
+}
+
+// A learned file that cannot be read is set aside, so the first save does not overwrite it.
+BOOST_AUTO_TEST_CASE(unreadable_locations_file_set_aside)
+{
+    TempDir dir;
+    std::size_t uplinks = 0;
+    FisbWebOptions o = tg30Options(dir, uplinks);
+    const std::string file = dir.path + "/fisb-locations.json";
+    const std::string kept = "{\"version\":1,\"locations\":{\"KZZZ\":[40,-86,1]}}";
+    writeFile(file, kept);
+    BOOST_REQUIRE(::chmod(file.c_str(), 0) == 0);
+    if (::access(file.c_str(), R_OK) == 0) {
+        BOOST_TEST_MESSAGE("running with read access to mode 000 files: skipped");
+        return;
+    }
+    StderrCapture err(dir.path + "/stderr.txt");
+    std::unique_ptr<FisbWebFx> f;
+    BOOST_REQUIRE_NO_THROW(f = std::make_unique<FisbWebFx>(o));
+    BOOST_REQUIRE(f->waitReplayed(uplinks, 0));
+    f->t.call([&] { f->engine->stop(); });
+    err.restore();
+    BOOST_TEST(linesWith(err.text(), " ERROR ") == 1u, err.text());
+    BOOST_TEST(has(err.text(), file + ": cannot read"), err.text());
+    std::vector<std::string> aside;
+    if (DIR* d = ::opendir(dir.path.c_str())) {
+        while (const dirent* e = ::readdir(d))
+            if (std::string(e->d_name).rfind("fisb-locations.json.unreadable-", 0) == 0)
+                aside.push_back(dir.path + "/" + e->d_name);
+        ::closedir(d);
+    }
+    BOOST_REQUIRE_EQUAL(aside.size(), 1u);
+    BOOST_REQUIRE(::chmod(aside[0].c_str(), 0644) == 0);
+    BOOST_TEST(readAll(aside[0]) == kept);
+    BOOST_TEST(savedIds(file).size() == 42u);  // the new save, without the unreadable file's KZZZ
+    BOOST_TEST(savedIds(file).count("KZZZ") == 0u);
 }
 
 // LOCATIONS_FILE that cannot be read stops the start.

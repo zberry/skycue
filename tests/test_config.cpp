@@ -408,6 +408,12 @@ BOOST_AUTO_TEST_CASE(locations_file_parsed)
     BOOST_TEST(parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\nLOCATIONS_FILE=/x/loc.csv\n", "t").locations_file ==
                "/x/loc.csv");
     BOOST_TEST(parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\n", "t").locations_file.empty());
+    using skycued::resolveConfigRelative;
+    BOOST_TEST(resolveConfigRelative("/etc/skycue/skycue.conf", "") == "");
+    BOOST_TEST(resolveConfigRelative("/etc/skycue/skycue.conf", "loc.csv") == "/etc/skycue/loc.csv");
+    BOOST_TEST(resolveConfigRelative("/etc/skycue/skycue.conf", "/x/loc.csv") == "/x/loc.csv");
+    BOOST_TEST(resolveConfigRelative("skycue.conf", "loc.csv") == "loc.csv");
+    BOOST_TEST(resolveConfigRelative("/skycue.conf", "fisb-locations.json") == "/fisb-locations.json");
 }
 
 BOOST_AUTO_TEST_CASE(known_keys_match_example)

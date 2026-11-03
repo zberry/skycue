@@ -67,5 +67,21 @@ private:
     bool dirty_ = false;
 };
 
+// Which positions the fisb_location items have announced. A learned position is announced again only once it is
+// kLocationMoveDeg or more (in latitude, or in wrapped longitude) from the last one announced, so a mean that
+// drifts in many small steps is still announced once the drift adds up.
+constexpr double kLocationMoveDeg = 1e-4;
+
+class LocationAnnouncer {
+public:
+    // After LocationIndex::learn: `before`/`after` are find(id) around it, `is_new` its result. True when `after`
+    // is to be announced (an id never announced counts as announced at `before`, which clients GET); records it.
+    bool update(const std::string& id, const std::optional<std::pair<double, double>>& before,
+                const std::pair<double, double>& after, bool is_new);
+
+private:
+    std::map<std::string, std::pair<double, double>> sent_;  // bounded by the learned ids
+};
+
 }  // namespace fisb
 }  // namespace skycued

@@ -301,6 +301,25 @@ std::map<std::string, std::pair<double, double>> LocationIndex::merged() const
     return out;
 }
 
+bool LocationAnnouncer::update(const std::string& id, const std::optional<std::pair<double, double>>& before,
+                               const std::pair<double, double>& after, bool is_new)
+{
+    auto it = sent_.find(id);
+    if (it == sent_.end()) {
+        if (is_new || !before) {
+            sent_[id] = after;
+            return true;
+        }
+        it = sent_.emplace(id, *before).first;
+    }
+    const auto& ref = it->second;
+    const bool moved = is_new || std::abs(after.first - ref.first) >= kLocationMoveDeg ||
+                       std::abs(std::remainder(after.second - ref.second, 360.0)) >= kLocationMoveDeg;
+    if (moved)
+        it->second = after;
+    return moved;
+}
+
 std::size_t LocationIndex::learnedCount() const { return learned_.size(); }
 
 bool LocationIndex::dirty() const { return dirty_; }

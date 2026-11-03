@@ -9,14 +9,17 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
-#include <iterator>
+#include <ctime>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace skycued {
 
@@ -67,23 +70,51 @@ EngineEvent kindEvent(EventKind kind)
     return EngineEvent{kind, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt};
 }
 
-// A learned position this far from the last one announced is announced again.
-constexpr double kLocationMoveDeg = 1e-4;
-
-// The whole file; nullopt (errno set) when it cannot be opened or read.
+// The whole regular file; nullopt with errno set when it cannot be opened
+// or read, or is not a regular file (EISDIR for a directory, EINVAL for
+// anything else: a FIFO is opened non-blocking, never read).
 std::optional<std::string> readWholeFile(const std::string& path)
 {
-    errno = 0;
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
+    const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
         return std::nullopt;
-    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (in.bad()) {
-        if (errno == 0)
-            errno = EIO;
-        return std::nullopt;
+    struct ::stat st{};
+    std::optional<std::string> text;
+    int err = 0;
+    if (::fstat(fd, &st) != 0) {
+        err = errno;
+    } else if (!S_ISREG(st.st_mode)) {
+        err = S_ISDIR(st.st_mode) ? EISDIR : EINVAL;
+    } else {
+        text.emplace();
+        char buf[65536];
+        for (;;) {
+            const ssize_t n = ::read(fd, buf, sizeof buf);
+            if (n > 0) {
+                text->append(buf, static_cast<std::size_t>(n));
+            } else if (n == 0) {
+                break;
+            } else if (errno != EINTR) {
+                err = errno;
+                text.reset();
+                break;
+            }
+        }
     }
+    ::close(fd);
+    errno = err;
     return text;
+}
+
+// "20261103T120000Z": a UTC stamp for a file name.
+std::string fileStamp()
+{
+    const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm{};
+    ::gmtime_r(&now, &tm);
+    char buf[32];
+    std::strftime(buf, sizeof buf, "%Y%m%dT%H%M%SZ", &tm);
+    return buf;
 }
 
 }  // namespace
@@ -289,14 +320,12 @@ void Engine::handleFisbEvents(std::vector<fisb::FisbEvent>& events)
 
 std::optional<EngineEvent> Engine::learnLocation(const fisb::TwgoRecord& record)
 {
+    if (!fisb::airportStyleId(record.location))
+        return std::nullopt;  // never learned; keeps announced_ to learnable ids
     const auto before = locations_.find(record.location);
     const bool is_new = locations_.learn(record);
     const auto after = locations_.find(record.location);
-    if (!after)
-        return std::nullopt;
-    const bool moved = before && (std::abs(after->first - before->first) >= kLocationMoveDeg ||
-                                  std::abs(std::remainder(after->second - before->second, 360.0)) >= kLocationMoveDeg);
-    if (!is_new && !moved)
+    if (!after || !announced_.update(record.location, before, *after, is_new))
         return std::nullopt;
     FisbNotice n;
     n.key = record.location;
@@ -324,9 +353,22 @@ void Engine::loadLocations(const std::string& learned_path, const std::string& o
                                                          std::strerror(errno))
                                        << "; starting with no learned locations");
             }
+        } else if (errno == EISDIR || errno == EINVAL) {
+            // Not a file we could replace: leave it, and save nothing this run.
+            LOG_ERROR(learned_path << ": not a regular file; learned locations are not loaded or saved this run");
+            locations_path_.clear();
         } else if (errno != ENOENT) {
-            LOG_ERROR(learned_path << ": cannot read: " << std::strerror(errno)
-                                   << "; starting with no learned locations");
+            // Unreadable (permissions, say): set it aside so the first save cannot overwrite it.
+            const std::string why = std::strerror(errno);
+            const std::string aside = learned_path + ".unreadable-" + fileStamp();
+            if (std::rename(learned_path.c_str(), aside.c_str()) == 0) {
+                LOG_ERROR(learned_path << ": cannot read: " << why << "; renamed " << aside
+                                       << "; starting with no learned locations");
+            } else {
+                LOG_ERROR(learned_path << ": cannot read: " << why << "; could not rename it to " << aside << ": "
+                                       << std::strerror(errno) << "; learned locations are not saved this run");
+                locations_path_.clear();
+            }
         }
     }
     if (!operator_csv_path.empty()) {
@@ -354,7 +396,7 @@ void Engine::saveLocations()
         locations_save_failing_ = false;
     } catch (const std::exception& e) {
         if (!locations_save_failing_)
-            LOG_WARN("fisb locations not saved: " << e.what() << "; retrying every " << kLocationsSaveInterval.count()
+            LOG_WARN("fisb locations not saved: " << e.what() << "; retrying every " << locations_save_interval_.count()
                                                   << " s");
         locations_save_failing_ = true;
     }
@@ -594,7 +636,7 @@ void Engine::tick()
         auto events = fisb_store_.sweep(now);
         handleFisbEvents(events);
     }
-    if (!locations_path_.empty() && locations_.dirty() && steady::now() - last_locations_save_ >= kLocationsSaveInterval)
+    if (!locations_path_.empty() && locations_.dirty() && steady::now() - last_locations_save_ >= locations_save_interval_)
         saveLocations();
     if (received_)
         received_->flush();

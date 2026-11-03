@@ -66,8 +66,9 @@
 //
 // Locations (design §3.2): every TWGO record with graphics is fed to a
 // fisb::LocationIndex; an id learned for the first time, or a learned
-// position that moves by 1e-4 degrees or more, emits fisb_location (after
-// the record's own event). The learned set is saved (atomicWrite) to the
+// position now kLocationMoveDeg (1e-4 degrees) or more from the one last
+// announced (fisb::LocationAnnouncer), emits fisb_location (after the
+// record's own event). The learned set is saved (atomicWrite) to the
 // loadLocations file on the 1 s tick when it changed and
 // kLocationsSaveInterval has passed since the last attempt, and by stop();
 // a failed save logs one WARN per run of failures and is retried.
@@ -151,12 +152,16 @@ public:
     // FisbStore::blocksCopied (a diagnostic for tests).
     uint64_t fisbBlocksCopied() const;
 
-    // Loads the learned file (missing: empty; malformed: one ERROR line, renamed "<path>.rejected", empty) and the
+    // Loads the learned file (missing: empty; malformed: one ERROR line, renamed "<path>.rejected", empty;
+    // unreadable: one ERROR line, renamed "<path>.unreadable-<UTC stamp>", empty; not a regular file, or the
+    // rename fails: one ERROR line, empty, and nothing is saved this run) and the
     // operator CSV (empty path: none; unreadable: throws std::runtime_error naming it; rejected lines: one WARN with
     // the count and the first line number). Call before start(). Remembers learned_path for saving ("": never saved).
     void loadLocations(const std::string& learned_path, const std::string& operator_csv_path);
     // Every known location id with its position, learned over operator (LocationIndex::merged()).
     std::map<std::string, std::pair<double, double>> locationPositions() const;
+    // The tick's save interval (kLocationsSaveInterval unless set; tests shorten it). 0: every tick while changed.
+    void setLocationsSaveInterval(std::chrono::seconds interval) { locations_save_interval_ = interval; }
 
     // Live changes (see the top of this file). `origin` names who made the
     // change in the record ("ui", say). Ignored after stop().
@@ -226,9 +231,11 @@ private:
     fisb::FisbStore fisb_store_;
     std::optional<std::chrono::system_clock::time_point> last_uplink_;
     fisb::LocationIndex locations_;
+    fisb::LocationAnnouncer announced_;  // what the fisb_location items said
     std::string locations_path_;  // fisb-locations.json; "" until loadLocations
     std::chrono::steady_clock::time_point last_locations_save_{};  // the last save attempt (or start())
     bool locations_save_failing_ = false;                           // the last save attempt failed
+    std::chrono::seconds locations_save_interval_ = kLocationsSaveInterval;
 
     FilterSet filters_;
     Thresholds thresholds_;

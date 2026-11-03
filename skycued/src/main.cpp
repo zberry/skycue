@@ -247,9 +247,8 @@ int main(int argc, char** argv)
     // The learned FIS-B report locations (fisb-locations.json next to the
     // config) and LOCATIONS_FILE under them.
     try {
-        const auto slash = config_path.rfind('/');
-        const std::string dir = slash == std::string::npos ? std::string(".") : config_path.substr(0, slash);
-        engine->loadLocations(dir + "/fisb-locations.json", config.locations_file);
+        engine->loadLocations(resolveConfigRelative(config_path, "fisb-locations.json"),
+                              resolveConfigRelative(config_path, config.locations_file));
     } catch (const std::exception& e) {
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;

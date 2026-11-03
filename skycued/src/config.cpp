@@ -309,11 +309,15 @@ Config parseConfigText(const std::string& text, const std::string& name)
 
 std::string resolveInputsFile(const std::string& conf_path, const std::string& value)
 {
-    const std::string name = value.empty() ? std::string("skycue.inputs.json") : value;
-    if (name.front() == '/')
-        return name;
+    return resolveConfigRelative(conf_path, value.empty() ? std::string("skycue.inputs.json") : value);
+}
+
+std::string resolveConfigRelative(const std::string& conf_path, const std::string& value)
+{
+    if (value.empty() || value.front() == '/')
+        return value;
     const auto slash = conf_path.rfind('/');
-    return slash == std::string::npos ? name : conf_path.substr(0, slash + 1) + name;
+    return slash == std::string::npos ? value : conf_path.substr(0, slash + 1) + value;
 }
 
 Config parseConfigFile(const std::string& path)

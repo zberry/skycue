@@ -271,3 +271,19 @@ BOOST_AUTO_TEST_CASE(operator_rows_capped) {
     BOOST_TEST(s.operatorRejected() == 0u);
     BOOST_TEST(s.loadOperatorCsv("IND,39.8,-86.3\n") == 1u); BOOST_TEST(s.operatorOverflow() == 0u);
 }
+BOOST_AUTO_TEST_CASE(announcer_adds_up_small_moves) {
+    LocationAnnouncer a;
+    BOOST_TEST(a.update("KPRG", std::nullopt, {40.0, -86.0}, true));       // new: announced
+    BOOST_TEST(!a.update("KPRG", LatLon{40.0, -86.0}, {40.00004, -86.0}, false));
+    BOOST_TEST(!a.update("KPRG", LatLon{40.00004, -86.0}, {40.00008, -86.0}, false));
+    BOOST_TEST(a.update("KPRG", LatLon{40.00008, -86.0}, {40.00012, -86.0}, false));   // 1.2e-4 from the last sent
+    BOOST_TEST(!a.update("KPRG", LatLon{40.00012, -86.0}, {40.00015, -86.0}, false));
+    // An id loaded from the file (never announced) counts as announced at its position before the learn.
+    BOOST_TEST(!a.update("KGSH", LatLon{41.5, -85.8}, {41.5, -85.80006}, false));
+    BOOST_TEST(a.update("KGSH", LatLon{41.5, -85.80006}, {41.5, -85.80011}, false));
+    // Longitude deltas wrap at +-180.
+    BOOST_TEST(!a.update("PAXX", LatLon{51.0, 179.99995}, {51.0, -179.99999}, false));
+    BOOST_TEST(a.update("PAXX", LatLon{51.0, -179.99999}, {51.0, -179.9999}, false));
+    // An operator position replaced by a first learned one: new, announced.
+    BOOST_TEST(a.update("KCVG", LatLon{39.0, -84.6}, {39.0, -84.6}, true));
+}

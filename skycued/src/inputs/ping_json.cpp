@@ -83,9 +83,7 @@ std::optional<std::string> lowerHex(const std::string& s)
     std::string out;
     out.reserve(s.size());
     for (char c : s) {
-        if (c >= '0' && c <= '9')
-            out += c;
-        else if (c >= 'a' && c <= 'f')
+        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
             out += c;
         else if (c >= 'A' && c <= 'F')
             out += static_cast<char>(c - 'A' + 'a');

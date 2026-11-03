@@ -231,7 +231,7 @@ ApiResponse putFiltersRoute(const std::string& body, RuntimeConfig& rc)
         const auto v = obj->getDouble(k);
         if (!v)
             return error(400, std::string(k) + " must be a number or null");
-        (range ? delta.max_range_nm : delta.min_elevation_deg) = *v;
+        (range ? delta.max_range_nm : delta.min_elevation_deg) = v;
     }
     return apply(rc, delta, [&] { return filtersJson(rc); });
 }

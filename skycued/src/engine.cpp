@@ -115,8 +115,8 @@ std::string fileStamp()
     std::tm tm{};
     ::gmtime_r(&now, &tm);
     char buf[32];
-    std::strftime(buf, sizeof buf, "%Y%m%dT%H%M%SZ", &tm);
-    return buf;
+    const std::size_t n = std::strftime(buf, sizeof buf, "%Y%m%dT%H%M%SZ", &tm);
+    return std::string(buf, n);  // empty, not indeterminate, if it ever did not fit
 }
 
 }  // namespace

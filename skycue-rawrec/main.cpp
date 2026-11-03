@@ -310,11 +310,15 @@ int run(int argc, char** argv)
         return 0;
     }
     std::optional<HostPort> beast_at, uat_at;
-    if (!beast_arg.empty() && !(beast_at = parseHostPort(beast_arg))) {
+    if (!beast_arg.empty())
+        beast_at = parseHostPort(beast_arg);
+    if (!beast_arg.empty() && !beast_at) {
         std::cerr << "skycue-rawrec: --beast must be HOST:PORT, got '" << beast_arg << "'\n";
         return 2;
     }
-    if (!uat_arg.empty() && !(uat_at = parseHostPort(uat_arg))) {
+    if (!uat_arg.empty())
+        uat_at = parseHostPort(uat_arg);
+    if (!uat_arg.empty() && !uat_at) {
         std::cerr << "skycue-rawrec: --uat must be HOST:PORT, got '" << uat_arg << "'\n";
         return 2;
     }

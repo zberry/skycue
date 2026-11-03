@@ -214,7 +214,7 @@ struct RestartKey {
 
 // Every skycue.conf key but the four the Engine applies live (MAX_RANGE_NM,
 // MIN_ELEVATION_DEG, ALLOW_LIST_FILE, BLOCK_LIST_FILE), in knownConfigKeys() order.
-const RestartKey kRestartKeys[] = {
+constexpr RestartKey kRestartKeys[] = {
     SKYCUED_RESTART_KEY("RECEIVER_LAT", receiver_lat),
     SKYCUED_RESTART_KEY("RECEIVER_LON", receiver_lon),
     SKYCUED_RESTART_KEY("RECEIVER_ALT_M", receiver_alt_m),

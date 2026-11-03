@@ -388,11 +388,15 @@ int run(int argc, char** argv)
         return usage("give exactly one of --udp, --tcp and --tcp-listen");
     Mode mode = Mode::udp;
     std::optional<HostPort> to;
-    if (vm.count("udp") && !(to = parseHostPort(udp_arg)))
-        return usage("--udp must be HOST:PORT, got '" + udp_arg + "'");
+    if (vm.count("udp")) {
+        to = parseHostPort(udp_arg);
+        if (!to)
+            return usage("--udp must be HOST:PORT, got '" + udp_arg + "'");
+    }
     if (vm.count("tcp")) {
         mode = Mode::tcp;
-        if (!(to = parseHostPort(tcp_arg)))
+        to = parseHostPort(tcp_arg);
+        if (!to)
             return usage("--tcp must be HOST:PORT, got '" + tcp_arg + "'");
     }
     if (vm.count("tcp-listen")) {

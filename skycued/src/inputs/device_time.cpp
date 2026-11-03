@@ -88,7 +88,7 @@ std::optional<system_clock::time_point> parseDeviceTime(const std::string& s)
     if (pos + 1 != s.size() || s[pos] != 'Z')
         return std::nullopt;
 
-    const int64_t secs = daysFromCivil(y, mo, d) * kSecondsPerDay + h * 3600 + mi * 60 + sec;
+    const int64_t secs = daysFromCivil(y, mo, d) * kSecondsPerDay + int64_t{h} * 3600 + int64_t{mi} * 60 + sec;
     return fromNs(secs * 1000000000 + frac_ns);
 }
 

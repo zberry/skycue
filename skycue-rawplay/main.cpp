@@ -335,7 +335,7 @@ int64_t playUat(const std::string& path, int64_t base, int64_t, Output& out, Pac
         }
         if (u->epoch_ms) {
             if (!first_ms)
-                first_ms = *u->epoch_ms;
+                first_ms = u->epoch_ms;
             rel = std::max(rel, (*u->epoch_ms - *first_ms) * 1'000'000);
         } else if (u->offset_ns) {
             // stratux: each session in file order, 1 s after the one before.
@@ -345,7 +345,7 @@ int64_t playUat(const std::string& path, int64_t base, int64_t, Output& out, Pac
                 continue;
             }
             if (!first_ns)
-                first_ns = *t;
+                first_ns = t;
             rel = std::max(rel, *t - *first_ns);
         } else if (any) {
             rel += kUntimedStepNs;
@@ -441,10 +441,16 @@ int main(int argc, char** argv)
     if (files.empty())
         return usage("no input files");
     std::optional<HostPort> beast_to, raw_to;
-    if (!beast_arg.empty() && !(beast_to = parseHostPort(beast_arg)))
-        return usage("--beast-in must be HOST:PORT, got '" + beast_arg + "'");
-    if (!raw_arg.empty() && !(raw_to = parseHostPort(raw_arg)))
-        return usage("--raw-in must be HOST:PORT, got '" + raw_arg + "'");
+    if (!beast_arg.empty()) {
+        beast_to = parseHostPort(beast_arg);
+        if (!beast_to)
+            return usage("--beast-in must be HOST:PORT, got '" + beast_arg + "'");
+    }
+    if (!raw_arg.empty()) {
+        raw_to = parseHostPort(raw_arg);
+        if (!raw_to)
+            return usage("--raw-in must be HOST:PORT, got '" + raw_arg + "'");
+    }
     if (vm.count("uat-listen") && (uat_port < 1 || uat_port > 65535))
         return usage("--uat-listen must be a port number 1-65535");
 

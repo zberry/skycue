@@ -229,7 +229,7 @@ bool getReal(const JsonObject& j, const char* k, Obs& o)
     auto v = j.getDouble(k);
     if (!v)
         return false;
-    o.*M = *v;
+    o.*M = v;
     return true;
 }
 

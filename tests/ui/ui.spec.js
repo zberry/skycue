@@ -494,6 +494,18 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   await page.locator('#config-copy').click();
   await expect(page.locator('#config-copy-status')).toHaveText('Copied');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(text);
+  await page.locator('#config-refresh').click();
+  await expect(page.locator('#config-copy-status')).toHaveText('');
+  // A failed copy shows the text to copy by hand; Refresh clears both.
+  await page.evaluate(() => { navigator.clipboard.writeText = () => Promise.reject(new Error('denied')); });
+  await page.locator('#config-copy').click();
+  await expect(page.locator('#config-copy-status')).toHaveText('Copy failed');
+  await expect(page.locator('#config-copy-text')).toBeVisible();
+  await page.locator('#config-refresh').click();
+  await expect(page.locator('#config-copy-status')).toHaveText('');
+  await expect(page.locator('#config-copy-status')).not.toHaveClass(/\berror\b/);
+  await expect(page.locator('#config-copy-text')).toBeHidden();
+  await expect(row('RECEIVER_LAT').locator('.cfg-value')).toHaveText('38.9');
   expect(errors).toEqual([]);
 });
 

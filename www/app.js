@@ -2338,6 +2338,10 @@
   // A response that an answer to a later request overtook is not shown.
   function showConfig() {
     var seq = ++config.seq;
+    // A fresh load: the last copy's status and fallback text no longer apply.
+    showMsg($('config-copy-status'), '');
+    $('config-copy-text').hidden = true;
+    $('config-copy-text').value = '';
     request('GET', 'api/config').then(function (c) {
       if (seq !== config.seq) return;
       config.data = c;

@@ -25,6 +25,7 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace skycuefuzz {
 
@@ -82,9 +83,14 @@ struct ApiStub {
         runtime.reset();
         engine.reset();
         fwd.reset();
+        // Collect the entries first: removing them while the same
+        // directory_iterator walks the directory is unspecified.
         std::error_code ec;
+        std::vector<fs::path> entries;
         for (const auto& entry : fs::directory_iterator(dir, ec))
-            fs::remove_all(entry.path(), ec);
+            entries.push_back(entry.path());
+        for (const auto& p : entries)
+            fs::remove_all(p, ec);
         fs::create_directories(www);
         std::ofstream(conf) << "RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\nWEB_PORT=0\nCUE_TCP_PORT=0\n";
 

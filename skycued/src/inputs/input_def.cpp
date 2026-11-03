@@ -263,7 +263,9 @@ InputDef parseInputDef(const JsonObject& o)
         fail(kTypeRule);
     d.type = *type;
     d.transport = d.type == InputType::pingstation_json ? InputTransport::udp : InputTransport::tcp_connect;
-    if (d.type == InputType::pingstation_cat021 && o.has("transport")) {
+    if (d.type == InputType::pingstation_cat021) {
+        if (!o.has("transport"))
+            fail("transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)");
         const auto transport = parseTransport(getText(o, "transport", "udp, tcp_connect or tcp_listen"));
         if (!transport)
             fail("transport must be udp, tcp_connect or tcp_listen");

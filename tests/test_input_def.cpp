@@ -308,10 +308,11 @@ BOOST_AUTO_TEST_CASE(required_fields)
     BOOST_TEST(err(R"("id":"x","type":"dump978","port":30978)") == "host is required");
     BOOST_TEST(err(R"("id":"x","type":"pingstation_cat021","transport":"tcp_connect","port":4000)") ==
                "host is required");
-    // The default transport is tcp_connect, which needs a host.
-    BOOST_TEST(err(R"("id":"x","type":"pingstation_cat021","port":4000)") == "host is required");
-    BOOST_TEST((def(R"("id":"x","type":"pingstation_cat021","host":"h","port":4000)").transport ==
-                InputTransport::tcp_connect));
+    // No default transport: the error names the key, even with a host or bind.
+    const std::string need = "transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)";
+    BOOST_TEST(err(R"("id":"x","type":"pingstation_cat021","port":4000)") == need);
+    BOOST_TEST(err(R"("id":"x","type":"pingstation_cat021","host":"h","port":4000)") == need);
+    BOOST_TEST(err(R"("id":"x","type":"pingstation_cat021","bind":"0.0.0.0","port":4000)") == need);
 }
 
 BOOST_AUTO_TEST_CASE(reserved_ids)
@@ -510,7 +511,7 @@ BOOST_AUTO_TEST_CASE(duplicate_listen_port_rejected)
     BOOST_TEST(setErr({l1, l2}) == "port 4000/tcp is already used by input l1");
     // Outgoing connections never conflict.
     InputDef r1 = def(R"("id":"r1","type":"readsb","host":"h","port":4000)");
-    InputDef r2 = def(R"("id":"r2","type":"pingstation_cat021","host":"h","port":4000)");
+    InputDef r2 = def(R"("id":"r2","type":"pingstation_cat021","transport":"tcp_connect","host":"h","port":4000)");
     BOOST_TEST(setErr({r1, r2, l1, b}).empty());
 }
 

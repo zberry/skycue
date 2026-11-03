@@ -394,7 +394,9 @@
   function isPingStation(type) { return type === 'pingstation_json' || type === 'pingstation_cat021'; }
   function inputTransport(type, transport) {
     if (type === 'pingstation_json') return 'udp';
-    if (type === 'pingstation_cat021' && TRANSPORTS.indexOf(transport) >= 0) return transport;
+    // cat021 has no default in skycued (transport is required); the add form
+    // preselects udp, so the fields shown before one is chosen are udp's.
+    if (type === 'pingstation_cat021') return TRANSPORTS.indexOf(transport) >= 0 ? transport : 'udp';
     return 'tcp_connect';
   }
   // Dotted decimal, four parts of 0..255 without leading zeros.
@@ -454,7 +456,9 @@
     else if (RESERVED_IDS.indexOf(id) >= 0) errors.id = "id '" + id + "' is reserved";
     if (unset(def.type)) errors.type = 'type is required';
     else if (INPUT_TYPES.indexOf(def.type) < 0) errors.type = 'type must be one of ' + INPUT_TYPES.join(', ');
-    if (def.type === 'pingstation_cat021' && !unset(def.transport) && TRANSPORTS.indexOf(def.transport) < 0)
+    if (def.type === 'pingstation_cat021' && unset(def.transport))
+      errors.transport = 'transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)';
+    else if (def.type === 'pingstation_cat021' && TRANSPORTS.indexOf(def.transport) < 0)
       errors.transport = 'transport must be udp, tcp_connect or tcp_listen';
     var fields = inputFields(def.type, def.transport);
     var has = function (k) { return fields.indexOf(k) >= 0; };
@@ -531,6 +535,15 @@
     return 'tcp → ' + def.host + ':' + def.port;
   }
 
+  // The card's rejected counter, with the refused-peer count beside it when
+  // there is one (data from an address other than the configured peer).
+  function rejectedText(state) {
+    var st = state || {};
+    var text = 'rejected ' + (st.rejected || 0);
+    if (st.rejected_peer > 0) text += ' · rejected_peer ' + st.rejected_peer;
+    return text;
+  }
+
   // A pingStation's gpsStatus and receiverStatus codes as the ICD names
   // them; a code it does not list stays the number.
   var GPS_STATUS = ['no GPS', 'no lock', '2D fix', '3D fix', 'DGPS'];
@@ -569,7 +582,8 @@
     cityRankLimit: cityRankLimit, MAX_CITY_LABELS: MAX_CITY_LABELS, cullCities: cullCities,
     overlayOffer: overlayOffer,
     INPUT_TYPES: INPUT_TYPES, validateInputDef: validateInputDef, inputFields: inputFields, inputDot: inputDot,
-    inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, inputsSummary: inputsSummary,
+    inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, rejectedText: rejectedText,
+    inputsSummary: inputsSummary,
     gpsStatusText: gpsStatusText, receiverStatusText: receiverStatusText
   };
   root.skycuePure = api;

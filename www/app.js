@@ -1714,7 +1714,7 @@
     var r = rx.rates[inp.id] || { obs_s: null, msg_s: null };
     var rates = setText(card, 'input-rates', 'obs/s ' + P.formatNum(r.obs_s, 1) + ' · msg/s ' + P.formatNum(r.msg_s, 1));
     rates.setAttribute('data-obs-s', r.obs_s === null ? '' : String(r.obs_s));
-    setText(card, 'input-rejected', 'rejected ' + (st.rejected || 0));
+    setText(card, 'input-rejected', P.rejectedText(st));
     var ping = inp.type === 'pingstation_json' || inp.type === 'pingstation_cat021';
     var dev = card.querySelector('.input-device');
     dev.hidden = !ping;

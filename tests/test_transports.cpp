@@ -235,8 +235,13 @@ BOOST_AUTO_TEST_CASE(udp_peer_filter)
     t.call([&] {
         BOOST_CHECK_EQUAL(l->rejectedPeer(), 1u);
         BOOST_CHECK_EQUAL(l->bytes(), 6u);
-        l.reset();
+        BOOST_CHECK_EQUAL(l->lastError(), "datagram from 127.0.0.1 refused (not the configured peer)");
     });
+    // Noted at most once a second: a second refusal right after leaves the
+    // message as it was (it is the same text either way; the count goes on).
+    sendFrom("127.0.0.1", port, "stranger");
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return l->rejectedPeer() == 2; }); }));
+    t.call([&] { l.reset(); });
 }
 
 BOOST_AUTO_TEST_CASE(udp_bind_failure_reported_and_retried)

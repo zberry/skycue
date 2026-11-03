@@ -4,6 +4,8 @@
 #include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
 
+#include <chrono>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -31,6 +33,8 @@ struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
     std::vector<uint8_t> buf;
     udp::endpoint sender;
     bool bound = false;
+    // When last_error last named a refused peer (at most once a second).
+    std::optional<std::chrono::steady_clock::time_point> peer_noted;
 
     void open()
     {
@@ -90,6 +94,11 @@ struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
         const auto from = sender.address();
         if (peer && from != *peer) {
             ++rejected_peer;
+            const auto now = std::chrono::steady_clock::now();
+            if (!peer_noted || now - *peer_noted >= std::chrono::seconds(1)) {
+                peer_noted = now;
+                last_error = "datagram from " + from.to_string() + " refused (not the configured peer)";
+            }
             return;
         }
         bytes += n;

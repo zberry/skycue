@@ -525,6 +525,10 @@ test('validateInputDef rejects unknown edition', () => {
     bind: 'bind must be an IPv4 address', sac: 'sac must be null or an integer from 0 to 255',
     status_interval_s: 'status_interval_s must be an integer from 5 to 3600', time_mode: 'time_mode must be utc or gps',
     name: 'name must be at most 64 printable characters' });
+  const noTransport = Object.assign({}, CAT021_UDP);
+  delete noTransport.transport;
+  assert.strictEqual(P.validateInputDef(noTransport).errors.transport,
+    'transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)');
   const tcp = { id: 'ps-c', type: 'pingstation_cat021', transport: 'tcp_connect', port: 4000 };
   assert.strictEqual(P.validateInputDef(tcp).errors.host, 'host is required');
   ['-bad.example', '999.1.1.1', 'a..b'].forEach((host) => {
@@ -543,8 +547,8 @@ test('inputFields for cat021 tcp_connect has host not bind', () => {
   assert.deepStrictEqual(P.inputFields('pingstation_json'), ['id', 'name', 'bind', 'port', 'peer',
     'status_url', 'status_interval_s', 'time_mode', 'capture', 'enabled']);
   assert.deepStrictEqual(P.inputFields('readsb'), ['id', 'name', 'host', 'port', 'enabled']);
-  // A cat021 input without a transport connects, as skycued defaults it.
-  assert.deepStrictEqual(P.inputFields('pingstation_cat021'), P.inputFields('pingstation_cat021', 'tcp_connect'));
+  // Before a transport is chosen the fields are udp's, the add form's preselected value.
+  assert.deepStrictEqual(P.inputFields('pingstation_cat021'), P.inputFields('pingstation_cat021', 'udp'));
 });
 
 const live = (state, extra) => Object.assign({ id: 'ps', type: 'pingstation_json', enabled: true,
@@ -597,6 +601,12 @@ test('inputEndpoint forms', () => {
   assert.strictEqual(P.inputEndpoint({ type: 'readsb', host: '127.0.0.1', port: 30047 }), 'readsb 127.0.0.1:30047');
   assert.strictEqual(P.inputEndpoint({ type: 'dump978', host: '127.0.0.1', port: 30978 }), 'dump978 127.0.0.1:30978');
   assert.strictEqual(P.inputEndpoint({ type: 'replay' }), 'replay');
+});
+
+test('rejectedText shows rejected_peer only when non-zero', () => {
+  assert.strictEqual(P.rejectedText({ rejected: 3, rejected_peer: 0 }), 'rejected 3');
+  assert.strictEqual(P.rejectedText({}), 'rejected 0');
+  assert.strictEqual(P.rejectedText({ rejected: 0, rejected_peer: 7 }), 'rejected 0 · rejected_peer 7');
 });
 
 test('inputsSummary counts', () => {

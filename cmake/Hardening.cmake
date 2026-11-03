@@ -15,6 +15,17 @@ else()
   message(FATAL_ERROR "SKYCUE_SANITIZE must be address,undefined, thread or OFF")
 endif()
 
+option(SKYCUE_FUZZ
+  "Build the libFuzzer harnesses in skycue/fuzz (clang only; run with scripts/run-fuzz.sh)" OFF)
+if(SKYCUE_FUZZ)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "SKYCUE_FUZZ=ON needs clang (CMAKE_CXX_COMPILER_ID is ${CMAKE_CXX_COMPILER_ID})")
+  endif()
+  if(_skycue_sanitize STREQUAL "thread")
+    message(FATAL_ERROR "SKYCUE_FUZZ=ON cannot be combined with SKYCUE_SANITIZE=thread")
+  endif()
+endif()
+
 set(SKYCUE_TEST_SLOW_FACTOR "" CACHE STRING
   "Multiplier for test timeouts and waits (SKYCUE_TEST_SLOW); empty = 4 in a sanitizer or fuzz build, else 1")
 if(NOT SKYCUE_TEST_SLOW_FACTOR STREQUAL "")
@@ -46,6 +57,36 @@ if(_skycue_sanitize)
   add_link_options(-fsanitize=${_skycue_sanitize})
   message(STATUS "skycue: instrumented with -fsanitize=${_skycue_sanitize}, test slow factor ${_skycue_slow_factor}")
 endif()
+
+if(SKYCUE_FUZZ)
+  # Everything gets the coverage hooks (fuzzer-no-link) and ASan + UBSan, so
+  # the parsers a harness calls are instrumented; only the fuzz_* executables
+  # link the libFuzzer driver (skycue_add_fuzzer). The other executables and
+  # the tests still build and run in this tree.
+  add_compile_options(-fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer -fno-sanitize-recover=all -gline-tables-only)
+  add_link_options(-fsanitize=address,undefined)
+  message(STATUS "skycue: fuzz build (-fsanitize=fuzzer-no-link,address,undefined), test slow factor ${_skycue_slow_factor}")
+endif()
+
+# skycue_add_fuzzer(<name> SOURCES <files...> [LIBS <targets...>]): the
+# libFuzzer executable fuzz_<name> in <build>/fuzz, linked with skycued_core
+# and LIBS; <name> is appended to the global property SKYCUE_FUZZ_TARGETS
+# (read by tests/CMakeLists.txt for fuzz_smoke).
+function(skycue_add_fuzzer name)
+  cmake_parse_arguments(PARSE_ARGV 1 _fz "" "" "SOURCES;LIBS")
+  if(NOT _fz_SOURCES)
+    message(FATAL_ERROR "skycue_add_fuzzer(${name}): SOURCES is required")
+  endif()
+  add_executable(fuzz_${name} ${_fz_SOURCES})
+  target_include_directories(fuzz_${name} PRIVATE ${PROJECT_SOURCE_DIR}/fuzz)
+  target_link_libraries(fuzz_${name} PRIVATE skycued_core ${_fz_LIBS})
+  target_link_options(fuzz_${name} PRIVATE -fsanitize=fuzzer)
+  set_target_properties(fuzz_${name} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/fuzz)
+  skycue_set_warnings(fuzz_${name})
+  set_property(GLOBAL APPEND PROPERTY SKYCUE_FUZZ_TARGETS ${name})
+endfunction()
 
 # skycue_skip_test(<name> <reason>): a test that prints "SKIP: <reason>"
 # and exits 77, which ctest reports as Skipped.

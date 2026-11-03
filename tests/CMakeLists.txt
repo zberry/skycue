@@ -352,6 +352,33 @@ set_tests_properties(capture PROPERTIES TIMEOUT 60)
 add_executable(sanitizer_canary EXCLUDE_FROM_ALL sanitizer/canary.cpp)
 target_link_libraries(sanitizer_canary PRIVATE Threads::Threads)
 
+# fuzz_smoke: every libFuzzer harness for 5 s on its seeds, through
+# scripts/run-fuzz.sh. fuzz_build (fixture setup) builds the harnesses first,
+# since ctest has no target dependencies.
+get_filename_component(_skycue_run_fuzz
+  "${PROJECT_SOURCE_DIR}/../scripts/run-fuzz.sh" ABSOLUTE)
+if(NOT SKYCUE_FUZZ)
+  skycue_skip_test(fuzz_smoke "SKYCUE_FUZZ is OFF (fuzz harnesses build with clang only)")
+elseif(NOT EXISTS "${_skycue_run_fuzz}")
+  skycue_skip_test(fuzz_smoke "scripts/run-fuzz.sh not found")
+else()
+  get_property(_skycue_fuzz_names GLOBAL PROPERTY SKYCUE_FUZZ_TARGETS)
+  set(_skycue_fuzz_bins "")
+  foreach(_n IN LISTS _skycue_fuzz_names)
+    list(APPEND _skycue_fuzz_bins fuzz_${_n})
+  endforeach()
+  add_test(NAME fuzz_build
+    COMMAND ${CMAKE_COMMAND} --build ${PROJECT_BINARY_DIR} --target ${_skycue_fuzz_bins})
+  set_tests_properties(fuzz_build PROPERTIES FIXTURES_SETUP fuzz_bins)
+  add_test(NAME fuzz_smoke
+    COMMAND bash ${_skycue_run_fuzz} all --seconds 5
+      --bin-dir ${PROJECT_BINARY_DIR}/fuzz
+      --work ${CMAKE_CURRENT_BINARY_DIR}/fuzz-smoke
+      --findings ${CMAKE_CURRENT_BINARY_DIR}/fuzz-smoke/findings)
+  set_tests_properties(fuzz_smoke PROPERTIES
+    FIXTURES_REQUIRED fuzz_bins TIMEOUT 600 SKIP_RETURN_CODE 77)
+endif()
+
 # Instrumented builds (SKYCUE_SANITIZE or SKYCUE_FUZZ): every test gets its
 # timeout and its waits (SKYCUE_TEST_SLOW, tests/test_slow.hpp) scaled by the
 # slow factor. The sanitizer options and suppression files are not set here:

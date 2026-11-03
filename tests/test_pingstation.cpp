@@ -1021,6 +1021,29 @@ TrackObservation groundUatObservation()
     return o;
 }
 
+// TIS-B with an ICAO address, below sea level, a squawk with a leading zero.
+TrackObservation tisbObservation()
+{
+    TrackObservation o;
+    o.id = skycue::TrackId{0x0A0B0C, AddressType::icao};
+    o.source = Source::tisb;
+    o.lat = 31.5;
+    o.lon = 35.4;
+    o.alt_baro_ft = -1250;
+    o.alt_geom_ft = -1200;
+    o.gs_kt = 95.0f;
+    o.track_deg = 0.5f;
+    o.baro_rate_fpm = -320.0f;
+    o.callsign = "LOW1";
+    o.squawk = "0123";
+    o.emergency = "none";
+    o.category = "A1";
+    o.nic = 7;
+    o.nac_p = 8;
+    o.on_ground = false;
+    return o;
+}
+
 TrackObservation bareObservation()
 {
     TrackObservation o;
@@ -1064,7 +1087,7 @@ template <class T> double val(const std::optional<T>& v) { return v ? static_cas
 
 BOOST_AUTO_TEST_CASE(ping_json_encode_round_trip)
 {
-    for (const auto& in : {fullObservation(), groundUatObservation()}) {
+    for (const auto& in : {fullObservation(), groundUatObservation(), tisbObservation()}) {
         const TrackObservation o = viaJson(in);
         BOOST_TEST(o.id.address == in.id.address);
         BOOST_TEST((o.id.type == in.id.type));
@@ -1148,6 +1171,21 @@ BOOST_AUTO_TEST_CASE(cat021_encode_round_trip_through_map)
         BOOST_TEST(val(o.nic) == val(in.nic));
         BOOST_TEST(val(o.nac_p) == val(in.nac_p));
         BOOST_TEST((o.on_ground == in.on_ground));
+    }
+    // TIS-B has no I021/210 LTT of its own (0, "other"), so it comes back as
+    // Source::other; the rest survives: negative altitudes, squawk 0123.
+    {
+        const TrackObservation in = tisbObservation();
+        const TrackObservation o = viaCat021(in);
+        BOOST_TEST((o.source == Source::other));
+        BOOST_TEST((o.id.type == AddressType::icao));
+        BOOST_TEST(o.squawk.value_or("-") == "0123");
+        BOOST_TEST(val(o.alt_baro_ft) == -1250);
+        BOOST_TEST(val(o.alt_geom_ft) == -1200);
+        BOOST_TEST(std::fabs(val(o.baro_rate_fpm) + 320) <= 6.25);
+        BOOST_TEST(o.callsign.value_or("-") == "LOW1");
+        BOOST_TEST(o.emergency.value_or("-") == "none");
+        BOOST_TEST(std::fabs(val(o.lat) - 31.5) <= 1e-6);
     }
     // No on_ground: 040 has no ext 1, so the mapping leaves it unset.
     TrackObservation unknown = fullObservation();

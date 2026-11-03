@@ -11,7 +11,8 @@
 //
 // Output: --udp HOST:PORT (one datagram per record), --tcp HOST:PORT (connects,
 // for a tcp_listen input) or --tcp-listen PORT (serves one client at a time,
-// for a tcp_connect input). JSON is UDP only, as the pingstation_json input.
+// for a tcp_connect input; on 127.0.0.1 unless --bind ADDR). JSON is UDP
+// only, as the pingstation_json input.
 // --status-interval S (JSON) also sends {"status":{...}} every S seconds.
 // Times are scheduled from the stream's start (no drift), --speed N plays N
 // times faster (0: as fast as possible), --loop starts again after the end.
@@ -87,12 +88,11 @@ enum class Mode { udp, tcp, tcp_listen };
 // Where the records go. Blocking, on the one io_context.
 class Output {
 public:
-    Output(asio::io_context& io, Mode mode, HostPort to, uint16_t listen_port)
+    Output(asio::io_context& io, Mode mode, HostPort to, asio::ip::address bind, uint16_t listen_port)
         : io_(io), mode_(mode), to_(std::move(to)), tcp_(io), udp_(io)
     {
         if (mode_ == Mode::tcp_listen) {
-            // All addresses, as the device serves its own: the daemon may be elsewhere.
-            const tcp::endpoint ep(asio::ip::address_v4::any(), listen_port);
+            const tcp::endpoint ep(bind, listen_port);
             acceptor_.emplace(io_);
             acceptor_->open(ep.protocol());
             acceptor_->set_option(tcp::acceptor::reuse_address(true));
@@ -260,6 +260,7 @@ enum class Form { capture, json, cat021 };
 
 struct Stats {
     uint64_t sent = 0, skipped = 0;
+    bool transport_warned = false;
 };
 
 int64_t nsBetween(system_clock::time_point a, system_clock::time_point b)
@@ -269,8 +270,8 @@ int64_t nsBetween(system_clock::time_point a, system_clock::time_point b)
 
 // Plays the file once starting at media time `base`; returns the media time
 // of its last record.
-int64_t playFile(const std::string& path, Form form, uint8_t sac, uint8_t sic, int64_t base, Output& out,
-                 Pacer& pacer, Stats& st)
+int64_t playFile(const std::string& path, Form form, Mode mode, uint8_t sac, uint8_t sic, int64_t base,
+                 Output& out, Pacer& pacer, Stats& st)
 {
     GzLineReader in(path);
     std::optional<system_clock::time_point> first;
@@ -287,6 +288,18 @@ int64_t playFile(const std::string& path, Form form, uint8_t sac, uint8_t sic, i
                 continue;
             }
             t = captured->t;
+            // A TCP block sent as a datagram keeps its bytes but not the stream; a
+            // datagram (JSON above all) sent over TCP loses its boundaries.
+            const bool from_udp = captured->transport == "udp";
+            if (!st.transport_warned && from_udp != (mode == Mode::udp)) {
+                st.transport_warned = true;
+                LOG_WARN(path << ": a record captured over " << captured->transport << " is sent over "
+                              << (mode == Mode::udp ? "UDP" : "TCP")
+                              << (from_udp && !captured->bytes.empty() && captured->bytes[0] == '{'
+                                      ? ": JSON has no framing on TCP"
+                                      : "")
+                              << " (warned once)");
+            }
         } else {
             const LineKind kind = parseRecordingLine(line, rec);
             if (!(kind == LineKind::readsb_raw || (kind == LineKind::received && rec.kind == RecordKind::obs))) {
@@ -327,12 +340,12 @@ int64_t playFile(const std::string& path, Form form, uint8_t sac, uint8_t sic, i
 
 int main(int argc, char** argv)
 {
-    std::string udp_arg, tcp_arg, capture_file, as_form;
+    std::string udp_arg, tcp_arg, capture_file, as_form, bind_arg = "127.0.0.1";
     int listen_port = 0, sac = 0, sic = 0;
     double speed = 1.0, status_interval = 0, status_lat = 0, status_lon = 0;
     std::vector<std::string> files;
     po::options_description desc(
-        "usage: skycue-pingsim (--udp HOST:PORT | --tcp HOST:PORT | --tcp-listen PORT)\n"
+        "usage: skycue-pingsim (--udp HOST:PORT | --tcp HOST:PORT | --tcp-listen PORT [--bind ADDR])\n"
         "                      (--capture FILE | --as json|cat021 FILE) [--speed N] [--loop]\n"
         "                      [--sac N] [--sic N] [--status-interval S --status-lat D --status-lon D]\n"
         "Plays a pingStation 3 to a skycued input: a capture file as recorded, or a received-stream\n"
@@ -340,7 +353,8 @@ int main(int argc, char** argv)
     desc.add_options()("help,h", "show this help")(
         "udp", po::value(&udp_arg), "send datagrams to HOST:PORT (pingstation_json, or a udp CAT021 input)")(
         "tcp", po::value(&tcp_arg), "connect to HOST:PORT (a tcp_listen CAT021 input)")(
-        "tcp-listen", po::value(&listen_port), "serve CAT021 on PORT, all addresses (a tcp_connect input)")(
+        "tcp-listen", po::value(&listen_port), "serve CAT021 on PORT (a tcp_connect input)")(
+        "bind", po::value(&bind_arg), "with --tcp-listen: the local address (default 127.0.0.1)")(
         "capture", po::value(&capture_file), "replay a capture file (capture-<id>-*.jsonl)")(
         "as", po::value(&as_form), "json or cat021: synthesise from the recording FILE")(
         "speed", po::value(&speed)->default_value(1.0), "playback speed; 0 = as fast as possible")(
@@ -387,7 +401,13 @@ int main(int argc, char** argv)
         mode = Mode::tcp_listen;
         if (listen_port < 1 || listen_port > 65535)
             return usage("--tcp-listen must be a port number 1-65535");
+    } else if (vm.count("bind")) {
+        return usage("--bind needs --tcp-listen");
     }
+    error_code bind_ec;
+    const auto bind_addr = asio::ip::make_address(bind_arg, bind_ec);
+    if (bind_ec)
+        return usage("--bind must be an IP address, got '" + bind_arg + "'");
 
     if (vm.count("capture") == vm.count("as"))
         return usage("give exactly one of --capture FILE and --as json|cat021 FILE");
@@ -438,9 +458,9 @@ int main(int argc, char** argv)
     asio::io_context io;
     std::optional<Output> out;
     try {
-        out.emplace(io, mode, to.value_or(HostPort{}), static_cast<uint16_t>(listen_port));
+        out.emplace(io, mode, to.value_or(HostPort{}), bind_addr, static_cast<uint16_t>(listen_port));
     } catch (const std::exception& e) {
-        std::cerr << "skycue-pingsim: --tcp-listen " << listen_port << ": " << e.what() << "\n";
+        std::cerr << "skycue-pingsim: --tcp-listen " << bind_arg << ":" << listen_port << ": " << e.what() << "\n";
         return 1;
     }
     const bool loop = vm.count("loop") > 0;
@@ -452,9 +472,15 @@ int main(int argc, char** argv)
         int64_t media = 0;
         for (unsigned pass = 0;; ++pass) {
             LOG_INFO("playing " << path << (pass ? " (pass " + std::to_string(pass + 1) + ")" : ""));
-            media = playFile(path, form, static_cast<uint8_t>(sac), static_cast<uint8_t>(sic), media, *out, pacer, st);
+            const uint64_t before = st.sent;
+            media = playFile(path, form, mode, static_cast<uint8_t>(sac), static_cast<uint8_t>(sic), media, *out,
+                             pacer, st);
             if (!loop)
                 break;
+            if (st.sent == before) {  // nothing to play: do not spin
+                std::cerr << "skycue-pingsim: " << path << ": --loop, but a pass sent nothing\n";
+                return 1;
+            }
             media += kGapNs;
         }
         out->close();

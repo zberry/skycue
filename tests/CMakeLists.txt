@@ -216,7 +216,8 @@ set_tests_properties(web_ui PROPERTIES TIMEOUT 60)
 if(SKYCUE_UI_TESTS)
   add_test(NAME ui_playwright
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/ui/run.sh
-      $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE})
+      $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
+      $<TARGET_FILE:skycue-pingsim>)
   set_tests_properties(ui_playwright PROPERTIES TIMEOUT 300)
 endif()
 

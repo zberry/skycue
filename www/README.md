@@ -63,6 +63,27 @@ text") with a station-prefix filter and age colouring (fresh < 30 min,
 aging < 90 min, old). A TWGO text item without graphics clears the shapes
 drawn for its key (an amended text drops the old graphics).
 
+## Side panel tabs and the Receiver tab
+
+The side panel's tabs are its `[role=tab]` buttons: `tab-<name>` shows
+`pane-<name>`, a header button with `data-opens-tab="<name>"` opens and
+closes the panel on that tab, and `TAB_SHOWN[<name>]` in `app.js` draws the
+tab when it is shown. A new tab is its markup in `index.html` and one entry
+in `TAB_SHOWN`.
+
+The Receiver tab (docs/web-api.md, Inputs) takes the input list from the
+snapshot, the `inputs` WebSocket items and `GET /api/inputs` every 5 s (the
+device status, status-poll failures and data ages are not changes), and the
+live counters from every `stats` item (`inputRates`). One card per input
+with its status dot (`inputDot`), endpoint (`inputEndpoint`) and, for a
+pingStation, the device line (`statusStale`); the header's `inputs n/m` is
+`inputsSummary`. The add/edit form shows `inputFields(type, transport)` and
+checks `validateInputDef`, which mirrors skycued's `parseInputDef` rules and
+messages, before it sends; skycued's 400 message is shown as it comes.
+Device positions are `.device-marker` markers, FIS-B ground stations
+`.station-marker`. Everything from an input's definition, the device or a
+server error is set with `textContent`, never as markup.
+
 ## Geometry
 
 `elevationDeg` in `app_pure.js` duplicates `skycued/src/geo.cpp`

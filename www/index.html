@@ -13,8 +13,8 @@
   <span class="brand">skycue</span>
   <span class="stat">tracks <b id="stat-tracks-total">–</b> / fwd <b id="stat-tracks-forwarded">–</b></span>
   <span class="stat">obs/s <b id="stat-obs-rate">–</b></span>
-  <span class="stat">readsb <b id="stat-readsb" class="dot">–</b></span>
-  <span class="stat">dump978 <b id="stat-dump978" class="dot">–</b></span>
+  <span class="stat">inputs <button id="stat-inputs" type="button" class="dot" data-opens-tab="receiver" aria-pressed="false"
+    title="Inputs connected / enabled: open the Receiver tab">–</button></span>
   <span class="stat">UAT dl/ul per min <b id="stat-uat">–</b></span>
   <span class="stat">TCP clients <b id="stat-tcp">–</b></span>
   <span class="stat">UDP targets <b id="stat-udp">–</b></span>
@@ -25,7 +25,7 @@
   <span class="stat fisb">radar age <b id="stat-radar-age">–</b></span>
   <span class="stat fisb">stations <b id="stat-fisb-stations">–</b></span>
   <span class="stat fisb warn" id="stat-fisb-skew" role="status" hidden>clock skew: <b id="stat-fisb-skew-text"></b></span>
-  <button id="wx-toggle" type="button" aria-pressed="false">Weather</button>
+  <button id="wx-toggle" type="button" data-opens-tab="weather" aria-pressed="false">Weather</button>
   <button id="table-toggle" type="button" aria-pressed="false">Table</button>
 </header>
 <div id="conn-banner" role="alert" hidden>Disconnected from skycued, reconnecting…</div>
@@ -101,6 +101,7 @@
       <div role="tablist" aria-label="Side panel">
         <button type="button" role="tab" id="tab-track" aria-controls="pane-track" aria-selected="true">Track</button>
         <button type="button" role="tab" id="tab-weather" aria-controls="pane-weather" aria-selected="false">Weather</button>
+        <button type="button" role="tab" id="tab-receiver" aria-controls="pane-receiver" aria-selected="false">Receiver</button>
       </div>
       <button type="button" id="details-close" aria-label="Close (Esc)">×</button>
     </div>
@@ -125,6 +126,68 @@
         autocomplete="off" spellcheck="false">
       <p id="wx-summary" class="msg" role="status"></p>
       <div id="wx-list"></div>
+    </section>
+    <section id="pane-receiver" role="tabpanel" aria-labelledby="tab-receiver" hidden>
+      <h2>Inputs</h2>
+      <div id="inputs-list"></div>
+      <p id="inputs-msg" class="msg" role="status"></p>
+      <form id="input-form" novalidate>
+        <h3 id="input-form-title">Add input</h3>
+        <label class="field" data-field="type">Type
+          <select name="type">
+            <option value="pingstation_cat021">pingStation CAT021</option>
+            <option value="pingstation_json">pingStation JSON</option>
+            <option value="readsb">readsb (JSON)</option>
+            <option value="dump978">dump978 (raw UAT)</option>
+          </select></label>
+        <label class="field" data-field="id">Id <input name="id" type="text" maxlength="32" autocomplete="off"
+          spellcheck="false" placeholder="ps-north"><small class="field-error" data-for="id"></small></label>
+        <label class="field" data-field="name">Name <input name="name" type="text" autocomplete="off"
+          placeholder="North mast"><small class="field-error" data-for="name"></small></label>
+        <label class="field" data-field="transport">Transport
+          <select name="transport">
+            <option value="udp">udp</option>
+            <option value="tcp_listen">tcp_listen (the device connects)</option>
+            <option value="tcp_connect">tcp_connect (connect to the device)</option>
+          </select><small class="field-error" data-for="transport"></small></label>
+        <label class="field" data-field="host">Host <input name="host" type="text" autocomplete="off" spellcheck="false"
+          placeholder="192.0.2.10"><small class="field-error" data-for="host"></small></label>
+        <label class="field" data-field="bind">Bind <input name="bind" type="text" autocomplete="off" spellcheck="false"
+          placeholder="0.0.0.0"><small class="field-error" data-for="bind"></small></label>
+        <label class="field" data-field="port">Port <input name="port" type="text" inputmode="numeric"
+          autocomplete="off"><small class="field-error" data-for="port"></small></label>
+        <label class="field" data-field="peer">Peer <input name="peer" type="text" autocomplete="off" spellcheck="false"
+          placeholder="any"><small class="field-error" data-for="peer"></small></label>
+        <label class="field" data-field="edition">Edition
+          <select name="edition">
+            <option>2.2</option><option>2.3</option><option>2.4</option><option selected>2.5</option><option>2.6</option><option>2.7</option>
+          </select><small class="field-error" data-for="edition"></small></label>
+        <label class="field" data-field="sac">SAC <input name="sac" type="text" inputmode="numeric" autocomplete="off"
+          placeholder="none"><small class="field-error" data-for="sac"></small></label>
+        <label class="field" data-field="sic">SIC <input name="sic" type="text" inputmode="numeric" autocomplete="off"
+          placeholder="none"><small class="field-error" data-for="sic"></small></label>
+        <label class="field" data-field="status_url">Status URL <input name="status_url" type="text" autocomplete="off"
+          spellcheck="false" placeholder="http://192.0.2.10/api/v1/status"><small class="field-error" data-for="status_url"></small></label>
+        <label class="field" data-field="status_interval_s">Status interval (s) <input name="status_interval_s" type="text"
+          inputmode="numeric" autocomplete="off" value="30"><small class="field-error" data-for="status_interval_s"></small></label>
+        <label class="field" data-field="time_mode">Timestamps
+          <select name="time_mode"><option value="utc">utc</option><option value="gps">gps</option></select>
+          <small class="field-error" data-for="time_mode"></small></label>
+        <label class="field check" data-field="capture"><input name="capture" type="checkbox"> Capture to RECORD_DIR</label>
+        <label class="field check" data-field="enabled"><input name="enabled" type="checkbox" checked> Enabled</label>
+        <p class="form-error msg error" role="alert"></p>
+        <div class="row form-buttons">
+          <button type="submit">Add</button>
+          <button type="button" data-act="cancel" hidden>Cancel</button>
+        </div>
+      </form>
+      <p class="msg help">A green dot: connected and data in the last 30 s; amber: connected, no data for 30 s; red:
+        disconnected, or the device's status poll failed 3 times in a row; grey: disabled. With CAT021 the device sends
+        only aircraft, so when the sky is empty its status poll (Status URL) is the only sign that it is alive.</p>
+      <h2>Ground stations</h2>
+      <ul id="stations-list" class="rx-list"></ul>
+      <h2>Decoder health</h2>
+      <table id="decoder-health" class="kv"><tbody></tbody></table>
     </section>
   </aside>
 </main>

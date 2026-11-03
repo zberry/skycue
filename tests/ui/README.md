@@ -31,7 +31,7 @@ cmake --build build-skycue
 ctest --test-dir build-skycue -R ui_playwright --output-on-failure
 ```
 
-or directly: `bash run.sh <skycued> <fixtures dir> <build>/www-stage`.
+or directly: `bash run.sh <skycued> <fixtures dir> <build>/www-stage <skycue-pingsim>`.
 
 `run.sh` writes a temporary `skycue.conf` with free `WEB_PORT` and
 `CUE_TCP_PORT`, starts skycued with `--replay ... --replay-speed 1
@@ -54,6 +54,13 @@ ground station, 40.04 N 86.26 W, inside both mosaics) as
 `SKYCUE_RADAR_URL`. Their `fisb-*.png` screenshots go to
 `.superpowers/sdd/2026-11-02-skycue-fisb/screenshots/` (override with
 `SKYCUE_FISB_SCREENSHOTS`).
+
+For the Receiver tab cases it starts one more skycued, `--no-readsb
+--no-uat` with a temporary `RECORD_DIR` and an inputs file holding one
+`pingstation_json` input, `ps-sim`, on a free UDP port, and
+`skycue-pingsim` sending the readsb fixture to it as pingStation JSON
+(`--loop --speed 5`, a device status every 2 s at 38.9 N 77.0 W), as
+`SKYCUE_RECEIVERS_URL`. The cases there leave its inputs as they found them.
 
 ## Cases
 
@@ -122,6 +129,30 @@ half, which lies outside its region's bbox.
     mod 16) x 256 px, a different place for each tile); `6/18/24` shows
     itself over the same parent (`tile-underlay`), since it is on its
     region's edge; no page error.
+
+Receiver tab, against the receivers skycued (`SKYCUE_RECEIVERS_URL`, ps-sim
+fed by skycue-pingsim), each case removing what it added:
+
+20. `inputs_header_opens_receiver_tab`: `#stat-inputs` reads `1/1`; a click
+    opens the Receiver tab, the tabs switch, and a second click closes it.
+21. `receiver_tab_lists_inputs_with_live_counts`: the ps-sim card turns
+    green, shows its endpoint, obs/s above 0 and the device line (GPS 3,
+    firmware 1.0.0); its `.device-marker` is on the map and Show pans to it.
+22. `add_input_form_validates_and_shows_server_error`: id `PS` and port 0
+    are marked inline without a request; ps-sim's port is sent and the
+    form shows skycued's 400 message word for word.
+23. `add_edit_disable_remove_input`: add a CAT021 udp input through the
+    form, rename it, disable it (grey dot), and remove it (a dismissed
+    confirm keeps it); `/api/inputs` agrees at each step.
+24. `input_name_is_text_not_html`: a name and a server error made of an
+    `<img onerror>` tag show as text; no `img` element, no script ran.
+
+Receiver tab, against the 2015 FIS-B skycued:
+
+25. `ground_stations_listed`: one station row (id, position, products) and
+    one `.station-marker`.
+26. `decoder_health_table`: the decoder counters as in `/api/fisb/status`,
+    `uplink_duplicates` 0, the last uplink time and recorder drops.
 
 Every test also fails if the page requested anything from another host
 than the one it was loaded from (`data:` URLs, the radar images, aside).

@@ -46,7 +46,8 @@
 
   // ---- HTTP ------------------------------------------------------------------
   // A PUT or POST always carries a JSON body and Content-Type: skycued
-  // answers 415 without it (docs/web-api.md, Security).
+  // answers 415 without it (docs/web-api.md, Security). A DELETE carries
+  // neither; its 204 (no body) resolves to null.
   function request(method, path, body) {
     var init = { method: method, headers: {} };
     if (method === 'PUT' || method === 'POST') {
@@ -54,6 +55,7 @@
       init.body = JSON.stringify(body === undefined ? {} : body);
     }
     return fetch(path, init).then(function (r) {
+      if (r.status === 204) return null;
       return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
         return j;
@@ -613,17 +615,33 @@
   }
 
   // ---- selection panel ---------------------------------------------------------
-  // The side panel: a Track tab (the selected aircraft) and a Weather tab
-  // (FIS-B text reports and the clicked airspace shape).
+  // The side panel: a Track tab (the selected aircraft), a Weather tab
+  // (FIS-B text reports and the clicked airspace shape) and a Receiver tab
+  // (inputs, ground stations, decoder health). The tabs are the panel's
+  // [role=tab] buttons, tab-<name> showing pane-<name>; a header button with
+  // data-opens-tab="<name>" toggles the panel on that tab. TAB_SHOWN[name]
+  // draws a tab when it is shown. A new tab: its markup and one entry here.
+  var TAB_SHOWN = {
+    weather: function () { renderWx(true); },
+    receiver: function () { renderReceiver(); }
+  };
   var activeTab = 'track';
+  function eachEl(selector, fn) { Array.prototype.forEach.call(document.querySelectorAll(selector), fn); }
+  function tabShown(tab) { return activeTab === tab && !$('details').hidden; }
+  function syncTabToggles() {
+    eachEl('[data-opens-tab]', function (b) {
+      b.setAttribute('aria-pressed', String(tabShown(b.getAttribute('data-opens-tab'))));
+    });
+  }
   function setTab(tab) {
     activeTab = tab;
-    ['track', 'weather'].forEach(function (t) {
-      $('tab-' + t).setAttribute('aria-selected', String(t === tab));
+    eachEl('#details [role=tab]', function (b) {
+      var t = b.id.replace(/^tab-/, '');
+      b.setAttribute('aria-selected', String(t === tab));
       $('pane-' + t).hidden = t !== tab;
     });
-    $('wx-toggle').setAttribute('aria-pressed', String(tab === 'weather' && !$('details').hidden));
-    if (tab === 'weather') renderWx(true);
+    syncTabToggles();
+    if (TAB_SHOWN[tab]) TAB_SHOWN[tab]();
   }
   function openPanel(tab) {
     var wasHidden = $('details').hidden;
@@ -635,7 +653,7 @@
     deselect();
     if ($('details').hidden) return;
     $('details').hidden = true;
-    $('wx-toggle').setAttribute('aria-pressed', 'false');
+    syncTabToggles();
     if (map) map.invalidateSize({ pan: false });
   }
 
@@ -888,8 +906,8 @@
     var now = Date.now();
     setStat('stat-tracks-total', String(s.tracks_total));
     setStat('stat-tracks-forwarded', String(s.tracks_forwarded));
-    setStat('stat-readsb', s.readsb_connected ? '● up' : '○ down', s.readsb_connected ? 'on' : 'off');
-    setStat('stat-dump978', s.dump978_connected ? '● up' : '○ down', s.dump978_connected ? 'on' : 'off');
+    applyInputLines(s.inputs, now);
+    rx.stats = s;
     setStat('stat-tcp', String(s.tcp_clients));
     setStat('stat-udp', String(s.udp_targets));
     setStat('stat-rec-drops', String((s.recorder_dropped_received || 0) + (s.recorder_dropped_sent || 0)));
@@ -1404,6 +1422,7 @@
     if (!st) return;
     var now = Date.now();
     fisb.status = st;
+    updateStationMarkers(st.stations || []);
     setStat('stat-fisb-stations', String((st.stations || []).length));
     var prev = fisb.prevStatus;
     if (prev && now > fisb.prevStatusWall) {
@@ -1542,6 +1561,387 @@
     }
   }
 
+  // ---- Receiver tab ------------------------------------------------------------------
+  // docs/web-api.md, Inputs. The list comes with the snapshot, the `inputs`
+  // items (a change) and GET /api/inputs every INPUTS_POLL_MS (device status,
+  // status poll failures and data ages are not changes); the live counters
+  // and `connected` with every stats item. Everything an input's definition
+  // or the device says is shown with textContent, never as markup.
+  var INPUTS_POLL_MS = 5000;
+  var NUMERIC_FIELDS = { port: true, sac: true, sic: true, status_interval_s: true };
+  var DOT_TITLES = { green: 'connected, receiving', amber: 'connected, no data for 30 s',
+    red: 'disconnected, or the status poll failed 3 times', grey: 'disabled' };
+  var ACT_LABELS = { toggle: 'Disable', edit: 'Edit', remove: 'Remove', show: 'Show' };
+  var DEVICE_SVG = '<svg width="16" height="16" viewBox="-8 -8 16 16" aria-hidden="true">' +
+    '<path d="M0,-7 L7,0 L0,7 L-7,0 Z" fill="currentColor" stroke="#0d1117" stroke-width="1.5"/></svg>';
+  var STATION_SVG = '<svg width="16" height="16" viewBox="-8 -8 16 16" aria-hidden="true">' +
+    '<path d="M0,-7 L7,6 L-7,6 Z" fill="currentColor" stroke="#0d1117" stroke-width="1.5"/></svg>';
+  var HEALTH_ROWS = [
+    ['metar', 'METAR held'], ['taf', 'TAF held'], ['pirep', 'PIREP held'], ['winds', 'Winds aloft held'],
+    ['other', 'Other text held'], ['twgo', 'NOTAM / SIGMET held'], ['cancelled', 'Cancelled (30 min)'],
+    ['bad_frames', 'Bad frames'], ['segments_open', 'Segments open'], ['mosaic_blocks', 'Mosaic blocks'],
+    ['last_uplink_time', 'Last uplink'], ['uplink_duplicates', 'Uplink duplicates'],
+    ['recorder_dropped', 'Recorder drops (received / sent)']
+  ];
+  var rx = {
+    inputs: [],                     // input objects, as GET /api/inputs lists them
+    wall: 0,                        // Date.now() when they arrived (for the data ages)
+    rates: {},                      // id -> {obs_s, msg_s}
+    dataWall: {},                   // id -> Date.now() of the stats item its message count last grew in
+    prevLines: null, prevWall: 0,   // the previous stats.inputs
+    stats: null,                    // the latest stats object (recorder drops)
+    cards: new Map(),               // id -> card element
+    devices: new Map(),             // id -> device marker
+    stations: new Map(),            // site_id -> station marker
+    editing: null                   // the id of the input the form edits; null: it adds one
+  };
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function inputById(id) {
+    for (var i = 0; i < rx.inputs.length; i++) if (rx.inputs[i].id === id) return rx.inputs[i];
+    return null;
+  }
+  function devicePos(inp) {
+    var ds = inp.state && inp.state.device_status;
+    return ds && typeof ds.lat === 'number' && typeof ds.lon === 'number' ? [ds.lat, ds.lon] : null;
+  }
+
+  function applyInputs(list) {
+    rx.inputs = Array.isArray(list) ? list : [];
+    rx.wall = Date.now();
+    updateInputsHeader();
+    updateDeviceMarkers();
+    if (tabShown('receiver')) renderInputs();
+  }
+  // stats.inputs: the rates, and each input's counters and `connected`.
+  function applyInputLines(lines, now) {
+    if (!Array.isArray(lines)) return;
+    rx.rates = P.inputRates(rx.prevLines, lines, rx.prevLines ? (now - rx.prevWall) / 1000 : 0);
+    lines.forEach(function (l) { if (rx.rates[l.id].msg_s > 0) rx.dataWall[l.id] = now; });
+    rx.prevLines = lines;
+    rx.prevWall = now;
+    lines.forEach(function (l) {
+      var inp = inputById(l.id);
+      if (!inp || !inp.state) return;
+      ['connected', 'messages', 'observations', 'uplinks', 'rejected'].forEach(function (k) { inp.state[k] = l[k]; });
+    });
+    updateInputsHeader();
+  }
+  function updateInputsHeader() {
+    var n = P.inputsSummary(rx.inputs);
+    setStat('stat-inputs', n.connected + '/' + n.enabled, n.enabled > 0 && n.connected === n.enabled ? 'on' : 'off');
+  }
+  function refreshInputs() {
+    return request('GET', 'api/inputs').then(function (j) { applyInputs(j.inputs); });
+  }
+  function pollInputs() {
+    if (connected) refreshInputs().catch(function () { /* the WebSocket watchdog reports a dead skycued */ });
+  }
+
+  function makeCard(inp) {
+    var card = el('div', 'input-card');
+    card.setAttribute('data-id', inp.id);
+    var head = el('div', 'input-head');
+    head.appendChild(el('span', 'dot'));
+    head.appendChild(el('span', 'input-name'));
+    head.appendChild(el('span', 'input-type'));
+    card.appendChild(head);
+    card.appendChild(el('div', 'input-endpoint'));
+    var line = el('div', 'input-stats');
+    ['input-age', 'input-rates', 'input-rejected'].forEach(function (c) { line.appendChild(el('span', c)); });
+    card.appendChild(line);
+    card.appendChild(el('div', 'input-device'));
+    card.appendChild(el('div', 'input-error'));
+    var acts = el('div', 'input-actions');
+    (inp.builtin ? ['toggle'] : ['toggle', 'edit', 'remove', 'show']).forEach(function (a) {
+      var b = el('button', null, ACT_LABELS[a]);
+      b.type = 'button';
+      b.setAttribute('data-act', a);
+      acts.appendChild(b);
+    });
+    card.appendChild(acts);
+    return card;
+  }
+  function setText(card, cls, text) {
+    var e = card.querySelector('.' + cls);
+    if (e.textContent !== text) e.textContent = text;
+    return e;
+  }
+  function deviceLine(inp, now) {
+    var ds = inp.state && inp.state.device_status;
+    if (!ds) return { text: 'no device status yet', stale: false };
+    var parts = [];
+    if (ds.gps_status !== undefined) parts.push('GPS ' + ds.gps_status);
+    if (ds.receiver_status !== undefined) parts.push('receiver ' + ds.receiver_status);
+    if (ds.version) parts.push('firmware ' + ds.version);
+    var stale = P.statusStale(ds, inp.status_interval_s || 30, now);
+    var at = Date.parse(ds.received_at);
+    if (!isNaN(at)) parts.push('status ' + P.formatAge(at, now) + (stale ? ' (stale)' : ''));
+    return { text: parts.join(' · '), stale: stale };
+  }
+  function fillCard(card, inp, now) {
+    var st = inp.state || {}, color = P.inputDot(inp, now);
+    var dot = card.querySelector('.dot');
+    dot.className = 'dot dot-' + color;
+    dot.title = DOT_TITLES[color];
+    setText(card, 'input-name', inp.name || inp.id);
+    setText(card, 'input-type', (inp.name ? inp.id + ' · ' : '') + inp.type);
+    setText(card, 'input-endpoint', P.inputEndpoint(inp));
+    // The last data: from the list's age, or newer from the stats counters.
+    var dataAt = typeof st.last_data_age_s === 'number' ? rx.wall - st.last_data_age_s * 1000 : NaN;
+    var counted = rx.dataWall[inp.id];
+    if (counted && !(counted <= dataAt)) dataAt = counted;
+    setText(card, 'input-age', isNaN(dataAt) ? 'no data yet' : 'data ' + P.formatAge(dataAt, Date.now()));
+    var r = rx.rates[inp.id] || { obs_s: null, msg_s: null };
+    var rates = setText(card, 'input-rates', 'obs/s ' + P.formatNum(r.obs_s, 1) + ' · msg/s ' + P.formatNum(r.msg_s, 1));
+    rates.setAttribute('data-obs-s', r.obs_s === null ? '' : String(r.obs_s));
+    setText(card, 'input-rejected', 'rejected ' + (st.rejected || 0));
+    var ping = inp.type === 'pingstation_json' || inp.type === 'pingstation_cat021';
+    var dev = card.querySelector('.input-device');
+    dev.hidden = !ping;
+    if (ping) {
+      var d = deviceLine(inp, now);
+      setText(card, 'input-device', d.text);
+      dev.classList.toggle('stale', d.stale);
+    }
+    setText(card, 'input-error', st.last_error ? 'last error: ' + st.last_error : '').hidden = !st.last_error;
+    card.querySelector('[data-act=toggle]').textContent = inp.enabled ? 'Disable' : 'Enable';
+    var show = card.querySelector('[data-act=show]');
+    if (show) show.hidden = !devicePos(inp);
+  }
+  function renderInputs() {
+    var list = $('inputs-list'), now = dataNow(), seen = {};
+    rx.inputs.forEach(function (inp, i) {
+      seen[inp.id] = true;
+      var card = rx.cards.get(inp.id);
+      if (!card) {
+        card = makeCard(inp);
+        rx.cards.set(inp.id, card);
+      }
+      if (list.children[i] !== card) list.insertBefore(card, list.children[i] || null);
+      fillCard(card, inp, now);
+    });
+    rx.cards.forEach(function (card, id) {
+      if (seen[id]) return;
+      card.remove();
+      rx.cards.delete(id);
+    });
+    list.classList.toggle('empty', !rx.inputs.length);
+  }
+  function renderReceiver() {
+    renderInputs();
+    renderStations();
+    renderHealth();
+  }
+
+  function updateDeviceMarkers() {
+    if (!map) return;
+    var seen = {};
+    rx.inputs.forEach(function (inp) {
+      var ll = devicePos(inp);
+      if (!ll) return;
+      seen[inp.id] = true;
+      var title = (inp.name || inp.id) + ': device position';
+      var m = rx.devices.get(inp.id);
+      if (!m) {
+        m = L.marker(ll, {
+          icon: L.divIcon({ className: 'device-marker', html: DEVICE_SVG, iconSize: [16, 16], iconAnchor: [8, 8] }),
+          title: title, keyboard: false, zIndexOffset: -500
+        }).addTo(map);
+        rx.devices.set(inp.id, m);
+      } else {
+        m.setLatLng(ll);
+      }
+      var e = m.getElement();
+      if (e && e.title !== title) e.title = title;
+    });
+    rx.devices.forEach(function (m, id) {
+      if (seen[id]) return;
+      m.remove();
+      rx.devices.delete(id);
+    });
+  }
+  function updateStationMarkers(stations) {
+    if (!map) return;
+    var seen = {};
+    stations.forEach(function (s) {
+      if (typeof s.lat !== 'number' || typeof s.lon !== 'number') return;
+      seen[s.site_id] = true;
+      var m = rx.stations.get(s.site_id);
+      if (!m) {
+        m = L.marker([s.lat, s.lon], {
+          icon: L.divIcon({ className: 'station-marker', html: STATION_SVG, iconSize: [16, 16], iconAnchor: [8, 8] }),
+          title: 'FIS-B ground station ' + s.site_id, keyboard: false, zIndexOffset: -600
+        }).addTo(map);
+        rx.stations.set(s.site_id, m);
+      } else {
+        m.setLatLng([s.lat, s.lon]);
+      }
+    });
+    rx.stations.forEach(function (m, id) {
+      if (seen[id]) return;
+      m.remove();
+      rx.stations.delete(id);
+    });
+    if (tabShown('receiver')) renderStations();
+  }
+  function renderStations() {
+    var ul = $('stations-list'), stations = (fisb.status && fisb.status.stations) || [], now = dataNow();
+    ul.textContent = '';
+    if (!stations.length) ul.appendChild(el('li', 'empty', 'None heard in the last 60 min.'));
+    stations.forEach(function (s) {
+      var li = el('li');
+      li.appendChild(el('span', 'st-id', s.site_id));
+      li.appendChild(el('span', 'st-pos', typeof s.lat === 'number' ? s.lat.toFixed(4) + ', ' + s.lon.toFixed(4) : '—'));
+      li.appendChild(el('span', 'st-count', s.count + ' products'));
+      var t = Date.parse(s.last_seen);
+      li.appendChild(el('span', 'st-age', isNaN(t) ? '' : 'heard ' + P.formatAge(t, now)));
+      ul.appendChild(li);
+    });
+  }
+  function uplinkTime(iso) {
+    var ms = Date.parse(iso);
+    if (isNaN(ms)) return '—';
+    var t = new Date(ms).toISOString();
+    return t.substr(0, 10) + ' ' + t.substr(11, 8) + 'Z';
+  }
+  function renderHealth() {
+    var st = fisb.status || {}, counts = st.counts || {}, s = rx.stats || {};
+    var body = $('decoder-health').tBodies[0];
+    body.textContent = '';
+    HEALTH_ROWS.forEach(function (row) {
+      var k = row[0], v;
+      if (k === 'last_uplink_time') v = uplinkTime(st.last_uplink_time);
+      else if (k === 'recorder_dropped') v = (s.recorder_dropped_received || 0) + ' / ' + (s.recorder_dropped_sent || 0);
+      else if (k in counts) v = String(counts[k]);
+      else v = String(st[k] || 0);
+      var tr = el('tr');
+      tr.setAttribute('data-key', k);
+      tr.appendChild(el('th', null, row[1]));
+      tr.appendChild(el('td', null, v));
+      body.appendChild(tr);
+    });
+  }
+
+  // ---- the add / edit form ----
+  function formEl(name) { return $('input-form').elements[name]; }
+  function formFields() { return P.inputFields(formEl('type').value, formEl('transport').value); }
+  function syncFormFields() {
+    var shown = formFields();
+    eachEl('#input-form [data-field]', function (l) {
+      var f = l.getAttribute('data-field');
+      l.hidden = f !== 'type' && shown.indexOf(f) < 0;
+    });
+  }
+  // The definition the form holds; a field left empty is not sent, so
+  // skycued's default applies.
+  function formDef() {
+    var def = { type: formEl('type').value };
+    formFields().forEach(function (f) {
+      var e = formEl(f);
+      if (e.type === 'checkbox') {
+        def[f] = e.checked;
+        return;
+      }
+      var v = f === 'name' ? e.value : e.value.trim();
+      if (v !== '') def[f] = NUMERIC_FIELDS[f] ? Number(v) : v;
+    });
+    return def;
+  }
+  function showFieldErrors(errors) {
+    eachEl('#input-form .field-error', function (e) {
+      var f = e.getAttribute('data-for'), msg = errors[f] || '';
+      e.textContent = msg;
+      var input = formEl(f);
+      input.classList.toggle('invalid', !!msg);
+      if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+    });
+  }
+  function showFormError(text) { $('input-form').querySelector('.form-error').textContent = text || ''; }
+  function resetForm() {
+    var form = $('input-form');
+    form.reset();
+    rx.editing = null;
+    formEl('id').readOnly = false;
+    formEl('type').disabled = false;
+    $('input-form-title').textContent = 'Add input';
+    form.querySelector('button[type=submit]').textContent = 'Add';
+    form.querySelector('[data-act=cancel]').hidden = true;
+    showFieldErrors({});
+    showFormError('');
+    syncFormFields();
+  }
+  // A built-in's card has no Edit: its enable/disable button is all it takes.
+  function editInput(inp) {
+    resetForm();
+    rx.editing = inp.id;
+    var form = $('input-form');
+    formEl('type').value = inp.type;
+    formEl('type').disabled = true;
+    if (inp.transport) formEl('transport').value = inp.transport;
+    P.inputFields(inp.type, inp.transport).forEach(function (f) {
+      var e = formEl(f), v = inp[f];
+      if (e.type === 'checkbox') e.checked = !!v;
+      else e.value = v === undefined || v === null ? '' : String(v);
+    });
+    formEl('id').readOnly = true;
+    $('input-form-title').textContent = 'Edit ' + inp.id;
+    form.querySelector('button[type=submit]').textContent = 'Save';
+    form.querySelector('[data-act=cancel]').hidden = false;
+    syncFormFields();
+    form.scrollIntoView({ block: 'nearest' });
+  }
+  function submitInput(ev) {
+    ev.preventDefault();
+    var def = formDef(), id = rx.editing;
+    var check = P.validateInputDef(def);
+    showFieldErrors(check.errors);
+    showFormError('');
+    if (!check.ok) return;
+    var submit = $('input-form').querySelector('button[type=submit]');
+    submit.disabled = true;
+    var req = id === null ? request('POST', 'api/inputs', def) :
+      request('PUT', 'api/inputs/' + encodeURIComponent(id), def);
+    req.then(function () {
+      resetForm();
+      return refreshInputs();
+    }).catch(function (err) {
+      showFormError(err.message); // skycued's message, word for word
+    }).then(function () { submit.disabled = false; });
+  }
+  function onFormInput(ev) {
+    var name = ev.target.name;
+    if (name === 'type' || name === 'transport') syncFormFields();
+    // Once marked, the marks follow the typing.
+    if ($('input-form').querySelector('.invalid')) showFieldErrors(P.validateInputDef(formDef()).errors);
+  }
+  function onCardClick(ev) {
+    var b = ev.target.closest('button[data-act]');
+    var card = b && b.closest('.input-card');
+    var inp = card && inputById(card.getAttribute('data-id'));
+    if (!inp) return;
+    var act = b.getAttribute('data-act'), path = 'api/inputs/' + encodeURIComponent(inp.id);
+    var done = function () { showMsg($('inputs-msg'), ''); return refreshInputs(); };
+    var failed = function (err) { showMsg($('inputs-msg'), err.message, true); };
+    if (act === 'toggle') {
+      request('POST', path + (inp.enabled ? '/disable' : '/enable'), {}).then(done).catch(failed);
+    } else if (act === 'edit') {
+      editInput(inp);
+    } else if (act === 'remove') {
+      if (!window.confirm('Remove input ' + inp.id + '?')) return;
+      if (rx.editing === inp.id) resetForm();
+      request('DELETE', path).then(done).catch(failed);
+    } else if (act === 'show') {
+      var ll = devicePos(inp);
+      if (ll && map) map.setView(ll, Math.max(map.getZoom(), 9));
+    }
+  }
+
   // ---- WebSocket -----------------------------------------------------------------
   function setConnected(on) {
     connected = on;
@@ -1555,7 +1955,10 @@
     cfg.receiver = s.receiver;
     cfg.trailSeconds = s.trail_seconds || 120;
     prevStats = null;
+    rx.prevLines = null;
+    rx.dataWall = {};
     applyStats(s.stats);
+    applyInputs(s.inputs);
     applyLists(s.lists);
     applyFilters(s.filters);
     updateReceiver();
@@ -1581,6 +1984,7 @@
       case 'stats': lastStatsWall = Date.now(); applyStats(it); break;
       case 'filters': applyFilters(it); break;
       case 'lists': applyLists(it); break;
+      case 'inputs': applyInputs(it.inputs); break;
       case 'fisb_text': case 'fisb_shape': case 'fisb_radar': case 'fisb_raster': case 'fisb_expired':
         onFisbItem(it);
         break;
@@ -1673,12 +2077,22 @@
     });
     $('save-baseline').addEventListener('click', saveBaseline);
     $('details-close').addEventListener('click', closePanel);
-    $('tab-track').addEventListener('click', function () { setTab('track'); });
-    $('tab-weather').addEventListener('click', function () { setTab('weather'); });
-    $('wx-toggle').addEventListener('click', function () {
-      if (!$('details').hidden && activeTab === 'weather') closePanel();
-      else openPanel('weather');
+    eachEl('#details [role=tab]', function (b) {
+      b.addEventListener('click', function () { setTab(b.id.replace(/^tab-/, '')); });
     });
+    eachEl('[data-opens-tab]', function (b) {
+      b.addEventListener('click', function () {
+        var tab = b.getAttribute('data-opens-tab');
+        if (tabShown(tab)) closePanel();
+        else openPanel(tab);
+      });
+    });
+    $('input-form').addEventListener('submit', submitInput);
+    $('input-form').addEventListener('input', onFormInput);
+    $('input-form').addEventListener('change', onFormInput);
+    $('input-form').querySelector('[data-act=cancel]').addEventListener('click', resetForm);
+    $('inputs-list').addEventListener('click', onCardClick);
+    syncFormFields();
     $('shape-close').addEventListener('click', hideShape);
     $('wx-filter').addEventListener('input', function () {
       clearTimeout(fisb.wxTimer);
@@ -1714,12 +2128,14 @@
     setInterval(prune, 2000);
     setInterval(watchdog, 1000);
     setInterval(pollFisb, FISB_POLL_MS);
+    setInterval(pollInputs, INPUTS_POLL_MS);
     var ticks = 0;
     setInterval(function () {
       if (selectedKey) renderDetails(); // ages
       updateHiddenCount();
       if (tableDirty) renderTable();
       if (map) radarAgeTick();
+      if (tabShown('receiver')) renderReceiver(); // ages, rates
       if (++ticks % 15 === 0) fisb.wxDirty = true; // ages and age classes
       renderWx();
     }, 1000);
@@ -1738,6 +2154,11 @@
       return out;
     },
     rangeRingRadius: function () { return rangeRing ? rangeRing.getRadius() : null; },
+    // The map centre, to 4 decimals (the Receiver tab's "show").
+    center: function () {
+      var c = map.getCenter();
+      return { lat: Math.round(c.lat * 1e4) / 1e4, lon: Math.round(c.lng * 1e4) / 1e4 };
+    },
     elevationRingRadius: function () { return elevRing ? elevRing.getRadius() : null; },
     selected: function () {
       var e = selectedKey && tracks.get(selectedKey);

@@ -978,3 +978,243 @@ test.describe('overlays without tiles', () => {
     expect(pageErrors).toEqual([]);
   });
 });
+
+// ---- Receiver tab ----------------------------------------------------------------
+// Against the "receivers" skycued run.sh starts: no built-in decoder inputs,
+// one pingstation_json input ps-sim that skycue-pingsim feeds (a device
+// status every 2 s at 38.9 N 77.0 W). Every case leaves only ps-sim, enabled.
+const RX_BASE = process.env.SKYCUE_RECEIVERS_URL;
+const dgram = require('dgram');
+
+async function rxApi(method, path, body) {
+  const init = { method, headers: {} };
+  if (body !== undefined) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const r = await fetch(RX_BASE + path, init);
+  const text = await r.text();
+  return { status: r.status, body: text ? JSON.parse(text) : null };
+}
+const rxInputs = async () => (await rxApi('GET', '/api/inputs')).body.inputs;
+async function rxRestore() {
+  for (const i of await rxInputs()) {
+    if (i.id !== 'ps-sim') await rxApi('DELETE', '/api/inputs/' + i.id);
+    else if (!i.enabled) await rxApi('POST', '/api/inputs/ps-sim/enable', {});
+  }
+}
+// A UDP port nothing listens on now.
+function freeUdpPort() {
+  return new Promise((resolve, reject) => {
+    const s = dgram.createSocket('udp4');
+    s.on('error', reject);
+    s.bind(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
+}
+async function openReceiverTab(page) {
+  await openPage(page);
+  await page.locator('#stat-inputs').click();
+  await expect(page.locator('#pane-receiver')).toBeVisible();
+}
+const inputCard = (page, id) => page.locator(`#inputs-list .input-card[data-id="${id}"]`);
+const isPost = (r) => r.method() === 'POST' && /\/api\/inputs$/.test(r.url());
+
+test.describe('receiver tab (pingsim)', () => {
+  test.use({ baseURL: RX_BASE });
+  test.afterEach(rxRestore);
+
+  test('inputs_header_opens_receiver_tab', async ({ page }) => {
+    await openPage(page);
+    await expect(page.locator('#stat-inputs')).toHaveText('1/1');
+    await expect(page.locator('#pane-receiver')).toBeHidden();
+    await page.locator('#stat-inputs').click();
+    await expect(page.locator('#pane-receiver')).toBeVisible();
+    await expect(page.locator('#tab-receiver')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#pane-track')).toBeHidden();
+    await expect(page.locator('#pane-weather')).toBeHidden();
+    // The tabs switch; the header button closes the panel again.
+    await page.locator('#tab-weather').click();
+    await expect(page.locator('#pane-weather')).toBeVisible();
+    await expect(page.locator('#pane-receiver')).toBeHidden();
+    await page.locator('#tab-receiver').click();
+    await expect(page.locator('#pane-receiver')).toBeVisible();
+    await page.locator('#stat-inputs').click();
+    await expect(page.locator('#details')).toBeHidden();
+  });
+
+  test('receiver_tab_lists_inputs_with_live_counts', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openReceiverTab(page);
+    const card = inputCard(page, 'ps-sim');
+    await expect(card.locator('.dot')).toHaveClass(/\bdot-green\b/, { timeout: 10000 });
+    await expect(card.locator('.input-name')).toHaveText('pingsim');
+    await expect(card.locator('.input-endpoint')).toHaveText(/^udp 127\.0\.0\.1:\d+$/);
+    await expect.poll(async () => Number(await card.locator('.input-rates').getAttribute('data-obs-s')),
+      { timeout: 10000 }).toBeGreaterThan(0);
+    await expect(card.locator('.input-rates')).toHaveText(/^obs\/s \d+\.\d · msg\/s \d+\.\d$/);
+    await expect(card.locator('.input-rejected')).toHaveText('rejected 0');
+    await expect(card.locator('.input-age')).toHaveText(/^data \d+ s ago$/);
+    const device = card.locator('.input-device');
+    await expect(device).toContainText('GPS 3');
+    await expect(device).toContainText('firmware 1.0.0');
+    await expect(device).not.toHaveClass(/\bstale\b/);
+    // Not a built-in: every button.
+    for (const act of ['toggle', 'edit', 'remove', 'show']) await expect(card.locator(`[data-act=${act}]`)).toBeVisible();
+    // The device's position is a marker of its own, which "show" pans to.
+    await expect(page.locator('.device-marker')).toHaveCount(1);
+    await expect(page.locator('.rx-marker')).toHaveCount(1);
+    await page.evaluate(() => window.skycueApp.setView(30, -100, 6));
+    await card.locator('[data-act=show]').click();
+    await expect.poll(() => page.evaluate(() => window.skycueApp.center())).toEqual({ lat: 38.9, lon: -77 });
+    expect(errors).toEqual([]);
+  });
+
+  test('add_input_form_validates_and_shows_server_error', async ({ page }) => {
+    await openReceiverTab(page);
+    const posts = [];
+    page.on('request', (r) => { if (isPost(r)) posts.push(r.url()); });
+    const form = page.locator('#input-form');
+    await form.locator('select[name=type]').selectOption('pingstation_json');
+    await expect(form.locator('[name=transport]')).toBeHidden();
+    await expect(form.locator('[name=host]')).toBeHidden();
+    await form.locator('[name=id]').fill('PS');
+    await form.locator('[name=port]').fill('0');
+    await form.locator('button[type=submit]').click();
+    await expect(form.locator('.field-error[data-for=id]')).toHaveText('id must be 1 to 32 characters of a-z, 0-9 and -');
+    await expect(form.locator('[name=id]')).toHaveClass(/\binvalid\b/);
+    await expect(form.locator('.field-error[data-for=port]')).toHaveText('port must be an integer from 1 to 65535');
+    // Fixing a field clears its mark as it is typed.
+    await form.locator('[name=id]').fill('ps-clash');
+    await expect(form.locator('[name=id]')).not.toHaveClass(/\binvalid\b/);
+    await expect(form.locator('.field-error[data-for=id]')).toHaveText('');
+    expect(posts).toEqual([]);
+
+    // A port ps-sim listens on: skycued's 400, word for word.
+    const ps = (await rxInputs()).find((i) => i.id === 'ps-sim');
+    await form.locator('[name=port]').fill(String(ps.port));
+    const answer = page.waitForResponse((r) => isPost(r.request()));
+    await form.locator('button[type=submit]').click();
+    const res = await answer;
+    expect(res.status()).toBe(400);
+    const message = (await res.json()).error;
+    expect(message).toContain('ps-sim');
+    await expect(form.locator('.form-error')).toHaveText(message);
+    expect(posts.length).toBe(1);
+    expect((await rxInputs()).map((i) => i.id)).toEqual(['ps-sim']);
+  });
+
+  test('add_edit_disable_remove_input', async ({ page }) => {
+    await openReceiverTab(page);
+    const port = await freeUdpPort();
+    const form = page.locator('#input-form');
+    await form.locator('select[name=type]').selectOption('pingstation_cat021');
+    await form.locator('select[name=transport]').selectOption('tcp_connect');
+    await expect(form.locator('[name=host]')).toBeVisible();
+    await expect(form.locator('[name=bind]')).toBeHidden();
+    await form.locator('select[name=transport]').selectOption('udp');
+    await expect(form.locator('[name=host]')).toBeHidden();
+    await expect(form.locator('[name=bind]')).toBeVisible();
+    await expect(form.locator('[name=edition]')).toHaveValue('2.5');
+    await form.locator('[name=id]').fill('ps-two');
+    await form.locator('[name=name]').fill('Second');
+    await form.locator('[name=bind]').fill('127.0.0.1');
+    await form.locator('[name=port]').fill(String(port));
+    await form.locator('button[type=submit]').click();
+    const card = inputCard(page, 'ps-two');
+    await expect(card.locator('.input-name')).toHaveText('Second');
+    await expect(card.locator('.input-endpoint')).toHaveText(`udp 127.0.0.1:${port}`);
+    await expect(form.locator('[name=id]')).toHaveValue(''); // the form is reset for the next one
+    let two = (await rxInputs()).find((i) => i.id === 'ps-two');
+    expect(two).toMatchObject({ type: 'pingstation_cat021', transport: 'udp', bind: '127.0.0.1', port, edition: '2.5',
+      enabled: true });
+    // Bound, nothing arriving: connected but not receiving.
+    await expect(card.locator('.dot')).toHaveClass(/\bdot-amber\b/);
+
+    await card.locator('[data-act=edit]').click();
+    await expect(form.locator('[name=id]')).toHaveValue('ps-two');
+    await expect(form.locator('[name=id]')).toHaveAttribute('readonly', '');
+    await expect(form.locator('[name=port]')).toHaveValue(String(port));
+    await form.locator('[name=name]').fill('Second mast');
+    await form.locator('button[type=submit]').click();
+    await expect(card.locator('.input-name')).toHaveText('Second mast');
+    two = (await rxInputs()).find((i) => i.id === 'ps-two');
+    expect(two).toMatchObject({ name: 'Second mast', transport: 'udp', port });
+
+    await card.locator('[data-act=toggle]').click();
+    await expect(card.locator('.dot')).toHaveClass(/\bdot-grey\b/);
+    expect((await rxInputs()).find((i) => i.id === 'ps-two').enabled).toBe(false);
+    await expect(page.locator('#stat-inputs')).toHaveText('1/1');
+
+    // Remove asks first: dismissed, nothing happens.
+    page.once('dialog', (d) => d.dismiss());
+    await card.locator('[data-act=remove]').click();
+    await page.waitForTimeout(500);
+    await expect(card).toHaveCount(1);
+    let asked = '';
+    page.once('dialog', (d) => { asked = d.type(); d.accept(); });
+    await card.locator('[data-act=remove]').click();
+    await expect(card).toHaveCount(0);
+    expect(asked).toBe('confirm');
+    expect((await rxInputs()).map((i) => i.id)).toEqual(['ps-sim']);
+  });
+
+  test('input_name_is_text_not_html', async ({ page }) => {
+    const name = '<img src=x onerror="window.__xss=1">';
+    const port = await freeUdpPort();
+    expect((await rxApi('POST', '/api/inputs',
+      { id: 'ps-xss', name, type: 'pingstation_json', bind: '127.0.0.1', port })).status).toBe(201);
+    await openReceiverTab(page);
+    const card = inputCard(page, 'ps-xss');
+    await expect(card.locator('.input-name')).toHaveText(name);
+    expect(await card.textContent()).toContain('<img');
+    expect(await card.locator('img').count()).toBe(0);
+    // A server error with markup in it is text too.
+    const markup = '<img src=x onerror="window.__xss=2"> is bad';
+    await page.route('**/api/inputs', (route) => (route.request().method() === 'POST' ?
+      route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: markup }) }) :
+      route.continue()));
+    const form = page.locator('#input-form');
+    await form.locator('select[name=type]').selectOption('pingstation_json');
+    await form.locator('[name=id]').fill('ps-markup');
+    await form.locator('[name=port]').fill(String(await freeUdpPort()));
+    await form.locator('button[type=submit]').click();
+    await expect(form.locator('.form-error')).toHaveText(markup);
+    expect(await form.locator('img').count()).toBe(0);
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+  });
+});
+
+test.describe('receiver tab (FIS-B, 2015 sample)', () => {
+  test.use({ baseURL: FISB_BASE });
+
+  test('ground_stations_listed', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('#stat-inputs').click();
+    const status = (await apiAt(FISB_BASE, '/api/fisb/status')).body;
+    expect(status.stations.length).toBe(1);
+    const row = page.locator('#stations-list li');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText(status.stations[0].site_id);
+    await expect(row).toContainText('37.3227, -121.7550');
+    await expect(row).toContainText(`${status.stations[0].count} products`);
+    await expect(page.locator('.station-marker')).toHaveCount(1);
+  });
+
+  test('decoder_health_table', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('#stat-inputs').click();
+    const status = (await apiAt(FISB_BASE, '/api/fisb/status')).body;
+    const cell = (k) => page.locator(`#decoder-health tr[data-key="${k}"] td`);
+    await expect(cell('uplink_duplicates')).toHaveText('0');
+    await expect(cell('bad_frames')).toHaveText(String(status.bad_frames));
+    await expect(cell('mosaic_blocks')).toHaveText(String(status.mosaic_blocks));
+    await expect(cell('segments_open')).toHaveText(String(status.segments_open));
+    await expect(cell('metar')).toHaveText(String(status.counts.metar));
+    await expect(cell('last_uplink_time')).toHaveText('2015-01-24 04:23:43Z');
+    await expect(cell('recorder_dropped')).toHaveText('0 / 0');
+  });
+});

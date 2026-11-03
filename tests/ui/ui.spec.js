@@ -538,6 +538,67 @@ test.describe('fisb radar (tg30)', () => {
     await page.waitForTimeout(500);
     await page.screenshot({ path: testInfo.outputPath(`fisb-radar-${testInfo.project.name}.png`), fullPage: true });
   });
+
+  test('metar_taf_symbols_have_category_classes', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openFisbPage(page);
+    const sym = (k, st) => page.locator(`.wx-sym.wx-${k}[data-station="${st}"]`);
+    await expect(sym('metar', 'KCVG')).toHaveClass(/\bcat-mvfr\b/);     // OVC019
+    await expect(sym('taf', 'KCVG')).toHaveClass(/\bcat-mvfr\b/);       // first group OVC025
+    await expect(sym('metar', 'KPRG')).toHaveClass(/\bcat-vfr\b/);      // 10SM CLR, no wind group
+    await expect(sym('metar', 'KAID')).toHaveClass(/\bcat-mvfr\b/);     // OVC012
+    const s = await page.evaluate(() => window.skycueApp.wxSymbols());
+    expect(s.find((x) => x.key === 'metar:KPRG').barb).toBeNull();
+    expect(s.find((x) => x.key === 'metar:KCVG').barb).toEqual({ dir: 330, kt: 11 });
+    const pos = await page.evaluate(() => window.skycueApp.wxPositioned());
+    expect(pos.n).toBeGreaterThanOrEqual(40); expect(pos.n).toBeLessThan(pos.m);
+    await page.locator('#wx-toggle').click();
+    await expect(page.locator('#wx-positioned')).toHaveText(`${pos.n} of ${pos.m} positioned`);
+    await expect(page.locator('#wx-list li.wx-row[data-key="metar:KCVG"] .wx-show')).toHaveCount(1);
+    const unplotted = page.locator('#wx-list li.wx-row[data-key="metar:K2G4"]');   // no NOTAM point names K2G4 in tg30
+    await expect(unplotted.locator('.wx-nopos')).toHaveText('no position');
+    await expect(sym('metar', 'K2G4')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+  test('symbol_click_opens_report_card', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('.wx-sym.wx-metar[data-station="KCVG"]').click();
+    await expect(page.locator('#shape-details')).toBeVisible();
+    await expect(page.locator('#shape-title')).toHaveText('METAR KCVG');
+    await expect(page.locator('#shape-details .shape-text')).toContainText('METAR KCVG 300852Z');
+    await expect(page.locator('#shape-fields')).toContainText('MVFR');
+  });
+  test('reports_toggle_and_filter_apply_to_symbols', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    await page.locator('#wx-show-metar').uncheck();
+    await expect(page.locator('.wx-sym.wx-metar')).toHaveCount(0);
+    await expect(page.locator('#wx-list li.wx-row[data-kind="metar"]')).toHaveCount(0);
+    await expect(page.locator('.wx-sym.wx-taf').first()).toBeVisible();
+    await page.locator('#wx-show-metar').check();
+    await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(1);
+    await page.locator('#wx-filter').fill('KCV');
+    await expect.poll(() => page.locator('.wx-sym.wx-metar').count(), { timeout: 3000 }).toBe(1);
+    await page.locator('#wx-filter').fill('');
+    await expect.poll(() => page.locator('.wx-sym.wx-metar').count(), { timeout: 3000 }).toBeGreaterThanOrEqual(40);
+  });
+  test('late_location_adds_symbol', async ({ page }) => {
+    await openFisbPage(page);
+    await page.evaluate(() => window.skycueApp.injectFisbItems([{ type: 'fisb_location', id: 'K2G4', lat: 39.0, lon: -79.0 }]));
+    await expect(page.locator('.wx-sym.wx-metar[data-station="K2G4"]')).toHaveClass(/\bcat-lifr\b/, { timeout: 3000 });
+    await page.locator('#wx-toggle').click();
+    await expect(page.locator('#wx-list li.wx-row[data-key="metar:K2G4"] .wx-nopos')).toHaveCount(0);
+  });
+  test('symbols_not_duplicated_after_reset', async ({ page }) => {
+    await openFisbPage(page);
+    await expect.poll(() => page.locator('.wx-sym.wx-metar[data-station="KCVG"]').count()).toBe(1);
+    const before = await page.evaluate(() => window.skycueApp.wxSymbols().length);
+    const n0 = await page.evaluate(() => window.skycueApp.snapshots());
+    await page.evaluate(() => window.skycueApp.reconnect());
+    await page.waitForFunction((n) => window.skycueApp.snapshots() > n && window.skycueApp.fisbLoaded(), n0, { timeout: 15000 });
+    await expect.poll(() => page.evaluate(() => window.skycueApp.wxSymbols().length)).toBe(before);
+    await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(1);
+  });
 });
 
 test.describe('fisb text and airspace (2015 sample)', () => {

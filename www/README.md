@@ -63,6 +63,23 @@ text") with a station-prefix filter and age colouring (fresh < 30 min,
 aging < 90 min, old). A TWGO text item without graphics clears the shapes
 drawn for its key (an amended text drops the old graphics).
 
+Weather symbols on the map: a METAR is a filled circle coloured by flight
+category (VFR green, MVFR blue, IFR red, LIFR magenta, grey when visibility
+or ceiling cannot be parsed) with a wind barb (a ring when calm, no barb
+when variable); a TAF an outlined square right of it, coloured by its first
+group; a PIREP a triangle (filled UA, outlined with "!" for UUA); winds aloft
+a barb with the temperature, from the 6 h record at 3000 ft. Symbols fade
+with the list's age classes and go when their record expires; hover shows
+the station, a click the parsed report and raw text. The Reports toggles
+(METAR, TAF, PIREP, Winds, each with its count) and the station filter apply
+to the list and the symbols alike. Positions come from `/api/fisb/locations`
+and `fisb_location` (ids learned from NOTAM points, or `LOCATIONS_FILE`): a
+report whose station has no known position is listed with "no position" and
+never plotted, and the Reports header shows "n of m positioned"; the other
+rows get a "show" link that pans to the symbol. At most 300 symbols are on
+the map (the nearest the map centre), redrawn at most once a second and
+only on a change.
+
 ## Side panel tabs and the Receiver tab
 
 The side panel's tabs are its `[role=tab]` buttons: `tab-<name>` shows

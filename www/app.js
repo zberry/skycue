@@ -998,8 +998,14 @@
     shapeKey: null,                 // the shape shown in the panel
     rasterHeads: new Map(),         // raster layer key -> mosaic head
     rasterSel: null, raster: null,  // the chosen raster layer and its drawing
-    wxDirty: true, wxFilter: '', wxTimer: null, wxExpanded: {}
+    wxDirty: true, wxFilter: '', wxTimer: null, wxExpanded: {},
+    locations: {},                  // location id -> [lat, lon] (api/fisb/locations, fisb_location)
+    show: { metar: true, taf: true, pirep: true, winds: true },   // the Reports toggles
+    syms: new Map(),                // symbol key -> {marker, sig, s} (renderWxSymbols)
+    symDirty: true, symOverCap: false,
+    reportRec: null                 // the record key of the report shown in the card
   };
+  var wxGroup = null;               // the weather symbols, pane fisbWx
   var radar = {
     regional: { product: 63, label: 'Radar (regional)', head: null, drawn: null, fetching: false, again: false },
     conus: { product: 64, label: 'Radar (CONUS)', head: null, drawn: null, fetching: false, again: false }
@@ -1014,6 +1020,10 @@
     map.createPane('fisbRaster');
     map.getPane('fisbRaster').style.zIndex = 350;   // under the shapes (overlayPane, 400)
     map.getPane('fisbRaster').style.pointerEvents = 'none';
+    map.createPane('fisbWx');
+    map.getPane('fisbWx').style.zIndex = 500;       // over the shapes and city labels, under the aircraft (600)
+    wxGroup = L.layerGroup().addTo(map);
+    map.on('moveend', function () { if (fisb.symOverCap) fisb.symDirty = true; });
     var overlays = {};
     ['conus', 'regional'].forEach(function (w) {
       radarGroups[w] = L.layerGroup().addTo(map);    // radar: on by default
@@ -1359,6 +1369,7 @@
   }
   function hideShape() {
     fisb.shapeKey = null;
+    fisb.reportRec = null;
     $('shape-details').hidden = true;
   }
 
@@ -1374,9 +1385,11 @@
     }
     fisb.text.set(rec.key, rec);
     fisb.wxDirty = true;
+    fisb.symDirty = true;
   }
   function dropText(key) {
-    if (fisb.text.delete(key)) fisb.wxDirty = true;
+    if (fisb.text.delete(key)) fisb.wxDirty = fisb.symDirty = true;
+    if (fisb.reportRec === key) hideShape();
   }
   function hhmm(iso) {
     var ms = Date.parse(iso);
@@ -1397,7 +1410,10 @@
       if (P.stationMatches(r.station, prefix)) groups[r.kind].push(r);
     });
     var shown = 0;
-    $('wx-list').innerHTML = WX_KINDS.map(function (k) {
+    WX_REPORT_KINDS.forEach(function (k) { $('wx-n-' + k).textContent = String(groups[k].length); });
+    var pos = wxPositioned();
+    $('wx-positioned').textContent = pos.n + ' of ' + pos.m + ' positioned';
+    $('wx-list').innerHTML = WX_KINDS.filter(function (k) { return fisb.show[k[0]] !== false; }).map(function (k) {
       var list = groups[k[0]].sort(function (a, b) {
         return a.station < b.station ? -1 : a.station > b.station ? 1 : Date.parse(a.issued) - Date.parse(b.issued);
       });
@@ -1413,11 +1429,218 @@
           '<span class="wx-issued">' + hhmm(r.issued) + '</span>' +
           (r.valid ? '<span class="wx-valid">valid ' + hhmm(r.valid) + '</span>' : '') +
           '<span class="wx-age">' + (isNaN(t) ? '' : shortAge(t, now)) + '</span></button>' +
+          (r.kind === 'twgo' ? '' : wxPos(r) ? '<a class="wx-show" href="#">show</a>' :
+            '<span class="wx-nopos">no position</span>') +
           '<pre class="wx-text"' + (open ? '' : ' hidden') + '>' + esc(r.text || '') + '</pre></li>';
       }).join('') + '</ul>' : '<p class="msg">None' + (prefix ? ' matching' : '') + '.</p>') + '</section>';
     }).join('');
     $('wx-summary').textContent = prefix ? shown + ' of ' + total + ' reports match "' + prefix.toUpperCase() + '"' :
       total + ' reports' + (fisb.loaded ? '' : ' (loading…)');
+  }
+
+  // ---- weather symbols (spec §3.3) ----
+  // One Leaflet marker per symbol in wxGroup, reused (setLatLng, setIcon on
+  // a change) and removed when its record goes. Colours come from the
+  // classes (style.css); the SVG uses currentColor.
+  var WX_REPORT_KINDS = ['metar', 'taf', 'pirep', 'winds'];
+  var MAX_WX_SYMBOLS = 300;         // on the map at once, the nearest the map centre first
+  var WINDS_PERIOD_H = 6, WINDS_LEVEL_FT = 3000;   // the record and level the winds barbs come from
+  var parsedCache = new WeakMap();  // text record -> its parse (a new record object on every update)
+  function parsedOf(r) {
+    if (!parsedCache.has(r)) {
+      parsedCache.set(r, r.kind === 'metar' ? P.parseMetar(r.text) : r.kind === 'taf' ? P.parseTafFirst(r.text) :
+        r.kind === 'pirep' ? P.parsePirep(r.text) : r.kind === 'winds' ? P.parseWinds(r.text) : null);
+    }
+    return parsedCache.get(r);
+  }
+  // A report's [lat, lon] (spec §3.2), or null: listed, never plotted.
+  function wxPos(r) {
+    if (r.kind === 'pirep') return P.pirepPosition(parsedOf(r), fisb.locations);
+    return P.resolveStation(r.kind, r.station, fisb.locations);
+  }
+  // "n of m positioned" over the reports the list shows (toggles, filter).
+  function wxPositioned() {
+    var n = 0, m = 0;
+    fisb.text.forEach(function (r) {
+      if (!fisb.show[r.kind] || !P.stationMatches(r.station, fisb.wxFilter)) return;
+      m++;
+      if (wxPos(r)) n++;
+    });
+    return { n: n, m: m };
+  }
+
+  // A barb's SVG: the staff from r0 px out to r0 + 17 px toward `dir` (where
+  // the wind comes from), 50 kt pennants, 10 kt barbs and a 5 kt half barb
+  // from its far end (P.barbParts); drawn twice, a halo under the line.
+  function barbSvg(dir, kt, r0) {
+    var b = P.barbParts(kt), tip = -(r0 + 17), y = tip, i;
+    var staff = 'M0 ' + (-r0) + 'V' + tip, feathers = '', pens = '';
+    for (i = 0; i < b.pennants; i++, y += 5) pens += 'M0 ' + y + 'L8 ' + (y + 2) + 'L0 ' + (y + 4) + 'Z';
+    if (b.pennants) y += 1;
+    for (i = 0; i < b.full; i++, y += 3) feathers += 'M0 ' + y + 'l8 -4';
+    if (b.half) feathers += 'M0 ' + (y === tip ? y + 3 : y) + 'l4 -2';
+    return '<g class="barb" transform="rotate(' + Number(dir) + ')"><path class="halo" d="' + staff + feathers + pens +
+      '"/><path d="' + staff + feathers + '"/>' + (pens ? '<path class="pen" d="' + pens + '"/>' : '') + '</g>';
+  }
+  function svgBox(size, body) {
+    var h = size / 2;
+    return '<svg width="' + size + '" height="' + size + '" viewBox="' + -h + ' ' + -h + ' ' + size + ' ' + size +
+      '" aria-hidden="true">' + body + '</svg>';
+  }
+  // The symbol of one record at pos, or null (a winds record without the level).
+  function wxSymbolFor(r, pos, now) {
+    var p = parsedOf(r), cls = 'wx-sym wx-' + r.kind, barb = null, html, size = 48, anchor = [24, 24];
+    var key = r.kind === 'winds' ? 'winds:' + r.station : r.key;
+    if (r.kind === 'metar' || r.kind === 'taf') {
+      cls += ' cat-' + (p ? p.category : 'unknown').toLowerCase();
+      if (r.kind === 'metar') {
+        var w = p && p.wind;
+        if (w && !w.calm && !w.variable && w.dir !== null) barb = { dir: w.dir, kt: w.kt };
+        html = svgBox(48, (barb ? barbSvg(barb.dir, barb.kt, 5) : '') + (w && w.calm ? '<circle class="ring" r="8"/>' : '') +
+          '<circle class="wx-core" r="5"/>');
+      } else {
+        size = 10; anchor = [-7, 5];   // right of the METAR circle
+        html = svgBox(10, '<rect class="wx-core" x="-4" y="-4" width="8" height="8"/>');
+      }
+    } else if (r.kind === 'pirep') {
+      var urgent = !!(p && p.urgent);
+      cls += urgent ? ' pirep-uua' : ' pirep-ua';
+      size = 18; anchor = [9, 9];
+      html = svgBox(18, '<path class="wx-core" d="M0 -7L7 6H-7Z"/>' + (urgent ? '<text class="bang" y="4.5">!</text>' : ''));
+    } else {
+      var lv = P.windsLevel(p, WINDS_LEVEL_FT);
+      if (!lv) return null;
+      if (!lv.lv) barb = { dir: lv.dir, kt: lv.kt };
+      anchor = [36, 24];   // left of the METAR circle
+      html = svgBox(48, (barb ? barbSvg(barb.dir, barb.kt, 3) : '') + '<circle class="wx-core" r="3"/>' +
+        (lv.temp !== null ? '<text class="temp" x="5" y="13">' + Number(lv.temp) + '</text>' : ''));
+    }
+    return { key: key, kind: r.kind, station: r.station, cls: cls + ' age-' + P.ageClass(r.issued, now),
+      lat: pos[0], lon: pos[1], barb: barb, html: html, size: size, anchor: anchor, rec: r };
+  }
+  function wxIcon(s) {
+    return L.divIcon({ className: s.cls, html: s.html, iconSize: [s.size, s.size], iconAnchor: s.anchor });
+  }
+  function clearWxSymbols() {
+    fisb.syms.forEach(function (o) { wxGroup.removeLayer(o.marker); });
+    fisb.syms.clear();
+    fisb.symDirty = true;
+  }
+  function renderWxSymbols() {
+    fisb.symDirty = false;
+    if (!map) return;
+    var now = dataNow(), want = [];
+    fisb.text.forEach(function (r) {
+      if (!fisb.show[r.kind] || !P.stationMatches(r.station, fisb.wxFilter)) return;
+      if (r.kind === 'winds' && r.period_h !== WINDS_PERIOD_H) return;
+      var pos = wxPos(r), s = pos && wxSymbolFor(r, pos, now);
+      if (s) want.push(s);
+    });
+    fisb.symOverCap = want.length > MAX_WX_SYMBOLS;
+    if (fisb.symOverCap) {
+      var c = map.getCenter();
+      want.forEach(function (s) { s.d = P.rangeNm(c.lat, c.lng, s.lat, s.lon); });
+      want.sort(function (a, b) { return a.d - b.d; });
+      want.length = MAX_WX_SYMBOLS;
+    }
+    var keep = {};
+    want.forEach(function (s) {
+      keep[s.key] = true;
+      var o = fisb.syms.get(s.key), sig = s.cls + s.html;
+      if (!o) {
+        var m = L.marker([s.lat, s.lon], { pane: 'fisbWx', icon: wxIcon(s), title: s.station, keyboard: false });
+        m.on('add', function () { m.getElement().setAttribute('data-station', s.station); });
+        m.on('click', function (ev) {
+          L.DomEvent.stopPropagation(ev);
+          showReport(s.key);
+        });
+        wxGroup.addLayer(m);
+        fisb.syms.set(s.key, { marker: m, sig: sig, s: s });
+        return;
+      }
+      var ll = o.marker.getLatLng();
+      if (ll.lat !== s.lat || ll.lng !== s.lon) o.marker.setLatLng([s.lat, s.lon]);
+      if (o.sig !== sig) o.marker.setIcon(wxIcon(s));   // the div is reused: data-station stays
+      o.sig = sig;
+      o.s = s;
+    });
+    fisb.syms.forEach(function (o, k) {
+      if (keep[k]) return;
+      wxGroup.removeLayer(o.marker);
+      fisb.syms.delete(k);
+    });
+  }
+
+  // The detail card for a report: its parsed summary and raw text. Every
+  // server string goes in through textContent.
+  function windText(w) {
+    if (!w) return 'not given';
+    if (w.calm) return 'calm';
+    var s = (w.variable || w.dir === null ? 'variable' : ('00' + w.dir).slice(-3) + '°') + ' ' + w.kt + ' kt';
+    return w.gust ? s + ', gusts ' + w.gust + ' kt' : s;
+  }
+  function visText(v) {
+    if (v === null || v === undefined) return 'unknown';
+    return Math.round(v * 100) / 100 + ' SM';
+  }
+  function ceilText(c) {
+    if (c === null || c === undefined) return 'unknown';
+    return c === Infinity ? 'none' : P.thousands(c) + ' ft';
+  }
+  function showReport(key) {
+    var o = fisb.syms.get(key), r = o ? o.s.rec : fisb.text.get(key);
+    if (!r) return;
+    var p = parsedOf(r), rows = [];
+    if (r.kind === 'metar' || r.kind === 'taf') {
+      rows.push(['category', 'Category', p ? p.category : 'unknown']);
+      rows.push(['wind', 'Wind', windText(p && p.wind)]);
+      rows.push(['visibility', 'Visibility', visText(p && p.visSm)]);
+      rows.push(['ceiling', 'Ceiling', ceilText(p && p.ceilFt)]);
+    } else if (r.kind === 'pirep') {
+      rows.push(['type', 'Type', p && p.urgent ? 'UUA (urgent)' : 'UA']);
+      var ov = p && p.ov;
+      rows.push(['ov', '/OV', ov ? ov.id + (ov.radial !== null ? ' ' + ('00' + ov.radial).slice(-3) + '° ' + ov.nm + ' nm' : '') :
+        'not a location id']);
+    } else if (r.kind === 'winds') {
+      var lv = P.windsLevel(p, WINDS_LEVEL_FT);
+      rows.push(['level', 'Level', P.thousands(WINDS_LEVEL_FT) + ' ft' + (r.period_h ? ' · ' + r.period_h + ' h forecast' : '')]);
+      rows.push(['wind', 'Wind', lv ? (lv.lv ? 'light and variable' : windText({ dir: lv.dir, kt: lv.kt })) : 'not given']);
+      rows.push(['temp', 'Temperature', lv && lv.temp !== null ? lv.temp + ' °C' : 'not given']);
+    }
+    var t = Date.parse(r.issued);
+    rows.push(['issued', 'Issued', r.issued ? fmtWhen(r.issued) : 'unknown']);
+    rows.push(['age', 'Age', isNaN(t) ? 'unknown' : shortAge(t, dataNow())]);
+    if (!wxPos(r)) rows.push(['position', 'Position', 'no position']);
+    fisb.shapeKey = null;
+    fisb.reportRec = r.key;
+    var card = $('shape-details');
+    card.setAttribute('data-key', key);
+    $('shape-title').textContent = r.kind.toUpperCase() + ' ' + (r.station || '');
+    var body = $('shape-fields');
+    body.textContent = '';
+    rows.forEach(function (row) {
+      var tr = document.createElement('tr'), th = document.createElement('th'), td = document.createElement('td');
+      th.scope = 'row';
+      th.textContent = row[1];
+      td.setAttribute('data-field', row[0]);
+      td.textContent = row[2];
+      tr.appendChild(th);
+      tr.appendChild(td);
+      body.appendChild(tr);
+    });
+    var pre = card.querySelector('pre.shape-text');
+    pre.textContent = r.text || '';
+    pre.hidden = !r.text;
+    card.hidden = false;
+    openPanel('weather');
+    card.scrollIntoView({ block: 'nearest' });
+  }
+  // The list's "show": pans to the report's position (as the Receiver tab's).
+  function showWxPos(key) {
+    var r = fisb.text.get(key), ll = r && wxPos(r);
+    if (!ll || !map) return;
+    if (map.getZoom() < SHOW_MIN_ZOOM && !map.getBounds().contains(ll)) map.setView(ll, SHOW_MIN_ZOOM);
+    else map.panTo(ll);
   }
 
   // ---- status strip ----
@@ -1484,6 +1707,8 @@
     fisb.gen++;
     var gen = fisb.gen;
     fisb.text.clear();
+    fisb.locations = {};
+    clearWxSymbols();
     Array.from(fisb.shapes.keys()).forEach(removeShapes);
     hideShape();
     Object.keys(radar).forEach(clearRadar);
@@ -1503,8 +1728,11 @@
     fisb.loading = true;
     applyFisbStatus(st);
     Promise.all([request('GET', 'api/fisb/text'), request('GET', 'api/fisb/shapes'),
-      request('GET', 'api/fisb/text?type=twgo')]).then(function (r) {
+      request('GET', 'api/fisb/text?type=twgo'),
+      request('GET', 'api/fisb/locations').catch(function () { return {}; })]).then(function (r) {
       if (gen !== fisb.gen) return;
+      var locs = r[3] || {};
+      Object.keys(locs).forEach(function (id) { if (Array.isArray(locs[id])) setLocation(id, locs[id][0], locs[id][1]); });
       (r[0].records || []).forEach(upsertText);
       (r[2].records || []).forEach(upsertText);
       var byKey = new Map();
@@ -1527,10 +1755,17 @@
     });
   }
 
+  function setLocation(id, lat, lon) {
+    if (typeof id !== 'string' || typeof lat !== 'number' || typeof lon !== 'number') return;
+    fisb.locations[id] = [lat, lon];
+    fisb.wxDirty = fisb.symDirty = true;
+  }
+
   function onFisbItem(it) {
     if (fisb.loading) { fisb.queue.push(it); return; }
     switch (it.type) {
       case 'fisb_text': upsertText(it.record); break;
+      case 'fisb_location': setLocation(it.id, it.lat, it.lon); break;
       case 'fisb_shape':
         dropText(it.key);   // a text-only TWGO record that now has graphics
         setShapes(it.key, it.features || []);
@@ -1972,7 +2207,9 @@
     $('conn-banner').hidden = on;
   }
 
+  var snapshotCount = 0;            // snapshots applied (a test hook)
   function onSnapshot(s) {
+    snapshotCount++;
     clearAll();
     clockOffsetMs = Date.parse(s.now) - Date.now();
     if (isNaN(clockOffsetMs)) clockOffsetMs = 0;
@@ -2010,6 +2247,7 @@
       case 'lists': applyLists(it); break;
       case 'inputs': applyInputs(it.inputs); break;
       case 'fisb_text': case 'fisb_shape': case 'fisb_radar': case 'fisb_raster': case 'fisb_expired':
+      case 'fisb_location':
         onFisbItem(it);
         break;
       default: break;
@@ -2122,10 +2360,24 @@
       clearTimeout(fisb.wxTimer);
       fisb.wxTimer = setTimeout(function () {
         fisb.wxFilter = $('wx-filter').value.trim();
+        fisb.symDirty = true;
         renderWx(true);
       }, WX_DEBOUNCE_MS);
     });
+    WX_REPORT_KINDS.forEach(function (k) {
+      $('wx-show-' + k).addEventListener('change', function () {
+        fisb.show[k] = $('wx-show-' + k).checked;
+        fisb.symDirty = true;
+        renderWx(true);
+      });
+    });
     $('wx-list').addEventListener('click', function (ev) {
+      var show = ev.target.closest('.wx-show');
+      if (show) {
+        ev.preventDefault();
+        showWxPos(show.closest('.wx-row').getAttribute('data-key'));
+        return;
+      }
       var head = ev.target.closest('.wx-head');
       if (!head) return;
       var li = head.closest('.wx-row');
@@ -2160,8 +2412,9 @@
       if (tableDirty) renderTable();
       if (map) radarAgeTick();
       if (tabShown('receiver')) renderReceiver(); // ages, rates
-      if (++ticks % 15 === 0) fisb.wxDirty = true; // ages and age classes
+      if (++ticks % 15 === 0) fisb.wxDirty = fisb.symDirty = true; // ages and age classes
       renderWx();
+      if (fisb.symDirty) renderWxSymbols();
     }, 1000);
   }
 
@@ -2199,6 +2452,17 @@
     // the page's own handler; what the radar canvases hold.
     fisbLoaded: function () { return fisb.loaded; },
     injectFisbItems: function (items) { items.forEach(onItem); },
+    // Weather symbols: what is drawn; "n of m positioned".
+    wxSymbols: function () {
+      return Array.from(fisb.syms.values()).map(function (o) {
+        var s = o.s;
+        return { key: s.key, kind: s.kind, station: s.station, cls: s.cls, lat: s.lat, lon: s.lon, barb: s.barb };
+      });
+    },
+    wxPositioned: wxPositioned,
+    snapshots: function () { return snapshotCount; },
+    // Closes the WebSocket: the page reconnects and resets from the snapshot.
+    reconnect: function () { if (ws) ws.close(); },
     radarStats: function () {
       var out = { blocks: 0, painted: 0, products: {} };
       Object.keys(radar).forEach(function (w) {

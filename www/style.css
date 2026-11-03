@@ -189,6 +189,46 @@ table.kv th { text-align: left; color: var(--muted); font-weight: normal; paddin
 table.kv td { padding: 2px 0; word-break: break-word; }
 #shape-details .shape-text { max-height: 220px; overflow-y: auto; border-radius: 3px; }
 
+/* Weather tab: Reports toggles and the list's show / no position */
+#wx-reports { margin: 8px 0 4px; font-size: 12px; }
+#wx-reports h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
+#wx-positioned { text-transform: none; letter-spacing: 0; font-weight: normal; margin-left: 6px; }
+#wx-reports .wx-tg { white-space: nowrap; margin-right: 10px; }
+#wx-reports .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.wx-row { display: flex; flex-wrap: wrap; align-items: baseline; }
+.wx-row .wx-head { width: auto; flex: 1 1 0; min-width: 0; }
+.wx-row .wx-text { flex-basis: 100%; }
+.wx-show, .wx-nopos { font-size: 11px; padding: 0 6px; white-space: nowrap; }
+.wx-show { color: var(--accent); }
+.wx-nopos { color: var(--muted); }
+
+/* map: weather symbols (spec §3.3). The SVG draws in currentColor; the
+   marker div takes no pointer events, only the symbol's core does. */
+.leaflet-marker-icon.wx-sym, .leaflet-marker-icon.wx-sym.leaflet-interactive { pointer-events: none; }
+.wx-sym svg { display: block; overflow: visible; pointer-events: none; }
+.wx-sym .wx-core { pointer-events: all; cursor: pointer; }
+.wx-sym circle.wx-core, .wx-sym .pen { fill: currentColor; stroke: #0d1117; stroke-width: 1; }
+.wx-sym .barb path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.wx-sym .barb path.halo { stroke: #0d1117; stroke-width: 3.5; opacity: .6; }
+.wx-sym .barb path.pen { fill: currentColor; stroke: none; }
+.wx-sym .ring { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.wx-taf .wx-core { fill: rgba(13, 17, 23, .35); stroke: currentColor; stroke-width: 2; }
+.wx-sym.cat-vfr { color: #3fb950; }
+.wx-sym.cat-mvfr { color: #388bfd; }
+.wx-sym.cat-ifr { color: #f85149; }
+.wx-sym.cat-lifr { color: #db61a2; }
+.wx-sym.cat-unknown { color: #8b949e; }
+.wx-pirep { color: #e3b341; }
+.wx-pirep .wx-core { stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.wx-pirep.pirep-ua .wx-core { fill: currentColor; }
+.wx-pirep.pirep-uua .wx-core { fill: rgba(13, 17, 23, .35); }
+.wx-pirep .bang { fill: currentColor; font: bold 10px sans-serif; text-anchor: middle; }
+.wx-winds { color: #c9d1d9; }
+.wx-winds circle.wx-core { stroke-width: .75; }
+.wx-winds .temp { fill: currentColor; font: 9px ui-monospace, Menlo, Consolas, monospace; paint-order: stroke; stroke: #0d1117; stroke-width: 2px; }
+.wx-sym.age-aging svg { opacity: .7; }
+.wx-sym.age-old svg { opacity: .45; }
+
 /* map: FIS-B layers and controls */
 .leaflet-image-layer.fisb-radar, .leaflet-image-layer.fisb-raster { image-rendering: pixelated; }
 .leaflet-control-layers {

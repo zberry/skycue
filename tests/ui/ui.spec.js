@@ -584,19 +584,85 @@ test.describe('fisb radar (tg30)', () => {
   });
   test('late_location_adds_symbol', async ({ page }) => {
     await openFisbPage(page);
-    await page.evaluate(() => window.skycueApp.injectFisbItems([{ type: 'fisb_location', id: 'K2G4', lat: 39.0, lon: -79.0 }]));
+    // Inside the view (the receiver's 150 nm ring around central Indiana).
+    await page.evaluate(() => window.skycueApp.injectFisbItems([{ type: 'fisb_location', id: 'K2G4', lat: 39.6, lon: -86.0 }]));
     await expect(page.locator('.wx-sym.wx-metar[data-station="K2G4"]')).toHaveClass(/\bcat-lifr\b/, { timeout: 3000 });
     await page.locator('#wx-toggle').click();
     await expect(page.locator('#wx-list li.wx-row[data-key="metar:K2G4"] .wx-nopos')).toHaveCount(0);
   });
+  test('symbols_culled_to_the_view', async ({ page }) => {
+    await openFisbPage(page);
+    const n0 = (await page.evaluate(() => window.skycueApp.wxPositioned())).n;
+    // Far east of the view (off the New England coast): positioned, not drawn.
+    await page.evaluate(() => window.skycueApp.injectFisbItems([{ type: 'fisb_location', id: 'K2G4', lat: 39.0, lon: -72.0 }]));
+    await expect.poll(() => page.evaluate(() => window.skycueApp.wxPositioned().n)).toBe(n0 + 1);
+    await page.waitForTimeout(1500);   // past the 1 s redraw
+    const sym = page.locator('.wx-sym.wx-metar[data-station="K2G4"]');
+    await expect(sym).toHaveCount(0);
+    await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(1);
+    await page.evaluate(() => window.skycueApp.setView(39.0, -72.0, 8));
+    await expect(sym).toHaveClass(/\bcat-lifr\b/, { timeout: 3000 });
+    await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(0);
+  });
+  test('winds_without_a_symbol_say_no_barb', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    // CVG has 6 h and 12 h records: the 6 h one (3000 ft) is drawn, the 12 h one is not.
+    await expect(page.locator('#wx-list li.wx-row[data-key="winds:CVG:6"] .wx-show')).toHaveCount(1);
+    await expect(page.locator('#wx-list li.wx-row[data-key="winds:CVG:12"] .wx-nobarb')).toHaveText('no barb');
+    await expect(page.locator('#wx-list li.wx-row[data-key="winds:CVG:12"] .wx-show')).toHaveCount(0);
+    await expect(page.locator('.wx-sym.wx-winds[data-station="CVG"]')).toHaveCount(1);
+    const s = await page.evaluate(() => window.skycueApp.wxSymbols());
+    const pos = await page.evaluate(() => window.skycueApp.wxPositioned());
+    expect(pos.n).toBe(s.length);   // every positioned report is drawn (all are in view in tg30)
+  });
+  test('report_card_follows_its_own_record', async ({ page }) => {
+    await openFisbPage(page);
+    const rec = (await apiAt(RADAR_BASE, '/api/fisb/text')).body.records.find((r) => r.key === 'metar:KAID');
+    const card = page.locator('#shape-details');
+    const inject = (items) => page.evaluate((it) => window.skycueApp.injectFisbItems(it), items);
+    // A report, then an airspace shape: the report's expiry leaves the shape card alone.
+    await page.locator('.wx-sym.wx-metar[data-station="KCVG"]').click();
+    await expect(page.locator('#shape-title')).toHaveText('METAR KCVG');
+    await layerToggle(page, 'NOTAM / TFR').check();
+    await expect.poll(() => page.locator('path.fisb-tfr').count()).toBeGreaterThan(0);
+    const i = await clickableIndex(page, 'path.fisb-tfr');
+    expect(i).toBeGreaterThanOrEqual(0);
+    await page.locator('path.fisb-tfr').nth(i).click();
+    await expect(page.locator('#shape-title')).not.toHaveText('METAR KCVG');
+    const shapeTitle = await page.locator('#shape-title').textContent();
+    await inject([{ type: 'fisb_expired', kind: 'text', key: 'metar:KCVG' }]);
+    await page.waitForTimeout(300);
+    await expect(card).toBeVisible();
+    await expect(page.locator('#shape-title')).toHaveText(shapeTitle);
+    await layerToggle(page, 'NOTAM / TFR').uncheck();
+    // A report card is re-rendered when its record is updated, kept on another's
+    // expiry and closed on its own.
+    await page.locator('.wx-sym.wx-metar[data-station="KAID"]').click();
+    await expect(page.locator('#shape-title')).toHaveText('METAR KAID');
+    const text = rec.text.replace(/ OVC012 /, ' OVC003 ');
+    await inject([{ type: 'fisb_text', record: Object.assign({}, rec, { text }) }]);
+    await expect(card.locator('.shape-text')).toContainText('OVC003');
+    await expect(page.locator('#shape-fields [data-field="category"]')).toHaveText('LIFR');
+    await inject([{ type: 'fisb_expired', kind: 'text', key: 'metar:KPRG' }]);
+    await page.waitForTimeout(300);
+    await expect(card).toBeVisible();
+    await inject([{ type: 'fisb_expired', kind: 'text', key: 'metar:KAID' }]);
+    await expect(card).toBeHidden();
+  });
   test('symbols_not_duplicated_after_reset', async ({ page }) => {
     await openFisbPage(page);
     await expect.poll(() => page.locator('.wx-sym.wx-metar[data-station="KCVG"]').count()).toBe(1);
-    const before = await page.evaluate(() => window.skycueApp.wxSymbols().length);
     const n0 = await page.evaluate(() => window.skycueApp.snapshots());
     await page.evaluate(() => window.skycueApp.reconnect());
     await page.waitForFunction((n) => window.skycueApp.snapshots() > n && window.skycueApp.fisbLoaded(), n0, { timeout: 15000 });
-    await expect.poll(() => page.evaluate(() => window.skycueApp.wxSymbols().length)).toBe(before);
+    // One marker per symbol key and nothing left over from before the reset,
+    // whatever arrived or expired meanwhile.
+    await expect.poll(async () => {
+      const keys = await page.evaluate(() => window.skycueApp.wxSymbols().map((s) => s.key));
+      const dom = await page.locator('.wx-sym').count();
+      return keys.length > 0 && new Set(keys).size === keys.length && dom === keys.length;
+    }).toBe(true);
     await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(1);
   });
 });

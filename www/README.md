@@ -68,17 +68,21 @@ category (VFR green, MVFR blue, IFR red, LIFR magenta, grey when visibility
 or ceiling cannot be parsed) with a wind barb (a ring when calm, no barb
 when variable); a TAF an outlined square right of it, coloured by its first
 group; a PIREP a triangle (filled UA, outlined with "!" for UUA); winds aloft
-a barb with the temperature, from the 6 h record at 3000 ft. Symbols fade
+a barb with the temperature, drawn just below the station, from the 6 h
+record at 3000 ft (other winds rows, and stations whose table has no 3000 ft
+level, say "no barb" and have no symbol). Symbols fade
 with the list's age classes and go when their record expires; hover shows
 the station, a click the parsed report and raw text. The Reports toggles
 (METAR, TAF, PIREP, Winds, each with its count) and the station filter apply
 to the list and the symbols alike. Positions come from `/api/fisb/locations`
 and `fisb_location` (ids learned from NOTAM points, or `LOCATIONS_FILE`): a
 report whose station has no known position is listed with "no position" and
-never plotted, and the Reports header shows "n of m positioned"; the other
-rows get a "show" link that pans to the symbol. At most 300 symbols are on
-the map (the nearest the map centre), redrawn at most once a second and
-only on a change.
+never plotted, and the Reports header shows "n of m positioned" (n: the
+reports with a symbol); those rows get a "show" link that pans to the symbol.
+Only symbols inside the view (grown by a quarter on each side) are drawn, at
+most 300: METAR first, then TAF, PIREP and winds, each nearest the map centre
+first. They are redrawn at most once a second, only on a change (a record, a
+location, a toggle, the filter, a pan or zoom, the age tick).
 
 ## Side panel tabs and the Receiver tab
 

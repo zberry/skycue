@@ -1002,7 +1002,7 @@
     locations: {},                  // location id -> [lat, lon] (api/fisb/locations, fisb_location)
     show: { metar: true, taf: true, pirep: true, winds: true },   // the Reports toggles
     syms: new Map(),                // symbol key -> {marker, sig, s} (renderWxSymbols)
-    symDirty: true, symOverCap: false,
+    symDirty: true,
     reportRec: null                 // the record key of the report shown in the card
   };
   var wxGroup = null;               // the weather symbols, pane fisbWx
@@ -1023,7 +1023,8 @@
     map.createPane('fisbWx');
     map.getPane('fisbWx').style.zIndex = 500;       // over the shapes and city labels, under the aircraft (600)
     wxGroup = L.layerGroup().addTo(map);
-    map.on('moveend', function () { if (fisb.symOverCap) fisb.symDirty = true; });
+    // Culled to the view: redrawn by the 1 s interval after a pan or zoom.
+    map.on('moveend zoomend', function () { fisb.symDirty = true; });
     var overlays = {};
     ['conus', 'regional'].forEach(function (w) {
       radarGroups[w] = L.layerGroup().addTo(map);    // radar: on by default
@@ -1343,6 +1344,7 @@
     if (!s) return;
     var p = s.props;
     fisb.shapeKey = key;
+    fisb.reportRec = null;
     var card = $('shape-details');
     card.setAttribute('data-key', key);
     $('shape-title').textContent = (p.name || 'product ' + p.product) + (p.label || p.location ? ' · ' + (p.label || p.location) : '');
@@ -1386,6 +1388,7 @@
     fisb.text.set(rec.key, rec);
     fisb.wxDirty = true;
     fisb.symDirty = true;
+    if (rec.key === fisb.reportRec) fillReport(rec);   // the card shows the new report
   }
   function dropText(key) {
     if (fisb.text.delete(key)) fisb.wxDirty = fisb.symDirty = true;
@@ -1429,7 +1432,8 @@
           '<span class="wx-issued">' + hhmm(r.issued) + '</span>' +
           (r.valid ? '<span class="wx-valid">valid ' + hhmm(r.valid) + '</span>' : '') +
           '<span class="wx-age">' + (isNaN(t) ? '' : shortAge(t, now)) + '</span></button>' +
-          (r.kind === 'twgo' ? '' : wxPos(r) ? '<a class="wx-show" href="#">show</a>' :
+          (r.kind === 'twgo' ? '' : wxPlotPos(r) ? '<a class="wx-show" href="#">show</a>' :
+            r.kind === 'winds' && wxPos(r) ? '<span class="wx-nobarb">no barb</span>' :
             '<span class="wx-nopos">no position</span>') +
           '<pre class="wx-text"' + (open ? '' : ' hidden') + '>' + esc(r.text || '') + '</pre></li>';
       }).join('') + '</ul>' : '<p class="msg">None' + (prefix ? ' matching' : '') + '.</p>') + '</section>';
@@ -1443,7 +1447,9 @@
   // a change) and removed when its record goes. Colours come from the
   // classes (style.css); the SVG uses currentColor.
   var WX_REPORT_KINDS = ['metar', 'taf', 'pirep', 'winds'];
-  var MAX_WX_SYMBOLS = 300;         // on the map at once, the nearest the map centre first
+  var MAX_WX_SYMBOLS = 300;         // on the map at once: METAR, TAF, PIREP, winds, each nearest the centre first
+  var WX_KIND_RANK = { metar: 0, taf: 1, pirep: 2, winds: 3 };
+  var WX_VIEW_PAD = 0.25;           // symbols drawn inside the view grown by this fraction per side
   var WINDS_PERIOD_H = 6, WINDS_LEVEL_FT = 3000;   // the record and level the winds barbs come from
   var parsedCache = new WeakMap();  // text record -> its parse (a new record object on every update)
   function parsedOf(r) {
@@ -1458,13 +1464,20 @@
     if (r.kind === 'pirep') return P.pirepPosition(parsedOf(r), fisb.locations);
     return P.resolveStation(r.kind, r.station, fisb.locations);
   }
-  // "n of m positioned" over the reports the list shows (toggles, filter).
+  // Where a report's symbol goes, or null: no position, or a winds record
+  // other than the one drawn (WINDS_PERIOD_H) or without WINDS_LEVEL_FT.
+  function wxPlotPos(r) {
+    if (r.kind === 'winds' && (r.period_h !== WINDS_PERIOD_H || !P.windsLevel(parsedOf(r), WINDS_LEVEL_FT))) return null;
+    return wxPos(r);
+  }
+  // "n of m positioned" over the reports the list shows (toggles, filter):
+  // n counts those with a symbol, on screen or not.
   function wxPositioned() {
     var n = 0, m = 0;
     fisb.text.forEach(function (r) {
       if (!fisb.show[r.kind] || !P.stationMatches(r.station, fisb.wxFilter)) return;
       m++;
-      if (wxPos(r)) n++;
+      if (wxPlotPos(r)) n++;
     });
     return { n: n, m: m };
   }
@@ -1511,7 +1524,7 @@
       var lv = P.windsLevel(p, WINDS_LEVEL_FT);
       if (!lv) return null;
       if (!lv.lv) barb = { dir: lv.dir, kt: lv.kt };
-      anchor = [36, 24];   // left of the METAR circle
+      anchor = [24, 8];    // 16 px below the station: clear of the METAR circle and its barb
       html = svgBox(48, (barb ? barbSvg(barb.dir, barb.kt, 3) : '') + '<circle class="wx-core" r="3"/>' +
         (lv.temp !== null ? '<text class="temp" x="5" y="13">' + Number(lv.temp) + '</text>' : ''));
     }
@@ -1529,18 +1542,18 @@
   function renderWxSymbols() {
     fisb.symDirty = false;
     if (!map) return;
-    var now = dataNow(), want = [];
+    var now = dataNow(), want = [], view = map.getBounds().pad(WX_VIEW_PAD);
     fisb.text.forEach(function (r) {
       if (!fisb.show[r.kind] || !P.stationMatches(r.station, fisb.wxFilter)) return;
-      if (r.kind === 'winds' && r.period_h !== WINDS_PERIOD_H) return;
-      var pos = wxPos(r), s = pos && wxSymbolFor(r, pos, now);
+      var pos = wxPlotPos(r);
+      if (!pos || !view.contains(pos)) return;
+      var s = wxSymbolFor(r, pos, now);
       if (s) want.push(s);
     });
-    fisb.symOverCap = want.length > MAX_WX_SYMBOLS;
-    if (fisb.symOverCap) {
+    if (want.length > MAX_WX_SYMBOLS) {
       var c = map.getCenter();
       want.forEach(function (s) { s.d = P.rangeNm(c.lat, c.lng, s.lat, s.lon); });
-      want.sort(function (a, b) { return a.d - b.d; });
+      want.sort(function (a, b) { return WX_KIND_RANK[a.kind] - WX_KIND_RANK[b.kind] || a.d - b.d; });
       want.length = MAX_WX_SYMBOLS;
     }
     var keep = {};
@@ -1587,9 +1600,18 @@
     if (c === null || c === undefined) return 'unknown';
     return c === Infinity ? 'none' : P.thousands(c) + ' ft';
   }
+  // key: a symbol key (winds:<st>) or a record key.
   function showReport(key) {
-    var o = fisb.syms.get(key), r = o ? o.s.rec : fisb.text.get(key);
+    var o = fisb.syms.get(key), r = fisb.text.get(o ? o.s.rec.key : key);
     if (!r) return;
+    var card = $('shape-details');
+    card.setAttribute('data-key', key);
+    fillReport(r);
+    openPanel('weather');
+    card.scrollIntoView({ block: 'nearest' });
+  }
+  // The card's rows, title and text for record r (also on an update of the shown record).
+  function fillReport(r) {
     var p = parsedOf(r), rows = [];
     if (r.kind === 'metar' || r.kind === 'taf') {
       rows.push(['category', 'Category', p ? p.category : 'unknown']);
@@ -1614,7 +1636,6 @@
     fisb.shapeKey = null;
     fisb.reportRec = r.key;
     var card = $('shape-details');
-    card.setAttribute('data-key', key);
     $('shape-title').textContent = r.kind.toUpperCase() + ' ' + (r.station || '');
     var body = $('shape-fields');
     body.textContent = '';
@@ -1632,12 +1653,10 @@
     pre.textContent = r.text || '';
     pre.hidden = !r.text;
     card.hidden = false;
-    openPanel('weather');
-    card.scrollIntoView({ block: 'nearest' });
   }
   // The list's "show": pans to the report's position (as the Receiver tab's).
   function showWxPos(key) {
-    var r = fisb.text.get(key), ll = r && wxPos(r);
+    var r = fisb.text.get(key), ll = r && wxPlotPos(r);
     if (!ll || !map) return;
     if (map.getZoom() < SHOW_MIN_ZOOM && !map.getBounds().contains(ll)) map.setView(ll, SHOW_MIN_ZOOM);
     else map.panTo(ll);

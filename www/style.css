@@ -198,9 +198,9 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .wx-row { display: flex; flex-wrap: wrap; align-items: baseline; }
 .wx-row .wx-head { width: auto; flex: 1 1 0; min-width: 0; }
 .wx-row .wx-text { flex-basis: 100%; }
-.wx-show, .wx-nopos { font-size: 11px; padding: 0 6px; white-space: nowrap; }
+.wx-show, .wx-nopos, .wx-nobarb { font-size: 11px; padding: 0 6px; white-space: nowrap; }
 .wx-show { color: var(--accent); }
-.wx-nopos { color: var(--muted); }
+.wx-nopos, .wx-nobarb { color: var(--muted); }
 
 /* map: weather symbols (spec §3.3). The SVG draws in currentColor; the
    marker div takes no pointer events, only the symbol's core does. */

@@ -205,8 +205,10 @@ std::optional<CsvMessage> parseCsvMessage(const std::string& raw)
 
 std::string avrLine(int64_t epoch_ns, const std::string& hex)
 {
-    // ns * 12e6 / 1e9 = ns * 3 / 250; ns < 2^63 / 3 for every epoch parseCsvMessage accepts.
-    const uint64_t ticks = (static_cast<uint64_t>(epoch_ns) * 3u / 250u) & beast::kTimestampMask;
+    // ns * 12e6 / 1e9 = ns * 3 / 250, as 3 * (ns / 250) + 3 * (ns % 250) / 250
+    // so the product never wraps (ns * 3 would past 2^64 / 3, the year 2165).
+    const uint64_t ns = static_cast<uint64_t>(epoch_ns);
+    const uint64_t ticks = (ns / 250u * 3u + ns % 250u * 3u / 250u) & beast::kTimestampMask;
     char ts[16];
     std::snprintf(ts, sizeof ts, "%012llX", static_cast<unsigned long long>(ticks));
     std::string out;

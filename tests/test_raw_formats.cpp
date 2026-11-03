@@ -313,6 +313,19 @@ BOOST_AUTO_TEST_CASE(avr_lines)
     BOOST_TEST(avrLine(1783963099005369000LL, "AB") == std::string("@") + want + "AB;");
 }
 
+// Found by fuzz_raw_formats (mode 2, the avrLine round trip of a parsed CSV
+// line, on "9000000000,5F406A936F50F0"): avrLine computed epoch_ns * 3 in
+// uint64_t, which wraps past 2^64 / 3 ns (the year 2165), well inside what
+// parseCsvMessage accepts, so later epochs got wrong ticks.
+BOOST_AUTO_TEST_CASE(fuzz_raw_formats_avr_ticks_wrap)
+{
+    const auto m = parseCsvMessage("9000000000,5F406A936F50F0");
+    BOOST_REQUIRE(m.has_value());
+    BOOST_TEST(avrLine(m->epoch_ns, m->hex) == "@B16D83BE00005F406A936F50F0;");
+    // The largest epoch parseCsvMessage accepts.
+    BOOST_TEST(avrLine(9223372035999999999LL, "AB") == "@374BC60B6BFFAB;");
+}
+
 BOOST_AUTO_TEST_CASE(avr_input_lines)
 {
     auto m = parseAvrLine("@000000B71B005F406A936F50F0;\r\n");

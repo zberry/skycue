@@ -269,3 +269,10 @@ add_test(NAME iqgen_cli
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
     $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180)
+
+# ASTERIX CAT021 decoder, test encoder and TCP stream framer (pure).
+add_executable(test_cat021 test_cat021.cpp)
+target_link_libraries(test_cat021 PRIVATE skycued_asterix Boost::unit_test_framework)
+target_compile_definitions(test_cat021 PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_cat021)
+add_test(NAME cat021 COMMAND test_cat021)

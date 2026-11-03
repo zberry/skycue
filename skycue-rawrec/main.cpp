@@ -272,9 +272,7 @@ private:
     std::string line_;  // partial UAT line
 };
 
-}  // namespace
-
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     std::string beast_arg, uat_arg, dir, retention_dir;
     double rotate_mb = 256, rotate_min = 60, max_gb = 0;
@@ -416,4 +414,18 @@ int main(int argc, char** argv)
         LOG_INFO("keeping " << retention_dir << " within " << max_gb << " GB, oldest deleted first");
     io.run();
     return 0;
+}
+
+}  // namespace
+
+// What escapes run() (io.run() rethrows a handler's exception; a constructor
+// can throw) ends the program with a message and status 1, not terminate().
+int main(int argc, char** argv)
+{
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "skycue-rawrec: " << e.what() << "\n";
+        return 1;
+    }
 }

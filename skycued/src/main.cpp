@@ -79,9 +79,7 @@ std::string defaultWwwDir()
     return ::realpath(www.c_str(), real) ? std::string(real) : www;
 }
 
-}  // namespace
-
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     const auto started = std::chrono::system_clock::now();
     std::string config_path, replay_path, readsb_host, dump978_host, log_level, www_dir, web_bind, inputs_file;
@@ -361,4 +359,18 @@ int main(int argc, char** argv)
     if (fisb)
         fisb->flush();
     return 0;
+}
+
+}  // namespace
+
+// What escapes run() (io.run() rethrows a handler's exception; a constructor
+// can throw) ends the program with a message and status 1, not terminate().
+int main(int argc, char** argv)
+{
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "skycued: " << e.what() << "\n";
+        return 1;
+    }
 }

@@ -336,9 +336,7 @@ int64_t playFile(const std::string& path, Form form, Mode mode, uint8_t sac, uin
     return base + rel;
 }
 
-}  // namespace
-
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     std::string udp_arg, tcp_arg, capture_file, as_form, bind_arg = "127.0.0.1";
     int listen_port = 0, sac = 0, sic = 0;
@@ -492,4 +490,18 @@ int main(int argc, char** argv)
         return 1;
     }
     return 0;
+}
+
+}  // namespace
+
+// What escapes run() (io.run() rethrows a handler's exception; a constructor
+// can throw) ends the program with a message and status 1, not terminate().
+int main(int argc, char** argv)
+{
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "skycue-pingsim: " << e.what() << "\n";
+        return 1;
+    }
 }

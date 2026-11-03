@@ -343,8 +343,8 @@ struct ReplayFx {
                 fisb = std::make_unique<skycued::Recorder>(rc, "fisb");
             }
             auto src = std::make_unique<skycued::ReplayObservationSource>(t.io, kReceivedWithUplinks, 0, false);
-            engine = std::make_unique<Engine>(t.io, cfg, std::move(src), nullptr, *fwd, received.get(), sent.get(),
-                                              fisb.get());
+            engine = std::make_unique<Engine>(t.io, cfg, sourceInputs(t.io, std::move(src)), *fwd, received.get(),
+                                              sent.get(), fisb.get());
             engine->onEvent([this](const EngineEvent& e) {
                 if (!e.fisb)
                     return;
@@ -514,7 +514,7 @@ BOOST_AUTO_TEST_CASE(fisb_disabled_decodes_nothing)
         fc.tcp_listen_ephemeral = true;
         fwd = std::make_unique<Forwarder>(t.io, fc);
         auto src = std::make_unique<skycued::ReplayObservationSource>(t.io, kReceivedWithUplinks, 0, false);
-        engine = std::make_unique<Engine>(t.io, cfg, std::move(src), nullptr, *fwd, nullptr, nullptr);
+        engine = std::make_unique<Engine>(t.io, cfg, sourceInputs(t.io, std::move(src)), *fwd, nullptr, nullptr);
         engine->start();
     });
     const auto end = steady::now() + 10s;

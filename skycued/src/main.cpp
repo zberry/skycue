@@ -1,14 +1,17 @@
-// skycued: reads readsb's JSON output (and dump978's raw UAT), filters and
-// rate-limits the tracks, and forwards them to skycue clients.
+// skycued: reads its inputs (readsb's JSON output, dump978's raw UAT, the
+// receiver inputs of the inputs file), filters and rate-limits the tracks,
+// and forwards them to skycue clients.
 //
 // Exit status: 0 after SIGINT/SIGTERM (or --help/--version), 1 on a runtime
 // failure (a port that cannot be bound, a recording directory that cannot be
 // created), 2 on a usage or configuration error.
 
 #include "config.hpp"
-#include "dump978_raw_source.hpp"
 #include "engine.hpp"
 #include "forwarder.hpp"
+#include "inputs/dump978_input.hpp"
+#include "inputs/input_manager.hpp"
+#include "inputs/source_input.hpp"
 #include "log.hpp"
 #include "readsb_json_source.hpp"
 #include "recorder.hpp"
@@ -79,7 +82,7 @@ std::string defaultWwwDir()
 
 int main(int argc, char** argv)
 {
-    std::string config_path, replay_path, readsb_host, dump978_host, log_level, www_dir, web_bind;
+    std::string config_path, replay_path, readsb_host, dump978_host, log_level, www_dir, web_bind, inputs_file;
     double replay_speed = 1.0;
     unsigned cue_tcp_port = 0, web_port = 0;
     po::options_description desc(
@@ -93,7 +96,9 @@ int main(int argc, char** argv)
         "replay-loop", "restart the replay at the end of the file")(
         "readsb-host", po::value(&readsb_host)->default_value("127.0.0.1"), "host of readsb's JSON port")(
         "dump978-host", po::value(&dump978_host)->default_value("127.0.0.1"), "host of dump978's raw port")(
-        "no-uat", "do not connect to dump978")(
+        "no-uat", "do not connect to dump978")("no-readsb", "do not connect to readsb")(
+        "inputs-file", po::value(&inputs_file),
+        "override INPUTS_FILE (default: skycue.inputs.json next to the config; empty: not persisted)")(
         "cue-tcp-port", po::value(&cue_tcp_port), "override CUE_TCP_PORT (0: no listener)")(
         "www-dir", po::value(&www_dir), "the web UI's files (default: <bin>/../share/skycue/www)")(
         "web-bind", po::value(&web_bind), "override WEB_BIND (numeric address)")(
@@ -190,24 +195,50 @@ int main(int argc, char** argv)
         }
     }
 
-    std::unique_ptr<ObservationSource> source;
-    std::unique_ptr<Dump978RawSource> uat;
+    // The inputs: the built-ins (readsb and dump978, or the replay alone) and,
+    // unless replaying, the user inputs of the inputs file.
+    InputManagerConfig mc;
+    mc.inputs_file = vm.count("inputs-file") ? inputs_file : resolveInputsFile(config_path, config.inputs_file);
+    mc.record_dir = config.record_dir;
+    mc.record_max_bytes = gigabytesToBytes(config.record_max_gb);
+    mc.replaying = replaying;
+    auto inputs = std::make_unique<InputManager>(io, mc);
+    auto builtin = [](const char* id, InputType type, const std::string& host, uint16_t port) {
+        InputDef d;
+        d.id = id;
+        d.type = type;
+        d.host = host;
+        d.port = port;
+        return d;
+    };
     try {
-        if (replaying)
-            source = std::make_unique<ReplayObservationSource>(io, replay_path, replay_speed, vm.count("replay-loop") > 0);
-        else
-            source = std::make_unique<ReadsbJsonSource>(io, readsb_host, config.readsb_json_port);
+        if (replaying) {
+            inputs->addBuiltin(std::make_unique<SourceInput>(
+                builtin("replay", InputType::replay, "", 0),
+                std::make_unique<ReplayObservationSource>(io, replay_path, replay_speed, vm.count("replay-loop") > 0)));
+        } else {
+            if (!vm.count("no-readsb")) {
+                const uint16_t port = config.readsb_json_port;
+                inputs->addBuiltin(std::make_unique<SourceInput>(
+                    builtin("readsb", InputType::readsb, readsb_host, port),
+                    SourceInput::SourceFactory([&io, readsb_host, port]() -> std::unique_ptr<ObservationSource> {
+                        return std::make_unique<ReadsbJsonSource>(io, readsb_host, port);
+                    })));
+            }
+            if (!vm.count("no-uat"))
+                inputs->addBuiltin(std::make_unique<Dump978Input>(
+                    io, builtin("dump978", InputType::dump978, dump978_host, config.dump978_raw_port)));
+        }
+        inputs->load();
     } catch (const std::exception& e) {
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
     }
-    if (!replaying && !vm.count("no-uat"))
-        uat = std::make_unique<Dump978RawSource>(io, dump978_host, config.dump978_raw_port);
 
     std::unique_ptr<Engine> engine;
     try {
-        engine = std::make_unique<Engine>(io, config, std::move(source), std::move(uat), forwarder, received.get(),
-                                          sent.get(), fisb.get());
+        engine = std::make_unique<Engine>(io, config, std::move(inputs), forwarder, received.get(), sent.get(),
+                                          fisb.get());
     } catch (const std::exception& e) {
         std::cerr << "skycued: " << config_path << ": " << e.what() << "\n";
         return 2;

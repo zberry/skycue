@@ -1,7 +1,8 @@
 #pragma once
 
-// Engine: wires a source of observations to the Forwarder through the track
-// table, change detection and filters, and records both streams.
+// Engine: wires the inputs (an InputManager: readsb, dump978, pingStations,
+// a replay) to the Forwarder through the track table, change detection and
+// filters, and records both streams.
 //
 // Per observation: received->writeObservation, table.apply, then
 //   filters.evaluate when shouldSend gives a reason, or the track has a
@@ -15,9 +16,15 @@
 // Every second: table.expire(TRACK_TIMEOUT_S) on the data clock (the newest
 // observation or uplink receive time seen, plus the steady time since; it
 // never goes back; so a replay of old data ages like live data); forwarded tracks among the expired get
-// sendDrop(timeout), or sendDrop(source_lost) while the source is down; both
-// recorders are flushed. When the source has been lost for TRACK_TIMEOUT_S,
-// every forwarded track is dropped as source_lost (a reconnect cancels it).
+// sendDrop(timeout), or sendDrop(source_lost) while the inputs are lost; both
+// recorders are flushed.
+//
+// Connection (spec §4.4): the inputs are lost when no enabled track input
+// (any type but dump978) is connected, connected meaning the transport is up
+// (a bound UDP socket is connected even when nothing arrives: its tracks just
+// time out). When they have been lost for TRACK_TIMEOUT_S, every forwarded
+// track is dropped as source_lost; any track input connecting again cancels
+// it. One input going while another stays leaves its tracks to time out.
 // The keyframe provider returns every forwarded track (periodic keyframes
 // are not recorded). Stats are logged at INFO every 10 s.
 //
@@ -39,11 +46,17 @@
 // sent (timeout, filtered, source_lost; the shutdown drops of stop() are
 // not reported), stats on every 1 s tick, filters_changed / lists_changed
 // after a live change is applied and recorded but before the drops and
-// updates it causes. Fired synchronously on the io thread; never after stop().
+// updates it causes, inputs_changed after any change the InputManager
+// reports (definitions, enabled, connection, device status). Fired
+// synchronously on the io thread; never after stop().
 //
-// FIS-B (FISB_ENABLE=yes, the default): every uplink, from dump978's raw port
-// or from a replay's "uat_uplink" records, is recorded in the received
-// stream, moves the data clock forward when it is newer, and is fed to a
+// Uplinks: one whose hex came from a different input within the last 2 s
+// (UplinkDedupe) is counted in fisb_uplink_duplicates and dropped: neither
+// recorded nor decoded.
+//
+// FIS-B (FISB_ENABLE=yes, the default): every other uplink, from any input
+// (dump978's raw port, a pingStation, a replay's "uat_uplink" records), is
+// recorded in the received stream, moves the data clock forward when it is newer, and is fed to a
 // FisbDecoder with its own receive time as the reference time; the products
 // go to a FisbStore at the data clock. The 1 s tick sweeps both on the data
 // clock (so a replay of 2015 uplinks keeps 2015 products for their 2015
@@ -56,10 +69,10 @@
 // outlive the Engine.
 
 #include "config.hpp"
-#include "dump978_raw_source.hpp"
 #include "engine_events.hpp"
 #include "filters.hpp"
 #include "forwarder.hpp"
+#include "inputs/input_manager.hpp"
 #include "observation.hpp"
 #include "recorder.hpp"
 #include "track_table.hpp"
@@ -84,28 +97,31 @@ class Engine {
 public:
     // Loads the allow/block lists named in the config: throws
     // std::runtime_error when one cannot be read or parsed, or when the
-    // receiver position is missing. `uat` may be null; so may the recorders
-    // (`fisb` is the "fisb" stream).
-    Engine(boost::asio::io_context& io, const Config& config, std::unique_ptr<ObservationSource> source,
-           std::unique_ptr<Dump978RawSource> uat, Forwarder& forwarder, Recorder* received, Recorder* sent,
-           Recorder* fisb = nullptr);
+    // receiver position is missing; std::invalid_argument when `inputs` is
+    // null. The recorders may be null (`fisb` is the "fisb" stream). The
+    // Engine registers the manager's callbacks: register none of your own.
+    Engine(boost::asio::io_context& io, const Config& config, std::unique_ptr<InputManager> inputs,
+           Forwarder& forwarder, Recorder* received, Recorder* sent, Recorder* fisb = nullptr);
     ~Engine();
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
     // Starts the Forwarder (throws std::runtime_error when its TCP port
     // cannot be bound; the Engine is then left unstarted), writes the startup
-    // filter_change record, starts the sources and the timers. Once.
+    // filter_change record, starts the inputs and the timers. Once.
     void start();
-    // Stops the sources and timers, records a shutdown drop for every
+    // Stops the inputs and timers, records a shutdown drop for every
     // forwarded track, stops the Forwarder (which sends them), flushes the
     // recorders. Idempotent.
     void stop();
 
     EngineStats stats() const;
     // "stats obs=N sent=N drops=N tracks=N fwd=N uat_dl=N uat_ul=N
-    // readsb=up|down dump978=up|down|off"
+    // readsb=up|down dump978=up|down|off inputs=<connected>/<enabled>"
     std::string statsLine() const;
+
+    InputManager& inputs() { return *inputs_; }
+    const InputManager& inputs() const { return *inputs_; }
 
     // Every track in the table with its filter decision now, the filters and
     // the stats. Changes nothing.
@@ -144,7 +160,14 @@ public:
 
 private:
     void handleObservation(const TrackObservation& obs);
-    void handleConnection(bool up);
+    // The manager reported a change: track_connected_ follows
+    // anyTrackInputConnected() (arming or cancelling lost_timer_), then
+    // inputs_changed is emitted.
+    void inputsChanged();
+    // The track inputs were just lost: arms lost_timer_ (source_lost drops).
+    void armLost();
+    // No built-in dump978, or it is disabled.
+    bool dump978Off() const;
     void handleUplink(std::chrono::system_clock::time_point when, const std::string& hex);
     void handleFisbEvents(std::vector<fisb::FisbEvent>& events);
     // `positioned`: the observation carried a position (an observed event follows).
@@ -168,8 +191,8 @@ private:
 
     boost::asio::io_context& io_;
     Config config_;
-    std::unique_ptr<ObservationSource> source_;
-    std::unique_ptr<Dump978RawSource> uat_;
+    std::unique_ptr<InputManager> inputs_;
+    UplinkDedupe dedupe_;
     Forwarder& forwarder_;
     Recorder* received_;
     Recorder* sent_;
@@ -185,13 +208,14 @@ private:
 
     boost::asio::steady_timer tick_timer_, stats_timer_, lost_timer_;
     bool started_ = false, stopped_ = false;
-    bool source_connected_ = false, uat_connected_ = false;
+    bool track_connected_ = false;  // an enabled track input is connected
     bool have_data_clock_ = false;
     std::chrono::system_clock::time_point last_obs_time_{};
     std::chrono::steady_clock::time_point last_obs_steady_{};
     unsigned lost_gen_ = 0;
     uint64_t observations_ = 0, sent_updates_ = 0, sent_drops_ = 0;
     uint64_t drops_timeout_ = 0, drops_filtered_ = 0, drops_source_lost_ = 0;
+    uint64_t uplink_duplicates_ = 0;
     uint32_t web_clients_ = 0;
     std::function<void(const EngineEvent&)> sink_;
     std::shared_ptr<char> alive_ = std::make_shared<char>(0);

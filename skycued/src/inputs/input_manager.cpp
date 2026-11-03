@@ -54,6 +54,20 @@ bool sameExceptEnabled(InputDef a, const InputDef& b)
 
 }  // namespace
 
+UplinkDedupe::UplinkDedupe(std::chrono::milliseconds window) : window_(window) {}
+
+bool UplinkDedupe::duplicate(const std::string& input_id, std::chrono::steady_clock::time_point now,
+                             const std::string& hex)
+{
+    while (!seen_.empty() && now - seen_.front().at > window_)
+        seen_.pop_front();
+    for (const auto& s : seen_)
+        if (s.hex == hex && s.input_id != input_id)
+            return true;
+    seen_.push_back(Seen{now, input_id, hex});
+    return false;
+}
+
 std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& def, const InputManagerConfig& /*config*/)
 {
     switch (def.type) {
@@ -431,6 +445,10 @@ void InputManager::attach(Input& input)
         Dispatch d(dispatching_);
         changed();
     });
+    input.onStatus([this]() {
+        Dispatch d(dispatching_);
+        changed();
+    });
 }
 
 void InputManager::retire(Slot& s, bool keep_counters)
@@ -462,7 +480,8 @@ void InputManager::schedule()
         if (ec || !alive.lock() || !started_)
             return;
         onTimer();
-        if (started_)
+        // onTimer() runs input callbacks, which may destroy the manager.
+        if (!alive.expired() && started_)
             schedule();
     });
 }

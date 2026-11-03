@@ -28,6 +28,7 @@ struct Config {
     int trail_seconds = 120;             // seconds of track history the web map shows, 0-3600
     bool fisb_enable = true;             // FISB_ENABLE: decode FIS-B weather from the UAT uplinks
     bool fisb_experimental = false;      // FISB_EXPERIMENTAL: APDU time options 1/3, radar blocks >= 60 N
+    std::string inputs_file;             // INPUTS_FILE as written; see resolveInputsFile
     // Accepted (they are skycue-start.sh's), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";
 };
@@ -42,5 +43,10 @@ struct ConfigError : std::runtime_error {
 Config parseConfigFile(const std::string& path);  // throws ConfigError
 Config parseConfigText(const std::string& text, const std::string& name_for_errors);
 const std::vector<std::string>& knownConfigKeys();  // exactly the keys of etc/skycue.conf.example
+
+// The inputs file for INPUTS_FILE `value` of the config at `conf_path`:
+// skycue.inputs.json next to the config when empty, `value` resolved against
+// the config's directory when relative, `value` itself when absolute.
+std::string resolveInputsFile(const std::string& conf_path, const std::string& value);
 
 }  // namespace skycued

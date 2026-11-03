@@ -28,7 +28,7 @@ const std::vector<std::string>& knownConfigKeys()
         "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
         "RECORD_RAW",  // used by skycue-start.sh only (it launches skycue-rawrec)
         "WEB_BIND",        "RECORD_MAX_GB",     "TRAIL_SECONDS",
-        "FISB_ENABLE",     "FISB_EXPERIMENTAL",
+        "FISB_ENABLE",     "FISB_EXPERIMENTAL", "INPUTS_FILE",
     };
     return keys;
 }
@@ -264,6 +264,7 @@ Config parseConfigText(const std::string& text, const std::string& name)
 
     conv.yesNo("FISB_ENABLE", c.fisb_enable);
     conv.yesNo("FISB_EXPERIMENTAL", c.fisb_experimental);
+    conv.str("INPUTS_FILE", c.inputs_file);
 
     conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
     conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);
@@ -302,6 +303,15 @@ Config parseConfigText(const std::string& text, const std::string& name)
         conv.fail(conv.find("RECORD_FORMATS") ? "RECORD_FORMATS" : "RECORD_DIR",
                   "RECORD_FORMATS must name at least one of jsonl, csv when RECORD_DIR is set");
     return c;
+}
+
+std::string resolveInputsFile(const std::string& conf_path, const std::string& value)
+{
+    const std::string name = value.empty() ? std::string("skycue.inputs.json") : value;
+    if (name.front() == '/')
+        return name;
+    const auto slash = conf_path.rfind('/');
+    return slash == std::string::npos ? name : conf_path.substr(0, slash + 1) + name;
 }
 
 Config parseConfigFile(const std::string& path)

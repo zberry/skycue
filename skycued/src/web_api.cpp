@@ -453,6 +453,7 @@ std::string eventJson(const EngineEvent& event)
         return event.stats ? statsJson(*event.stats, "stats") : std::string();
     case EventKind::filters_changed:
     case EventKind::lists_changed:
+    case EventKind::inputs_changed:
         break;
     case EventKind::fisb_text:
     case EventKind::fisb_shape:

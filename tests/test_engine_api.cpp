@@ -24,7 +24,11 @@ struct Sink {
     std::vector<EngineEvent> events;
     void attach(Engine& e)
     {
-        e.onEvent([this](const EngineEvent& ev) { events.push_back(ev); });
+        // inputs_changed (an input connecting) is not what these tests follow.
+        e.onEvent([this](const EngineEvent& ev) {
+            if (ev.kind != EventKind::inputs_changed)
+                events.push_back(ev);
+        });
     }
     size_t count(EventKind k) const
     {

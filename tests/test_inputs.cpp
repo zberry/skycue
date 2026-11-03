@@ -57,14 +57,14 @@ template <class F> bool eventuallyWithin(std::chrono::milliseconds limit, F pred
 }
 template <class F> bool eventually(F pred) { return eventuallyWithin(kWait, pred); }
 
-// Waits until count() reaches `target` or stops growing for 50 ms (a
+// Waits until count() reaches `target` or stops growing for 200 ms (a
 // datagram the kernel dropped never arrives), at most kWait.
 template <class F> void settle(F count, uint64_t target)
 {
     const auto until = steady::now() + kWait;
     uint64_t last = count();
     auto changed = steady::now();
-    while (last < target && steady::now() < until && steady::now() - changed < 50ms) {
+    while (last < target && steady::now() < until && steady::now() - changed < 200ms) {
         std::this_thread::sleep_for(2ms);
         const uint64_t now = count();
         if (now != last) {

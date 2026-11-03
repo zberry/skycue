@@ -21,7 +21,8 @@
 //   change: the poll keeps watching the path and loads a file that appears.
 // - Counters in `state` are lifetime: the counters of an instance destroyed
 //   by a replace are kept per id and added; remove forgets them.
-// - onChanged fires after any definition, enabled or connection change.
+// - onChanged fires after any definition, enabled, connection or device
+//   status change.
 //
 // Threading: lives on the io_context; call everything from its thread.
 // Register callbacks before start(). An input destroyed while one of its
@@ -37,6 +38,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -75,6 +77,26 @@ struct InputNotFound : std::runtime_error {
 // 403: a built-in cannot be replaced or removed.
 struct InputForbidden : std::runtime_error {
     using runtime_error::runtime_error;
+};
+
+// FIS-B uplink dedupe across inputs (spec §4.5): two 978 feeds of the same
+// ground station must not decode its products twice.
+class UplinkDedupe {
+public:
+    explicit UplinkDedupe(std::chrono::milliseconds window = std::chrono::seconds(2));
+    // True when the same hex came from a different input within the window
+    // (the same input repeating is not a duplicate). A duplicate is not
+    // remembered; anything else is. Entries older than the window are pruned
+    // on each call.
+    bool duplicate(const std::string& input_id, std::chrono::steady_clock::time_point now, const std::string& hex);
+
+private:
+    struct Seen {
+        std::chrono::steady_clock::time_point at;
+        std::string input_id, hex;
+    };
+    std::chrono::milliseconds window_;
+    std::deque<Seen> seen_;  // oldest first
 };
 
 // The Input a user definition names. Throws std::invalid_argument for the

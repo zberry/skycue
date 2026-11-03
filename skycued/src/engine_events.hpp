@@ -5,6 +5,7 @@
 
 #include "filters.hpp"
 #include "fisb/fisb_store.hpp"
+#include "inputs/input_types.hpp"
 
 #include <skycue/types.hpp>
 
@@ -34,6 +35,13 @@ struct EngineStats {
              fisb_mosaic_blocks = 0;
     // The receive time of the last uplink fed to the decoder (unset before any).
     std::optional<std::chrono::system_clock::time_point> fisb_last_uplink;
+    // Uplinks dropped as the same hex from another input within 2 s
+    // (UplinkDedupe): neither recorded nor decoded.
+    uint64_t fisb_uplink_duplicates = 0;
+    // Every input, built-ins first (InputManager::statsLines). readsb_connected
+    // and dump978_connected above (and uat_downlink, uat_uplink) are those of
+    // the built-ins readsb (or replay) and dump978, kept for one release.
+    std::vector<InputStatsLine> inputs;
 };
 
 // One track as the Engine sees it now.
@@ -73,6 +81,7 @@ enum class EventKind {
     fisb_radar,    // a NEXRAD (63/64) mosaic was published
     fisb_raster,   // another raster layer (70/71/84/90/91/103) was published
     fisb_expired,  // a FIS-B item left the store, or a TWGO record was cancelled
+    inputs_changed,  // an input was added, changed, removed, enabled, disabled, connected or lost
 };
 
 // What a fisb_* event carries. Radar and raster events are notifications:
@@ -96,7 +105,8 @@ struct FisbNotice {
 // or not). drop: `id` and `reason` (any reason but shutdown). expired: `id`
 // (a track that was not being forwarded left the table: no drop is sent for
 // it, but an observer showing it should remove it). stats: `stats`.
-// filters_changed, lists_changed: nothing set. fisb_*: `fisb`.
+// filters_changed, lists_changed, inputs_changed: nothing set (inputs_changed:
+// read Engine::inputs()). fisb_*: `fisb`.
 struct EngineEvent {
     EventKind kind = EventKind::stats;
     std::optional<TrackSnapshot> track;

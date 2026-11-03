@@ -209,6 +209,7 @@ std::vector<std::string> restartKeysChanged(const Config& a, const Config& b)
     check(a.track_timeout_s != b.track_timeout_s, "TRACK_TIMEOUT_S");
     check(a.keyframe_interval_s != b.keyframe_interval_s, "KEYFRAME_INTERVAL_S");
     check(a.trail_seconds != b.trail_seconds, "TRAIL_SECONDS");
+    check(a.inputs_file != b.inputs_file, "INPUTS_FILE");
     return out;
 }
 

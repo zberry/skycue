@@ -535,7 +535,7 @@ BOOST_AUTO_TEST_CASE(api_state_shape)
         BOOST_TEST(t.get<std::string>("source") == "adsb_1090");
         BOOST_TEST(std::regex_match(t.get<std::string>("first_seen"), iso));
         BOOST_TEST(std::regex_match(t.get<std::string>("last_seen"), iso));
-        BOOST_TEST(t.count("input") == 0u);  // these observations carry no input id
+        BOOST_TEST(t.get<std::string>("input", "") == "readsb");  // the input that emitted them
         if (t.get<std::string>("hex") == "a1b2c3") {
             saw_a = true;
             BOOST_TEST(t.get<double>("lat") == 38.95);

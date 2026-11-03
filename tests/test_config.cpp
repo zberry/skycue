@@ -372,6 +372,26 @@ BOOST_AUTO_TEST_CASE(fisb_enable_and_experimental)
     }
 }
 
+BOOST_AUTO_TEST_CASE(inputs_file_key)
+{
+    BOOST_TEST(parseConfigText(kLatLon, "t").inputs_file.empty());
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "INPUTS_FILE=/var/lib/skycue/inputs.json\n", "t").inputs_file ==
+               "/var/lib/skycue/inputs.json");
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "INPUTS_FILE=my.json\n", "t").inputs_file == "my.json");
+}
+
+BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_the_config)
+{
+    using skycued::resolveInputsFile;
+    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "") == "/etc/skycue/skycue.inputs.json");
+    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "mine.json") == "/etc/skycue/mine.json");
+    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "sub/mine.json") == "/etc/skycue/sub/mine.json");
+    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "/srv/inputs.json") == "/srv/inputs.json");
+    BOOST_TEST(resolveInputsFile("skycue.conf", "") == "skycue.inputs.json");
+    BOOST_TEST(resolveInputsFile("skycue.conf", "mine.json") == "mine.json");
+    BOOST_TEST(resolveInputsFile("/skycue.conf", "") == "/skycue.inputs.json");
+}
+
 BOOST_AUTO_TEST_CASE(known_keys_match_example)
 {
     std::string text = readExample();

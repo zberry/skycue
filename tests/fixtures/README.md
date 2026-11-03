@@ -128,9 +128,9 @@ for t in seen:
     print(t.replace("\n", " "))
 ' > "$tmp/pireps.body"
 { printf '%s\n' '# Real PIREPs decoded by skycue-fisb: lines 1-14 from raw/stratux-uat-2015.log.gz (BSD-3-Clause,' \
-    '# see README.md), 15-17 from fisb/received-tg30.jsonl, 18-19 from fisb/received-with-uplinks.jsonl.'; cat "$tmp/pireps.body"; } \
+    '# see tests/fixtures/README.md), 15-17 from fisb/received-tg30.jsonl, 18-19 from fisb/received-with-uplinks.jsonl.'; cat "$tmp/pireps.body"; } \
   > skycue/tests/fixtures/fisb/pireps.txt
 grep -vc '^#' skycue/tests/fixtures/fisb/pireps.txt; rm -rf "$tmp"   # prints 19
 ```
 
-- sha256: `27ea53f031c2d735ba8514fe8045695fc74548e61508ac9b073ee9030cdd52eb`
+- sha256: `56271e7acf2939e69e13a74f709bf5dbd3e2644604d9d7f28c6cfa508fef7d59`

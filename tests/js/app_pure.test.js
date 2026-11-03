@@ -787,5 +787,33 @@ test('barb_parts', () => {
   assert.deepStrictEqual(P.barbParts(127), { calm: false, pennants: 2, full: 2, half: 1 });
 });
 
+test('flight_category_just_above_edges', () => {
+  const F = P.flightCategory;
+  assert.strictEqual(F(10, 3001), 'VFR');
+  assert.strictEqual(F(0.99, Infinity), 'LIFR'); assert.strictEqual(F(2.99, Infinity), 'IFR');
+  assert.strictEqual(F(5.01, Infinity), 'VFR');
+});
+test('metar_trend_groups_ignored', () => {   // synthetic
+  const m = P.parseMetar('METAR KXXX 300855Z 9999 BKN010 TEMPO BKN003=');
+  assert.strictEqual(m.ceilFt, 1000); assert.strictEqual(m.category, 'MVFR');
+  assert.strictEqual(P.parseMetar('METAR KXXX 300855Z 10SM CLR BECMG 1200 OVC002=').category, 'VFR');
+  assert.strictEqual(P.parseMetar('METAR KXXX 300855Z 10SM CLR NOSIG=').category, 'VFR');
+});
+test('non_taf_text_and_zero_denominator', () => {
+  assert.strictEqual(P.parseTafFirst('garbage text'), null);
+  assert.strictEqual(P.parseTafFirst(FIX['metar:KCVG']), null);
+  assert.strictEqual(P.visibilitySm(['1/0SM']), null);
+});
+test('winds_direction_code_out_of_range_is_null', () => {   // synthetic
+  assert.strictEqual(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   9912'), null);
+  assert.strictEqual(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   4012'), null);
+  assert.strictEqual(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   8712'), null);
+  assert.strictEqual(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   0012'), null);
+  assert.deepStrictEqual(P.windsLevel(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   3612'), 3000),
+    { ft: 3000, dir: 360, kt: 12, temp: null, lv: false });
+  assert.deepStrictEqual(P.windsLevel(P.parseWinds('WINDS XYZ 301800Z  FT 39000\n   860560'), 39000),
+    { ft: 39000, dir: 360, kt: 105, temp: -60, lv: false });
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

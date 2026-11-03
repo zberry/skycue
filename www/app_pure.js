@@ -593,6 +593,7 @@
       if (/^\/+SM$/.test(t)) return null;
       m = /^([PM])?(?:(\d+)|(\d+)\/(\d+))SM$/.exec(t);
       if (!m) continue;
+      if (m[4] !== undefined && Number(m[4]) === 0) return null;   // '1/0SM'
       var v = m[2] !== undefined ? Number(m[2]) : Number(m[3]) / Number(m[4]);
       if (m[2] === undefined && i > 0 && /^\d$/.test(tokens[i - 1])) v += Number(tokens[i - 1]);
       return m[1] === 'M' ? v - 0.01 : v;
@@ -646,7 +647,9 @@
     return { station: station, category: flightCategory(vis, ceil), visSm: vis, ceilFt: ceil, wind: windGroup(groups) };
   }
 
-  // A METAR or SPECI: its groups are searched only after the ddhhmmZ token.
+  // A METAR or SPECI: its groups are searched only after the ddhhmmZ token
+  // and before any trend (BECMG, TEMPO, NOSIG; reportBody already stops at RMK).
+  var METAR_TREND = /^(BECMG|TEMPO|NOSIG)$/;
   function parseMetar(text) {
     var toks = reportBody(text);
     if (toks[0] !== 'METAR' && toks[0] !== 'SPECI') return null;
@@ -655,7 +658,11 @@
     var station = toks[i] || null;
     var t = i + 1;
     while (t < toks.length && !/^\d{6}Z$/.test(toks[t])) t++;
-    return weatherSummary(station, t < toks.length ? toks.slice(t + 1) : toks.slice(i + 1));
+    var groups = t < toks.length ? toks.slice(t + 1) : toks.slice(i + 1);
+    for (var g = 0; g < groups.length; g++) {
+      if (METAR_TREND.test(groups[g])) { groups = groups.slice(0, g); break; }
+    }
+    return weatherSummary(station, groups);
   }
 
   var TAF_HEAD = /^(TAF|TAF\.AMD|AMD|COR)$/;
@@ -678,15 +685,21 @@
     return out;
   }
 
+  // A TAF's station and first-group summary; null for text that does not
+  // start with TAF, TAF.AMD, AMD or COR.
   function parseTafFirst(text) {
     var toks = reportBody(text);
-    return weatherSummary(toks[tafStart(toks)] || null, tafFirstGroup(text));
+    var s = tafStart(toks);
+    if (s === 0) return null;
+    return weatherSummary(toks[s] || null, tafFirstGroup(text));
   }
 
   // The daemon's winds-aloft record: 'WINDS <stn> <ddhhmm>Z FT <level>...'
   // then a line of values matched to the levels by order. Values: 'ddss',
   // 'ddss+tt' / 'ddss-tt', or 'ddsstt' (sign implied negative); '9900' is
   // light and variable; a direction code of 51..86 means speed >= 100 kt.
+  // Any other direction code (00, 37..50, 87..98, or 99 with a speed) makes
+  // the record null.
   var WINDS_LEVELS_FT = [3000, 6000, 9000, 12000, 18000, 24000, 30000, 34000, 39000];
   function parseWinds(text) {
     var lines = String(text || '').split('\n');
@@ -703,6 +716,7 @@
       var d = Number(m[1]), s = Number(m[2]);
       var temp = m[3] === undefined ? null : (/^[+-]/.test(m[3]) ? Number(m[3]) : -Number(m[3]));
       var lv = d === 99 && s === 0;
+      if (!lv && !(d >= 1 && d <= 36) && !(d >= 51 && d <= 86)) return null;
       if (!lv && d >= 51) { d -= 50; s += 100; }
       levels.push({ ft: Number(fts[i]), dir: lv ? null : d * 10, kt: lv ? 0 : s, temp: temp, lv: lv });
     }
@@ -728,7 +742,8 @@
 
   // A PIREP: its station, UUA (urgent) or UA, and the /OV group when it is a
   // location id optionally followed by rrrddd (radial, nm); routes and
-  // free-text positions ('SJX-GRB', '4 W CVG') give ov null.
+  // free-text positions ('SJX-GRB', '4 W CVG') give ov null. The radial is
+  // magnetic as reported; pirepPosition applies it as a true bearing.
   function parsePirep(text) {
     var s = String(text || '');
     var toks = s.split(/\s+/).filter(Boolean);
@@ -761,7 +776,7 @@
   }
 
   // The point nm along a great circle from lat/lon on the initial bearing,
-  // on the same sphere as rangeNm.
+  // on the same sphere as rangeNm. The bearing is true (no magnetic variation).
   function destinationPoint(lat, lon, brgDeg, nm) {
     var d = nm * METRES_PER_NM / EARTH_RADIUS_M, b = brgDeg * DEG, p1 = lat * DEG, l1 = lon * DEG;
     var sp2 = Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b);
@@ -771,6 +786,9 @@
     return [p2 / DEG, lonOut];
   }
 
+  // A PIREP's position: its /OV id resolved, then moved rrr/ddd when given.
+  // Approximation: the magnetic radial is used as a true bearing (magnetic
+  // variation ignored), so the point can be off by about 1-2 nm at 30 nm.
   function pirepPosition(parsed, index) {
     if (!parsed || !parsed.ov) return null;
     var pos = resolveStation('pirep', parsed.ov.id, index);

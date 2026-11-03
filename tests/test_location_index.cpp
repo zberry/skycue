@@ -259,6 +259,8 @@ BOOST_AUTO_TEST_CASE(learned_ids_capped) {
     std::string over = s.learnedJson();
     over.insert(over.size() - 2, ",\"CXXX\":[40,-86,1]");
     BOOST_CHECK_THROW(b.loadLearned(over), std::runtime_error);
+    BOOST_CHECK_NO_THROW(s.loadLearned(s.learnedJson()));   // a load resets the overflow count
+    BOOST_TEST(s.learnedOverflow() == 0u);
 }
 BOOST_AUTO_TEST_CASE(operator_rows_capped) {
     QuietLog quiet;

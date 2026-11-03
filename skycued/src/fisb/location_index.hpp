@@ -33,7 +33,7 @@ public:
     // kCentroidMaxRadiusNm of it; polylines are ignored. Returns true when the id is new.
     // Longitudes are averaged as wrapped deltas, so samples either side of +-180 average near it.
     bool learn(const TwgoRecord& record);
-    std::size_t learnedOverflow() const;  // new ids ignored past kMaxLearnedIds
+    std::size_t learnedOverflow() const;  // new ids ignored past kMaxLearnedIds since the last loadLearned()
     // fisb-locations.json: {"version":1,"locations":{"KPRG":[39.699097,-87.670212,3]}} (6 decimals, ids sorted).
     // The third value is the point-sample count; 0 marks a polygon centroid.
     std::string learnedJson() const;

@@ -228,6 +228,7 @@ void LocationIndex::loadLearned(const std::string& text)
         loaded[id] = Learned{*lat, *lon, *count};
     }
     learned_ = std::move(loaded);
+    learned_overflow_ = 0;
     dirty_ = false;
 }
 

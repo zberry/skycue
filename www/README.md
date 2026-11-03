@@ -135,8 +135,10 @@ per `CONFIG_GROUPS` entry (a key no group names goes to a trailing
 `Other`, an empty group is left out), each key a `tr[data-key]` with
 `td.cfg-value`, `td.cfg-source` and `td.cfg-restart` (a `restart` badge
 when the key needs one). `#config-copy` writes `configText` (skycue.conf
-text, quoted as `conf_rewrite.cpp`'s `quoteValue` does, each line
-commented with its source) with `navigator.clipboard.writeText`;
+text, quoted as `conf_rewrite.cpp`'s `quoteValue` does, each key preceded
+by a `# KEY: source[, restart]` comment line so the text parses as it is;
+`confValue` returns null for a value the grammar cannot hold, which is left
+as a comment) with `navigator.clipboard.writeText`;
 `#config-copy-status` says `Copied`, or `Copy failed` with the text shown
 selected in the read-only `#config-copy-text`. Keys, values and paths are
 set with `textContent`.

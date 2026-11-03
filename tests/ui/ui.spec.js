@@ -502,7 +502,7 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   await expect(page.locator('#pane-config table[data-group="FIS-B"] tr[data-key="LOCATIONS_FILE"]')).toHaveCount(1);
   await expect(page.locator('#config-daemon')).toContainText('skycued');
   const text = await page.evaluate(() => window.skycueApp.configText());
-  expect(text).toContain(`WEB_PORT=${port}  # conf, restart`);
+  expect(text).toContain(`\n# WEB_PORT: conf, restart\nWEB_PORT=${port}\n`);
   await page.locator('#config-copy').click();
   await expect(page.locator('#config-copy-status')).toHaveText('Copied');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(text);

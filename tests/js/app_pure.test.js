@@ -864,10 +864,54 @@ test('config_grouping', () => {
 test('config_text', () => {
   const t = P.configText(CFG);
   assert.ok(t.startsWith('# skycued 0.1.0, started 2026-01-01T00:00:00.000Z\n'));
-  assert.ok(t.includes('# Receiver site\nRECEIVER_LAT=38.9  # conf, restart\n'));
-  assert.ok(t.includes('CUE_UDP_TARGETS="127.0.0.1:30501 10.0.0.2:30502"  # conf, restart\n'));
-  assert.ok(t.includes('MAX_RANGE_NM=20  # overlay\n'));
-  assert.ok(t.includes('RECORD_DIR=""  # default, restart\n'));
+  assert.ok(t.includes('# Receiver site\n# RECEIVER_LAT: conf, restart\nRECEIVER_LAT=38.9\n'));
+  assert.ok(t.includes('# CUE_UDP_TARGETS: conf, restart\nCUE_UDP_TARGETS="127.0.0.1:30501 10.0.0.2:30502"\n'));
+  assert.ok(t.includes('# MAX_RANGE_NM: overlay\nMAX_RANGE_NM=20\n'));
+  assert.ok(t.includes('# RECORD_DIR: default, restart\nRECORD_DIR=\n'));
+});
+test('conf_value_every_branch', () => {
+  assert.strictEqual(P.confValue('38.9'), '38.9');
+  assert.strictEqual(P.confValue(''), '');
+  assert.strictEqual(P.confValue('a b'), '"a b"');
+  assert.strictEqual(P.confValue("o'hare x"), '"o\'hare x"');
+  assert.strictEqual(P.confValue('say "hi" $1'), '\'say "hi" $1\'');
+  assert.strictEqual(P.confValue('it\'s $HOME'), null);
+  assert.strictEqual(P.confValue('a\nb'), null);
+});
+// Every line is a comment or KEY=value in the conf grammar (config.cpp
+// parseConfigText, skycue-start.sh load_config):
+// ^[A-Z][A-Z0-9_]*=  then  ^"[^"$`\\]*"$  or  ^'[^']*'$  or  ^[A-Za-z0-9_.,:/+@%=-]*$.
+function confGrammarValue(line) {
+  if (/^\s*(#|$)/.test(line)) return undefined;
+  const m = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
+  if (!m) throw new Error('malformed line: ' + line);
+  const v = m[2];
+  let q;
+  if ((q = /^"([^"$`\\]*)"$/.exec(v)) || (q = /^'([^']*)'$/.exec(v))) return [m[1], q[1]];
+  if (/^[A-Za-z0-9_.,:/+@%=-]*$/.test(v)) return [m[1], v];
+  throw new Error('malformed value: ' + line);
+}
+// The same keys and values test_config.cpp (config_copy_text_parses) checks.
+const CFG_COPY = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
+  { key: 'RECEIVER_LAT', value: '38.9', source: 'conf', restart: true },
+  { key: 'RECEIVER_LON', value: '-77.0', source: 'conf', restart: true },
+  { key: 'SDR_1090_SERIAL', value: '', source: 'default', restart: true },
+  { key: 'CUE_UDP_TARGETS', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
+  { key: 'RECORD_DIR', value: '/srv/sky cue/rec', source: 'conf', restart: true },
+  { key: 'MAX_RANGE_NM', value: '20', source: 'overlay', restart: false },
+  { key: 'ALLOW_LIST_FILE', value: 'allow "main" $1.txt', source: 'conf', restart: false },
+  { key: 'BLOCK_LIST_FILE', value: "it's $HOME.txt", source: 'conf', restart: false },
+  { key: 'LOCATIONS_FILE', value: "o'hare locations.csv", source: 'conf', restart: true }] };
+test('config_text_round_trips_through_the_conf_grammar', () => {
+  const t = P.configText(CFG_COPY);
+  // test_config.cpp parses this same fixture with parseConfigText.
+  assert.strictEqual(t, fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'config-copy.conf'), 'utf8'));
+  const got = {};
+  t.split('\n').forEach((l) => { const kv = confGrammarValue(l); if (kv) got[kv[0]] = kv[1]; });
+  const want = {};
+  CFG_COPY.keys.forEach((k) => { if (k.key !== 'BLOCK_LIST_FILE') want[k.key] = k.value; });
+  assert.deepStrictEqual(got, want);   // BLOCK_LIST_FILE cannot be held: left as a comment
+  assert.ok(t.includes('# BLOCK_LIST_FILE cannot be written in skycue.conf'));
 });
 
 console.log(passed + ' passed, ' + failed + ' failed');

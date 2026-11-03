@@ -495,3 +495,28 @@ BOOST_AUTO_TEST_CASE(every_known_key_has_value_text)
     BOOST_TEST(configValueText(c, "CUE_UDP_TARGETS") == "127.0.0.1:30501 10.0.0.2:30502");
     BOOST_CHECK_THROW(configValueText(c, "NOPE"), std::invalid_argument);
 }
+
+BOOST_AUTO_TEST_CASE(config_copy_text_parses)
+{
+    // fixtures/config-copy.conf is exactly what the Config tab's "Copy as
+    // text" (app_pure.js configText) writes for these values; the node test
+    // config_text_round_trips_through_the_conf_grammar checks that. Every
+    // quoting branch reads back as the value it was written from.
+    std::ifstream in(SKYCUE_FIXTURE_DIR "/config-copy.conf", std::ios::binary);
+    BOOST_REQUIRE(in);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const Config c = parseConfigText(ss.str(), "config-copy.conf");
+    using skycued::configValueText;
+    BOOST_TEST(c.receiver_lat == 38.9);
+    BOOST_TEST(c.receiver_lon == -77.0);
+    BOOST_TEST(c.sdr_1090_serial == "");                                          // bare, empty
+    BOOST_TEST(configValueText(c, "CUE_UDP_TARGETS") == "127.0.0.1:30501 10.0.0.2:30502");  // "..."
+    BOOST_TEST(c.record_dir == "/srv/sky cue/rec");                               // "..."
+    BOOST_TEST(c.max_range_nm == 20.0);                                           // bare
+    BOOST_TEST(c.allow_list_file == "allow \"main\" $1.txt");                     // '...'
+    BOOST_TEST(c.block_list_file == "");          // could not be written: left as a comment
+    BOOST_TEST(c.locations_file == "o'hare locations.csv");                       // "..." holding '
+    BOOST_TEST((c.file_keys == std::set<std::string>{"RECEIVER_LAT", "RECEIVER_LON", "SDR_1090_SERIAL", "CUE_UDP_TARGETS",
+                                                     "RECORD_DIR", "MAX_RANGE_NM", "ALLOW_LIST_FILE", "LOCATIONS_FILE"}));
+}

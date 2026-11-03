@@ -301,21 +301,34 @@
     return out;
   }
 
-  // A value as skycue.conf spells it: bare when every character is one of
-  // the grammar's unquoted ones, else quoted (conf_rewrite.cpp quoteValue).
+  // A value as skycue.conf spells it, the same rules as conf_rewrite.cpp
+  // quoteValue: bare when every character is one of the grammar's unquoted
+  // ones, else "..." when it has none of " $ ` \, else '...' when it has no
+  // '; null when the grammar cannot hold it (both kinds, or a line break).
   function confValue(v) {
-    if (/^[A-Za-z0-9_.,:/+@%=-]+$/.test(v)) return v;
-    return /["$`\\]/.test(v) ? "'" + v + "'" : '"' + v + '"';
+    if (/[\r\n]/.test(v)) return null;
+    if (/^[A-Za-z0-9_.,:/+@%=-]*$/.test(v)) return v;
+    if (!/["$`\\]/.test(v)) return '"' + v + '"';
+    if (v.indexOf("'") < 0) return "'" + v + "'";
+    return null;
   }
 
-  // The whole configuration as skycue.conf text, each key commented with
-  // its source and whether it needs a restart (the Config tab's copy).
+  // The whole configuration as skycue.conf text (the Config tab's copy):
+  // a `# <group>` line before each group, and before each key a comment
+  // with its source and whether it needs a restart, so every line is one
+  // parseConfigText and skycue-start.sh accept. A value the grammar cannot
+  // hold is left as a comment saying so.
   function configText(cfg) {
     var d = cfg.daemon || {}, out = '# ' + d.version + ', started ' + d.started + '\n';
     groupConfig(cfg.keys || []).forEach(function (g) {
       out += '# ' + g.group + '\n';
       g.rows.forEach(function (r) {
-        out += r.key + '=' + confValue(String(r.value)) + '  # ' + r.source + (r.restart ? ', restart' : '') + '\n';
+        var v = String(r.value), q = confValue(v);
+        out += '# ' + r.key + ': ' + r.source + (r.restart ? ', restart' : '') + '\n';
+        out += q === null
+          ? '# ' + r.key + ' cannot be written in skycue.conf (it holds both \' and one of " $ ` \\, or a line break): ' +
+            v.replace(/[\r\n]+/g, ' ') + '\n'
+          : r.key + '=' + q + '\n';
       });
     });
     return out;
@@ -959,7 +972,7 @@
     dropRemovesMarker: dropRemovesMarker,
     CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
     filterHistoryRows: filterHistoryRows,
-    CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText,
+    CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText, confValue: confValue,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,

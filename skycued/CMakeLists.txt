@@ -42,6 +42,7 @@ add_library(skycued_core STATIC
   src/inputs/input_manager.cpp
   src/inputs/inputs_file.cpp
   src/inputs/ping_cat021_input.cpp
+  src/inputs/ping_encode.cpp
   src/inputs/ping_json.cpp
   src/inputs/ping_json_input.cpp
   src/inputs/source_input.cpp

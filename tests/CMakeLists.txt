@@ -158,6 +158,13 @@ add_test(NAME dump
     $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-dump> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(dump PROPERTIES TIMEOUT 60)
 
+# skycue-pingsim into a skycued with a CAT021 UDP input, then skycue-dump --capture.
+add_test(NAME pingsim
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pingsim.sh
+    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-pingsim> $<TARGET_FILE:skycue-dump>
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(pingsim PROPERTIES TIMEOUT 90)
+
 add_executable(test_stats test_stats.cpp)
 target_link_libraries(test_stats PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_stats PRIVATE BOOST_TEST_DYN_LINK)

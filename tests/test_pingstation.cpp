@@ -6,8 +6,10 @@
 #include "inputs/cat021_map.hpp"
 #include "inputs/device_time.hpp"
 #include "inputs/input_types.hpp"
+#include "inputs/ping_encode.hpp"
 #include "inputs/ping_json.hpp"
 #include "json_lite.hpp"
+#include "recording_reader.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -968,4 +970,227 @@ BOOST_AUTO_TEST_CASE(input_counters_add)
     BOOST_TEST(a.clock_rejects == 1u);
     BOOST_TEST(a.status_fail == 4u);
     BOOST_TEST(a.raw_unknown_len == 5u);
+}
+
+// ---- encoders (skycue-pingsim) ----
+
+namespace {
+
+// Observations in the style of engine_test_support's nearbyObservation, with
+// every field the pingStation forms carry.
+TrackObservation fullObservation()
+{
+    TrackObservation o;
+    o.id = skycue::TrackId{0xA1B2C3, AddressType::icao};
+    o.source = Source::adsb_1090;
+    o.lat = 38.95;
+    o.lon = -77.0;
+    o.alt_baro_ft = 5000;
+    o.alt_geom_ft = 5150;
+    o.gs_kt = 200.5f;
+    o.track_deg = 90.25f;
+    o.baro_rate_fpm = -640.0f;
+    o.callsign = "UAL123";
+    o.squawk = "1200";
+    o.emergency = "minfuel";
+    o.category = "A3";
+    o.nic = 8;
+    o.nac_p = 9;
+    o.on_ground = false;
+    return o;
+}
+
+TrackObservation groundUatObservation()
+{
+    TrackObservation o;
+    o.id = skycue::TrackId{0x00ABCD, AddressType::non_icao};
+    o.source = Source::uat_978;
+    o.lat = -33.5;
+    o.lon = 151.125;
+    o.alt_geom_ft = 120;
+    o.gs_kt = 12.25f;
+    o.track_deg = 359.5f;
+    o.geom_rate_fpm = 320.5f;
+    o.callsign = "N12";
+    o.squawk = "7700";
+    o.emergency = "general";
+    o.category = "C1";
+    o.nic = 10;
+    o.nac_p = 11;
+    o.on_ground = true;
+    return o;
+}
+
+TrackObservation bareObservation()
+{
+    TrackObservation o;
+    o.id = skycue::TrackId{0x123456, AddressType::icao};
+    o.source = Source::tisb;
+    return o;
+}
+
+const TP kEncStamp = utc(2026, 11, 2, 12, 0, 0, 250000000);
+
+TrackObservation viaJson(const TrackObservation& in)
+{
+    const std::string text = pingJsonFromObservation(in, kEncStamp);
+    const auto r = parsePingDatagram(text, PingContext{kEncStamp, TimeMode::utc});
+    BOOST_TEST_INFO("datagram " << text);
+    BOOST_REQUIRE_EQUAL(r.rejected, 0u);
+    BOOST_REQUIRE_EQUAL(r.clock_rejects, 0u);
+    BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
+    return r.observations[0];
+}
+
+TrackObservation viaCat021(const TrackObservation& in, uint8_t sac = 0, uint8_t sic = 0)
+{
+    const auto blk = encodeBlock({cat021FromObservation(in, sac, sic, kEncStamp)});
+    const auto d = decodeBlock(blk.data(), blk.size(), Edition::e2_5);
+    BOOST_REQUIRE(!d.error);
+    BOOST_REQUIRE_EQUAL(d.records.size(), 1u);
+    BOOST_TEST(d.records[0].sac.value_or(255) == sac);
+    BOOST_TEST(d.records[0].sic.value_or(255) == sic);
+    Cat021Counts counts;
+    auto o = mapCat021Record(d.records[0], Cat021Context{kEncStamp, TimeMode::utc, sac, sic}, counts);
+    BOOST_REQUIRE(o);
+    BOOST_TEST(counts.clock_rejects == 0u);
+    BOOST_TEST(counts.sac_sic_mismatch == 0u);
+    return *o;
+}
+
+template <class T> double val(const std::optional<T>& v) { return v ? static_cast<double>(*v) : -1e9; }
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(ping_json_encode_round_trip)
+{
+    for (const auto& in : {fullObservation(), groundUatObservation()}) {
+        const TrackObservation o = viaJson(in);
+        BOOST_TEST(o.id.address == in.id.address);
+        BOOST_TEST((o.id.type == in.id.type));
+        BOOST_TEST((o.source == in.source));
+        BOOST_TEST(std::fabs(val(o.lat) - *in.lat) <= 0.01);
+        BOOST_TEST(std::fabs(val(o.lon) - *in.lon) <= 0.01);
+        BOOST_TEST((o.position_time == std::optional<TP>(kEncStamp)));
+        BOOST_TEST(o.alt_baro_ft.has_value() == in.alt_baro_ft.has_value());
+        BOOST_TEST(std::fabs(val(o.alt_baro_ft) - val(in.alt_baro_ft)) <= 1);
+        BOOST_TEST(std::fabs(val(o.alt_geom_ft) - val(in.alt_geom_ft)) <= 1);
+        BOOST_TEST(std::fabs(val(o.gs_kt) - val(in.gs_kt)) <= 0.01);
+        BOOST_TEST(std::fabs(val(o.track_deg) - val(in.track_deg)) <= 0.01);
+        BOOST_TEST(o.baro_rate_fpm.has_value() == in.baro_rate_fpm.has_value());
+        BOOST_TEST(o.geom_rate_fpm.has_value() == in.geom_rate_fpm.has_value());
+        BOOST_TEST(std::fabs(val(o.baro_rate_fpm) - val(in.baro_rate_fpm)) <= 0.5);
+        BOOST_TEST(std::fabs(val(o.geom_rate_fpm) - val(in.geom_rate_fpm)) <= 0.5);
+        BOOST_TEST(o.callsign.value_or("-") == *in.callsign);
+        BOOST_TEST(o.squawk.value_or("-") == *in.squawk);
+        BOOST_TEST(o.emergency.value_or("-") == *in.emergency);
+        BOOST_TEST(o.category.value_or("-") == *in.category);
+        BOOST_TEST(val(o.nic) == val(in.nic));
+        BOOST_TEST(val(o.nac_p) == val(in.nac_p));
+        BOOST_TEST((o.on_ground == in.on_ground));
+    }
+    // Nothing but the address: no position, no detail, on_ground stays unset.
+    const std::string text = pingJsonFromObservation(bareObservation(), kEncStamp);
+    BOOST_TEST(text.find("airGroundState") == std::string::npos, text);
+    BOOST_TEST(text.find(R"("utcSync":1)") != std::string::npos, text);
+    BOOST_TEST(text.find(R"("timeStamp":"2026-11-02T12:00:00.250Z")") != std::string::npos, text);
+    const TrackObservation bare = viaJson(bareObservation());
+    BOOST_TEST(bare.id.address == 0x123456u);
+    BOOST_TEST((bare.source == Source::tisb));
+    BOOST_TEST((bare.id.type == AddressType::icao));
+    BOOST_TEST(!bare.lat);
+    BOOST_TEST(!bare.on_ground);
+    BOOST_TEST(!bare.alt_baro_ft);
+    BOOST_TEST(!bare.category);
+    // A callsign that needs escaping stays one JSON string.
+    TrackObservation quoted = bareObservation();
+    quoted.callsign = R"(A"B\C)";
+    BOOST_TEST(viaJson(quoted).callsign.value_or("") == R"(A"B\C)");
+
+    // pingsim's status message.
+    const auto st = parsePingDatagram(pingStatusJson(38.9, -77.25, kEncStamp), PingContext{kEncStamp, TimeMode::utc});
+    BOOST_TEST(st.rejected == 0u);
+    BOOST_REQUIRE(st.status);
+    BOOST_TEST(st.status->guid == "0000000000000001");
+    BOOST_TEST(st.status->version == "1.0.0");
+    BOOST_TEST(st.status->gps_status.value_or(-1) == 3);
+    BOOST_TEST(st.status->receiver_status.value_or(-1) == 0);
+    BOOST_TEST(st.status->lat.value_or(0) == 38.9);
+    BOOST_TEST(st.status->lon.value_or(0) == -77.25);
+    BOOST_TEST((st.status->device_time == std::optional<TP>(kEncStamp)));
+}
+
+BOOST_AUTO_TEST_CASE(cat021_encode_round_trip_through_map)
+{
+    for (const auto& in : {fullObservation(), groundUatObservation()}) {
+        const TrackObservation o = viaCat021(in, 7, 9);
+        BOOST_TEST(o.id.address == in.id.address);
+        BOOST_TEST((o.id.type == in.id.type));
+        BOOST_TEST((o.source == in.source));  // adsb_1090 and uat_978 kept
+        BOOST_TEST(std::fabs(val(o.lat) - *in.lat) <= 1e-6);
+        BOOST_TEST(std::fabs(val(o.lon) - *in.lon) <= 1e-6);
+        BOOST_TEST(std::fabs(secondsBetween(o.position_time.value_or(TP{}), kEncStamp)) <= 1.0 / 128);
+        if (in.on_ground == std::optional<bool>(true))
+            BOOST_TEST(!o.alt_baro_ft);  // 145 left out on the ground
+        else
+            BOOST_TEST(std::fabs(val(o.alt_baro_ft) - val(in.alt_baro_ft)) <= 25);
+        BOOST_TEST(std::fabs(val(o.alt_geom_ft) - val(in.alt_geom_ft)) <= 6.25);
+        BOOST_TEST(std::fabs(val(o.gs_kt) - val(in.gs_kt)) <= 0.25);
+        BOOST_TEST(std::fabs(val(o.track_deg) - val(in.track_deg)) <= 0.01);
+        BOOST_TEST(o.baro_rate_fpm.has_value() == in.baro_rate_fpm.has_value());
+        BOOST_TEST(o.geom_rate_fpm.has_value() == in.geom_rate_fpm.has_value());
+        BOOST_TEST(std::fabs(val(o.baro_rate_fpm) - val(in.baro_rate_fpm)) <= 6.25);
+        BOOST_TEST(std::fabs(val(o.geom_rate_fpm) - val(in.geom_rate_fpm)) <= 6.25);
+        BOOST_TEST(o.callsign.value_or("-") == *in.callsign);
+        BOOST_TEST(o.squawk.value_or("-") == *in.squawk);
+        BOOST_TEST(o.emergency.value_or("-") == *in.emergency);
+        BOOST_TEST(o.category.value_or("-") == *in.category);
+        BOOST_TEST(val(o.nic) == val(in.nic));
+        BOOST_TEST(val(o.nac_p) == val(in.nac_p));
+        BOOST_TEST((o.on_ground == in.on_ground));
+    }
+    // No on_ground: 040 has no ext 1, so the mapping leaves it unset.
+    TrackObservation unknown = fullObservation();
+    unknown.on_ground.reset();
+    BOOST_TEST(!viaCat021(unknown).on_ground);
+
+    for (const char* cat : {"A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", "B6", "B7", "C1",
+                            "C2", "C3", "C4", "C5"}) {
+        TrackObservation in = fullObservation();
+        in.category = cat;
+        BOOST_TEST(viaCat021(in).category.value_or("-") == cat);
+    }
+    for (const char* cat : {"A0", "B0", "B5", "C0", "C6", "C7", "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7"}) {
+        TrackObservation in = fullObservation();
+        in.category = cat;
+        const Cat021Record r = cat021FromObservation(in, 0, 0, kEncStamp);
+        BOOST_TEST(!r.ecat, cat);
+        BOOST_TEST(!viaCat021(in).category, cat);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(encoders_on_readsb_fixture)
+{
+    std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/readsb-sample.jsonl");
+    BOOST_REQUIRE(in);
+    std::size_t n = 0;
+    for (std::string line; std::getline(in, line);) {
+        RecordingRecord rec;
+        BOOST_REQUIRE((parseRecordingLine(line, rec) == LineKind::readsb_raw));
+        ++n;
+        BOOST_TEST_INFO("line " << n);
+        BOOST_CHECK_NO_THROW({
+            const auto r = parsePingDatagram(pingJsonFromObservation(rec.obs, kEncStamp),
+                                             PingContext{kEncStamp, TimeMode::utc});
+            BOOST_TEST(r.rejected == 0u);
+            BOOST_TEST(r.observations.size() == 1u);
+        });
+        BOOST_CHECK_NO_THROW({
+            const auto blk = encodeBlock({cat021FromObservation(rec.obs, 0, 0, kEncStamp)});
+            const auto d = decodeBlock(blk.data(), blk.size(), Edition::e2_5);
+            BOOST_TEST(!d.error);
+            BOOST_TEST(d.records.size() == 1u);
+        });
+    }
+    BOOST_TEST(n == 1394u);
 }

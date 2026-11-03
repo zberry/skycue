@@ -1,6 +1,8 @@
 // skycue-dump: connects to a skycue stream (TCP or UDP) and prints one line
-// per frame, as text or as JSON. A pure libskycue consumer: everything it
-// shows comes through skycue::Client, so it links nothing from skycued.
+// per frame, as text or as JSON. For the stream it is a pure libskycue
+// consumer: everything it shows comes through skycue::Client. --capture
+// instead prints a pingStation capture file, decoding CAT021 with
+// skycued_asterix (the only part of skycued it links).
 //
 // Frame lines (HELLO, UPDATE, DROP, HB, BAD) show exactly what arrived on the
 // wire: they are decoded here from Client::onFrame, never from the track
@@ -11,6 +13,10 @@
 #include <skycue/client.hpp>
 #include <skycue/protocol.hpp>
 #include <skycue/types.hpp>
+
+#include "asterix/capture_line.hpp"
+#include "asterix/cat021.hpp"
+#include "time_util.hpp"
 
 #include <boost/program_options.hpp>
 
@@ -23,6 +29,7 @@
 #include <cstdio>
 #include <ctime>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -237,19 +244,107 @@ bool parseEndpoint(const std::string& s, std::string& host, uint16_t& port)
     return true;
 }
 
+// "  CAT021 sac=0 sic=0 addr=A6452D lat=39.93328 lon=-88.38120 fl=390.25
+// squawk=2001 ident=ATN3597 gnd=-": the fields present, in this order; gnd
+// (Y or -) only when 040 has its first extension.
+std::string cat021Line(const skycued::asterix::Cat021Record& r)
+{
+    using namespace skycued::asterix;
+    std::string s = "  CAT021";
+    if (r.sac)
+        s += " sac=" + std::to_string(*r.sac);
+    if (r.sic)
+        s += " sic=" + std::to_string(*r.sic);
+    if (r.address)
+        s += " addr=" + hex(*r.address);
+    if (r.lat131 && r.lon131)
+        s += " lat=" + num(*r.lat131 * kLsb131Deg, "%.5f") + " lon=" + num(*r.lon131 * kLsb131Deg, "%.5f");
+    else if (r.lat130 && r.lon130)
+        s += " lat=" + num(*r.lat130 * kLsb130Deg, "%.5f") + " lon=" + num(*r.lon130 * kLsb130Deg, "%.5f");
+    if (r.fl145)
+        s += " fl=" + num(*r.fl145 * kFt145 / 100.0, "%.2f");
+    if (r.mode3a) {
+        char buf[8];
+        std::snprintf(buf, sizeof buf, "%04o", static_cast<unsigned>(*r.mode3a & 07777));
+        s += " squawk=" + std::string(buf);
+    }
+    if (r.ident) {
+        const auto first = r.ident->find_first_not_of(' ');
+        if (first != std::string::npos)
+            s += " ident=" + textWord(r.ident->substr(first, r.ident->find_last_not_of(' ') - first + 1));
+    }
+    if (r.trd && r.trd->has_ext1)
+        s += r.trd->gbs ? " gnd=Y" : " gnd=-";
+    return s + "\n";
+}
+
+// --capture: one "<t> <input> <transport> <n> bytes" line per record, then
+// its text (a JSON datagram) or one line per CAT021 record. Lines that are
+// not capture records are reported on stderr and skipped.
+int dumpCapture(const std::string& path, skycued::asterix::Edition edition)
+{
+    using namespace skycued::asterix;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "skycue-dump: cannot open " << path << "\n";
+        return 1;
+    }
+    unsigned long n = 0;
+    std::string out;
+    for (std::string text; std::getline(in, text);) {
+        ++n;
+        if (text.empty() || text == "\r")
+            continue;
+        const auto line = skycued::parseCaptureLine(text);
+        if (!line) {
+            std::cerr << "skycue-dump: " << path << ":" << n << ": not a capture record\n";
+            continue;
+        }
+        const auto& b = line->bytes;
+        out = skycued::formatIso8601Ms(line->t) + " " + textWord(line->input) + " " + line->transport + " " +
+              std::to_string(b.size()) + " bytes\n";
+        if (!b.empty() && b[0] == '{') {
+            std::string body(b.begin(), b.end());
+            while (!body.empty() && (body.back() == '\n' || body.back() == '\r'))
+                body.pop_back();
+            out += "  " + body + "\n";
+        } else {
+            const BlockSplit split = splitBlocks(b.data(), b.size());
+            for (const auto& blk : split.blocks) {
+                if (blk.cat != 21) {
+                    out += "  BAD category " + std::to_string(blk.cat) + " block\n";
+                    continue;
+                }
+                const DecodedBlock d = decodeBlock(b.data() + blk.offset, blk.size, edition);
+                for (const auto& r : d.records)
+                    out += cat021Line(r);
+                if (d.error)
+                    out += "  BAD " + d.error_text + "\n";
+            }
+            if (split.truncated)
+                out += "  BAD truncated block\n";
+        }
+        std::fwrite(out.data(), 1, out.size(), stdout);
+    }
+    std::fflush(stdout);
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
-    std::string tcp_ep, udp_ep, listen_ep;
+    std::string tcp_ep, udp_ep, listen_ep, capture_path, edition_text = "2.5";
     unsigned long count = 0;
     double timeout_s = 0;
     po::options_description desc("usage: skycue-dump [--tcp HOST:PORT | --tcp-listen BIND:PORT | --udp BIND:PORT]\n"
                                  "                   [--json] [--count N] [--timeout S]\n"
+                                 "       skycue-dump --capture FILE [--edition 2.5]\n"
                                  "Prints a skycue stream one line per wire frame: HELLO, UPDATE, DROP, HB, or\n"
                                  "BAD <type> <len> for a frame that does not decode. Event lines CONN up|down and\n"
                                  "LOCAL-DROP <HEX> <reason> (a drop the client made up: stale, source_lost) are\n"
-                                 "printed too but are not frames and do not count towards --count");
+                                 "printed too but are not frames and do not count towards --count. --capture\n"
+                                 "prints a pingStation capture file one record at a time, CAT021 decoded");
     desc.add_options()("help,h", "show this help")(
         "tcp", po::value(&tcp_ep), "connect to a skycued TCP port (default 127.0.0.1:30500)")(
         "tcp-listen", po::value(&listen_ep), "listen on a TCP port for skycued to connect (CUE_TCP_CONNECT); "
@@ -257,7 +352,9 @@ int main(int argc, char** argv)
         "udp", po::value(&udp_ep), "bind a UDP port and print the datagrams sent to it")(
         "json", "one JSON object per line instead of text")(
         "count", po::value(&count), "exit 0 after N frame lines (heartbeats and BAD count; CONN and LOCAL-DROP do not)")(
-        "timeout", po::value(&timeout_s), "exit after S seconds (at most 1e6): 0 if any frame arrived, else 3");
+        "timeout", po::value(&timeout_s), "exit after S seconds (at most 1e6): 0 if any frame arrived, else 3")(
+        "capture", po::value(&capture_path), "print the capture file FILE (capture-<id>-*.jsonl) and exit")(
+        "edition", po::value(&edition_text), "with --capture: the CAT021 edition, 2.2-2.7 (default 2.5)");
     // Numbers are printed with snprintf, whose decimal point follows
     // LC_NUMERIC; pin it so the JSON stays valid whatever setlocale callers do.
     std::setlocale(LC_NUMERIC, "C");
@@ -272,6 +369,24 @@ int main(int argc, char** argv)
     if (vm.count("help")) {
         std::cout << desc << "\n";
         return 0;
+    }
+    if (vm.count("capture")) {
+        if (vm.count("tcp") + vm.count("tcp-listen") + vm.count("udp") + vm.count("json") + vm.count("count") +
+                vm.count("timeout") >
+            0) {
+            std::cerr << "skycue-dump: --capture excludes --tcp, --tcp-listen, --udp, --json, --count and --timeout\n";
+            return 2;
+        }
+        const auto edition = skycued::asterix::parseEdition(edition_text);
+        if (!edition) {
+            std::cerr << "skycue-dump: --edition must be 2.2-2.7, got '" << edition_text << "'\n";
+            return 2;
+        }
+        return dumpCapture(capture_path, *edition);
+    }
+    if (vm.count("edition")) {
+        std::cerr << "skycue-dump: --edition needs --capture\n";
+        return 2;
     }
     if (vm.count("tcp") + vm.count("tcp-listen") + vm.count("udp") > 1) {
         std::cerr << "skycue-dump: --tcp, --tcp-listen and --udp are mutually exclusive\n";

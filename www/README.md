@@ -28,7 +28,7 @@ through npm). It is not committed: the page loads it from
   `SKYCUE_LEAFLET_DIR` the page has no map library and the tests that need
   it say SKIP.
 
-`vendor/` and `tiles/` in this directory are git-ignored, for local use
+`vendor/`, `tiles/` and `overlays/` (scripts/make-overlays.sh) in this directory are git-ignored, for local use
 only; the build never copies them.
 
 ## Map tiles

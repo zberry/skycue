@@ -6,11 +6,55 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <stdexcept>
 #include <utility>
 
 namespace skycued {
+
+namespace {
+
+using Duration = std::chrono::system_clock::duration;
+using Rep = Duration::rep;
+
+Duration saturate(bool overflowed, Rep value, bool negative)
+{
+    if (!overflowed)
+        return Duration(value);
+    return negative ? Duration::min() : Duration::max();
+}
+
+// a + b and a * n, saturated: loop mode adds a shift of up to the whole
+// recording's span per pass, so neither may wrap.
+Duration satAdd(Duration a, Duration b)
+{
+    Rep r = 0;
+    const bool over = __builtin_add_overflow(a.count(), b.count(), &r);
+    return saturate(over, r, b.count() < 0);
+}
+
+Duration satMul(Duration a, uint64_t n)
+{
+    Rep r = 0;
+    const bool over = n > static_cast<uint64_t>(INT64_MAX) ||
+                      __builtin_mul_overflow(a.count(), static_cast<Rep>(n), &r);
+    return saturate(over, over ? 0 : r, a.count() < 0);
+}
+
+std::chrono::system_clock::time_point shifted(std::chrono::system_clock::time_point t, Duration shift)
+{
+    return std::chrono::system_clock::time_point(satAdd(t.time_since_epoch(), shift));
+}
+
+}  // namespace
+
+Duration replayOffset(std::chrono::system_clock::time_point t, std::chrono::system_clock::time_point first)
+{
+    Rep r = 0;
+    const bool over = __builtin_sub_overflow(t.time_since_epoch().count(), first.time_since_epoch().count(), &r);
+    return saturate(over, r, t < first);
+}
 
 std::chrono::steady_clock::duration replayDelay(std::chrono::system_clock::duration offset, double speed)
 {
@@ -60,7 +104,7 @@ ReplaySource::ReplaySource(boost::asio::io_context& io, std::string path, double
     if (!records_.empty()) {
         std::vector<std::chrono::system_clock::duration> gaps;
         for (std::size_t i = 1; i < records_.size(); ++i)
-            gaps.push_back(records_[i].time - records_[i - 1].time);
+            gaps.push_back(replayOffset(records_[i].time, records_[i - 1].time));
         std::chrono::system_clock::duration median{};
         if (!gaps.empty()) {
             std::nth_element(gaps.begin(), gaps.begin() + static_cast<std::ptrdiff_t>(gaps.size() / 2), gaps.end());
@@ -70,8 +114,8 @@ ReplaySource::ReplaySource(boost::asio::io_context& io, std::string path, double
         // max - min, not back - front: a hand-edited file need not be in order.
         const auto by_time = [](const RecordingRecord& a, const RecordingRecord& b) { return a.time < b.time; };
         const auto range = std::minmax_element(records_.begin(), records_.end(), by_time);
-        const auto span = range.second->time - range.first->time;
-        loop_shift_ = span + std::max(median, min_gap);
+        const auto span = replayOffset(range.second->time, range.first->time);
+        loop_shift_ = satAdd(span, std::max(median, min_gap));
     }
 }
 
@@ -134,7 +178,7 @@ void ReplaySource::scheduleNext()
     }
     // Absolute schedule from start_, so per-record delays never accumulate.
     const auto offset =
-        (records_[next_].time - records_.front().time) + loop_shift_ * static_cast<int64_t>(pass_);
+        satAdd(replayOffset(records_[next_].time, records_.front().time), satMul(loop_shift_, pass_));
     timer_.expires_at(start_ + replayDelay(offset, speed_));
     timer_.async_wait([this, alive](const boost::system::error_code& ec) {
         if (!ec && !alive.expired())
@@ -148,16 +192,16 @@ void ReplaySource::emitNext()
     std::weak_ptr<char> alive = alive_;
     if (record.kind == RecordKind::uat_uplink) {
         if (on_uplink_)
-            on_uplink_(record.time + loop_shift_ * static_cast<int64_t>(pass_), record.uplink_hex);
+            on_uplink_(shifted(record.time, satMul(loop_shift_, pass_)), record.uplink_hex);
     } else if (on_observation_) {
         if (pass_ == 0) {
             on_observation_(record.obs);
         } else {
-            const auto shift = loop_shift_ * static_cast<int64_t>(pass_);
+            const auto shift = satMul(loop_shift_, pass_);
             TrackObservation obs = record.obs;
-            obs.received_time += shift;
+            obs.received_time = shifted(obs.received_time, shift);
             if (obs.position_time)
-                *obs.position_time += shift;
+                *obs.position_time = shifted(*obs.position_time, shift);
             on_observation_(obs);
         }
     }

@@ -32,7 +32,7 @@ void recordingLine(const std::string& line)
 
     // A replay whose first record is at 2026-11-02T00:00:00Z.
     const std::chrono::system_clock::time_point start{std::chrono::seconds(1793577600)};
-    const auto offset = rec.time - start;
+    const auto offset = skycued::replayOffset(rec.time, start);
     const auto max = std::chrono::duration<double>(skycued::kMaxReplayDelaySeconds);
     for (double speed : {1e-6, 0.5, 1.0, 64.0, 1e6}) {
         const auto d = skycued::replayDelay(offset, speed);

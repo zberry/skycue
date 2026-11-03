@@ -43,6 +43,13 @@ namespace skycued {
 constexpr double kMaxReplayDelaySeconds = 1e9;
 std::chrono::steady_clock::duration replayDelay(std::chrono::system_clock::duration offset, double speed);
 
+// t - first, saturated to system_clock::duration's range: a recording may
+// hold any time the nanosecond clock can (1677 to 2262), and the difference
+// of two such times can exceed an int64 count of nanoseconds. Pure;
+// ReplaySource takes every offset and gap with it.
+std::chrono::system_clock::duration replayOffset(std::chrono::system_clock::time_point t,
+                                                 std::chrono::system_clock::time_point first);
+
 class ReplaySource {
 public:
     // speed: 1.0 = real time; N = N times faster; 0 = no pacing (every

@@ -759,6 +759,66 @@ BOOST_AUTO_TEST_CASE(fuzz_recording_replay_delay_overflow)
     BOOST_TEST((replayDelay(0s, 1.0) == steady::duration::zero()));
 }
 
+// Found in review of fuzz_recording: a recording may hold a 1677 and a 2026
+// record (both inside the nanosecond clock's range), but their difference,
+// about 349 years, is not: ReplaySource's offsets, gaps, span and loop shifts
+// and the harness's offset were plain int64 subtractions that overflowed
+// (undefined behaviour; the offset wrapped negative, so the 2026 record
+// played at once). They saturate now.
+BOOST_AUTO_TEST_CASE(replay_offset_saturates_across_the_clock_range)
+{
+    using skycued::parseIso8601Ms;
+    using skycued::replayOffset;
+    const auto old_t = parseIso8601Ms("1677-09-22T00:00:00.000Z");
+    const auto new_t = parseIso8601Ms("2026-11-02T00:00:00.000Z");
+    BOOST_REQUIRE(old_t);
+    BOOST_REQUIRE(new_t);
+    BOOST_TEST((replayOffset(*new_t, *old_t) == sys_clock::duration::max()));
+    BOOST_TEST((replayOffset(*old_t, *new_t) == sys_clock::duration::min()));
+    BOOST_TEST((replayOffset(*new_t, *new_t - 2s) == sys_clock::duration(2s)));
+    BOOST_TEST((replayOffset(*new_t - 2s, *new_t) == sys_clock::duration(-2s)));
+
+    TempDir tmp;
+    const std::string path = tmp.path + "/span.jsonl";
+    {
+        std::ofstream out(path);
+        out << "{\"time\":\"1677-09-22T00:00:00.000Z\",\"type\":\"obs\",\"hex\":\"123456\"}\n"
+            << "{\"time\":\"2026-11-02T00:00:00.000Z\",\"type\":\"obs\",\"hex\":\"abcdef\"}\n";
+    }
+    // At 1e12 times real time the saturated offset (about 9.2e9 s) is a
+    // 9.2 ms wait; the wrapped one was negative, a wait of 0.
+    {
+        boost::asio::io_context io;
+        ReplaySource replay(io, path, 1e12);
+        BOOST_REQUIRE(replay.recordCount() == 2u);
+        std::vector<steady::time_point> at;
+        replay.onObservation([&](const TrackObservation&) { at.push_back(steady::now()); });
+        replay.start();
+        io.run();
+        BOOST_REQUIRE(at.size() == 2u);
+        BOOST_TEST((at[1] - at[0] >= 5ms));
+        BOOST_TEST((at[1] - at[0] < 2s));
+    }
+    // Loop mode: the second pass's shift saturates too, so its 2026 record
+    // is stamped at the clock's end instead of a wrapped time.
+    {
+        boost::asio::io_context io;
+        ReplaySource replay(io, path, 1e12, true);
+        std::vector<sys_clock::time_point> got;
+        replay.onObservation([&](const TrackObservation& o) {
+            got.push_back(o.received_time);
+            if (got.size() == 4u)
+                io.stop();
+        });
+        replay.start();
+        io.run();
+        BOOST_REQUIRE(got.size() == 4u);
+        BOOST_TEST((got[0] == *old_t));
+        BOOST_TEST((got[1] == *new_t));
+        BOOST_TEST((got[3] == sys_clock::time_point::max()));
+    }
+}
+
 BOOST_AUTO_TEST_CASE(replay_default_speed_is_realtime)
 {
     TempDir tmp;

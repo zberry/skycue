@@ -209,6 +209,23 @@ struct WsClient {
         }
     }
 
+    // Sends one short masked text frame by writing it to the socket itself.
+    // The websocket stream is not safe for a write on this thread while the
+    // reader thread is inside ws.read() (TSan saw them race on its state);
+    // the socket is.
+    void sendText(const std::string& text)
+    {
+        BOOST_REQUIRE(text.size() < 126);
+        const uint8_t mask[4] = {0x12, 0x34, 0x56, 0x78};
+        std::string frame;
+        frame += static_cast<char>(0x81);  // FIN, text
+        frame += static_cast<char>(0x80 | text.size());
+        frame.append(reinterpret_cast<const char*>(mask), 4);
+        for (std::size_t i = 0; i < text.size(); ++i)
+            frame += static_cast<char>(static_cast<uint8_t>(text[i]) ^ mask[i % 4]);
+        asio::write(ws.next_layer(), asio::buffer(frame));
+    }
+
     template <class Pred> bool waitFor(Pred p, std::chrono::milliseconds timeout = kWait)
     {
         std::unique_lock<std::mutex> lk(m);
@@ -810,7 +827,7 @@ BOOST_AUTO_TEST_CASE(ws_snapshot_then_events)
         BOOST_TEST(!c.waitForMessage({"\"type\":\"lists\"", "\"block\":[\"abc001\"]"}).empty());
 
         // Text from the client is ignored.
-        c.ws.write(asio::buffer(std::string("hello")));
+        c.sendText("hello");
         std::this_thread::sleep_for(100ms);
         BOOST_TEST(f.webClients() == 1u);
         std::lock_guard<std::mutex> lk(c.m);

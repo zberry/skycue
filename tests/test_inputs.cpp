@@ -742,9 +742,11 @@ BOOST_AUTO_TEST_CASE(edit_while_receiving_rebinds_same_port)
     const uint16_t port = freeUdpPort();
     m.on([&](InputManager& im) { return im.create(psJson("ps", port)); });
     std::atomic<bool> stop{false};
+    // Read on this thread: fixture() asserts, and Boost.Test assertions are
+    // not thread-safe (TSan saw the sender race the main thread on them).
+    const std::string text = fixture("icd-traffic-1090.json");
     std::thread sender([&] {
         UdpSender tx;
-        const std::string text = fixture("icd-traffic-1090.json");
         while (!stop) {
             tx.send(port, text);
             std::this_thread::sleep_for(1ms);

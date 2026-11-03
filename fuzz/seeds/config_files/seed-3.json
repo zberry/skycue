@@ -1,0 +1,1 @@
+1{"version":1,"inputs":[{"id":"ps-north","type":"pingstation_cat021","transport":"udp","port":4001},{"id":"ps-south","type":"pingstation_cat021","transport":"tcp_connect","host":"192.0.2.10","port":4002},{"id":"rb2","type":"readsb","host":"192.0.2.1","port":30047}],"builtin":{"readsb":{"enabled":true},"dump978":{"enabled":false}}}

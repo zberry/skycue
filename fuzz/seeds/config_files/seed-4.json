@@ -1,0 +1,1 @@
+2{"version":1,"filters":{"max_range_nm":42,"min_elevation_deg":1.5},"lists":{"allow":{"add":["N123AB"],"remove":["B1B1B1"]},"block":{"add":["c0ffee"]}}}

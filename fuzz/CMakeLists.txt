@@ -12,6 +12,8 @@ skycue_add_fuzzer(web SOURCES fuzz_web.cpp)
 # The one harness with a socket: a real WebServer on an ephemeral loopback
 # port in its own process (fuzz_ws.cpp).
 skycue_add_fuzzer(ws SOURCES fuzz_ws.cpp LIBS Threads::Threads)
+skycue_add_fuzzer(pingstation SOURCES fuzz_pingstation.cpp)
+skycue_add_fuzzer(config_files SOURCES fuzz_config_files.cpp)
 
 # The harness names, one per line, for scripts/run-fuzz.sh --bin-dir.
 get_property(_skycue_fuzz_names GLOBAL PROPERTY SKYCUE_FUZZ_TARGETS)

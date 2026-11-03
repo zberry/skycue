@@ -1,0 +1,5 @@
+5# allow list
+a1b2c3
+N123AB
+G-ABCD
+b1b1b1

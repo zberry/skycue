@@ -1217,3 +1217,33 @@ BOOST_AUTO_TEST_CASE(filters_history_route)
     BOOST_TEST(p.status == 405u);
     BOOST_TEST(p.allow == "GET");
 }
+
+BOOST_AUTO_TEST_CASE(cues_clients_route)
+{
+    WebFx f;
+    std::atomic<bool> hello{false};
+    skycue::Client client(clientConfig(f.fx->port()));
+    client.onFrame([&](const skycue::Frame& fr) {
+        if (fr.type == skycue::FrameType::hello)
+            hello = true;
+    });
+    client.start();
+    BOOST_REQUIRE(pollUntil([&] { return hello.load(); }));
+
+    const Reply r = get(f.port, "/api/cues/clients");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.content_type == "application/json");
+    BOOST_TEST(has(r.body, "\"udp\":[]"));
+    const pt::ptree j = parseJson(r.body);
+    const auto& tcp = j.get_child("tcp");
+    BOOST_REQUIRE(tcp.size() == 1u);
+    const pt::ptree& c = tcp.begin()->second;
+    BOOST_TEST(c.get<std::string>("direction") == "accepted");
+    BOOST_TEST(has(c.get<std::string>("endpoint"), "127.0.0.1:"));
+    BOOST_TEST(c.get<uint64_t>("bytes_sent") > 0u);
+    const std::regex iso("^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$");
+    BOOST_TEST(std::regex_match(c.get<std::string>("connected_since"), iso));
+
+    BOOST_TEST(request(f.port, http::verb::post, "/api/cues/clients").status == 405u);
+    client.stop();
+}

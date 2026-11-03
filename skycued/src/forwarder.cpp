@@ -70,7 +70,9 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         std::string peer;
         std::string kind = "TCP client";     // for the log: "TCP client" or "TCP target"
         std::shared_ptr<OutboundLink> link; // set for a connection we dialled
-        std::deque<Buf> queue;          // not yet handed to async_write
+        std::chrono::system_clock::time_point connected_since{}; // set by addSession
+        uint64_t bytes_sent = 0;        // bytes whose async_write completed
+        std::deque<Buf> queue;         // not yet handed to async_write
         std::vector<Buf> inflight;      // being written now
         size_t queued_bytes = 0;        // queue + inflight
         bool closed = false;
@@ -102,6 +104,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         bool error_seen = false;
         steady::time_point last_error_log{};
         uint64_t errors_since_log = 0;
+        uint64_t datagrams_sent = 0; // sends completed without error
     };
 
     asio::io_context& io;
@@ -269,6 +272,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
     {
         error_code ignored;
         s->sock.set_option(tcp::no_delay(true), ignored);
+        s->connected_since = std::chrono::system_clock::now();
         sessions.emplace(s->id, s);
         LOG_INFO("forwarder: " << s->kind << " " << s->peer << " connected (" << sessions.size() << " total)");
 
@@ -415,6 +419,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
                 self->dropSession(s, "write failed: " + ec.message(), false);
                 return;
             }
+            s->bytes_sent += n;
             s->queued_bytes -= std::min(n, s->queued_bytes);
             s->inflight.clear();
             self->write(s);
@@ -472,7 +477,9 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         UdpTarget* tp = &t; // targets is never resized after start()
         udp_sock.async_send_to(asio::buffer(*b), t.ep, [self, b, tp](const error_code& ec, size_t) {
             --self->udp_inflight;
-            if (ec && ec != asio::error::operation_aborted)
+            if (!ec)
+                ++tp->datagrams_sent;
+            else if (ec != asio::error::operation_aborted)
                 self->udpError(*tp, ec);
             self->maybeFinishStop();
         });
@@ -675,6 +682,26 @@ void Forwarder::sendDrop(skycue::TrackId id, skycue::DropReason reason)
 void Forwarder::setKeyframeProvider(KeyframeProvider provider) { impl_->provider = std::move(provider); }
 size_t Forwarder::tcpClientCount() const { return impl_->sessions.size(); }
 size_t Forwarder::udpTargetCount() const { return impl_->targets.size(); }
+
+std::vector<CueTcpClient> Forwarder::tcpClients() const
+{
+    std::vector<CueTcpClient> out;
+    out.reserve(impl_->sessions.size());
+    for (const auto& kv : impl_->sessions) {
+        const Impl::Session& s = *kv.second;
+        out.push_back(CueTcpClient{s.peer, s.link != nullptr, s.connected_since, s.bytes_sent});
+    }
+    return out;
+}
+
+std::vector<CueUdpTarget> Forwarder::udpTargets() const
+{
+    std::vector<CueUdpTarget> out;
+    out.reserve(impl_->targets.size());
+    for (const auto& t : impl_->targets)
+        out.push_back(CueUdpTarget{t.name, t.datagrams_sent});
+    return out;
+}
 uint64_t Forwarder::framesSent() const { return impl_->frames_sent; }
 uint16_t Forwarder::tcpPort() const { return impl_->port; }
 

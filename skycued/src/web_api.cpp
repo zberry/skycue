@@ -347,6 +347,24 @@ std::string filterHistoryJson(const Engine& engine)
     return JsonWriter().addRaw("changes", jsonArray(changes)).str();
 }
 
+std::string cueClientsJson(const Forwarder& forwarder)
+{
+    std::vector<std::string> tcp, udp;
+    for (const auto& c : forwarder.tcpClients())
+        tcp.push_back(JsonWriter()
+                          .add("endpoint", c.endpoint)
+                          .add("direction", c.dialled ? "dialled" : "accepted")
+                          .add("connected_since", formatIso8601Ms(c.connected_since))
+                          .add("bytes_sent", static_cast<int64_t>(c.bytes_sent))
+                          .str());
+    for (const auto& t : forwarder.udpTargets())
+        udp.push_back(JsonWriter()
+                          .add("endpoint", t.endpoint)
+                          .add("datagrams_sent", static_cast<int64_t>(t.datagrams_sent))
+                          .str());
+    return JsonWriter().addRaw("tcp", jsonArray(tcp)).addRaw("udp", jsonArray(udp)).str();
+}
+
 }  // namespace
 
 std::optional<ApiResponse> rejectUnsafe(const ApiRequest& req)
@@ -602,6 +620,8 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return postListRoute(path == "/api/lists/allow" ? ListKind::allow : ListKind::block, body, engine,
                                  runtime);
         }
+        if (path == "/api/cues/clients")
+            return get ? json(200, cueClientsJson(engine.forwarder())) : notAllowed("GET");
         if (isInputsPath(path))
             return handleInputsApi(request, engine);
         if (isFisbPath(path))

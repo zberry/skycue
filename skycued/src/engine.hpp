@@ -138,6 +138,7 @@ public:
 
     InputManager& inputs() { return *inputs_; }
     const InputManager& inputs() const { return *inputs_; }
+    const Forwarder& forwarder() const { return forwarder_; }
 
     // Every track in the table with its filter decision now, the filters and
     // the stats. Changes nothing.

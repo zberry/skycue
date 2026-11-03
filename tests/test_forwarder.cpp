@@ -120,6 +120,8 @@ struct Fx {
 
     uint16_t port() { return t.call([this] { return fwd->tcpPort(); }); }
     size_t clients() { return t.call([this] { return fwd->tcpClientCount(); }); }
+    std::vector<skycued::CueTcpClient> tcpClients() { return t.call([this] { return fwd->tcpClients(); }); }
+    std::vector<skycued::CueUdpTarget> udpTargets() { return t.call([this] { return fwd->udpTargets(); }); }
     void update(const Track& tr)
     {
         t.call([&] { fwd->sendUpdate(tr); });
@@ -185,6 +187,7 @@ struct RawTcp {
     asio::io_context io;
     tcp::socket sock{io};
     std::vector<uint8_t> rx;
+    uint64_t bytes_read = 0;
 
     explicit RawTcp(uint16_t port, std::optional<int> rcvbuf = std::nullopt)
     {
@@ -213,6 +216,7 @@ struct RawTcp {
             const size_t n = sock.read_some(asio::buffer(buf), ec);
             if (!ec) {
                 rx.insert(rx.end(), buf, buf + n);
+                bytes_read += n;
                 continue;
             }
             if (ec != asio::error::would_block)
@@ -774,4 +778,86 @@ BOOST_AUTO_TEST_CASE(tcp_port_zero_disables_listener)
     BOOST_TEST(t.call([&] { return fwd->tcpClientCount(); }) == 1u);
     t.call([&] { fwd.reset(); });
     t.join();
+}
+
+BOOST_AUTO_TEST_CASE(tcp_client_bookkeeping)
+{
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.heartbeat_interval = 10s;
+    Fx fx(cfg, [] { return mkTracks(2); });
+
+    auto raw = std::make_unique<RawTcp>(fx.port());
+    const std::string local_port = std::to_string(raw->sock.local_endpoint().port());
+    BOOST_REQUIRE(waitUntil([&] { return fx.tcpClients().size() == 1; }));
+    {
+        const auto c = fx.tcpClients().at(0);
+        BOOST_TEST(!c.dialled);
+        const std::string suffix = ":" + local_port;
+        BOOST_REQUIRE(c.endpoint.size() > suffix.size());
+        BOOST_TEST(c.endpoint.compare(c.endpoint.size() - suffix.size(), suffix.size(), suffix) == 0);
+        const auto age = std::chrono::system_clock::now() - c.connected_since;
+        BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(age).count() >= 0);
+        BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(age).count() < 5000);
+    }
+
+    for (uint32_t i = 0; i < 3; ++i)
+        fx.update(mkTrack(0x100 + i, false));
+    // Hello + 2 keyframes + 3 updates: bytes_sent catches up with what arrived.
+    size_t frames = 0;
+    BOOST_REQUIRE(waitUntil([&] {
+        while (raw->next(10ms))
+            ++frames;
+        const auto clients = fx.tcpClients();
+        return frames == 6 && clients.size() == 1 && clients[0].bytes_sent == raw->bytes_read;
+    }));
+    BOOST_TEST(raw->bytes_read > 0u);
+
+    raw.reset();
+    BOOST_REQUIRE(waitUntil([&] { return fx.tcpClients().empty(); }));
+}
+
+BOOST_AUTO_TEST_CASE(udp_target_datagram_count)
+{
+    RawUdp raw;
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.heartbeat_interval = 10s;
+    cfg.udp_targets = {{"127.0.0.1", raw.port()}};
+    Fx fx(cfg);
+
+    for (uint32_t i = 0; i < 3; ++i)
+        fx.update(mkTrack(0x200 + i, false));
+    // The start() Hello + 3 updates.
+    uint64_t received = 0;
+    BOOST_REQUIRE(waitUntil([&] {
+        while (raw.next(10ms))
+            ++received;
+        const auto targets = fx.udpTargets();
+        return received >= 4 && targets.size() == 1 && targets[0].datagrams_sent == received;
+    }));
+    const auto targets = fx.udpTargets();
+    BOOST_TEST(targets.at(0).endpoint == "127.0.0.1:" + std::to_string(raw.port()));
+    BOOST_TEST(received == 4u);
+}
+
+BOOST_AUTO_TEST_CASE(dialled_target_marked)
+{
+    Events ev;
+    Client target(listenConfig());
+    ev.attach(target);
+    target.start();
+    BOOST_REQUIRE(target.localPort() != 0);
+
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.tcp_connect_targets = {{"127.0.0.1", target.localPort()}};
+    Fx fx(cfg, [] { return mkTracks(3); });
+
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3; }));
+    const auto clients = fx.tcpClients();
+    BOOST_REQUIRE(clients.size() == 1u);
+    BOOST_TEST(clients[0].dialled);
+    BOOST_TEST(clients[0].endpoint == "127.0.0.1:" + std::to_string(target.localPort()));
+    BOOST_REQUIRE(waitUntil([&] { return fx.tcpClients().at(0).bytes_sent > 0; }));
 }

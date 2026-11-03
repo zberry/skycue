@@ -415,3 +415,18 @@ BOOST_AUTO_TEST_CASE(json_bool)
     // PropertyTree keeps scalars as text, so the string "true" reads the same.
     BOOST_TEST((o->getBool("st") == std::optional<bool>(true)));
 }
+
+// Every JSON text the daemon writes is valid UTF-8: a byte that does not
+// start a well-formed RFC 3629 sequence, or a sequence cut short, becomes
+// U+FFFD, one per byte; valid sequences pass unchanged.
+BOOST_AUTO_TEST_CASE(json_writer_output_is_valid_utf8)
+{
+    const auto w = [](const std::string& s) { return skycued::JsonWriter().add("k", s).str(); };
+    BOOST_TEST(w("a\xFF" "b") == "{\"k\":\"a\xEF\xBF\xBD" "b\"}");
+    BOOST_TEST(w("\xC0\xAF") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\"}");                  // overlong
+    BOOST_TEST(w("\xED\xA0\x80") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"}");  // surrogate
+    BOOST_TEST(w("\xC3\xA9t\xC3\xA9") == "{\"k\":\"\xC3\xA9t\xC3\xA9\"}");                // valid kept
+    BOOST_TEST(w("\xE2\x82") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\"}");                  // truncated
+    BOOST_TEST(w("\xF4\x90\x80\x80") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"}");  // > U+10FFFF
+    BOOST_TEST(w("\xF0\x9F\x9B\xA9\x7F") == "{\"k\":\"\xF0\x9F\x9B\xA9\x7F\"}");          // 4 bytes, DEL kept
+}

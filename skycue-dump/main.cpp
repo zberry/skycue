@@ -16,6 +16,7 @@
 
 #include "asterix/capture_line.hpp"
 #include "asterix/cat021.hpp"
+#include "json_escape.hpp"
 #include "time_util.hpp"
 
 #include <boost/program_options.hpp>
@@ -62,25 +63,13 @@ std::string iso8601(std::chrono::system_clock::time_point tp)
     return buf;
 }
 
-// A JSON string literal. Control characters and bytes >= 0x7f are written as
-// \u00XX (the latter read as Latin-1), so the output is always plain ASCII.
+// A JSON string literal, through the daemon's shared escaper: valid UTF-8
+// passes unchanged and an invalid byte is written as U+FFFD.
 std::string jsonString(const std::string& s)
 {
-    std::string out = "\"";
-    for (const char ch : s) {
-        const auto c = static_cast<unsigned char>(ch);
-        if (c == '"' || c == '\\') {
-            out += '\\';
-            out += ch;
-        } else if (c < 0x20 || c >= 0x7f) {
-            char buf[8];
-            std::snprintf(buf, sizeof buf, "\\u%04x", static_cast<unsigned>(c));
-            out += buf;
-        } else {
-            out += ch;
-        }
-    }
-    return out + "\"";
+    std::string out;
+    skycued::appendJsonString(out, s);
+    return out;
 }
 
 // Text form: non-printable bytes and spaces become '?' so a value stays one word.

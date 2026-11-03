@@ -1,5 +1,7 @@
 #pragma once
 
+#include "json_escape.hpp"  // appendJsonString, the shared escaper
+
 #include <boost/property_tree/ptree.hpp>
 
 #include <cstddef>
@@ -86,9 +88,6 @@ private:
 
 // "[a,b,...]" from already-serialised JSON values, inserted verbatim.
 std::string jsonArray(const std::vector<std::string>& values);
-
-// Appends s to out as a JSON string literal, quotes included.
-void appendJsonString(std::string& out, const std::string& s);
 
 // The shortest %.Ng text (N = 15..17 for double, 6..9 for float) that parses
 // back to exactly `value` (37.887976 stays "37.887976"; 329.67f stays

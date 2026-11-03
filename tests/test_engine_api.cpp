@@ -1004,3 +1004,22 @@ BOOST_AUTO_TEST_CASE(inputs_writes_cross_origin_403)
     BOOST_TEST(a.call("POST", "/api/inputs/ps-b/disable", "{}", none).status == 200u);
     BOOST_TEST(a.call("DELETE", "/api/inputs/ps-b", "", Headers{{"host", "127.0.0.1:8080"}}).status == 204u);
 }
+
+// The live server (web_server.cpp) builds its ApiRequest with this, so the
+// fuzz_web harness drives handleApi exactly as a socket would.
+BOOST_AUTO_TEST_CASE(make_api_request_splits_target)
+{
+    const auto r = skycued::webapi::makeApiRequest(
+        "PUT", "/api/filters?a=1&b=2#frag", {{"Content-Type", "application/json"}, {"X-A", "1"}, {"x-a", "2"}}, "{}");
+    BOOST_TEST(r.method == "PUT");
+    BOOST_TEST(r.path == "/api/filters");
+    BOOST_TEST(r.query == "a=1&b=2");
+    BOOST_TEST(r.headers.at("content-type") == "application/json");
+    BOOST_TEST(r.headers.at("x-a") == "2");
+    BOOST_TEST(r.body == "{}");
+    BOOST_TEST(skycued::webapi::makeApiRequest("GET", "/api/state#x", {}, "").query == "");
+    // A '?' after the fragment is part of the fragment.
+    const auto f = skycued::webapi::makeApiRequest("GET", "/api/state#x?y=1", {}, "");
+    BOOST_TEST(f.path == "/api/state");
+    BOOST_TEST(f.query == "");
+}

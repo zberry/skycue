@@ -579,6 +579,27 @@ std::string tilesAvailableJson(const std::string& www_dir)
 
 std::string errorJson(const std::string& message) { return JsonWriter().add("error", message).str(); }
 
+ApiRequest makeApiRequest(const std::string& method, const std::string& target,
+                          const std::vector<std::pair<std::string, std::string>>& fields, std::string body)
+{
+    ApiRequest r;
+    r.method = method;
+    r.path = target.substr(0, target.find_first_of("?#"));
+    const std::string no_fragment = target.substr(0, target.find('#'));
+    const size_t q = no_fragment.find('?');
+    if (q != std::string::npos)
+        r.query = no_fragment.substr(q + 1);
+    for (const auto& field : fields) {
+        std::string name = field.first;
+        for (auto& ch : name)
+            if (ch >= 'A' && ch <= 'Z')
+                ch = static_cast<char>(ch - 'A' + 'a');
+        r.headers[name] = field.second;
+    }
+    r.body = std::move(body);
+    return r;
+}
+
 bool isApiPath(const std::string& path) { return path == "/api" || path.compare(0, 5, "/api/") == 0; }
 
 ApiResponse handleApi(const ApiRequest& request, ApiContext& context)

@@ -8,6 +8,7 @@ add_library(skycued_asterix STATIC
   src/asterix/cat021.cpp
   src/asterix/cat021_encode.cpp
   src/asterix/cat021_framer.cpp
+  src/json_escape.cpp
   src/time_util.cpp)
 target_include_directories(skycued_asterix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(skycued_asterix PUBLIC Boost::boost)

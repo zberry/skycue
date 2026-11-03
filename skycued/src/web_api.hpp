@@ -14,6 +14,8 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace skycued {
 
@@ -58,6 +60,13 @@ struct ApiRequest {
     std::map<std::string, std::string> headers;  // names lower-cased
     std::string body;
 };
+
+// The ApiRequest for one HTTP request, as WebServer builds it: path is the
+// target up to the first '?' or '#'; query is what follows the '?' up to
+// any '#' ("" when the '?' is missing or inside the fragment); each field
+// name is lower-cased and of a repeated name the last wins.
+ApiRequest makeApiRequest(const std::string& method, const std::string& target,
+                          const std::vector<std::pair<std::string, std::string>>& fields, std::string body);
 
 // What the routes work on.
 struct ApiContext {

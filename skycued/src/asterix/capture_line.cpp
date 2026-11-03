@@ -1,12 +1,12 @@
 #include "asterix/capture_line.hpp"
 
+#include "json_escape.hpp"
 #include "json_nesting.hpp"
 #include "time_util.hpp"
 
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 
-#include <cstdio>
 #include <sstream>
 
 namespace skycued {
@@ -14,27 +14,6 @@ namespace skycued {
 namespace {
 
 constexpr int kMaxCaptureLineDepth = 32;
-
-// Ids and transports are plain ASCII by their own rules; escape anyway so a
-// line is always valid JSON.
-void appendJsonString(std::string& out, const std::string& s)
-{
-    out += '"';
-    for (const char ch : s) {
-        const auto c = static_cast<unsigned char>(ch);
-        if (c == '"' || c == '\\') {
-            out += '\\';
-            out += ch;
-        } else if (c < 0x20) {
-            char buf[8];
-            std::snprintf(buf, sizeof buf, "\\u%04x", c);
-            out += buf;
-        } else {
-            out += ch;
-        }
-    }
-    out += '"';
-}
 
 int hexValue(char c)
 {

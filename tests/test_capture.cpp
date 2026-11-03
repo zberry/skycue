@@ -509,3 +509,24 @@ BOOST_AUTO_TEST_CASE(capture_dropped_added)
     a += b;
     BOOST_TEST(a.capture_dropped == 3u);
 }
+
+// captureLineJson writes through the shared escaper, so its text is valid
+// UTF-8 as well (json_writer_output_is_valid_utf8 in test_readsb_json.cpp).
+BOOST_AUTO_TEST_CASE(capture_line_json_is_valid_utf8)
+{
+    const auto w = [](const std::string& s) {
+        CaptureLine l;
+        l.t = std::chrono::system_clock::time_point(std::chrono::milliseconds(1793614500123));
+        l.input = s;
+        l.transport = "udp";
+        const std::string text = skycued::captureLineJson(l);
+        const auto a = text.find("\"input\":");
+        const auto b = text.find(",\"transport\"");
+        return "{\"k\":" + text.substr(a + 8, b - a - 8) + "}";
+    };
+    BOOST_TEST(w("a\xFF" "b") == "{\"k\":\"a\xEF\xBF\xBD" "b\"}");
+    BOOST_TEST(w("\xC0\xAF") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\"}");                  // overlong
+    BOOST_TEST(w("\xED\xA0\x80") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"}");  // surrogate
+    BOOST_TEST(w("\xC3\xA9t\xC3\xA9") == "{\"k\":\"\xC3\xA9t\xC3\xA9\"}");                // valid kept
+    BOOST_TEST(w("\xE2\x82") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\"}");                  // truncated
+}

@@ -21,7 +21,6 @@
 #include <unistd.h>
 
 #include <array>
-#include <cctype>
 #include <cerrno>
 #include <cstring>
 #include <cstdint>
@@ -113,13 +112,6 @@ std::string endpointText(const tcp::socket& s)
 }
 
 template <class S> std::string toString(const S& view) { return std::string(view.data(), view.size()); }
-
-std::string lowerCase(std::string s)
-{
-    for (auto& ch : s)
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-    return s;
-}
 
 }  // namespace
 
@@ -241,16 +233,10 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
             return;
         }
         if (webapi::isApiPath(path)) {
-            webapi::ApiRequest api;
-            api.method = method;
-            api.path = path;
-            const std::string no_fragment = target.substr(0, target.find('#'));
-            const size_t q = no_fragment.find('?');
-            if (q != std::string::npos)
-                api.query = no_fragment.substr(q + 1);
+            std::vector<std::pair<std::string, std::string>> fields;
             for (const auto& field : req)
-                api.headers[lowerCase(toString(field.name_string()))] = toString(field.value());
-            api.body = std::move(req.body());
+                fields.emplace_back(toString(field.name_string()), toString(field.value()));
+            const webapi::ApiRequest api = webapi::makeApiRequest(method, target, fields, std::move(req.body()));
             webapi::ApiContext ctx{srv->engine, srv->runtime, srv->cfg.www_dir, srv->cfg.daemon};
             const auto r = webapi::handleApi(api, ctx);
             if (r.status >= 500)

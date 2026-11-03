@@ -379,6 +379,25 @@ else()
     FIXTURES_REQUIRED fuzz_bins TIMEOUT 600 SKIP_RETURN_CODE 77)
 endif()
 
+# static_analysis: clang-tidy over skycue's own sources, through
+# scripts/run-static.sh --tidy-only (it configures its own tree under this
+# build directory); fails on any unsuppressed warning.
+get_filename_component(_skycue_run_static
+  "${PROJECT_SOURCE_DIR}/../scripts/run-static.sh" ABSOLUTE)
+find_program(SKYCUE_CLANG_TIDY clang-tidy)
+if(NOT SKYCUE_STATIC_TESTS)
+  skycue_skip_test(static_analysis "SKYCUE_STATIC_TESTS is OFF")
+elseif(NOT SKYCUE_CLANG_TIDY)
+  skycue_skip_test(static_analysis "clang-tidy not found")
+elseif(NOT EXISTS "${_skycue_run_static}")
+  skycue_skip_test(static_analysis "scripts/run-static.sh not found")
+else()
+  add_test(NAME static_analysis
+    COMMAND bash ${_skycue_run_static} --tidy-only
+      --build-dir ${CMAKE_CURRENT_BINARY_DIR}/static-analysis)
+  set_tests_properties(static_analysis PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
+endif()
+
 # Instrumented builds (SKYCUE_SANITIZE or SKYCUE_FUZZ): every test gets its
 # timeout and its waits (SKYCUE_TEST_SLOW, tests/test_slow.hpp) scaled by the
 # slow factor. The sanitizer options and suppression files are not set here:

@@ -1,0 +1,36 @@
+# clang-tidy for skycue (scripts/run-static.sh; docs/hardening.md "Static
+# analysis"). A conservative set: bugprone-*, cert-*, performance-* and a few
+# readability checks that cannot change behaviour. modernize-* and the rest
+# of readability-* stay off. Each check turned off below has its reason on
+# the line above its entry.
+Checks:
+  - '-*'
+  - 'bugprone-*'
+  - 'cert-*'
+  - 'performance-*'
+  - 'readability-misleading-indentation'
+  - 'readability-redundant-string-cstr'
+  - 'readability-container-size-empty'
+  # bugprone-easily-swappable-parameters: flags every function taking two parameters of one type (two ints, two strings); a style rule, not a bug finder.
+  - '-bugprone-easily-swappable-parameters'
+  # bugprone-narrowing-conversions: -Wconversion (CompilerWarnings.cmake) already covers narrowing, with -Werror in the checked builds.
+  - '-bugprone-narrowing-conversions'
+  # bugprone-unchecked-optional-access: its dataflow cannot see the invariants the parsers rely on (BitReader's latched overrun(), a pair checked together, emplace() then use); all 66 first-run findings were false positives on review.
+  - '-bugprone-unchecked-optional-access'
+  # performance-enum-size: shrinking an enum's underlying type changes libskycue's ABI and every struct that holds one, for no measured gain.
+  - '-performance-enum-size'
+  # performance-inefficient-string-concatenation: flags a + b + c that builds an error message before a throw or a warning, where the temporaries do not matter.
+  - '-performance-inefficient-string-concatenation'
+CheckOptions:
+  # asio's error_code overloads return the error they also store in their ec
+  # out-parameter, which the code tests (or ignores on purpose when closing);
+  # boost::system::error_code is dropped from the default list for that.
+  bugprone-unused-return-value.CheckedReturnTypes: '^::std::error_code$;^::std::error_condition$;^::std::errc$;^::std::expected$'
+  cert-err33-c.CheckedReturnTypes: '^::std::error_code$;^::std::error_condition$;^::std::errc$;^::std::expected$'
+  # 64 * 1024 and the like: compile-time constants that fit their int type.
+  bugprone-implicit-widening-of-multiplication-result.IgnoreConstantIntExpr: true
+WarningsAsErrors: ''
+# skycue's own sources only: not system headers, not the third-party
+# headers, not tests/ or fuzz/.
+HeaderFilterRegex: '.*/skycue/(skycued|libskycue|skycue-[a-z]+)/.*'
+FormatStyle: none

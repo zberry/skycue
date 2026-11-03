@@ -26,6 +26,9 @@ if(SKYCUE_FUZZ)
   endif()
 endif()
 
+option(SKYCUE_STATIC_TESTS
+  "Register the ctest static_analysis (scripts/run-static.sh --tidy-only; needs clang-tidy)" OFF)
+
 set(SKYCUE_TEST_SLOW_FACTOR "" CACHE STRING
   "Multiplier for test timeouts and waits (SKYCUE_TEST_SLOW); empty = 4 in a sanitizer or fuzz build, else 1")
 if(NOT SKYCUE_TEST_SLOW_FACTOR STREQUAL "")

@@ -1,0 +1,19 @@
+# cppcheck suppressions for scripts/run-static.sh: one <id>:<file>:<line>
+# entry each, under a line that gives its reason. A suppressed line that
+# moves shows up again in the next run, to be looked at afresh.
+
+# False positive: st is assigned (truncated) before anything reads it; binding
+# the reference to the uninitialised dummy reads nothing.
+legacyUninitvar:*/skycue/skycued/src/fisb/apdu.cpp:12
+
+# False positive: Set::filled has a default member initializer (= 0), which
+# cppcheck 2.9 does not see through the std::move into emplace().
+uninitvar:*/skycue/skycued/src/fisb/segment_assembler.cpp:34
+
+# False positive: cppcheck takes sac and sic at their initial 0, not seeing
+# that program_options writes them through po::value(&sac) and po::value(&sic).
+knownConditionTrueFalse:*/skycue/skycue-pingsim/main.cpp:435
+
+# False positive: the loop runs only while done < n, so count >= 1 and
+# bytes_ holds at least two bytes when write() is called.
+invalidFunctionArg:*/skycue/skycue-iqgen/iq_writer.cpp:91

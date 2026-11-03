@@ -26,9 +26,12 @@ std::map<std::string, bool> parseBuiltin(const JsonObject& o)
         const auto entry = o.getObject(id.c_str());
         if (!entry)
             fail("builtin." + id + " must be an object {\"enabled\":true|false}");
-        for (const auto& key : entry->keys())
+        const auto keys = entry->keys();
+        for (const auto& key : keys)
             if (key != "enabled")
                 fail("builtin." + id + ": unknown key '" + key + "'");
+        if (keys.size() > 1)
+            fail("builtin." + id + ": duplicate key 'enabled'");
         const auto enabled = entry->getBool("enabled");
         if (!enabled)
             fail("builtin." + id + ".enabled must be true or false");

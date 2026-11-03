@@ -523,6 +523,40 @@ BOOST_AUTO_TEST_CASE(duplicate_ids_rejected)
     BOOST_TEST(setErr({a, b}).empty());
 }
 
+// PropertyTree keeps a repeated key, so the parsers reject one instead of
+// silently using either value.
+BOOST_AUTO_TEST_CASE(duplicate_keys_rejected)
+{
+    BOOST_TEST(contains(err(R"("id":"a","id":"b","type":"pingstation_json","port":4000)"), "duplicate key 'id'"));
+    BOOST_TEST(contains(err(std::string(kPsJson) + R"(,"port":4001)"), "duplicate key 'port'"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"version":1})"), "version"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"inputs":[],"inputs":[]})"), "inputs"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"builtin":{"readsb":{"enabled":true},"readsb":{"enabled":false}}})"),
+                        "duplicate input 'readsb'"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"builtin":{},"builtin":{}})"), "builtin"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"builtin":{"readsb":{"enabled":true,"enabled":false}}})"),
+                        "enabled"));
+}
+
+// The same PropertyTree limitation as quoted numerals: "true" reads as true.
+BOOST_AUTO_TEST_CASE(quoted_boolean_accepted)
+{
+    BOOST_TEST(def(cat(R"("enabled":"true")")).enabled);
+    BOOST_TEST(!def(cat(R"("enabled":"false")")).enabled);
+    const auto file = parseInputsFile(R"({"version":1,"builtin":{"readsb":{"enabled":"false"}}})");
+    BOOST_TEST(file.builtin_enabled.at("readsb") == false);
+}
+
+BOOST_AUTO_TEST_CASE(integer_overflow_rejected)
+{
+    for (const char* big : {"99999999999999999999", "4294967297", "18446744073709551616"}) {
+        BOOST_TEST(contains(err(std::string(R"("id":"x","type":"pingstation_json","port":)") + big), "port"), big);
+        BOOST_TEST(contains(err(cat(std::string(R"("sac":)") + big)), "sac"), big);
+        BOOST_TEST(contains(err(cat(std::string(R"("status_interval_s":)") + big)), "status_interval_s"), big);
+    }
+    BOOST_TEST(contains(inputsFileErr(R"({"version":99999999999999999999})"), "version"));
+}
+
 BOOST_AUTO_TEST_CASE(settled_file_needs_two_stable_polls)
 {
     TempDir tmp;

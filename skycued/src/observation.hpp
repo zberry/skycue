@@ -43,6 +43,9 @@ public:
     virtual void onUplink(std::function<void(std::chrono::system_clock::time_point, const std::string& hex)>) {}
     virtual void start() = 0;
     virtual void stop() = 0;
+    // Lines or records that did not parse (counted in the input's messages
+    // and rejected). Most sources have none.
+    virtual uint64_t rejected() const { return 0; }
 };
 
 }  // namespace skycued

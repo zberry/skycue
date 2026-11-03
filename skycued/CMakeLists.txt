@@ -31,9 +31,15 @@ add_library(skycued_core STATIC
   src/geo.cpp
   src/inputs/cat021_map.cpp
   src/inputs/device_time.cpp
+  src/inputs/dump978_input.cpp
+  src/inputs/input.cpp
   src/inputs/input_def.cpp
+  src/inputs/input_manager.cpp
   src/inputs/inputs_file.cpp
+  src/inputs/ping_cat021_input.cpp
   src/inputs/ping_json.cpp
+  src/inputs/ping_json_input.cpp
+  src/inputs/source_input.cpp
   src/inputs/tcp_connect_client.cpp
   src/inputs/tcp_listener.cpp
   src/inputs/transport.cpp

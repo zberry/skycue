@@ -300,3 +300,13 @@ target_compile_definitions(test_transports PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_transports)
 add_test(NAME transports COMMAND test_transports)
 set_tests_properties(transports PROPERTIES TIMEOUT 60)
+
+# Inputs and the InputManager: pingStation inputs over real sockets, the
+# inputs file, hand edits and the lifecycle.
+add_executable(test_inputs test_inputs.cpp)
+target_link_libraries(test_inputs PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_inputs PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_inputs)
+add_test(NAME inputs COMMAND test_inputs)
+set_tests_properties(inputs PROPERTIES TIMEOUT 120)

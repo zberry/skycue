@@ -453,6 +453,25 @@ test('cues_row_click_selects_track', async ({ page }) => {
   await expect(page.locator('#details [data-field="hex"]')).toHaveText(TARGET);
 });
 
+test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.locator('#wx-toggle').click();
+  // Five tabs on one row at 13 px in a 340 px panel (both viewports are >= 1280 px).
+  const tabs = await page.locator('.tabs [role="tab"]').evaluateAll((ts) => ts.map((t) =>
+    [Math.round(t.getBoundingClientRect().top), getComputedStyle(t).fontSize]));
+  expect(tabs).toHaveLength(5);
+  expect(new Set(tabs.map((t) => t[0])).size).toBe(1);
+  expect(new Set(tabs.map((t) => t[1]))).toEqual(new Set(['13px']));
+  expect(await page.locator('#details').evaluate((e) => e.getBoundingClientRect().width)).toBe(340);
+  // Recent decisions wraps rather than scrolling sideways.
+  await page.locator('#tab-cues').click();
+  expect(await blockTarget(page, 'add')).toBe(200);
+  expect(await blockTarget(page, 'remove')).toBe(200);
+  await expect.poll(() => page.locator('#cues-recent tbody tr').count(), { timeout: 15000 }).toBeGreaterThan(1);
+  const scroll = page.locator('#pane-cues .cues-scroll');
+  expect(await scroll.evaluate((e) => e.scrollWidth - e.clientWidth)).toBeLessThanOrEqual(0);
+});
+
 // ---- Config tab ----------------------------------------------------------------
 test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   const errors = watchErrors(page);

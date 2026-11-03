@@ -356,10 +356,19 @@ table.cfg-table td.cfg-source { color: var(--muted); white-space: nowrap; }
 table.cfg-table td.cfg-restart { padding-right: 0; white-space: nowrap; text-align: right; }
 .badge { display: inline-block; padding: 0 5px; border: 1px solid var(--line); border-radius: 8px; font-size: 10px; color: var(--muted); }
 
+/* Five tabs on one row needs about 340 px of side panel at the 13 px tab
+   font; below 1280 px the panel narrows and the tabs may wrap. */
+@media (min-width: 1280px) {
+  .tabs [role="tablist"] { flex-wrap: nowrap; }
+}
 @media (max-width: 1400px) {
   #filters { width: 230px; }
-  #details { width: 300px; }
   #stats { gap: 2px 12px; font-size: 12px; }
+  /* Recent decisions wraps in the narrower panel instead of scrolling sideways. */
+  #cues-recent td { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (max-width: 1279px) {
+  #details { width: 300px; }
 }
 
 /* "Hide filtered": a view option kept in this browser only. */

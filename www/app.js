@@ -220,7 +220,7 @@
   var view = { style: 'light', borders: false, cities: false };
   var overlayMeta = null;           // overlays/meta.json, or null when there is none
   var bordersLayer = null, bordersLoading = null;
-  var citiesLayer = null, citiesData = null, citiesLoading = null, cityTimer = null, cityShown = [];
+  var citiesLayer = null, citiesData = null, citiesLoading = null, citiesFailed = false, cityTimer = null, cityShown = [];
   function storeGet(k) { try { return window.localStorage.getItem(k); } catch (err) { return null; } }
   function storeSet(k, v) { try { window.localStorage.setItem(k, v); } catch (err) { /* private window */ } }
   function overlayStyle() { return haveTiles ? view.style : 'dark'; }
@@ -241,10 +241,14 @@
     var ViewControl = L.Control.extend({
       options: { position: 'topleft' },
       onAdd: function () {
+        // The style only changes tiles: without them it is left out, and
+        // the box too when there are no overlays either.
         var div = L.DomUtil.create('div', 'view-control');
+        div.hidden = !haveTiles && !offer.borders && !offer.cities;
         div.innerHTML =
+          '<div id="map-style-row"' + (haveTiles ? '' : ' hidden') + '>' +
           '<label for="map-style">Map</label> <select id="map-style">' +
-          '<option value="light">Light</option><option value="dark">Dark</option></select>' +
+          '<option value="light">Light</option><option value="dark">Dark</option></select></div>' +
           '<label class="check" for="ov-borders"' + (offer.borders ? '' : ' hidden') + '>' +
           '<input id="ov-borders" type="checkbox"> Borders</label>' +
           '<label class="check" for="ov-cities"' + (offer.cities ? '' : ' hidden') + '>' +
@@ -258,7 +262,7 @@
     $('map-style').addEventListener('change', function () { setMapStyle($('map-style').value); });
     $('ov-borders').addEventListener('change', function () { setOverlay('borders', $('ov-borders').checked); });
     $('ov-cities').addEventListener('change', function () { setOverlay('cities', $('ov-cities').checked); });
-    map.on('zoomend', function () { if (bordersLayer) restyleBorders(); });
+    map.on('zoomend', function () { if (bordersLayer && map.hasLayer(bordersLayer)) restyleBorders(); });
     map.on('zoomend moveend', scheduleCities);
     setMapStyle(storeGet(VIEW_KEYS.style), true);
     setOverlay('borders', offer.borders && storeGet(VIEW_KEYS.borders) === '1', true);
@@ -281,7 +285,7 @@
     $('ov-' + name).checked = view[name];
     if (!initial) storeSet(VIEW_KEYS[name], view[name] ? '1' : '0');
     if (name === 'borders') showBorders();
-    else drawCities();
+    else { if (!initial) citiesFailed = false; drawCities(); }
   }
 
   function fetchJson(url) {
@@ -347,7 +351,7 @@
       return;
     }
     if (!citiesData) {
-      if (citiesLoading) return;
+      if (citiesLoading || citiesFailed) return;   // a failed load is retried when the box is ticked again
       citiesLoading = fetchJson(overlayFile('cities')).then(function (g) {
         citiesData = (g && Array.isArray(g.features) ? g.features : []).map(function (f) {
           var p = f.properties || {}, c = f.geometry && f.geometry.coordinates;
@@ -356,6 +360,7 @@
         }).filter(function (c) { return c.name && isFinite(c.lat) && isFinite(c.lon) && isFinite(c.rank); });
         drawCities();
       }).catch(function (err) {
+        citiesFailed = true;
         console.warn('cities overlay: ' + err.message);
       }).then(function () { citiesLoading = null; });
       return;

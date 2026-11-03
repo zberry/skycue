@@ -155,7 +155,10 @@ rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/c.log"; fail "(c) pingsim exit $rc"; }
 [ "$(sent "$tmp/c.log")" = "$lines" ] || { cat "$tmp/c.log"; fail "(c) pingsim did not send $lines records"; }
 wait_messages replayed "$lines"
-[ "$messages" -eq "$lines" ] || fail "(c) replayed counted $messages, the capture has $lines"
+# UDP on loopback can still drop a datagram when the machine is loaded (a
+# parallel ctest), as (a) and (b) allow for; pingsim sending every record is
+# checked exactly above.
+at_least_95 "$messages" "$lines" || fail "(c) replayed counted $messages, the capture has $lines"
 [ "$rejected" -eq 0 ] || fail "(c) replayed rejected $rejected"
 
 # ---- (d) --tcp-listen, loopback by default, to a tcp_connect input ---------------

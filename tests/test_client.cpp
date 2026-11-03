@@ -339,7 +339,9 @@ BOOST_AUTO_TEST_CASE(tcp_bad_magic_closes_connection)
     server.send(encodeTrackUpdate(mkTrack(1, true)));
     BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 1; }));
     server.send(std::vector<uint8_t>{'X', 'X', 'X', 'X', 1, 2, 0, 0});
-    BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() == 2; }));
+    // The connection callback fires before the source_lost drops (and the
+    // count reset), so wait for the drop as well.
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.conns.size() == 2 && ev.drops.size() == 1; }));
     BOOST_TEST(ev.conn(1) == false);
     BOOST_TEST(client.trackCount() == 0u);
 }

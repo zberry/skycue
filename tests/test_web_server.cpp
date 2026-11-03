@@ -1270,11 +1270,32 @@ BOOST_AUTO_TEST_CASE(main_serves_with_overrides)
     ::mkdir(www.c_str(), 0755);
     writeFile(www + "/index.html", kIndex);
     writeFile(conf, std::string(kConfHead) + "WEB_PORT=0\nWEB_BIND=0.0.0.0\nCUE_TCP_PORT=0\n");
-    const uint16_t port = freePort();
-    const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture, "--replay-loop", "--www-dir", www,
-                                    "--web-bind", "127.0.0.1", "--web-port", std::to_string(port)},
-                                   log);
-    BOOST_TEST(pollUntil([&] { return has(readAll(log), "web: listening on http://127.0.0.1:" + std::to_string(port)); }));
+    // freePort() releases the port before skycued binds it, so a parallel
+    // test can take it in between: on "cannot listen", try another port.
+    uint16_t port = 0;
+    pid_t pid = -1;
+    for (int attempt = 0; attempt < 5 && pid < 0; ++attempt) {
+        port = freePort();
+        const std::string try_log = log + "." + std::to_string(attempt);
+        const pid_t p = spawnSkycued({"--config", conf, "--replay", kFixture, "--replay-loop", "--www-dir", www,
+                                      "--web-bind", "127.0.0.1", "--web-port", std::to_string(port)},
+                                     try_log);
+        const std::string listening = "web: listening on http://127.0.0.1:" + std::to_string(port);
+        const std::string busy = "web: cannot listen on 127.0.0.1:" + std::to_string(port);
+        if (!pollUntil([&] {
+                const std::string text = readAll(try_log);
+                return has(text, listening) || has(text, busy);
+            })) {
+            ::kill(p, SIGKILL);
+            waitExit(p, 1s);
+            BOOST_FAIL("skycued neither listened nor failed to listen on port " << port);
+        }
+        if (has(readAll(try_log), listening))
+            pid = p;
+        else
+            BOOST_TEST(waitExit(p, 5s) == 1);
+    }
+    BOOST_REQUIRE(pid > 0);
     BOOST_TEST(get(port, "/").body == kIndex);
     BOOST_TEST(get(port, "/api/state").status == 200u);
     ::kill(pid, SIGTERM);

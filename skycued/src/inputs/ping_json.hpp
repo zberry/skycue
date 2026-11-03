@@ -52,7 +52,8 @@ struct PingResult {
 // checked against arrival when utcSync is 1 or absent (clock_offset_s,
 // clock_rejects) whether or not the aircraft has a position; position_time is
 // set only with a position. A raw frame's GPS counter time is clamped the same
-// way but not counted. raw_line of every observation is the datagram text.
+// way but not counted. raw_line is the datagram text on the first observation
+// of the datagram and empty on the others.
 PingResult parsePingDatagram(const std::string& text, const PingContext& ctx);
 
 // The object inside "status". nullopt when it holds none of the status fields.

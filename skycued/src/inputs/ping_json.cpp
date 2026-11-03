@@ -254,8 +254,11 @@ PingResult parse(const std::string& text, const PingContext& ctx)
         if (!aircraft) {
             ++r.rejected;
         } else {
+            // The datagram is recorded once, with the first observation it
+            // gives; the rest carry no raw_line (N copies would be N^2 bytes).
+            static const std::string kNone;
             for (const auto& a : *aircraft)
-                if (!mapAircraft(a, text, ctx, r))
+                if (!mapAircraft(a, r.observations.empty() ? text : kNone, ctx, r))
                     ++r.rejected;
         }
     }

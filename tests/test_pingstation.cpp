@@ -371,6 +371,16 @@ BOOST_AUTO_TEST_CASE(bare_object_and_wrapped_array)
     BOOST_REQUIRE_EQUAL(r.observations.size(), 3u);
     BOOST_TEST(r.observations[2].id.address == 3u);
     BOOST_TEST(r.rejected == 0u);
+    // The datagram is kept once, on the first observation.
+    BOOST_TEST(r.observations[0].raw_line.find(R"("icaoAddress":"000003")") != std::string::npos);
+    BOOST_TEST(r.observations[1].raw_line.empty());
+    BOOST_TEST(r.observations[2].raw_line.empty());
+    // A rejected first element: the first observation still carries it.
+    const auto s = parse(R"({"aircraft":[{"icaoAddress":"zz"},{"icaoAddress":"000002"},{"icaoAddress":"000003"}]})");
+    BOOST_REQUIRE_EQUAL(s.observations.size(), 2u);
+    BOOST_TEST(s.rejected == 1u);
+    BOOST_TEST(!s.observations[0].raw_line.empty());
+    BOOST_TEST(s.observations[1].raw_line.empty());
     BOOST_TEST(parse(R"({"aircraft":[]})").observations.empty());
     BOOST_TEST(parse(R"({"aircraft":[]})").rejected == 0u);
 }

@@ -47,6 +47,15 @@ struct EngineStats {
     std::vector<InputStatsLine> inputs;
 };
 
+// One filter change (Engine::filterHistory): the new state only, never a
+// diff. The list changes are not recorded here.
+struct FilterChange {
+    std::chrono::system_clock::time_point time;  // the data clock
+    std::string origin;                          // "startup", "ui", "file:<name>", "save-baseline", ...
+    FilterConfig filters;                        // the new state
+};
+constexpr std::size_t kFilterHistoryMax = 100;
+
 // One track as the Engine sees it now.
 struct TrackSnapshot {
     skycue::Track track;  // toTrack of the state (lat/lon 0 without a position), keyframe false

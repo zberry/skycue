@@ -96,12 +96,14 @@
 
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace skycued {
 
@@ -176,6 +178,11 @@ public:
     void removeListEntry(ListKind list, const std::string& entry, const std::string& origin);
     const IdList& allowList() const { return filters_.allow(); }
     const IdList& blockList() const { return filters_.block(); }
+    // The last filter changes, oldest first, at most kFilterHistoryMax: the
+    // startup state (pushed by start() unless a setFilterConfig before it
+    // already pushed one), then one per setFilterConfig, whether or not
+    // there is a sent recorder.
+    std::vector<FilterChange> filterHistory() const;
 
     // The one event sink (replaces any earlier one; empty to clear). It must
     // not call the live-change methods or stop().
@@ -219,6 +226,7 @@ private:
     void armTick();
     void armStats();
     std::string filterDescription() const;
+    void pushFilterChange(const std::string& origin);
 
     boost::asio::io_context& io_;
     Config config_;
@@ -240,6 +248,7 @@ private:
     std::chrono::seconds locations_save_interval_ = kLocationsSaveInterval;
 
     FilterSet filters_;
+    std::deque<FilterChange> filter_history_;  // at most kFilterHistoryMax
     Thresholds thresholds_;
     std::chrono::seconds track_timeout_;
     TrackTable table_;

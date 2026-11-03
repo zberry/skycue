@@ -198,6 +198,8 @@ void Engine::start()
     LOG_INFO("filters " << description);
     if (sent_)
         sent_->writeFilterChange(description);
+    if (filter_history_.empty())  // RuntimeConfig::load() may have pushed the startup state already
+        pushFilterChange("startup");
     inputs_->start();
     last_locations_save_ = steady::now();
     armTick();
@@ -556,9 +558,22 @@ void Engine::setFilterConfig(FilterConfig config, const std::string& origin)
     if (!(config.min_elevation_deg >= -90 && config.min_elevation_deg <= 90))
         throw std::invalid_argument("min_elevation_deg must be in [-90,90]");
     filters_.setConfig(config);
+    pushFilterChange(origin);
     std::ostringstream ss;
     ss << origin << ": max_range_nm=" << config.max_range_nm << " min_elevation_deg=" << config.min_elevation_deg;
     applied(ss.str(), EventKind::filters_changed);
+}
+
+void Engine::pushFilterChange(const std::string& origin)
+{
+    filter_history_.push_back(FilterChange{dataNow(), origin, filters_.config()});
+    if (filter_history_.size() > kFilterHistoryMax)
+        filter_history_.pop_front();
+}
+
+std::vector<FilterChange> Engine::filterHistory() const
+{
+    return std::vector<FilterChange>(filter_history_.begin(), filter_history_.end());
 }
 
 void Engine::setLists(IdList allow, IdList block, const std::string& origin)

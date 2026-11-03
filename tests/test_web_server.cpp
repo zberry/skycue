@@ -1189,3 +1189,31 @@ BOOST_AUTO_TEST_CASE(main_serves_with_overrides)
     ::kill(pid, SIGTERM);
     BOOST_TEST(waitExit(pid, 5s) == 0);
 }
+
+BOOST_AUTO_TEST_CASE(filters_history_route)
+{
+    WebFx f;
+    BOOST_TEST(request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":20}").status == 200u);
+
+    const Reply r = get(f.port, "/api/filters/history");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.content_type == "application/json");
+    const pt::ptree h = parseJson(r.body);
+    const auto& changes = h.get_child("changes");
+    BOOST_REQUIRE(changes.size() == 2u);
+    auto it = changes.begin();
+    const pt::ptree& first = it->second;
+    const pt::ptree& second = (++it)->second;
+    BOOST_TEST(first.get<std::string>("origin") == "startup");
+    BOOST_TEST(first.get<double>("filters.max_range_nm") == 150.0);
+    BOOST_TEST(second.get<std::string>("origin") == "ui");
+    BOOST_TEST(second.get<double>("filters.max_range_nm") == 20.0);
+    BOOST_TEST(second.get<double>("filters.min_elevation_deg") == 0.0);
+    const std::regex iso("^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$");
+    BOOST_TEST(std::regex_match(first.get<std::string>("time"), iso));
+    BOOST_TEST(std::regex_match(second.get<std::string>("time"), iso));
+
+    const Reply p = request(f.port, http::verb::post, "/api/filters/history");
+    BOOST_TEST(p.status == 405u);
+    BOOST_TEST(p.allow == "GET");
+}

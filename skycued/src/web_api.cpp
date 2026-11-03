@@ -331,6 +331,22 @@ bool sameOrigin(const std::string& origin, const std::string& host)
     return normaliseAuthority(authority, scheme) == normaliseAuthority(host, scheme);
 }
 
+// {"changes":[{"time":"...","origin":"...","filters":{...}},...]}, oldest first.
+std::string filterHistoryJson(const Engine& engine)
+{
+    std::vector<std::string> changes;
+    for (const auto& c : engine.filterHistory())
+        changes.push_back(JsonWriter()
+                              .add("time", formatIso8601Ms(c.time))
+                              .add("origin", c.origin)
+                              .addRaw("filters", JsonWriter()
+                                                     .add("max_range_nm", c.filters.max_range_nm)
+                                                     .add("min_elevation_deg", c.filters.min_elevation_deg)
+                                                     .str())
+                              .str());
+    return JsonWriter().addRaw("changes", jsonArray(changes)).str();
+}
+
 }  // namespace
 
 std::optional<ApiResponse> rejectUnsafe(const ApiRequest& req)
@@ -562,6 +578,8 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
                 return *rejected;
             return putFiltersRoute(body, runtime);
         }
+        if (path == "/api/filters/history")
+            return get ? json(200, filterHistoryJson(engine)) : notAllowed("GET");
         if (path == "/api/filters/save-baseline") {
             if (method != "POST")
                 return notAllowed("POST");

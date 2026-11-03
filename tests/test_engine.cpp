@@ -894,3 +894,53 @@ BOOST_AUTO_TEST_CASE(drop_event_carries_decision_callsign_time)
     lk.unlock();
     fx.t.call([&] { fx.engine->onEvent({}); });
 }
+
+BOOST_AUTO_TEST_CASE(filter_history_ring)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(baseConfig(), fakeSource(src));  // no record dir: no sent recorder
+    fx.t.call([&] {
+        auto h = fx.engine->filterHistory();
+        BOOST_REQUIRE(h.size() == 1u);
+        BOOST_TEST(h[0].origin == "startup");
+        BOOST_TEST(h[0].filters.max_range_nm == 150.0);
+        BOOST_TEST(h[0].filters.min_elevation_deg == 0.0);
+
+        for (int i = 0; i < 120; ++i)
+            fx.engine->setFilterConfig({10.0 + i, 0}, "ui");
+        h = fx.engine->filterHistory();
+        BOOST_REQUIRE(h.size() == skycued::kFilterHistoryMax);
+        BOOST_TEST(h.front().filters.max_range_nm == 30.0);  // i = 20
+        BOOST_TEST(h.back().filters.max_range_nm == 129.0);
+        for (size_t k = 0; k < h.size(); ++k) {
+            BOOST_TEST(h[k].origin == "ui");
+            if (k > 0)
+                BOOST_TEST((h[k - 1].time <= h[k].time));
+        }
+    });
+}
+
+BOOST_AUTO_TEST_CASE(filter_history_load_before_start)
+{
+    IoThread t;
+    std::unique_ptr<Forwarder> fwd;
+    std::unique_ptr<Engine> engine;
+    FakeSource* src = nullptr;
+    const auto make = fakeSource(src);
+    t.call([&] {
+        ForwarderConfig fc;
+        fc.tcp_listen_ephemeral = true;
+        fwd = std::make_unique<Forwarder>(t.io, fc);
+        engine = std::make_unique<Engine>(t.io, baseConfig(), sourceInputs(t.io, make(t.io)), *fwd, nullptr, nullptr);
+        engine->setFilterConfig({40, 1}, "startup");  // as RuntimeConfig::load() with an overlay
+        engine->start();
+        const auto h = engine->filterHistory();
+        BOOST_REQUIRE(h.size() == 1u);
+        BOOST_TEST(h[0].origin == "startup");
+        BOOST_TEST(h[0].filters.max_range_nm == 40.0);
+        BOOST_TEST(h[0].filters.min_elevation_deg == 1.0);
+        engine.reset();
+        fwd.reset();
+    });
+    t.join();
+}

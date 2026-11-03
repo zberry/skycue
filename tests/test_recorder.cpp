@@ -819,6 +819,24 @@ BOOST_AUTO_TEST_CASE(replay_offset_saturates_across_the_clock_range)
     }
 }
 
+// A zero factor is a zero shift, whatever the other: the first pass of a
+// loop (pass 0) and an empty span (shift 0, a one-record file) must never
+// saturate, or a huge pass count with a zero span would move every record to
+// the end of the clock's range.
+BOOST_AUTO_TEST_CASE(replay_loop_shift_zero_factor_is_zero)
+{
+    using skycued::replayLoopShift;
+    using D = sys_clock::duration;
+    BOOST_TEST((replayLoopShift(D::zero(), UINT64_MAX) == D::zero()));
+    BOOST_TEST((replayLoopShift(D::zero(), static_cast<uint64_t>(INT64_MAX) + 1) == D::zero()));
+    BOOST_TEST((replayLoopShift(D::max(), 0) == D::zero()));
+    BOOST_TEST((replayLoopShift(D::min(), 0) == D::zero()));
+    BOOST_TEST((replayLoopShift(D(2s), 3) == D(6s)));
+    BOOST_TEST((replayLoopShift(D(2s), UINT64_MAX) == D::max()));
+    BOOST_TEST((replayLoopShift(D(-2s), UINT64_MAX) == D::min()));
+    BOOST_TEST((replayLoopShift(D::max(), 2) == D::max()));
+}
+
 BOOST_AUTO_TEST_CASE(replay_default_speed_is_realtime)
 {
     TempDir tmp;

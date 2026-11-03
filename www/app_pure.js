@@ -234,6 +234,24 @@
     return null;
   }
 
+  // The level an underlay tries after level n's image failed to load: the
+  // next ancestor inside a region (nearestInsideAncestor from n + 1), or null.
+  // Never the plain n + 1, which may be a region-edge tile, transparent in
+  // the very place the underlay is for.
+  function underlayNextLevel(z, x, y, n, maxLevels, regions) {
+    return nearestInsideAncestor(z, x, y, n + 1, maxLevels, regions);
+  }
+
+  // The weather card closes: no shape or report is shown, and the report
+  // "show" kept through the symbol cap (showKey) is let go, so the cap
+  // is recomputed without it (symDirty) when one was kept.
+  function closeReportCard(fisb) {
+    if (fisb.showKey !== null && fisb.showKey !== undefined) fisb.symDirty = true;
+    fisb.shapeKey = null;
+    fisb.reportRec = null;
+    fisb.showKey = null;
+  }
+
   // At most `max` of `symbols` ({key, rank, lat, lon}), as a new array: the
   // one whose key is keepKey first (the report "show" panned to stays on the
   // map), then the rest by rank, then nearest `centre` ({lat, lng}) first.
@@ -1020,7 +1038,8 @@
     thousands: thousands, trackKey: trackKey, markerLabel: markerLabel, listHas: listHas,
     sortTracks: sortTracks, graticuleStep: graticuleStep, parentTile: parentTile,
     tileBounds: tileBounds, tileInsideRegions: tileInsideRegions,
-    nearestInsideAncestor: nearestInsideAncestor, capSymbols: capSymbols,
+    nearestInsideAncestor: nearestInsideAncestor, underlayNextLevel: underlayNextLevel,
+    capSymbols: capSymbols, closeReportCard: closeReportCard,
     dropRemovesMarker: dropRemovesMarker,
     CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
     filterHistoryRows: filterHistoryRows,

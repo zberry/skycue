@@ -948,6 +948,35 @@ test('nearestInsideAncestor skips region-edge ancestors', () => {
   assert.strictEqual(P.nearestInsideAncestor(6, 18, 24, 5, 9, regions), 5);
   assert.strictEqual(P.nearestInsideAncestor(1, 0, 0, 2, 4, regions), null);
 });
+test('underlayNextLevel stays on ancestors inside a region', () => {
+  // 6/18/24: its z 4 ancestor 4/4/6 is exactly region "r4" (inside), z 3 is in no region
+  // (an edge level), z 2 is inside "g". The underlay starts at level 2 (z 4); when that
+  // image fails it must go on to level 4 (z 2), never to the edge level 3.
+  const b4 = P.tileBounds(4, 4, 6);
+  const r4 = { name: 'r4', bbox: [b4.west, b4.south, b4.east, b4.north], minZoom: 4, maxZoom: 4 };
+  const g = { name: 'g', bbox: [-180, -85.06, 180, 85.06], minZoom: 0, maxZoom: 2 };
+  const regions = [g, r4];
+  assert.deepStrictEqual(P.parentTile(6, 18, 24, 2), Object.assign({}, P.parentTile(6, 18, 24, 2), { z: 4, x: 4, y: 6 }));
+  assert.strictEqual(P.tileInsideRegions(4, 4, 6, regions), true);
+  assert.strictEqual(P.tileInsideRegions(3, 2, 3, regions), false);
+  assert.strictEqual(P.nearestInsideAncestor(6, 18, 24, 1, 4, regions), 2);
+  assert.strictEqual(P.underlayNextLevel(6, 18, 24, 2, 4, regions), 4);
+  // Nothing inside further up: no next level, not an edge level.
+  assert.strictEqual(P.underlayNextLevel(6, 18, 24, 2, 4, [r4]), null);
+  assert.strictEqual(P.underlayNextLevel(6, 18, 24, 2, 3, regions), null);
+  assert.strictEqual(P.underlayNextLevel(6, 18, 24, 4, 9, regions), 5);
+});
+test('closeReportCard forgets the shown report', () => {
+  const fisb = { shapeKey: 'k', reportRec: 'metar:KDCA', showKey: 'metar:KDCA', symDirty: false };
+  P.closeReportCard(fisb);
+  assert.strictEqual(fisb.shapeKey, null);
+  assert.strictEqual(fisb.reportRec, null);
+  assert.strictEqual(fisb.showKey, null);
+  assert.strictEqual(fisb.symDirty, true);   // the symbol cap is recomputed without it
+  const idle = { shapeKey: null, reportRec: null, showKey: null, symDirty: false };
+  P.closeReportCard(idle);
+  assert.strictEqual(idle.symDirty, false);  // nothing was kept: no redraw
+});
 test('capSymbols keeps the shown report', () => {
   const s = [];
   for (let i = 0; i < 400; i++) s.push({ key: 'metar:' + i, rank: 0, lat: 38 + i / 100, lon: -77 });

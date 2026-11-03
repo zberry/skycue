@@ -120,15 +120,18 @@
         img.style.position = 'absolute';
         return img;
       }
-      // load(img, n, cb): img shows the first tile from n levels up that
-      // exists; cb(p) once it has loaded, cb(null) when none does (maybe
+      // load(img, n, cb, next): img shows the first tile from n levels up
+      // that exists, trying next(n) after level n (default n + 1; null
+      // stops); cb(p) once it has loaded, cb(null) when none does (maybe
       // synchronously).
-      function load(img, n, cb) {
-        var p = n === 0 ? { z: coords.z, x: coords.x, y: coords.y, scale: 1, offsetX: 0, offsetY: 0 }
+      function load(img, n, cb, next) {
+        var p = n === null ? null
+          : n === 0 ? { z: coords.z, x: coords.x, y: coords.y, scale: 1, offsetX: 0, offsetY: 0 }
           : P.parentTile(coords.z, coords.x, coords.y, n);
         if (!p || p.z < o.fallbackMinZoom || n > o.fallbackLevels) { cb(null); return; }
+        var after = next ? next(n) : n + 1;
         var url = layer.ancestorUrl(p);
-        if (tileKnownMissing(url)) { load(img, n + 1, cb); return; }
+        if (tileKnownMissing(url)) { load(img, after, cb, next); return; }
         img.style.width = size.x * p.scale + 'px';
         img.style.height = size.y * p.scale + 'px';
         img.style.left = -p.offsetX * size.x + 'px';
@@ -136,7 +139,7 @@
         img.onload = function () { if (!dropped()) cb(p); };
         img.onerror = function () {
           tileMissing.set(url, Date.now());
-          if (!dropped()) load(img, n + 1, cb);
+          if (!dropped()) load(img, after, cb, next);
         };
         img.src = url;
       }
@@ -172,6 +175,7 @@
             var under = newImg();
             under.className = 'tile-underlay';
             tile.insertBefore(under, img);
+            // A missing underlay goes on to the next inside ancestor only.
             load(under, from, function (q) {
               if (q) {
                 tileCounts.underlay++;
@@ -179,6 +183,8 @@
               } else if (under.parentNode) {
                 under.parentNode.removeChild(under);
               }
+            }, function (m) {
+              return P.underlayNextLevel(coords.z, coords.x, coords.y, m, o.fallbackLevels, o.regions);
             });
           }
         }
@@ -1412,8 +1418,7 @@
     card.scrollIntoView({ block: 'nearest' });
   }
   function hideShape() {
-    fisb.shapeKey = null;
-    fisb.reportRec = null;
+    P.closeReportCard(fisb);
     $('shape-details').hidden = true;
   }
 

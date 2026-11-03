@@ -25,21 +25,13 @@ Duration saturate(bool overflowed, Rep value, bool negative)
     return negative ? Duration::min() : Duration::max();
 }
 
-// a + b and a * n, saturated: loop mode adds a shift of up to the whole
-// recording's span per pass, so neither may wrap.
+// a + b, saturated: loop mode adds a shift of up to the whole recording's
+// span per pass, so it may not wrap.
 Duration satAdd(Duration a, Duration b)
 {
     Rep r = 0;
     const bool over = __builtin_add_overflow(a.count(), b.count(), &r);
     return saturate(over, r, b.count() < 0);
-}
-
-Duration satMul(Duration a, uint64_t n)
-{
-    Rep r = 0;
-    const bool over = n > static_cast<uint64_t>(INT64_MAX) ||
-                      __builtin_mul_overflow(a.count(), static_cast<Rep>(n), &r);
-    return saturate(over, over ? 0 : r, a.count() < 0);
 }
 
 std::chrono::system_clock::time_point shifted(std::chrono::system_clock::time_point t, Duration shift)
@@ -48,6 +40,17 @@ std::chrono::system_clock::time_point shifted(std::chrono::system_clock::time_po
 }
 
 }  // namespace
+
+Duration replayLoopShift(Duration shift, uint64_t pass)
+{
+    // A zero factor is 0 whatever the other (pass 0, or a one-record span).
+    if (shift.count() == 0 || pass == 0)
+        return Duration::zero();
+    Rep r = 0;
+    const bool over = pass > static_cast<uint64_t>(INT64_MAX) ||
+                      __builtin_mul_overflow(shift.count(), static_cast<Rep>(pass), &r);
+    return saturate(over, over ? 0 : r, shift.count() < 0);
+}
 
 Duration replayOffset(std::chrono::system_clock::time_point t, std::chrono::system_clock::time_point first)
 {
@@ -178,7 +181,7 @@ void ReplaySource::scheduleNext()
     }
     // Absolute schedule from start_, so per-record delays never accumulate.
     const auto offset =
-        satAdd(replayOffset(records_[next_].time, records_.front().time), satMul(loop_shift_, pass_));
+        satAdd(replayOffset(records_[next_].time, records_.front().time), replayLoopShift(loop_shift_, pass_));
     timer_.expires_at(start_ + replayDelay(offset, speed_));
     timer_.async_wait([this, alive](const boost::system::error_code& ec) {
         if (!ec && !alive.expired())
@@ -192,12 +195,12 @@ void ReplaySource::emitNext()
     std::weak_ptr<char> alive = alive_;
     if (record.kind == RecordKind::uat_uplink) {
         if (on_uplink_)
-            on_uplink_(shifted(record.time, satMul(loop_shift_, pass_)), record.uplink_hex);
+            on_uplink_(shifted(record.time, replayLoopShift(loop_shift_, pass_)), record.uplink_hex);
     } else if (on_observation_) {
         if (pass_ == 0) {
             on_observation_(record.obs);
         } else {
-            const auto shift = satMul(loop_shift_, pass_);
+            const auto shift = replayLoopShift(loop_shift_, pass_);
             TrackObservation obs = record.obs;
             obs.received_time = shifted(obs.received_time, shift);
             if (obs.position_time)

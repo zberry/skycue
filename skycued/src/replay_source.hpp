@@ -50,6 +50,11 @@ std::chrono::steady_clock::duration replayDelay(std::chrono::system_clock::durat
 std::chrono::system_clock::duration replayOffset(std::chrono::system_clock::time_point t,
                                                  std::chrono::system_clock::time_point first);
 
+// shift * pass, saturated to system_clock::duration's range: loop mode
+// shifts pass N's timestamps by N times the recording's span, so the product
+// may not wrap. Pure; ReplaySource takes every loop shift with it.
+std::chrono::system_clock::duration replayLoopShift(std::chrono::system_clock::duration shift, uint64_t pass);
+
 class ReplaySource {
 public:
     // speed: 1.0 = real time; N = N times faster; 0 = no pacing (every

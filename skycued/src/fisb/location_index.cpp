@@ -3,6 +3,7 @@
 #include "geo.hpp"
 #include "json_lite.hpp"
 #include "json_nesting.hpp"
+#include "log.hpp"
 
 #include <boost/property_tree/json_parser.hpp>
 
@@ -62,6 +63,9 @@ std::string fixed6(double v)
     return out.str();
 }
 
+// Longitude in [-180, 180].
+double wrapLon(double lon) { return std::remainder(lon, 360.0); }
+
 std::string trim(const std::string& s)
 {
     const auto b = s.find_first_not_of(" \t\r");
@@ -79,13 +83,15 @@ std::optional<std::pair<double, double>> smallCentroid(const Shape& s)
         --n;
     if (n == 0)
         return std::nullopt;
+    // Longitudes relative to the first vertex, so a polygon across +-180 is not averaged to 0.
+    const double lon0 = s.points[0].second;
     double lat = 0, lon = 0;
     for (std::size_t i = 0; i < n; ++i) {
         lat += s.points[i].first;
-        lon += s.points[i].second;
+        lon += lon0 + std::remainder(s.points[i].second - lon0, 360.0);
     }
     lat /= static_cast<double>(n);
-    lon /= static_cast<double>(n);
+    lon = wrapLon(lon / static_cast<double>(n));
     if (!validPosition(lat, lon))
         return std::nullopt;
     for (std::size_t i = 0; i < n; ++i)
@@ -126,33 +132,49 @@ bool LocationIndex::learn(const TwgoRecord& record)
     const bool is_new = it == learned_.end();
     if (samples.empty() && (!centroid || (!is_new && it->second.samples > 0)))
         return false;
-    if (is_new)
-        it = learned_.emplace(record.location, Learned{}).first;
-    Learned& e = it->second;
-    if (samples.empty()) {
-        if (is_new || e.lat != centroid->first || e.lon != centroid->second) {
-            e.lat = centroid->first;
-            e.lon = centroid->second;
-            dirty_ = true;
+    if (is_new) {
+        if (learned_.size() >= kMaxLearnedIds) {
+            if (learned_overflow_++ == 0)
+                LOG_WARN("fisb locations: more than " << kMaxLearnedIds << " ids, new ones ignored (first "
+                                                      << record.location << ")");
+            return false;
         }
-        return is_new;
+        it = learned_.emplace(record.location, Learned{}).first;
+    }
+    Learned& e = it->second;
+    const std::string before = is_new ? std::string() : rendering(e);
+    if (samples.empty()) {
+        e.lat = centroid->first;
+        e.lon = centroid->second;
     }
     for (const auto& p : samples) {
         // A centroid entry has 0 samples, so its first point replaces it.
         const uint32_t n = e.samples < kMaxSamples ? e.samples + 1 : kMaxSamples;
-        e.lat += (p.first - e.lat) / n;
-        e.lon += (p.second - e.lon) / n;
+        if (n == 1) {
+            e.lat = p.first;
+            e.lon = p.second;
+        } else {
+            e.lat += (p.first - e.lat) / n;
+            e.lon = wrapLon(e.lon + std::remainder(p.second - e.lon, 360.0) / n);
+        }
         e.samples = n;
     }
-    dirty_ = true;
+    // Only a change to the persisted text needs a save: at the sample cap a repeated point moves nothing.
+    if (is_new || rendering(e) != before)
+        dirty_ = true;
     return is_new;
+}
+
+std::string LocationIndex::rendering(const Learned& e)
+{
+    return "[" + fixed6(e.lat) + "," + fixed6(e.lon) + "," + std::to_string(e.samples) + "]";
 }
 
 std::string LocationIndex::learnedJson() const
 {
     JsonWriter locations;
     for (const auto& [id, e] : learned_)
-        locations.addRaw(id.c_str(), "[" + fixed6(e.lat) + "," + fixed6(e.lon) + "," + std::to_string(e.samples) + "]");
+        locations.addRaw(id.c_str(), rendering(e));
     JsonWriter doc;
     doc.add("version", int64_t{1});
     doc.addRaw("locations", locations.str());
@@ -186,6 +208,8 @@ void LocationIndex::loadLearned(const std::string& text)
     for (const auto& [id, value] : *locations) {
         if (!airportStyleId(id))
             throw std::runtime_error("\"locations\": bad id \"" + id + "\"");
+        if (loaded.size() >= kMaxLearnedIds && loaded.count(id) == 0)
+            throw std::runtime_error("more than " + std::to_string(kMaxLearnedIds) + " locations");
         std::vector<std::string> fields;
         for (const auto& [key, element] : value) {
             if (!key.empty() || !element.empty())
@@ -212,7 +236,9 @@ std::size_t LocationIndex::loadOperatorCsv(const std::string& text)
     operator_.clear();
     rejected_ = 0;
     rejected_first_line_ = 0;
-    std::istringstream in(text);
+    operator_overflow_ = 0;
+    const bool bom = text.compare(0, 3, "\xEF\xBB\xBF") == 0;
+    std::istringstream in(bom ? text.substr(3) : text);
     std::string raw;
     for (std::size_t line_no = 1; std::getline(in, raw); ++line_no) {
         const std::string line = trim(raw);
@@ -237,14 +263,25 @@ std::size_t LocationIndex::loadOperatorCsv(const std::string& text)
                 rejected_first_line_ = line_no;
             continue;
         }
+        if (operator_.size() >= kMaxOperatorRows && operator_.count(id) == 0) {
+            ++operator_overflow_;
+            continue;
+        }
         operator_[id] = {*lat, *lon};
     }
+    if (operator_overflow_ > 0)
+        LOG_WARN("fisb locations: operator file holds more than " << kMaxOperatorRows << " ids, "
+                                                                  << operator_overflow_ << " ignored");
     return operator_.size();
 }
 
 std::size_t LocationIndex::operatorRejected() const { return rejected_; }
 
 std::size_t LocationIndex::operatorRejectedFirstLine() const { return rejected_first_line_; }
+
+std::size_t LocationIndex::operatorOverflow() const { return operator_overflow_; }
+
+std::size_t LocationIndex::learnedOverflow() const { return learned_overflow_; }
 
 std::optional<std::pair<double, double>> LocationIndex::find(const std::string& id) const
 {

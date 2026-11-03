@@ -451,6 +451,31 @@ test('cues_row_click_selects_track', async ({ page }) => {
   await expect(page.locator('#details [data-field="hex"]')).toHaveText(TARGET);
 });
 
+// ---- Config tab ----------------------------------------------------------------
+test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
+  const port = new URL(BASE).port;
+  await openPage(page);
+  await page.locator('#wx-toggle').click();
+  await page.locator('#tab-config').click();
+  const row = (k) => page.locator(`#pane-config tr[data-key="${k}"]`);
+  await expect(row('RECEIVER_LAT').locator('.cfg-value')).toHaveText('38.9');
+  await expect(row('RECEIVER_LAT').locator('.cfg-source')).toHaveText('conf');
+  await expect(row('WEB_PORT').locator('.cfg-value')).toHaveText(port);
+  await expect(row('WEB_PORT').locator('.cfg-restart')).toContainText('restart');
+  await expect(row('MIN_INTERVAL_S').locator('.cfg-source')).toHaveText('default');
+  await expect(row('MAX_RANGE_NM').locator('.cfg-restart')).not.toContainText('restart');
+  await expect(page.locator('#pane-config table[data-group="FIS-B"] tr[data-key="LOCATIONS_FILE"]')).toHaveCount(1);
+  await expect(page.locator('#config-daemon')).toContainText('skycued');
+  const text = await page.evaluate(() => window.skycueApp.configText());
+  expect(text).toContain(`WEB_PORT=${port}  # conf, restart`);
+  await page.locator('#config-copy').click();
+  await expect(page.locator('#config-copy-status')).toHaveText('Copied');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(text);
+  expect(errors).toEqual([]);
+});
+
 // ---- FIS-B ---------------------------------------------------------------------
 async function apiAt(base, path) {
   const r = await fetch(base + path);

@@ -270,6 +270,57 @@
     return rows;
   }
 
+  // ---- Config tab ----
+  // GET /api/config's keys in the tab's tables, in this order; a key no
+  // group names (one added to skycued later) goes to a trailing Other.
+  var CONFIG_GROUPS = [
+    ['Receiver site', ['RECEIVER_LAT', 'RECEIVER_LON', 'RECEIVER_ALT_M', 'ANTENNA_HEIGHT_M']],
+    ['Decoders', ['SDR_1090_SERIAL', 'SDR_978_SERIAL', 'GAIN_1090', 'GAIN_978', 'DUMP978_RAW_PORT', 'DUMP978_JSON_PORT', 'READSB_JSON_PORT', 'INPUTS_FILE']],
+    ['Cue outputs', ['CUE_TCP_PORT', 'CUE_TCP_CONNECT', 'CUE_UDP_TARGETS', 'MIN_INTERVAL_S', 'MAX_INTERVAL_S', 'TRACK_TIMEOUT_S', 'KEYFRAME_INTERVAL_S']],
+    ['Recording', ['RECORD_DIR', 'RECORD_FORMATS', 'RECORD_MAX_GB', 'RECORD_RAW']],
+    ['Filters', ['MAX_RANGE_NM', 'MIN_ELEVATION_DEG', 'ALLOW_LIST_FILE', 'BLOCK_LIST_FILE']],
+    ['Web', ['WEB_BIND', 'WEB_PORT', 'TRAIL_SECONDS']],
+    ['FIS-B', ['FISB_ENABLE', 'FISB_EXPERIMENTAL', 'LOCATIONS_FILE']]];
+
+  // [{group, rows}] in CONFIG_GROUPS order, each group's rows in its key
+  // order; groups with no key are left out.
+  function groupConfig(keys) {
+    var byKey = {}, named = {};
+    keys.forEach(function (k) { byKey[k.key] = k; });
+    var out = [];
+    CONFIG_GROUPS.forEach(function (g) {
+      var rows = [];
+      g[1].forEach(function (name) {
+        named[name] = true;
+        if (byKey[name]) rows.push(byKey[name]);
+      });
+      if (rows.length) out.push({ group: g[0], rows: rows });
+    });
+    var other = keys.filter(function (k) { return !named[k.key]; });
+    if (other.length) out.push({ group: 'Other', rows: other });
+    return out;
+  }
+
+  // A value as skycue.conf spells it: bare when every character is one of
+  // the grammar's unquoted ones, else quoted (conf_rewrite.cpp quoteValue).
+  function confValue(v) {
+    if (/^[A-Za-z0-9_.,:/+@%=-]+$/.test(v)) return v;
+    return /["$`\\]/.test(v) ? "'" + v + "'" : '"' + v + '"';
+  }
+
+  // The whole configuration as skycue.conf text, each key commented with
+  // its source and whether it needs a restart (the Config tab's copy).
+  function configText(cfg) {
+    var d = cfg.daemon || {}, out = '# ' + d.version + ', started ' + d.started + '\n';
+    groupConfig(cfg.keys || []).forEach(function (g) {
+      out += '# ' + g.group + '\n';
+      g.rows.forEach(function (r) {
+        out += r.key + '=' + confValue(String(r.value)) + '  # ' + r.source + (r.restart ? ', restart' : '') + '\n';
+      });
+    });
+    return out;
+  }
+
   function backoffMs(attempt) { return Math.min(5000, 500 * Math.pow(2, attempt)); }
 
   // skycued's data clock minus the browser's clock, after seeing the
@@ -908,6 +959,7 @@
     dropRemovesMarker: dropRemovesMarker,
     CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
     filterHistoryRows: filterHistoryRows,
+    CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,

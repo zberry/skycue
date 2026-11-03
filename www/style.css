@@ -147,10 +147,10 @@ input.invalid { border-color: var(--blocked); }
 
 /* side panel tabs */
 .tabs { display: flex; align-items: center; justify-content: space-between; margin: -4px 0 12px; border-bottom: 1px solid var(--line); }
-.tabs [role="tablist"] { display: flex; gap: 2px; }
+.tabs [role="tablist"] { display: flex; flex-wrap: wrap; min-width: 0; }
 .tabs [role="tab"] {
   border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted);
-  padding: 6px 12px; margin-bottom: -1px;
+  padding: 6px 5px; margin-bottom: -1px; font-size: 13px;
 }
 .tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
 .tabs [role="tab"]:hover { color: var(--text); }
@@ -339,6 +339,22 @@ table.cues-table td.empty { color: var(--muted); border: none; }
 #cues-clients td:nth-child(3) { white-space: normal; }
 #cues-filters li { display: block; color: var(--text); }
 #cues-filters .cf-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* config tab */
+#pane-config h2 { margin-top: 14px; }
+.config-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.config-actions .msg { margin: 0; }
+#config-copy-text { display: block; width: 100%; height: 12em; margin-bottom: 8px; font: 11px ui-monospace, Menlo, Consolas, monospace;
+  color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; resize: vertical; }
+#config-copy-text[hidden] { display: none; }
+table.cfg-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 6px; }
+table.cfg-table th { text-align: left; font-weight: normal; padding: 2px 6px 2px 0; vertical-align: top;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); word-break: break-all; border-top: 1px solid var(--line); }
+table.cfg-table td { padding: 2px 6px 2px 0; border-top: 1px solid var(--line); vertical-align: top; }
+table.cfg-table td.cfg-value { word-break: break-all; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
+table.cfg-table td.cfg-source { color: var(--muted); white-space: nowrap; }
+table.cfg-table td.cfg-restart { padding-right: 0; white-space: nowrap; text-align: right; }
+.badge { display: inline-block; padding: 0 5px; border: 1px solid var(--line); border-radius: 8px; font-size: 10px; color: var(--muted); }
 
 @media (max-width: 1400px) {
   #filters { width: 230px; }

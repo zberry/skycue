@@ -851,6 +851,24 @@ test('filter_history_rows_diff_consecutive', () => {
   assert.deepStrictEqual(rows[2].diffs, [{ field: 'max_range_nm', from: null, to: 150 }, { field: 'min_elevation_deg', from: null, to: 0 }]);
   assert.deepStrictEqual(P.filterHistoryRows([]), []);
 });
+const CFG = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
+  { key: 'RECEIVER_LAT', value: '38.9', source: 'conf', restart: true }, { key: 'WEB_BIND', value: '127.0.0.1', source: 'default', restart: true },
+  { key: 'CUE_UDP_TARGETS', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
+  { key: 'MAX_RANGE_NM', value: '20', source: 'overlay', restart: false }, { key: 'RECORD_DIR', value: '', source: 'default', restart: true },
+  { key: 'NEW_KEY', value: 'x', source: 'conf', restart: true }] };
+test('config_grouping', () => {
+  const g = P.groupConfig(CFG.keys);
+  assert.deepStrictEqual(g.map((x) => x.group), ['Receiver site', 'Cue outputs', 'Recording', 'Filters', 'Web', 'Other']);
+  assert.deepStrictEqual(g[5].rows.map((r) => r.key), ['NEW_KEY']);
+});
+test('config_text', () => {
+  const t = P.configText(CFG);
+  assert.ok(t.startsWith('# skycued 0.1.0, started 2026-01-01T00:00:00.000Z\n'));
+  assert.ok(t.includes('# Receiver site\nRECEIVER_LAT=38.9  # conf, restart\n'));
+  assert.ok(t.includes('CUE_UDP_TARGETS="127.0.0.1:30501 10.0.0.2:30502"  # conf, restart\n'));
+  assert.ok(t.includes('MAX_RANGE_NM=20  # overlay\n'));
+  assert.ok(t.includes('RECORD_DIR=""  # default, restart\n'));
+});
 
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

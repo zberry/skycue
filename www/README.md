@@ -126,6 +126,21 @@ the startup entry has every field, from `null`), and `#cues-clients` is
 are fetched again every 5 s, and the history also on every `filters` item.
 Origins, endpoints and callsigns are set with `textContent`.
 
+## Config tab
+
+The Config tab (`showConfig`) is read only and fetches `GET /api/config`
+each time it is shown and on `#config-refresh`. `#config-daemon` lists the
+daemon facts; `groupConfig` sorts the keys into one `table[data-group]`
+per `CONFIG_GROUPS` entry (a key no group names goes to a trailing
+`Other`, an empty group is left out), each key a `tr[data-key]` with
+`td.cfg-value`, `td.cfg-source` and `td.cfg-restart` (a `restart` badge
+when the key needs one). `#config-copy` writes `configText` (skycue.conf
+text, quoted as `conf_rewrite.cpp`'s `quoteValue` does, each line
+commented with its source) with `navigator.clipboard.writeText`;
+`#config-copy-status` says `Copied`, or `Copy failed` with the text shown
+selected in the read-only `#config-copy-text`. Keys, values and paths are
+set with `textContent`.
+
 ## Geometry
 
 `elevationDeg` in `app_pure.js` duplicates `skycued/src/geo.cpp`

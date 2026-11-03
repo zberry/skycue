@@ -628,7 +628,8 @@
   var TAB_SHOWN = {
     weather: function () { renderWx(true); },
     receiver: function () { renderReceiver(); },
-    cues: showCues
+    cues: showCues,
+    config: showConfig
   };
   var activeTab = 'track';
   function eachEl(selector, fn) { Array.prototype.forEach.call(document.querySelectorAll(selector), fn); }
@@ -2273,6 +2274,86 @@
     fetchCueClients();
   }
 
+  // ---- Config tab ----------------------------------------------------------------
+  // docs/operating.md, Config tab. Read only: GET /api/config each time the
+  // tab is shown and on Refresh; one table per CONFIG_GROUPS group with each
+  // key's value, source and restart badge. "Copy as text" puts configText()
+  // on the clipboard, or, where the clipboard refuses, in a selected
+  // textarea to copy by hand. Server strings go in through textContent.
+  var config = { data: null, seq: 0 };
+
+  function renderConfigDaemon(d) {
+    var body = $('config-daemon').tBodies[0], started = Date.parse(d.started);
+    var rows = [
+      ['Version', d.version],
+      ['Started', isNaN(started) ? d.started : d.started + ' (' + P.formatAge(started, Date.now()) + ')'],
+      ['Config file', d.config_path],
+      ['Inputs file', d.inputs_path],
+      ['Overlay file', d.overlay_path + (d.overlay_active ? ' (unsaved changes)' : '')],
+      ['www directory', d.www_dir],
+      ['Recording to', d.record_dir || 'not recording'],
+      ['Recording files', (d.recording_files || []).join(', ') || 'none'],
+      ['Log level', d.log_level]];
+    body.textContent = '';
+    rows.forEach(function (r) {
+      var tr = el('tr');
+      tr.appendChild(el('th', null, r[0]));
+      tr.appendChild(el('td', null, r[1] === undefined || r[1] === null ? '' : String(r[1])));
+      body.appendChild(tr);
+    });
+  }
+  function renderConfigGroups(keys) {
+    var box = $('config-groups');
+    box.textContent = '';
+    P.groupConfig(keys).forEach(function (g) {
+      box.appendChild(el('h2', null, g.group));
+      var table = el('table', 'cfg-table'), body = el('tbody');
+      table.setAttribute('data-group', g.group);
+      g.rows.forEach(function (r) {
+        var tr = el('tr'), restart = el('td', 'cfg-restart');
+        tr.setAttribute('data-key', r.key);
+        tr.appendChild(el('th', null, r.key));
+        tr.appendChild(el('td', 'cfg-value', String(r.value)));
+        tr.appendChild(el('td', 'cfg-source', r.source));
+        if (r.restart) restart.appendChild(el('span', 'badge', 'restart'));
+        tr.appendChild(restart);
+        body.appendChild(tr);
+      });
+      table.appendChild(body);
+      box.appendChild(table);
+    });
+  }
+  // A response that an answer to a later request overtook is not shown.
+  function showConfig() {
+    var seq = ++config.seq;
+    request('GET', 'api/config').then(function (c) {
+      if (seq !== config.seq) return;
+      config.data = c;
+      showMsg($('config-msg'), '');
+      renderConfigDaemon(c.daemon || {});
+      renderConfigGroups(c.keys || []);
+      $('config-copy').disabled = false;
+    }).catch(function (e) {
+      if (seq === config.seq) showMsg($('config-msg'), 'Could not load the configuration: ' + e.message, true);
+    });
+  }
+  function configText() { return config.data ? P.configText(config.data) : ''; }
+  function copyConfig() {
+    var text = configText(), status = $('config-copy-status'), area = $('config-copy-text');
+    var fallback = function () {
+      showMsg(status, 'Copy failed', true);
+      area.value = text;
+      area.hidden = false;
+      area.focus();
+      area.select();
+    };
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { fallback(); return; }
+    navigator.clipboard.writeText(text).then(function () {
+      area.hidden = true;
+      showMsg(status, 'Copied');
+    }, fallback);
+  }
+
   // ---- the add / edit form ----
   function formEl(name) { return $('input-form').elements[name]; }
   function formFields() { return P.inputFields(formEl('type').value, formEl('transport').value); }
@@ -2535,6 +2616,8 @@
     });
     $('save-baseline').addEventListener('click', saveBaseline);
     $('details-close').addEventListener('click', closePanel);
+    $('config-refresh').addEventListener('click', showConfig);
+    $('config-copy').addEventListener('click', copyConfig);
     eachEl('#details [role=tab]', function (b) {
       b.addEventListener('click', function () { setTab(b.id.replace(/^tab-/, '')); });
     });
@@ -2650,6 +2733,8 @@
       return e ? e.t.hex : null;
     },
     connected: function () { return connected; },
+    // The Config tab's "copy as text" (empty before GET /api/config answers).
+    configText: configText,
     setHideFiltered: setHideFiltered,
     getHideFiltered: function () { return hideFiltered; },
     hiddenCount: updateHiddenCount,

@@ -103,6 +103,7 @@
         <button type="button" role="tab" id="tab-weather" aria-controls="pane-weather" aria-selected="false">Weather</button>
         <button type="button" role="tab" id="tab-receiver" aria-controls="pane-receiver" aria-selected="false">Receiver</button>
         <button type="button" role="tab" id="tab-cues" aria-controls="pane-cues" aria-selected="false">Cues</button>
+        <button type="button" role="tab" id="tab-config" aria-controls="pane-config" aria-selected="false">Config</button>
       </div>
       <button type="button" id="details-close" aria-label="Close (Esc)">×</button>
     </div>
@@ -218,6 +219,18 @@
         <thead><tr><th>Endpoint</th><th>Direction</th><th>Since</th><th>Sent</th></tr></thead>
         <tbody></tbody>
       </table>
+    </section>
+    <section id="pane-config" role="tabpanel" aria-labelledby="tab-config" hidden>
+      <div class="config-actions">
+        <button type="button" id="config-refresh">Refresh</button>
+        <button type="button" id="config-copy" disabled>Copy as text</button>
+        <span id="config-copy-status" class="msg" role="status"></span>
+      </div>
+      <textarea id="config-copy-text" readonly hidden aria-label="Configuration as text"></textarea>
+      <p id="config-msg" class="msg" role="status"></p>
+      <h2>Daemon</h2>
+      <table id="config-daemon" class="kv"><tbody></tbody></table>
+      <div id="config-groups"></div>
     </section>
   </aside>
 </main>

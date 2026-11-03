@@ -1,0 +1,21 @@
+{
+     "aircraft": [
+           {
+                 "icaoAddress":"A1B2C3",
+                 "trafficSource":1,
+                 "altitudeMM":1524000,
+                 "altitudeType":1,
+                 "emitterType":14,
+                 "squawk":7,
+                 "detail": {
+                       "secondaryAltType":0,
+                       "secondaryAltitudeMM":1600200,
+                       "addressQualifier":0,
+                       "airGroundState":2,
+                       "emergencyStatus":3,
+                       "verVelocitySrc":0,
+                       "rawData":"00a1b2c31a2b3c4d5e6f708192a3b4c5d6e7"
+                 }
+           }
+     ]
+}

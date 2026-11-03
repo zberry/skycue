@@ -276,3 +276,11 @@ target_link_libraries(test_cat021 PRIVATE skycued_asterix Boost::unit_test_frame
 target_compile_definitions(test_cat021 PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_cat021)
 add_test(NAME cat021 COMMAND test_cat021)
+
+# pingStation 3 adapters, pure part: device time, JSON parser, CAT021 mapping.
+add_executable(test_pingstation test_pingstation.cpp)
+target_link_libraries(test_pingstation PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_pingstation PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_pingstation)
+add_test(NAME pingstation COMMAND test_pingstation)

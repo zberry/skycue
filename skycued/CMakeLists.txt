@@ -28,6 +28,9 @@ add_library(skycued_core STATIC
   src/filters.cpp
   src/forwarder.cpp
   src/geo.cpp
+  src/inputs/cat021_map.cpp
+  src/inputs/device_time.cpp
+  src/inputs/ping_json.cpp
   src/json_lite.cpp
   src/line_client.cpp
   src/log.cpp

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <string>
 
 using skycue::AddressType;
@@ -349,4 +350,39 @@ BOOST_AUTO_TEST_CASE(json_writer_escapes)
     BOOST_TEST(o->getString("s").value_or("") == "a\"b\n");
     BOOST_TEST(o->getString("bs").value_or("") == "c\\d\t\x01");
     BOOST_TEST(o->getInt("i").value_or(0) == -1234567890123);
+}
+
+BOOST_AUTO_TEST_CASE(json_object_array)
+{
+    auto o = JsonObject::parse(
+        R"({"a":[{"x":1},{"x":"2"}],"empty":[],"eobj":{},"scalars":[1,2],"nested":[[1]],)"
+        R"("obj":{"k":{"x":1}},"s":"v","mixed":[{"x":1},3]})");
+    BOOST_REQUIRE(o);
+    auto a = o->getObjectArray("a");
+    BOOST_REQUIRE(a);
+    BOOST_REQUIRE(a->size() == 2u);
+    BOOST_TEST((*a)[0].getInt("x").value_or(0) == 1);
+    BOOST_TEST((*a)[1].getInt("x").value_or(0) == 2);
+    BOOST_TEST(o->getObjectArray("empty").value().empty());
+    BOOST_TEST(o->getObjectArray("eobj").value().empty());  // {} reads as an empty array
+    BOOST_TEST(!o->getObjectArray("scalars"));
+    BOOST_TEST(!o->getObjectArray("nested"));
+    BOOST_TEST(!o->getObjectArray("obj"));
+    BOOST_TEST(!o->getObjectArray("s"));
+    BOOST_TEST(!o->getObjectArray("mixed"));
+    BOOST_TEST(!o->getObjectArray("absent"));
+}
+
+BOOST_AUTO_TEST_CASE(json_bool)
+{
+    auto o = JsonObject::parse(R"({"t":true,"f":false,"one":1,"s":"yes","o":{},"st":"true"})");
+    BOOST_REQUIRE(o);
+    BOOST_TEST((o->getBool("t") == std::optional<bool>(true)));
+    BOOST_TEST((o->getBool("f") == std::optional<bool>(false)));
+    BOOST_TEST(!o->getBool("one"));
+    BOOST_TEST(!o->getBool("s"));
+    BOOST_TEST(!o->getBool("o"));
+    BOOST_TEST(!o->getBool("absent"));
+    // PropertyTree keeps scalars as text, so the string "true" reads the same.
+    BOOST_TEST((o->getBool("st") == std::optional<bool>(true)));
 }

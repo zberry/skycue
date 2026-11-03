@@ -13,9 +13,10 @@ namespace {
 using skycue::AddressType;
 using skycue::Source;
 
-// Upper bound for "now": keeps the conversion to system_clock's nanosecond
-// count far from overflow (1e11 s is past the year 5000).
-constexpr double kMaxEpochSeconds = 1e11;
+// Upper bound for "now": system_clock counts int64 nanoseconds, which end
+// near 9.22e9 s (the year 2262), so a larger value would overflow the
+// conversion. 9e9 s (the year 2255) leaves a margin.
+constexpr double kMaxEpochSeconds = 9e9;
 
 std::chrono::system_clock::time_point fromEpochSeconds(double seconds)
 {

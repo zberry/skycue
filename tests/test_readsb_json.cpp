@@ -33,6 +33,16 @@ const char* const kMinimal =
     R"("rc":186,"seen_pos":0.5,"version":2,"nac_p":9,"mlat":[],"tisb":[],"messages":1234,"seen":0.2,)"
     R"("rssi":-12.3})";
 
+// "7b22..." -> the bytes, for fuzz findings kept inline as hex.
+std::string fromHex(const std::string& hex)
+{
+    std::string out;
+    for (std::size_t i = 0; i + 1 < hex.size(); i += 2) {
+        out.push_back(static_cast<char>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+    }
+    return out;
+}
+
 }  // namespace
 
 BOOST_AUTO_TEST_CASE(parses_minimal_line)
@@ -291,6 +301,25 @@ BOOST_AUTO_TEST_CASE(invalid_utf8_rejected_or_ignored)
         BOOST_TEST(obs->id.address == 0xabcdefu);
     }
     BOOST_CHECK_NO_THROW(JsonObject::parse("{\"\xff\xfe\":1}"));
+}
+
+// Fuzz finding (fuzz_readsb_line, minimised): "now" of 1.79e10 s passed the
+// old 1e11 bound, but system_clock counts int64 nanoseconds, which end near
+// 9.22e9 s; the double-to-int64 conversion overflowed (undefined behaviour,
+// a garbage received_time).
+BOOST_AUTO_TEST_CASE(fuzz_readsb_line_now_overflow)
+{
+    const std::string line =
+        fromHex("7b226e6f77223a31373933353435303235362c22686578223a22613466326331227d");
+    BOOST_TEST(line == R"({"now":17935450256,"hex":"a4f2c1"})");
+    BOOST_TEST(!parseReadsbLine(line).has_value());
+
+    // The largest accepted "now" still converts exactly enough.
+    auto obs = parseReadsbLine(R"({"now":9000000000,"hex":"a4f2c1","lat":1,"lon":2})");
+    BOOST_TEST_REQUIRE(obs.has_value());
+    BOOST_TEST(std::fabs(toSeconds(obs->received_time) - 9e9) < 1e-3);
+    BOOST_TEST(std::fabs(toSeconds(*obs->position_time) - 9e9) < 1e-3);
+    BOOST_TEST(!parseReadsbLine(R"({"now":9000000001,"hex":"a4f2c1"})").has_value());
 }
 
 BOOST_AUTO_TEST_CASE(sample_fixture_parses_fully)

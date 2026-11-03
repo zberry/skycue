@@ -23,7 +23,10 @@ constexpr double kCentroidMaxRadiusNm = 10;   // a larger polygon's centroid is 
 constexpr uint32_t kMaxSamples = 1000;        // the running mean stops weighting new samples past this
 // Memory bounds: new ids past these are counted and ignored (a WARN once per index).
 constexpr std::size_t kMaxLearnedIds = 20000;
-constexpr std::size_t kMaxOperatorRows = 50000;
+// Room for a world-wide make-locations.py file (about 100k ids from full
+// OurAirports data); scripts/make-locations.py warns past it and
+// tests/superbuild/test_make_locations.sh pins the two together.
+constexpr std::size_t kMaxOperatorRows = 250000;
 
 class LocationIndex {
 public:

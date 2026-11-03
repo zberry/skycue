@@ -6,13 +6,18 @@
 //
 // Only our own file names are considered, in `dir` and `dir/raw`:
 //   (received|sent|fisb|beast|uat)-YYYYMMDD-HHMMSS[-N].(jsonl|csv|bin|txt)
+//   capture-<id>-YYYYMMDD-HHMMSS[-N].jsonl     (pingStation capture)
+//   raw-<id>-YYYYMMDD-HHMMSS[-N].(csv|txt)     (pingStation RECORD_RAW frames)
+// with <id> an input id, [a-z0-9-]{1,32}; names are parsed from the end, so
+// the stream is everything before the time stamp ("raw-ps-north").
 // (regular files only; anything else is neither counted nor touched). They are
 // ordered by the time stamp in the name, then the -N suffix (none first), and
 // deleted oldest first until the total is at most max_bytes. Never deleted:
 //   - a file in `open_files` (compared by device and inode, so any spelling
 //     of the path works);
-//   - the newest file of each stream and extension in each of the two
-//     directories, by name and also by modification time, and any file
+//   - the newest file of each stream (the whole prefix, so per input) and
+//     extension in each of the two directories, by name and also by
+//     modification time, and any file
 //     modified within kRecentWindow (or in the future): another process
 //     (skycued and skycue-rawrec share the budget) may still be writing it,
 //     and a clock step or a restart can give its file an older name stamp.

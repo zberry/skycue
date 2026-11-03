@@ -200,6 +200,7 @@ int main(int argc, char** argv)
     InputManagerConfig mc;
     mc.inputs_file = vm.count("inputs-file") ? inputs_file : resolveInputsFile(config_path, config.inputs_file);
     mc.record_dir = config.record_dir;
+    mc.record_raw = config.record_raw;
     mc.record_max_bytes = gigabytesToBytes(config.record_max_gb);
     mc.replaying = replaying;
     auto inputs = std::make_unique<InputManager>(io, mc);

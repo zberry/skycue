@@ -1,12 +1,16 @@
 # skycued: the daemon. skycued_core holds everything except main.cpp so the
 # tests can link it.
 
-# ASTERIX CAT021 codec and stream framer: pure code, no I/O.
+# ASTERIX CAT021 codec, stream framer and the capture-file line: pure code,
+# no I/O. skycue-dump links it without skycued_core, hence time_util here.
 add_library(skycued_asterix STATIC
+  src/asterix/capture_line.cpp
   src/asterix/cat021.cpp
   src/asterix/cat021_encode.cpp
-  src/asterix/cat021_framer.cpp)
+  src/asterix/cat021_framer.cpp
+  src/time_util.cpp)
 target_include_directories(skycued_asterix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(skycued_asterix PUBLIC Boost::boost)
 skycue_set_warnings(skycued_asterix)
 
 add_library(skycued_core STATIC
@@ -29,6 +33,7 @@ add_library(skycued_core STATIC
   src/filters.cpp
   src/forwarder.cpp
   src/geo.cpp
+  src/inputs/capture_writer.cpp
   src/inputs/cat021_map.cpp
   src/inputs/device_time.cpp
   src/inputs/dump978_input.cpp
@@ -58,7 +63,6 @@ add_library(skycued_core STATIC
   src/rotating_file.cpp
   src/runtime_config.cpp
   src/stats_report.cpp
-  src/time_util.cpp
   src/track_table.cpp
   src/web_api.cpp
   src/web_fisb.cpp

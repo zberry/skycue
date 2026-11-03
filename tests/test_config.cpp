@@ -357,6 +357,17 @@ BOOST_AUTO_TEST_CASE(web_bind_record_max_gb_trail_seconds)
     BOOST_TEST(contains(e.what(), "WEB_BIND"));
 }
 
+BOOST_AUTO_TEST_CASE(record_raw_parsed)
+{
+    BOOST_TEST(!parseConfigText(kLatLon, "t").record_raw);
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "RECORD_RAW=yes\n", "t").record_raw);
+    BOOST_TEST(!parseConfigText(std::string(kLatLon) + "RECORD_RAW=no\n", "t").record_raw);
+    ConfigError e = expectError(std::string(kLatLon) + "RECORD_RAW=maybe\n");
+    BOOST_TEST(e.line == 3);
+    BOOST_TEST(contains(e.what(), "RECORD_RAW"));
+    BOOST_TEST(contains(e.what(), "yes or no"));
+}
+
 BOOST_AUTO_TEST_CASE(fisb_enable_and_experimental)
 {
     Config c = parseConfigText(kLatLon, "t");

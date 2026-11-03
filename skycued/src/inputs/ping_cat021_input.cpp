@@ -8,13 +8,36 @@
 
 namespace skycued {
 
-PingCat021Input::PingCat021Input(boost::asio::io_context& io, InputDef def)
+PingCat021Input::PingCat021Input(boost::asio::io_context& io, InputDef def, const RecordOptions& record)
     : TransportInput(io, std::move(def)),
       edition_(asterix::parseEdition(this->def().edition).value_or(asterix::Edition::e2_5))
 {
+    if (this->def().capture && !record.record_dir.empty())
+        capture_ = std::make_unique<CaptureWriter>(record.record_dir, this->def().id, record.max_bytes);
 }
 
 PingCat021Input::~PingCat021Input() = default;
+
+void PingCat021Input::stop()
+{
+    TransportInput::stop();
+    if (capture_)
+        capture_->flush();
+}
+
+void PingCat021Input::tick(std::chrono::system_clock::time_point now)
+{
+    TransportInput::tick(now);
+    if (capture_)
+        capture_->flush();
+}
+
+void PingCat021Input::capture(const uint8_t* data, std::size_t size)
+{
+    if (capture_)
+        capture_->write(CaptureLine{std::chrono::system_clock::now(), def().id, transportName(def().transport),
+                                    std::vector<uint8_t>(data, data + size)});
+}
 
 void PingCat021Input::resetStreams() { framers_.clear(); }
 
@@ -23,6 +46,7 @@ void PingCat021Input::handleStreamClosed(uint64_t stream) { framers_.erase(strea
 void PingCat021Input::handleData(const TransportData& data)
 {
     if (def().transport == InputTransport::udp) {  // one datagram
+        capture(data.data, data.size);
         const asterix::BlockSplit split = asterix::splitBlocks(data.data, data.size);
         for (const auto& b : split.blocks) {
             if (!running())
@@ -55,6 +79,7 @@ void PingCat021Input::handleData(const TransportData& data)
     for (const auto& block : blocks) {
         if (!running())
             return;
+        capture(block.data(), block.size());
         handleBlock(block.data(), block.size());
     }
 }

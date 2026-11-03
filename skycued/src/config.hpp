@@ -20,6 +20,9 @@ struct Config {
     std::vector<std::pair<std::string, uint16_t>> cue_udp_targets;  // from "host:port host:port"
     std::string record_dir;
     std::set<std::string> record_formats{"jsonl", "csv"};
+    // RECORD_RAW: skycue-start.sh runs skycue-rawrec; skycued writes the
+    // pingStation JSON rawData frames to RECORD_DIR/raw-<id>-*.
+    bool record_raw = false;
     double max_range_nm = 150, min_elevation_deg = 0;
     std::string allow_list_file, block_list_file;
     double min_interval_s = 1, max_interval_s = 10, track_timeout_s = 60, keyframe_interval_s = 10;

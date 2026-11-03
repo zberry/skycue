@@ -68,8 +68,9 @@ bool UplinkDedupe::duplicate(const std::string& input_id, std::chrono::steady_cl
     return false;
 }
 
-std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& def, const InputManagerConfig& /*config*/)
+std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& def, const InputManagerConfig& config)
 {
+    const RecordOptions record{config.record_dir, config.record_raw, config.record_max_bytes};
     switch (def.type) {
     case InputType::readsb: {
         const std::string host = def.host;
@@ -82,9 +83,9 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
     case InputType::dump978:
         return std::make_unique<Dump978Input>(io, def);
     case InputType::pingstation_json:
-        return std::make_unique<PingJsonInput>(io, def);
+        return std::make_unique<PingJsonInput>(io, def, record);
     case InputType::pingstation_cat021:
-        return std::make_unique<PingCat021Input>(io, def);
+        return std::make_unique<PingCat021Input>(io, def, record);
     case InputType::replay:
         break;
     }
@@ -96,6 +97,8 @@ InputManager::InputManager(boost::asio::io_context& io, InputManagerConfig confi
 {
     if (!config_.inputs_file.empty())
         watch_ = std::make_unique<SettledFile>(config_.inputs_file);
+    if (config_.record_raw && config_.record_dir.empty() && !config_.replaying)
+        LOG_WARN("RECORD_RAW=yes without RECORD_DIR: pingStation raw frames are not written");
 }
 
 InputManager::~InputManager() { stop(); }

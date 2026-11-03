@@ -319,3 +319,13 @@ target_compile_definitions(test_status_poller PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_status_poller)
 add_test(NAME status_poller COMMAND test_status_poller)
 set_tests_properties(status_poller PROPERTIES TIMEOUT 60)
+
+# pingStation raw capture (capture: true) and the RECORD_RAW frames of JSON
+# mode, in the formats skycue-rawplay replays.
+add_executable(test_capture test_capture.cpp)
+target_link_libraries(test_capture PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_capture PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_capture)
+add_test(NAME capture COMMAND test_capture)
+set_tests_properties(capture PROPERTIES TIMEOUT 60)

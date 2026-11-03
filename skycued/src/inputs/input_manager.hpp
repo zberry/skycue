@@ -54,6 +54,9 @@ class SettledFile;
 
 struct InputManagerConfig {
     std::string inputs_file;  // empty = in-memory only
+    // For the pingStation inputs' capture and raw-frame files (spec §5.4).
+    // record_raw without a record_dir is logged once at WARN (by the
+    // constructor) and writes nothing.
     std::string record_dir;
     bool record_raw = false;
     uint64_t record_max_bytes = 0;

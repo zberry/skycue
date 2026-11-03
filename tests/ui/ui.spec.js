@@ -645,6 +645,45 @@ test.describe('fisb radar (tg30)', () => {
     await page.locator('#raster-select').selectOption('84');
     await expect(band).toBeHidden();
   });
+  test('winds_and_raster_picks_survive_items_and_reconnect', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    await layerToggle(page, 'Other rasters').check();
+    const status = (await apiAt(RADAR_BASE, '/api/fisb/status')).body;
+    const codes = status.rasters.filter((h) => h.product === 70).map((h) => h.altitude_code).sort((a, b) => a - b);
+    expect(codes.length).toBeGreaterThan(1);
+    const top = String(codes[codes.length - 1]);   // not the default (the lowest)
+    await page.locator('#raster-select').selectOption('70');
+    await page.locator('#raster-band').selectOption(top);
+    await expect.poll(() => page.evaluate(() => window.skycueApp.windsPickers().period)).toBe(6);
+    await page.locator('#wx-winds-period').selectOption('12');
+    await page.locator('#wx-winds-level').selectOption('39000');
+    const picks = async () => [await page.locator('#raster-select').inputValue(), await page.locator('#raster-band').inputValue(),
+      await page.evaluate(() => { const w = window.skycueApp.windsPickers(); return [w.period, w.level]; })];
+    const want = ['70', top, [12, 39000]];
+    expect(await picks()).toEqual(want);
+    // Unrelated items leave the picks alone.
+    const metar = (await apiAt(RADAR_BASE, '/api/fisb/text')).body.records.find((r) => r.kind === 'metar');
+    await page.evaluate((m) => window.skycueApp.injectFisbItems([{ type: 'fisb_location', id: 'K2G4', lat: 39.6, lon: -86.0 },
+      { type: 'fisb_text', record: m }]), metar);
+    await page.waitForTimeout(500);
+    expect(await picks()).toEqual(want);
+    // A reconnect empties the data set while it reloads (held here for a
+    // while): the picks outlive it.
+    let release;
+    const held = new Promise((ok) => { release = ok; });
+    await page.route('**/api/fisb/text*', async (route) => { await held; await route.continue(); });
+    const n = await page.evaluate(() => window.skycueApp.snapshots());
+    await page.evaluate(() => window.skycueApp.reconnect());
+    await expect.poll(() => page.evaluate(() => window.skycueApp.snapshots())).toBeGreaterThan(n);
+    await page.waitForTimeout(1500);
+    release();
+    await page.waitForFunction(() => window.skycueApp.fisbLoaded());
+    await expect.poll(picks).toEqual(want);
+    await page.unroute('**/api/fisb/text*');
+    expect(errors).toEqual([]);
+  });
 
   test('fisb_screenshots_radar', async ({ page }, testInfo) => {
     await openFisbPage(page);

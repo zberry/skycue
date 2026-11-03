@@ -1238,7 +1238,9 @@
     var products = P.rasterProducts(Array.from(fisb.rasterHeads.values()));
     var pick = fisb.rasterPick;
     var entry = products.filter(function (e) { return e.product === pick.product; })[0];
-    if (!entry) { entry = products[0] || null; pick.product = entry ? entry.product : null; pick.band = null; }
+    // With no rasters held (a reconnect reloading, say) the pick is kept for
+    // when they are back; otherwise a product no longer offered is replaced.
+    if (!entry) { entry = products[0] || null; if (entry) { pick.product = entry.product; pick.band = null; } }
     var bands = entry ? entry.bands : [];
     if (bands.length && (pick.band === null || !bands[pick.band] || !bands[pick.band].key)) pick.band = P.defaultBand(entry);
     fisb.rasterSel = !entry ? null : bands.length ? (pick.band === null ? null : bands[pick.band].key) : entry.key;
@@ -1511,11 +1513,14 @@
     var recs = [];
     fisb.text.forEach(function (r) { if (r.kind === 'winds') recs.push(r); });
     var pick = fisb.windsPick, periods = P.windsPeriods(recs);
-    if (periods.indexOf(pick.period) < 0) pick.period = null;
+    // No winds held at all (a reconnect reloading, say): the pick is kept
+    // for when they are back, not judged against an empty set.
+    var empty = !recs.length;
+    if (!empty && periods.indexOf(pick.period) < 0) pick.period = null;
     var period = pick.period !== null ? pick.period : P.nearestWindsPeriod(recs, dataNow());
     if (period === null && periods.length) period = periods[0];
     var levels = period === null ? [] : P.windsLevelsFor(recs, period, parsedOf);
-    if (levels.indexOf(pick.level) < 0) pick.level = null;
+    if (!empty && levels.indexOf(pick.level) < 0) pick.level = null;
     var level = pick.level !== null ? pick.level : levels.length ? levels[0] : null;
     var old = fisb.winds;
     fisb.winds = { period: period, level: level, periods: periods, levels: levels };

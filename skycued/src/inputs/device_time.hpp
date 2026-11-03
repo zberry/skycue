@@ -21,7 +21,8 @@ constexpr std::chrono::seconds kGpsUtcOffset{18};
 // "YYYY-MM-DDTHH:MM:SS", then optionally `.` or `:` and 1 to 9 fraction
 // digits, then "Z" (the ICD writes both "…:32.3725496Z" and
 // "…:ss:ffffffffZ"). The date and time fields are range-checked (no leap
-// second). Anything else -> nullopt. UTC; locale- and time-zone-independent.
+// second); the year is 1678 to 2261, inside system_clock's nanosecond range.
+// Anything else -> nullopt. UTC; locale- and time-zone-independent.
 std::optional<std::chrono::system_clock::time_point> parseDeviceTime(const std::string& text);
 
 struct ClockCheck {

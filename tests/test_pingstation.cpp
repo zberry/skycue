@@ -122,6 +122,31 @@ BOOST_AUTO_TEST_CASE(iso_fraction_forms)
     BOOST_TEST(!parseDeviceTime(""));
 }
 
+// Found by fuzz_pingstation (mode 0, an aircraft with timeStamp
+// "4044-12-13T21:11:32Z"): parseDeviceTime took any 4-digit year, and the
+// seconds to nanoseconds conversion overflowed int64_t (undefined behaviour)
+// outside system_clock's range, 1677-09-21 to 2262-04-11. Years 1678 to 2261
+// are accepted, which also leaves room for the GPS offset and the skew check.
+BOOST_AUTO_TEST_CASE(fuzz_pingstation_device_time_out_of_range)
+{
+    for (const char* bad : {"4044-12-13T21:11:32Z", "9999-12-31T23:59:59.999999999Z", "0000-01-01T00:00:00Z",
+                            "1677-12-31T23:59:59Z", "2262-01-01T00:00:00Z", "2262-04-11T23:47:16.854775807Z"})
+        BOOST_TEST(!parseDeviceTime(bad), "accepted: " << bad);
+    BOOST_TEST(epochNs(parseDeviceTime("2261-12-31T23:59:59.999999999Z").value()) ==
+               epochNs(utc(2261, 12, 31, 23, 59, 59, 999999999)));
+    BOOST_TEST(parseDeviceTime("1678-01-01T00:00:00Z").has_value());
+
+    // The datagram path: such a timeStamp is no device time, so the
+    // aircraft is dated with the arrival time and nothing is clock-checked.
+    PingContext ctx;
+    ctx.arrival = utc(2026, 11, 2, 10, 15, 0);
+    const PingResult r = parsePingDatagram(
+        R"({"icaoAddress":"C00586","latDD":42.1,"lonDD":-93.0,"timeStamp":"4044-12-13T21:11:32Z"})", ctx);
+    BOOST_REQUIRE(r.observations.size() == 1u);
+    BOOST_TEST(r.clock_rejects == 0u);
+    BOOST_TEST(!r.clock_offset_s.has_value());
+}
+
 BOOST_AUTO_TEST_CASE(clock_check_window)
 {
     const TP arrival = utc(2026, 11, 2, 12, 0, 0);

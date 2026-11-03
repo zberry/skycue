@@ -9,6 +9,7 @@ using std::chrono::system_clock;
 
 constexpr int64_t kSecondsPerDay = 86400;
 constexpr int64_t kGpsEpochUnixS = 315964800;
+constexpr int kMinYear = 1678, kMaxYear = 2261;
 
 bool digits(const std::string& s, std::size_t pos, std::size_t n, int& out)
 {
@@ -61,6 +62,11 @@ std::optional<system_clock::time_point> parseDeviceTime(const std::string& s)
         !digits(s, 14, 2, mi) || !digits(s, 17, 2, sec))
         return std::nullopt;
     if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo) || h > 23 || mi > 59 || sec > 59)
+        return std::nullopt;
+    // system_clock counts int64 nanoseconds (1677-09-21 to 2262-04-11), so
+    // the conversion below would overflow outside; whole years inside keep
+    // room for the GPS offset and the skew check against arrival.
+    if (y < kMinYear || y > kMaxYear)
         return std::nullopt;
 
     std::size_t pos = 19;

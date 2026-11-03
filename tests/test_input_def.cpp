@@ -118,6 +118,41 @@ BOOST_AUTO_TEST_CASE(name_rules)
     BOOST_TEST(def(kCatUdp).name.empty());
 }
 
+BOOST_AUTO_TEST_CASE(name_rejects_c1_and_bad_utf8)
+{
+    const auto named = [](const std::string& n) { return cat(R"("name":")" + n + "\""); };
+    // C1 controls are valid UTF-8, so they reach the name rule both raw and as \u escapes.
+    BOOST_CHECK_THROW(def(named("a\xC2\x85" "b")), InputDefError);  // U+0085
+    BOOST_CHECK_THROW(def(named("a\xC2\x9F" "b")), InputDefError);  // U+009F, the last C1 control
+    BOOST_CHECK_THROW(def(named("\\u0080")), InputDefError);
+    BOOST_TEST(contains(err(named("\\u0085")), "name"));
+    BOOST_CHECK_NO_THROW(def(named("\xC3\xA9t\xC3\xA9")));
+    BOOST_CHECK_NO_THROW(def(named("\xC2\xA0" "x")));      // U+00A0, just past C1
+    BOOST_CHECK_NO_THROW(def(named("\xF0\x9F\x9B\xA9")));  // a 4-byte character
+    // Invalid UTF-8. PropertyTree's parser refuses some of it (a 0xFF byte, a
+    // truncated sequence); what it lets through, the name rule refuses.
+    int reached = 0;
+    for (const std::string bad : {"a\xFF" "b", "\xE2\x82", "a\x82" "b", "\xC0\xAF", "\xED\xA0\x80",
+                                  "\xF4\x90\x80\x80", "\xE2\x82" "a"}) {
+        BOOST_TEST(!isValidInputName(bad));
+        if (const auto o = JsonObject::parse("{" + named(bad) + "}")) {
+            ++reached;
+            BOOST_CHECK_THROW(parseInputDef(*o), InputDefError);
+        }
+    }
+    BOOST_TEST(reached > 0);  // the parser alone does not guard the name
+    BOOST_TEST(isValidInputName("\xC3\xA9t\xC3\xA9"));
+    BOOST_TEST(isValidInputName(""));
+    BOOST_TEST(!isValidInputName("\xC2\x85"));
+}
+
+BOOST_AUTO_TEST_CASE(clip_for_message_keeps_utf8_whole)
+{
+    const std::string s = std::string(63, 'a') + "\xC3\xA9" + "zzz";
+    BOOST_TEST(clipForMessage(s) == std::string(63, 'a') + "...");
+    BOOST_TEST(clipForMessage(std::string(64, 'a')) == std::string(64, 'a'));
+}
+
 BOOST_AUTO_TEST_CASE(type_rules)
 {
     BOOST_TEST((def(kReadsb).type == InputType::readsb));

@@ -67,6 +67,9 @@ InputDef parseInputDef(const JsonObject& object);
 
 // The id rule: 1 to 32 characters of a-z, 0-9 and '-' (reserved ids pass).
 bool isValidInputId(const std::string& id);
+// The rule for a definition's "name": valid UTF-8, at most 64 characters, no
+// C0 or C1 control character and no DEL.
+bool isValidInputName(const std::string& name);
 // `text` for an error message: as is up to 64 bytes, else its first 64
 // bytes (never splitting a UTF-8 character) and "...".
 std::string clipForMessage(const std::string& text);

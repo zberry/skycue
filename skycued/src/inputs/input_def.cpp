@@ -1,6 +1,7 @@
 #include "inputs/input_def.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstddef>
 #include <iterator>
 #include <set>
@@ -33,16 +34,46 @@ bool validId(const std::string& id)
                        [](char c) { return isDigit(c) || (c >= 'a' && c <= 'z') || c == '-'; });
 }
 
-// At most kMaxNameChars characters (UTF-8 code points), none a control character.
+// Valid UTF-8 (shortest form, no surrogates, at most U+10FFFF) of at most
+// kMaxNameChars code points, none a C0 or C1 control character or DEL.
 bool validName(const std::string& name)
 {
     std::size_t chars = 0;
-    for (char c : name) {
-        const auto u = static_cast<unsigned char>(c);
-        if (u < 0x20 || u == 0x7f)
-            return false;
-        if ((u & 0xc0) != 0x80)  // not a continuation byte
-            ++chars;
+    std::size_t i = 0;
+    while (i < name.size()) {
+        const auto u = static_cast<unsigned char>(name[i]);
+        std::size_t len = 0;
+        std::uint32_t cp = 0;
+        if (u < 0x80) {
+            len = 1;
+            cp = u;
+        } else if (u >= 0xC2 && u <= 0xDF) {
+            len = 2;
+            cp = u & 0x1Fu;
+        } else if (u >= 0xE0 && u <= 0xEF) {
+            len = 3;
+            cp = u & 0x0Fu;
+        } else if (u >= 0xF0 && u <= 0xF4) {
+            len = 4;
+            cp = u & 0x07u;
+        } else {
+            return false;  // a continuation byte, an overlong lead (C0, C1) or F5..FF
+        }
+        if (name.size() - i < len)
+            return false;  // truncated
+        for (std::size_t k = 1; k < len; ++k) {
+            const auto c = static_cast<unsigned char>(name[i + k]);
+            if ((c & 0xC0u) != 0x80u)
+                return false;
+            cp = (cp << 6) | (c & 0x3Fu);
+        }
+        if ((len == 3 && cp < 0x800) || (len == 4 && (cp < 0x10000 || cp > 0x10FFFF)) ||
+            (cp >= 0xD800 && cp <= 0xDFFF))
+            return false;  // overlong, out of range or a surrogate
+        if (cp < 0x20 || (cp >= 0x7F && cp <= 0x9F))
+            return false;  // C0, DEL, C1
+        i += len;
+        ++chars;
     }
     return chars <= kMaxNameChars;
 }
@@ -404,6 +435,7 @@ std::optional<HttpUrl> parseHttpUrl(const std::string& url)
 }
 
 bool isValidInputId(const std::string& id) { return validId(id); }
+bool isValidInputName(const std::string& name) { return validName(name); }
 
 std::string clipForMessage(const std::string& text)
 {

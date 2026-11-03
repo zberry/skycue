@@ -346,3 +346,25 @@ target_compile_definitions(test_capture PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_capture)
 add_test(NAME capture COMMAND test_capture)
 set_tests_properties(capture PROPERTIES TIMEOUT 60)
+
+# The sanitizer canary (scripts/run-sanitizers.sh --canary); never built by
+# default.
+add_executable(sanitizer_canary EXCLUDE_FROM_ALL sanitizer/canary.cpp)
+target_link_libraries(sanitizer_canary PRIVATE Threads::Threads)
+
+# Instrumented builds (SKYCUE_SANITIZE or SKYCUE_FUZZ): every test gets its
+# timeout and its waits (SKYCUE_TEST_SLOW, tests/test_slow.hpp) scaled by the
+# slow factor. The sanitizer options and suppression files are not set here:
+# scripts/run-sanitizers.sh exports them at test time and ctest passes them on.
+if(_skycue_sanitize OR SKYCUE_FUZZ)
+  get_property(_skycue_all_tests DIRECTORY PROPERTY TESTS)
+  foreach(_t IN LISTS _skycue_all_tests)
+    get_test_property(${_t} TIMEOUT _timeout)
+    if(NOT _timeout)
+      set(_timeout 1500)
+    endif()
+    math(EXPR _timeout "${_timeout} * ${_skycue_slow_factor}")
+    set_tests_properties(${_t} PROPERTIES TIMEOUT ${_timeout})
+    set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT "SKYCUE_TEST_SLOW=${_skycue_slow_factor}")
+  endforeach()
+endif()

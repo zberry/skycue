@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include "forwarder.hpp"
+#include "test_slow.hpp"
 
 #include <skycue/client.hpp>
 #include <skycue/protocol.hpp>
@@ -35,7 +36,7 @@ using steady = std::chrono::steady_clock;
 
 namespace {
 
-constexpr auto kWait = 5s;
+const std::chrono::milliseconds kWait = slow(5s);
 
 Track mkTrack(uint32_t address, bool keyframe)
 {

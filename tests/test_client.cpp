@@ -5,6 +5,8 @@
 #include <skycue/protocol.hpp>
 #include <skycue/types.hpp>
 
+#include "test_slow.hpp"
+
 #include <boost/asio.hpp>
 
 #include <algorithm>
@@ -30,7 +32,7 @@ using asio::ip::udp;
 
 namespace {
 
-constexpr auto kWait = 5s;
+const std::chrono::milliseconds kWait = slow(5s);
 
 Track mkTrack(uint32_t address, bool keyframe)
 {

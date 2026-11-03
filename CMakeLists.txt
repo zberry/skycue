@@ -29,6 +29,7 @@ find_package(Threads REQUIRED)
 
 include(GNUInstallDirs)
 include(cmake/CompilerWarnings.cmake)
+include(cmake/Hardening.cmake)
 
 enable_testing()
 

@@ -4,6 +4,9 @@
 // PLAYWRIGHT_BROWSERS_PATH is honoured by Playwright itself.
 const { defineConfig } = require('@playwright/test');
 
+// Sanitizer builds set SKYCUE_TEST_SLOW (see tests/test_slow.hpp).
+const slow = Number(process.env.SKYCUE_TEST_SLOW) || 1;
+
 module.exports = defineConfig({
   testDir: __dirname,
   testMatch: 'ui.spec.js',
@@ -11,8 +14,8 @@ module.exports = defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: 90000,
-  expect: { timeout: 10000 },
+  timeout: 90000 * slow,
+  expect: { timeout: 10000 * slow },
   reporter: [['list']],
   use: {
     baseURL: process.env.SKYCUE_BASE_URL,

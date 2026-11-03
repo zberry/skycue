@@ -12,6 +12,7 @@
 #include "observation.hpp"
 #include "recorder.hpp"
 #include "replay_source.hpp"
+#include "test_slow.hpp"
 
 #include <skycue/client.hpp>
 #include <skycue/types.hpp>
@@ -65,7 +66,7 @@ namespace asio = boost::asio;
 using asio::ip::tcp;
 using steady = std::chrono::steady_clock;
 
-constexpr auto kWait = 5s;
+inline const std::chrono::milliseconds kWait = slow(5s);
 inline const std::string kFixture = std::string(SKYCUE_FIXTURE_DIR) + "/readsb-sample.jsonl";
 
 inline int removeEntry(const char* p, const struct stat*, int, struct FTW*) { return ::remove(p); }

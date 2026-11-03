@@ -252,7 +252,10 @@ void Engine::handleObservation(const TrackObservation& obs)
     advanceDataClock(obs.received_time);
     if (received_)
         received_->writeObservation(obs);
-    process(table_.apply(obs), last_obs_steady_, obs.lat.has_value());
+    // The send decision runs on the steady clock at arrival, not on the data
+    // clock's anchor: an observation stamped behind the data clock leaves the
+    // anchor where it is, and MAX_INTERVAL_S resends must not stall with it.
+    process(table_.apply(obs), steady::now(), obs.lat.has_value());
 }
 
 void Engine::handleUplink(std::chrono::system_clock::time_point when, const std::string& hex)

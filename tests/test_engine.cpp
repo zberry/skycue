@@ -733,6 +733,35 @@ BOOST_AUTO_TEST_CASE(two_inputs_same_aircraft_send_rate_bounded)
     BOOST_TEST(w.ev.updatesFor(id) <= 5u);  // the first plus about one a second
 }
 
+BOOST_AUTO_TEST_CASE(lagging_observation_times_still_resend_at_max_interval)
+{
+    // Observations stamped 0.5 s behind the data clock do not move it, but
+    // MAX_INTERVAL_S resends must still happen on time.
+    Config cfg = baseConfig();
+    cfg.min_interval_s = 0.2;
+    cfg.max_interval_s = 1;
+    FakeSource* fake = nullptr;
+    EngineFx fx(cfg, fakeSource(fake));
+    Watch w(fx);
+    const TrackId id{0x666666, AddressType::icao};
+    fx.t.call([&] {
+        fake->connection(true);
+        fake->emit(nearbyObservation(id.address, 0));  // sets the data clock
+    });
+    BOOST_TEST(w.ev.waitFor([&] { return w.ev.updatesFor(id) == 1; }));
+    const auto end = steady::now() + 3500ms;
+    while (steady::now() < end) {
+        TrackObservation o = nearbyObservation(id.address, 0);  // same state: only max_interval sends
+        o.received_time -= 500ms;
+        o.position_time = o.received_time;
+        fx.t.call([&] { fake->emit(o); });
+        std::this_thread::sleep_for(100ms);
+    }
+    std::lock_guard<std::mutex> lk(w.ev.m);
+    BOOST_TEST(w.ev.updatesFor(id) >= 3u);  // the first plus a resend about every second
+    BOOST_TEST(w.ev.updatesFor(id) <= 5u);
+}
+
 BOOST_AUTO_TEST_CASE(stats_lists_inputs)
 {
     Config cfg = baseConfig();

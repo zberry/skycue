@@ -954,7 +954,7 @@ BOOST_AUTO_TEST_CASE(fuzz_twgo_no_throw)
         auto b = it.payload;
         const int flips = 1 + byte(rng) % 4;
         for (int k = 0; k < flips; ++k)
-            b[static_cast<std::size_t>(byte(rng) * 256 + byte(rng)) % b.size()] ^= static_cast<uint8_t>(1u << (byte(rng) % 8));
+            { const auto flipMask_ = static_cast<uint8_t>(1u << (byte(rng) % 8)); auto& flipCell_ = b[static_cast<std::size_t>(byte(rng) * 256 + byte(rng)) % b.size()]; flipCell_ = static_cast<uint8_t>(flipCell_ ^ flipMask_); }
         if (i % 5 == 0)
             b.resize(static_cast<std::size_t>(byte(rng) * 256 + byte(rng)) % (b.size() + 1));
         check(it.h, b);

@@ -758,7 +758,7 @@ BOOST_AUTO_TEST_CASE(framer_passed_blocks_always_decode) {
             break;
         }
         // or a corrupted block (one byte past the header changed)
-        blk[3 + pick(static_cast<uint32_t>(blk.size() - 3))] ^= static_cast<uint8_t>(1 + pick(255));
+        { const auto flipMask_ = static_cast<uint8_t>(1 + pick(255)); auto& flipCell_ = blk[3 + pick(static_cast<uint32_t>(blk.size() - 3))]; flipCell_ = static_cast<uint8_t>(flipCell_ ^ flipMask_); }
         stream.insert(stream.end(), blk.begin(), blk.end());
         break;
       default:

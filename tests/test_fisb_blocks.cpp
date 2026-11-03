@@ -534,7 +534,7 @@ BOOST_AUTO_TEST_CASE(fuzz_blocks_no_throw)
         const auto& a = real[static_cast<std::size_t>(byte(rng) * 256 + byte(rng)) % real.size()];
         auto b = a.payload;
         if (!b.empty())
-            b[static_cast<std::size_t>(byte(rng)) % b.size()] ^= static_cast<uint8_t>(1u << (byte(rng) % 8));
+            { const auto flipMask_ = static_cast<uint8_t>(1u << (byte(rng) % 8)); auto& flipCell_ = b[static_cast<std::size_t>(byte(rng)) % b.size()]; flipCell_ = static_cast<uint8_t>(flipCell_ ^ flipMask_); }
         if (i % 3 == 0)
             b.resize(static_cast<std::size_t>(byte(rng)) % (b.size() + 1));
         check(a.h.product_id, b, (i & 1) != 0);

@@ -495,9 +495,15 @@ BOOST_AUTO_TEST_CASE(expired_event_for_unforwarded_track)
 
 // ---------------------------------------------------------------- /api/inputs
 
-BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<bool>)
-BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<std::string>)
-BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<int64_t>)
+// Compare optionals outside BOOST_TEST's expression decomposition: Boost 1.66
+// cannot resolve operator== between value_expr<std::optional<T>> and optional.
+template <class T>
+void expectOpt(const std::optional<T>& got, const typename std::remove_cv<T>::type& want, const char* what) {
+    BOOST_TEST_CONTEXT(what) {
+        BOOST_TEST(got.has_value());
+        if (got) BOOST_TEST(*got == want);
+    }
+}
 
 namespace {
 
@@ -621,22 +627,22 @@ BOOST_AUTO_TEST_CASE(inputs_get_lists_builtins)
     BOOST_TEST(r.status == 200u);
     const auto readsb = listed(r.body, "readsb");
     BOOST_REQUIRE_MESSAGE(readsb, r.body);
-    BOOST_TEST(readsb->getBool("builtin") == std::optional<bool>(true));
-    BOOST_TEST(readsb->getString("type") == std::optional<std::string>("readsb"));
+    expectOpt(readsb->getBool("builtin"), true, "readsb->getBool('builtin')");
+    expectOpt(readsb->getString("type"), "readsb", "readsb->getString('type')");
     const auto state = readsb->getObject("state");
     BOOST_REQUIRE_MESSAGE(state, r.body);
-    BOOST_TEST(state->getBool("connected") == std::optional<bool>(true));
+    expectOpt(state->getBool("connected"), true, "state->getBool('connected')");
     BOOST_TEST(state->getBool("receiving").has_value());
     for (const char* k : {"peers", "status_fail_streak", "connects", "bytes", "messages", "observations", "uplinks",
                           "rejected", "records_skipped", "sac_sic_mismatch", "nogo_records", "clock_rejects",
                           "rejected_peer", "raw_unknown_len", "status_ok", "status_fail", "capture_dropped"})
         BOOST_TEST(state->getInt(k).has_value(), k);
-    BOOST_TEST(state->getString("last_error") == std::optional<std::string>(""));
+    expectOpt(state->getString("last_error"), "", "state->getString('last_error')");
     BOOST_TEST(!state->has("device_status"));
     BOOST_TEST(!state->has("last_data_age_s"));  // nothing arrived yet
     a.fx->t.call([&] { a.src->emit(nearbyObservation(0xABC001, 0)); });
     const auto after = listed(a.get("/api/inputs").body, "readsb");
-    BOOST_TEST(after->getObject("state")->getInt("observations") == std::optional<int64_t>(1));
+    expectOpt(after->getObject("state")->getInt("observations"), 1, "after->getObject('state')->getInt('observations')");
 }
 
 BOOST_AUTO_TEST_CASE(inputs_post_creates_201)
@@ -646,10 +652,10 @@ BOOST_AUTO_TEST_CASE(inputs_post_creates_201)
     const auto r = a.call("POST", "/api/inputs", psJson("ps-a", port, R"(,"name":"North")"));
     BOOST_TEST(r.status == 201u, r.body);
     const auto in = parsed(r.body);
-    BOOST_TEST(in.getString("id") == std::optional<std::string>("ps-a"));
-    BOOST_TEST(in.getString("name") == std::optional<std::string>("North"));
-    BOOST_TEST(in.getInt("port") == std::optional<int64_t>(port));
-    BOOST_TEST(in.getBool("builtin") == std::optional<bool>(false));
+    expectOpt(in.getString("id"), "ps-a", "in.getString('id')");
+    expectOpt(in.getString("name"), "North", "in.getString('name')");
+    expectOpt(in.getInt("port"), port, "in.getInt('port')");
+    expectOpt(in.getBool("builtin"), false, "in.getBool('builtin')");
     BOOST_TEST(in.getObject("state").has_value());
     const auto list = a.get("/api/inputs").body;
     BOOST_TEST(listed(list, "ps-a").has_value());
@@ -708,12 +714,12 @@ BOOST_AUTO_TEST_CASE(inputs_put_replaces)
     // Without an id the path's applies; with one it must be the same.
     auto r = a.call("PUT", "/api/inputs/ps-a", psJson("", port2, R"(,"name":"South")"));
     BOOST_TEST(r.status == 200u, r.body);
-    BOOST_TEST(parsed(r.body).getString("name") == std::optional<std::string>("South"));
-    BOOST_TEST(parsed(r.body).getInt("port") == std::optional<int64_t>(port2));
+    expectOpt(parsed(r.body).getString("name"), "South", "parsed(r.body).getString('name')");
+    expectOpt(parsed(r.body).getInt("port"), port2, "parsed(r.body).getInt('port')");
     r = a.call("PUT", "/api/inputs/ps-a", psJson("ps-a", port2, R"(,"name":"East")"));
     BOOST_TEST(r.status == 200u, r.body);
     const auto in = listed(a.get("/api/inputs").body, "ps-a");
-    BOOST_TEST(in->getString("name") == std::optional<std::string>("East"));
+    expectOpt(in->getString("name"), "East", "in->getString('name')");
     BOOST_TEST(has(readAll(a.inputs_file), "East"));
     // A bad definition is a 400 with the parser's message.
     r = a.call("PUT", "/api/inputs/ps-a", psJson("", 0));
@@ -743,15 +749,15 @@ BOOST_AUTO_TEST_CASE(inputs_put_builtin_only_enabled)
     ApiFx a;
     auto r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":false})");
     BOOST_TEST(r.status == 200u, r.body);
-    BOOST_TEST(parsed(r.body).getBool("enabled") == std::optional<bool>(false));
-    BOOST_TEST(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled") == std::optional<bool>(false));
+    expectOpt(parsed(r.body).getBool("enabled"), false, "parsed(r.body).getBool('enabled')");
+    expectOpt(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled"), false, "listed(a.get('/api/inputs').body, 'readsb')->getBool('enabled')");
     r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":false,"port":1})");
     BOOST_TEST(r.status == 403u, r.body);
     r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":"maybe"})");
     BOOST_TEST(r.status == 400u, r.body);
     r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":true})");
     BOOST_TEST(r.status == 200u, r.body);
-    BOOST_TEST(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled") == std::optional<bool>(true));
+    expectOpt(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled"), true, "listed(a.get('/api/inputs').body, 'readsb')->getBool('enabled')");
 }
 
 BOOST_AUTO_TEST_CASE(inputs_delete_204_then_404)
@@ -799,14 +805,14 @@ BOOST_AUTO_TEST_CASE(inputs_enable_disable)
     BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
     auto r = a.call("POST", "/api/inputs/ps-a/disable", "{}");
     BOOST_TEST(r.status == 200u, r.body);
-    BOOST_TEST(parsed(r.body).getBool("enabled") == std::optional<bool>(false));
-    BOOST_TEST(parsed(r.body).getObject("state")->getBool("connected") == std::optional<bool>(false));
+    expectOpt(parsed(r.body).getBool("enabled"), false, "parsed(r.body).getBool('enabled')");
+    expectOpt(parsed(r.body).getObject("state")->getBool("connected"), false, "parsed(r.body).getObject('state')->getBool('connected')");
     r = a.call("POST", "/api/inputs/ps-a/enable", "{}");
     BOOST_TEST(r.status == 200u, r.body);
-    BOOST_TEST(parsed(r.body).getBool("enabled") == std::optional<bool>(true));
+    expectOpt(parsed(r.body).getBool("enabled"), true, "parsed(r.body).getBool('enabled')");
     // Built-ins too; the body must be an empty object.
     BOOST_TEST(a.call("POST", "/api/inputs/readsb/disable", "{}").status == 200u);
-    BOOST_TEST(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled") == std::optional<bool>(false));
+    expectOpt(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled"), false, "listed(a.get('/api/inputs').body, 'readsb')->getBool('enabled')");
     BOOST_TEST(a.call("POST", "/api/inputs/readsb/enable", R"({"x":1})").status == 400u);
     BOOST_TEST(a.call("POST", "/api/inputs/nope/enable", "{}").status == 404u);
 }
@@ -819,12 +825,12 @@ BOOST_AUTO_TEST_CASE(inputs_status_route)
     const auto r = a.get("/api/inputs/ps-a/status");
     BOOST_TEST(r.status == 200u, r.body);
     const auto s = parsed(r.body);
-    BOOST_TEST(s.getString("id") == std::optional<std::string>("ps-a"));
-    BOOST_TEST(s.getString("status_url") == std::optional<std::string>(""));
-    BOOST_TEST(s.getInt("status_interval_s") == std::optional<int64_t>(60));
-    BOOST_TEST(s.getInt("status_ok") == std::optional<int64_t>(0));
-    BOOST_TEST(s.getInt("status_fail") == std::optional<int64_t>(0));
-    BOOST_TEST(s.getInt("status_fail_streak") == std::optional<int64_t>(0));
+    expectOpt(s.getString("id"), "ps-a", "s.getString('id')");
+    expectOpt(s.getString("status_url"), "", "s.getString('status_url')");
+    expectOpt(s.getInt("status_interval_s"), 60, "s.getInt('status_interval_s')");
+    expectOpt(s.getInt("status_ok"), 0, "s.getInt('status_ok')");
+    expectOpt(s.getInt("status_fail"), 0, "s.getInt('status_fail')");
+    expectOpt(s.getInt("status_fail_streak"), 0, "s.getInt('status_fail_streak')");
     BOOST_TEST(!s.has("device_status"));
     BOOST_TEST(!s.has("state"));
     BOOST_TEST(a.get("/api/inputs/nope/status").status == 404u);
@@ -878,14 +884,14 @@ BOOST_AUTO_TEST_CASE(stats_carry_inputs)
     BOOST_REQUIRE_MESSAGE(inputs, r.body);
     BOOST_REQUIRE_EQUAL(inputs->size(), 1u);
     const auto& in = (*inputs)[0];
-    BOOST_TEST(in.getString("id") == std::optional<std::string>("readsb"));
-    BOOST_TEST(in.getBool("connected") == std::optional<bool>(true));
-    BOOST_TEST(in.getInt("observations") == std::optional<int64_t>(1));
+    expectOpt(in.getString("id"), "readsb", "in.getString('id')");
+    expectOpt(in.getBool("connected"), true, "in.getBool('connected')");
+    expectOpt(in.getInt("observations"), 1, "in.getInt('observations')");
     for (const char* k : {"messages", "uplinks", "rejected"})
         BOOST_TEST(in.getInt(k).has_value(), k);
     BOOST_TEST(in.keys().size() == 6u, r.body);
     // The derived built-in flags stay for one release.
-    BOOST_TEST(parsed(r.body).getBool("readsb_connected") == std::optional<bool>(true));
+    expectOpt(parsed(r.body).getBool("readsb_connected"), true, "parsed(r.body).getBool('readsb_connected')");
 }
 
 BOOST_AUTO_TEST_CASE(state_carries_inputs)
@@ -897,8 +903,8 @@ BOOST_AUTO_TEST_CASE(state_carries_inputs)
     const auto inputs = parsed(r.body).getObjectArray("inputs");
     BOOST_REQUIRE_MESSAGE(inputs, r.body);
     BOOST_REQUIRE_EQUAL(inputs->size(), 2u);
-    BOOST_TEST((*inputs)[0].getString("id") == std::optional<std::string>("readsb"));
-    BOOST_TEST((*inputs)[1].getString("id") == std::optional<std::string>("ps-a"));
+    expectOpt((*inputs)[0].getString("id"), "readsb", "(*inputs)[0].getString('id')");
+    expectOpt((*inputs)[1].getString("id"), "ps-a", "(*inputs)[1].getString('id')");
     BOOST_TEST((*inputs)[1].getObject("state").has_value());
 }
 
@@ -907,7 +913,7 @@ BOOST_AUTO_TEST_CASE(fisb_status_has_uplink_duplicates)
     ApiFx a;
     const auto r = a.get("/api/fisb/status");
     BOOST_TEST(r.status == 200u);
-    BOOST_TEST(parsed(r.body).getInt("uplink_duplicates") == std::optional<int64_t>(0), r.body);
+    expectOpt(parsed(r.body).getInt("uplink_duplicates"), 0, "parsed(r.body).getInt('uplink_duplicates')");
 }
 
 BOOST_AUTO_TEST_CASE(inputs_path_id_invalid_400)
@@ -951,7 +957,7 @@ BOOST_AUTO_TEST_CASE(replay_writes_409)
     // Reads still work, and nothing changed.
     const auto list = a.get("/api/inputs");
     BOOST_TEST(list.status == 200u);
-    BOOST_TEST(listed(list.body, "replay")->getBool("enabled") == std::optional<bool>(true));
+    expectOpt(listed(list.body, "replay")->getBool("enabled"), true, "listed(list.body, 'replay')->getBool('enabled')");
     BOOST_TEST(!listed(list.body, "ps-a"));
     BOOST_TEST(a.get("/api/inputs/replay/status").status == 200u);
 }
@@ -987,9 +993,9 @@ BOOST_AUTO_TEST_CASE(inputs_writes_cross_origin_403)
     BOOST_TEST(a.call("POST", "/api/inputs/readsb/enable", "{}", foreign).status == 403u);
     BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-b", freeUdpPort()), foreign).status == 403u);
     const auto list = a.get("/api/inputs").body;
-    BOOST_TEST(listed(list, "ps-a")->getString("name") == std::optional<std::string>(""));
-    BOOST_TEST(listed(list, "ps-a")->getBool("enabled") == std::optional<bool>(true));
-    BOOST_TEST(listed(list, "readsb")->getBool("enabled") == std::optional<bool>(true));
+    expectOpt(listed(list, "ps-a")->getString("name"), "", "listed(list, 'ps-a')->getString('name')");
+    expectOpt(listed(list, "ps-a")->getBool("enabled"), true, "listed(list, 'ps-a')->getBool('enabled')");
+    expectOpt(listed(list, "readsb")->getBool("enabled"), true, "listed(list, 'readsb')->getBool('enabled')");
     BOOST_TEST(!listed(list, "ps-b"));
     // Without an Origin header (curl, scripts) a write is allowed, as for the
     // other routes: browsers always send one on these requests.

@@ -114,7 +114,7 @@ std::optional<TrackObservation> parse(const std::string& line)
     if (!hex || !parseHex(*hex, obs.id.address, non_icao))
         return std::nullopt;
     auto now = json->getDouble("now");
-    if (!now || *now < 0 || *now > kMaxEpochSeconds)
+    if (!now || !(*now >= 0 && *now <= kMaxEpochSeconds))  // NaN fails too
         return std::nullopt;
 
     const std::string type = json->getString("type").value_or("");

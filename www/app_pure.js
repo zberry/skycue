@@ -384,6 +384,164 @@
     return String(station || '').toUpperCase().indexOf(String(prefix).toUpperCase()) === 0;
   }
 
+  // ---- Receiver tab: input definitions (docs/web-api.md, Inputs) ----
+  // The rules and messages of skycued's parseInputDef
+  // (skycued/src/inputs/input_def.cpp), for the fields the add form has.
+  var INPUT_TYPES = ['readsb', 'dump978', 'pingstation_json', 'pingstation_cat021'];
+  var TRANSPORTS = ['udp', 'tcp_connect', 'tcp_listen'];
+  var EDITIONS = ['2.2', '2.3', '2.4', '2.5', '2.6', '2.7'];
+  var RESERVED_IDS = ['readsb', 'dump978', 'replay'];
+  function isPingStation(type) { return type === 'pingstation_json' || type === 'pingstation_cat021'; }
+  function inputTransport(type, transport) {
+    if (type === 'pingstation_json') return 'udp';
+    if (type === 'pingstation_cat021' && TRANSPORTS.indexOf(transport) >= 0) return transport;
+    return 'tcp_connect';
+  }
+  // Dotted decimal, four parts of 0..255 without leading zeros.
+  function isIpv4(s) {
+    return typeof s === 'string' && /^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$/.test(s) &&
+      s.split('.').every(function (p) { return Number(p) <= 255; });
+  }
+  // An IPv4 address or a hostname of at most 253 characters (a trailing dot
+  // not counted), labels of 1..63 letters, digits and '-' not at either end,
+  // the last label not all digits.
+  function isHost(s) {
+    if (typeof s !== 'string') return false;
+    if (isIpv4(s)) return true;
+    var name = s.charAt(s.length - 1) === '.' ? s.slice(0, -1) : s;
+    if (!name || name.length > 253) return false;
+    var labels = name.split('.');
+    var ok = labels.every(function (l) { return /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(l); });
+    return ok && !/^\d+$/.test(labels[labels.length - 1]);
+  }
+  function isHttpUrl(url) {
+    if (url.indexOf('http://') !== 0 || /[\x00-\x20\x7f-￿#]/.test(url)) return false;
+    var rest = url.slice(7), end = rest.search(/[/?]/);
+    var authority = end < 0 ? rest : rest.slice(0, end);
+    if (authority.indexOf('@') >= 0) return false;
+    var host = authority, colon = authority.lastIndexOf(':');
+    if (colon >= 0) {
+      host = authority.slice(0, colon);
+      var port = authority.slice(colon + 1);
+      if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) return false;
+    }
+    return isHost(host);
+  }
+  function isIntIn(v, lo, hi) { return typeof v === 'number' && Math.floor(v) === v && v >= lo && v <= hi; }
+  function unset(v) { return v === undefined || v === null || v === ''; }
+
+  // The form fields for an input of `type` over `transport`, in order.
+  function inputFields(type, transport) {
+    var listens = inputTransport(type, transport) !== 'tcp_connect';
+    var f = ['id', 'name'];
+    if (type === 'pingstation_cat021') f.push('transport');
+    f.push(listens ? 'bind' : 'host', 'port');
+    if (listens) f.push('peer');
+    if (type === 'pingstation_cat021') f.push('edition', 'sac', 'sic');
+    if (isPingStation(type)) f.push('status_url', 'status_interval_s', 'time_mode', 'capture');
+    f.push('enabled');
+    return f;
+  }
+
+  // {ok, errors: {field: message}} for a definition as the form sends it
+  // (numbers as numbers; an optional text left empty is unset).
+  function validateInputDef(def) {
+    var errors = {};
+    def = def || {};
+    var id = def.id;
+    if (unset(id)) errors.id = 'id is required';
+    else if (typeof id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(id)) errors.id = 'id must be 1 to 32 characters of a-z, 0-9 and -';
+    else if (RESERVED_IDS.indexOf(id) >= 0) errors.id = "id '" + id + "' is reserved";
+    if (unset(def.type)) errors.type = 'type is required';
+    else if (INPUT_TYPES.indexOf(def.type) < 0) errors.type = 'type must be one of ' + INPUT_TYPES.join(', ');
+    if (def.type === 'pingstation_cat021' && !unset(def.transport) && TRANSPORTS.indexOf(def.transport) < 0)
+      errors.transport = 'transport must be udp, tcp_connect or tcp_listen';
+    var fields = inputFields(def.type, def.transport);
+    var has = function (k) { return fields.indexOf(k) >= 0; };
+    var name = def.name;
+    if (!unset(name) && (typeof name !== 'string' || /[\x00-\x1f\x7f]/.test(name) || Array.from(name).length > 64))
+      errors.name = 'name must be at most 64 printable characters';
+    if (def.port === undefined || def.port === null) errors.port = 'port is required';
+    else if (!isIntIn(def.port, 1, 65535)) errors.port = 'port must be an integer from 1 to 65535';
+    if (has('bind') && !unset(def.bind) && !isIpv4(def.bind)) errors.bind = 'bind must be an IPv4 address';
+    if (has('peer') && !unset(def.peer) && !isIpv4(def.peer)) errors.peer = 'peer must be an IPv4 address';
+    if (has('host')) {
+      if (unset(def.host)) errors.host = 'host is required';
+      else if (!isHost(def.host)) errors.host = 'host must be an IPv4 address or a hostname of at most 253 characters';
+    }
+    if (has('edition') && !unset(def.edition) && EDITIONS.indexOf(def.edition) < 0)
+      errors.edition = 'edition must be one of ' + EDITIONS.join(', ');
+    ['sac', 'sic'].forEach(function (k) {
+      if (has(k) && !unset(def[k]) && !isIntIn(def[k], 0, 255)) errors[k] = k + ' must be null or an integer from 0 to 255';
+    });
+    if (has('status_url') && !unset(def.status_url) && !(typeof def.status_url === 'string' && isHttpUrl(def.status_url)))
+      errors.status_url = 'status_url must be an http:// URL without userinfo, with a port of 1 to 65535';
+    if (has('status_interval_s') && def.status_interval_s !== undefined && !isIntIn(def.status_interval_s, 5, 3600))
+      errors.status_interval_s = 'status_interval_s must be an integer from 5 to 3600';
+    if (has('time_mode') && def.time_mode !== undefined && def.time_mode !== 'utc' && def.time_mode !== 'gps')
+      errors.time_mode = 'time_mode must be utc or gps';
+    ['capture', 'enabled'].forEach(function (k) {
+      if (has(k) && def[k] !== undefined && typeof def[k] !== 'boolean') errors[k] = k + ' must be true or false';
+    });
+    return { ok: Object.keys(errors).length === 0, errors: errors };
+  }
+
+  // The card's status dot: grey disabled; red disconnected or the status
+  // poll failed 3 times in a row; amber connected but no data for 30 s
+  // (skycued's `receiving`); else green. The state carries all of it, so
+  // `nowMs` is not needed today.
+  function inputDot(input, nowMs) {
+    var s = (input && input.state) || {};
+    if (!input || !input.enabled) return 'grey';
+    if (!s.connected || (s.status_fail_streak || 0) >= 3) return 'red';
+    if (!s.receiving) return 'amber';
+    return 'green';
+  }
+
+  // Per-input observations and messages per second between two stats.inputs
+  // lists `dtS` seconds apart; null where there is no earlier count, a
+  // counter went down (the input was removed and added again) or dtS <= 0.
+  function inputRates(prevLines, curLines, dtS) {
+    var prev = {}, out = {};
+    (prevLines || []).forEach(function (l) { prev[l.id] = l; });
+    (curLines || []).forEach(function (l) {
+      var p = prev[l.id];
+      var ok = p && dtS > 0 && l.observations >= p.observations && l.messages >= p.messages;
+      out[l.id] = ok ? { obs_s: (l.observations - p.observations) / dtS, msg_s: (l.messages - p.messages) / dtS } :
+        { obs_s: null, msg_s: null };
+    });
+    return out;
+  }
+
+  // A device status is stale when it arrived more than 3 status intervals
+  // ago (or its time is unreadable); no status is not stale.
+  function statusStale(deviceStatus, intervalS, nowMs) {
+    if (!deviceStatus) return false;
+    var t = Date.parse(deviceStatus.received_at);
+    return isNaN(t) || nowMs - t > 3 * intervalS * 1000;
+  }
+
+  // Where an input gets its data, for its card.
+  function inputEndpoint(def) {
+    if (def.type === 'readsb' || def.type === 'dump978') return def.type + ' ' + def.host + ':' + def.port;
+    if (!isPingStation(def.type)) return String(def.type);
+    var t = inputTransport(def.type, def.transport);
+    if (t === 'udp') return 'udp ' + def.bind + ':' + def.port;
+    if (t === 'tcp_listen') return 'tcp listen ' + def.bind + ':' + def.port;
+    return 'tcp → ' + def.host + ':' + def.port;
+  }
+
+  // The header's `inputs n/m`: enabled inputs connected / enabled inputs.
+  function inputsSummary(inputs) {
+    var out = { connected: 0, enabled: 0 };
+    (inputs || []).forEach(function (i) {
+      if (!i.enabled) return;
+      out.enabled++;
+      if (i.state && i.state.connected) out.connected++;
+    });
+    return out;
+  }
+
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
@@ -402,7 +560,9 @@
     MAP_STYLES: MAP_STYLES, DARK_TILE_FILTER: DARK_TILE_FILTER, mapStyle: mapStyle, tileFilter: tileFilter,
     ADMIN1_MIN_ZOOM: ADMIN1_MIN_ZOOM, borderVisible: borderVisible, borderStyle: borderStyle,
     cityRankLimit: cityRankLimit, MAX_CITY_LABELS: MAX_CITY_LABELS, cullCities: cullCities,
-    overlayOffer: overlayOffer
+    overlayOffer: overlayOffer,
+    INPUT_TYPES: INPUT_TYPES, validateInputDef: validateInputDef, inputFields: inputFields, inputDot: inputDot,
+    inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, inputsSummary: inputsSummary
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

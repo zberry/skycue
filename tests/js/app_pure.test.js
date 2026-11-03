@@ -479,5 +479,132 @@ test('overlayOffer: toggles from overlays/meta.json', () => {
   assert.deepStrictEqual(P.overlayOffer({ files: 'x' }), { borders: false, cities: false });
 });
 
+// ---- Receiver tab -------------------------------------------------------------
+// The messages are parseInputDef's (skycued/src/inputs/input_def.cpp).
+const CAT021_UDP = { id: 'ps-north', name: 'North mast', type: 'pingstation_cat021', enabled: true, transport: 'udp',
+  bind: '0.0.0.0', port: 4001, peer: '', edition: '2.5', sac: null, sic: null, status_url: 'http://192.0.2.10/api/v1/status',
+  status_interval_s: 30, time_mode: 'utc', capture: false };
+
+test('validateInputDef accepts a pingstation_cat021 udp definition', () => {
+  assert.deepStrictEqual(P.validateInputDef(CAT021_UDP), { ok: true, errors: {} });
+  assert.deepStrictEqual(P.validateInputDef({ id: 'rx-2', type: 'readsb', host: 'pi.local', port: 30047 }),
+    { ok: true, errors: {} });
+});
+test('validateInputDef rejects id "PS"', () => {
+  const r = P.validateInputDef(Object.assign({}, CAT021_UDP, { id: 'PS' }));
+  assert.strictEqual(r.ok, false);
+  assert.deepStrictEqual(r.errors, { id: 'id must be 1 to 32 characters of a-z, 0-9 and -' });
+  assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { id: 'readsb' })).errors.id, "id 'readsb' is reserved");
+  assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { id: '' })).errors.id, 'id is required');
+  assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { id: 'a'.repeat(33) })).ok, false);
+});
+test('validateInputDef rejects port 0 and 65536', () => {
+  const msg = 'port must be an integer from 1 to 65535';
+  [0, 65536, 1.5, NaN].forEach((port) => {
+    assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { port })).errors.port, msg, String(port));
+  });
+  const noPort = Object.assign({}, CAT021_UDP);
+  delete noPort.port;
+  assert.strictEqual(P.validateInputDef(noPort).errors.port, 'port is required');
+  assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { port: 65535 })).ok, true);
+});
+test('validateInputDef rejects https status_url', () => {
+  const msg = 'status_url must be an http:// URL without userinfo, with a port of 1 to 65535';
+  ['https://192.0.2.10/status', 'http://user@192.0.2.10/', 'http://192.0.2.10:0/', 'http://bad host/'].forEach((u) => {
+    assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { status_url: u })).errors.status_url, msg, u);
+  });
+  assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { status_url: 'http://ps.local:8080?x' })).ok, true);
+  assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { status_url: '' })).ok, true);
+});
+test('validateInputDef rejects unknown edition', () => {
+  assert.strictEqual(P.validateInputDef(Object.assign({}, CAT021_UDP, { edition: '3.0' })).errors.edition,
+    'edition must be one of 2.2, 2.3, 2.4, 2.5, 2.6, 2.7');
+  const r = P.validateInputDef(Object.assign({}, CAT021_UDP, { bind: '256.0.0.1', sac: 256, status_interval_s: 4,
+    time_mode: 'tai', name: 'x'.repeat(65) }));
+  assert.deepStrictEqual(r.errors, {
+    bind: 'bind must be an IPv4 address', sac: 'sac must be null or an integer from 0 to 255',
+    status_interval_s: 'status_interval_s must be an integer from 5 to 3600', time_mode: 'time_mode must be utc or gps',
+    name: 'name must be at most 64 printable characters' });
+  const tcp = { id: 'ps-c', type: 'pingstation_cat021', transport: 'tcp_connect', port: 4000 };
+  assert.strictEqual(P.validateInputDef(tcp).errors.host, 'host is required');
+  ['-bad.example', '999.1.1.1', 'a..b'].forEach((host) => {
+    assert.strictEqual(P.validateInputDef(Object.assign({}, tcp, { host })).errors.host,
+      'host must be an IPv4 address or a hostname of at most 253 characters', host);
+  });
+  assert.strictEqual(P.validateInputDef({ id: 'x', type: 'replay', port: 1 }).errors.type,
+    'type must be one of readsb, dump978, pingstation_json, pingstation_cat021');
+});
+
+test('inputFields for cat021 tcp_connect has host not bind', () => {
+  const f = P.inputFields('pingstation_cat021', 'tcp_connect');
+  assert.ok(f.indexOf('host') >= 0 && f.indexOf('bind') < 0 && f.indexOf('peer') < 0, f.join());
+  assert.deepStrictEqual(P.inputFields('pingstation_cat021', 'udp'), ['id', 'name', 'transport', 'bind', 'port', 'peer',
+    'edition', 'sac', 'sic', 'status_url', 'status_interval_s', 'time_mode', 'capture', 'enabled']);
+  assert.deepStrictEqual(P.inputFields('pingstation_json'), ['id', 'name', 'bind', 'port', 'peer',
+    'status_url', 'status_interval_s', 'time_mode', 'capture', 'enabled']);
+  assert.deepStrictEqual(P.inputFields('readsb'), ['id', 'name', 'host', 'port', 'enabled']);
+  // A cat021 input without a transport connects, as skycued defaults it.
+  assert.deepStrictEqual(P.inputFields('pingstation_cat021'), P.inputFields('pingstation_cat021', 'tcp_connect'));
+});
+
+const live = (state, extra) => Object.assign({ id: 'ps', type: 'pingstation_json', enabled: true,
+  state: Object.assign({ connected: true, receiving: true, status_fail_streak: 0 }, state) }, extra);
+test('inputDot grey when disabled', () => {
+  assert.strictEqual(P.inputDot(live({}, { enabled: false }), 0), 'grey');
+  assert.strictEqual(P.inputDot(live({ connected: false }, { enabled: false }), 0), 'grey');
+});
+test('inputDot red when status failed 3 times', () => {
+  assert.strictEqual(P.inputDot(live({ status_fail_streak: 3 }), 0), 'red');
+  assert.strictEqual(P.inputDot(live({ status_fail_streak: 2 }), 0), 'green');
+  assert.strictEqual(P.inputDot(live({ connected: false }), 0), 'red');
+});
+test('inputDot amber when connected but not receiving', () => {
+  assert.strictEqual(P.inputDot(live({ receiving: false }), 0), 'amber');
+});
+test('inputDot green', () => {
+  assert.strictEqual(P.inputDot(live({}), 0), 'green');
+});
+
+test('inputRates per second and null after a counter reset', () => {
+  const prev = [{ id: 'a', messages: 100, observations: 90 }, { id: 'b', messages: 50, observations: 50 }];
+  const cur = [{ id: 'a', messages: 120, observations: 100 }, { id: 'b', messages: 10, observations: 60 },
+    { id: 'c', messages: 5, observations: 5 }];
+  assert.deepStrictEqual(P.inputRates(prev, cur, 2), {
+    a: { obs_s: 5, msg_s: 10 }, b: { obs_s: null, msg_s: null }, c: { obs_s: null, msg_s: null } });
+  assert.deepStrictEqual(P.inputRates(prev, cur.slice(0, 1), 0), { a: { obs_s: null, msg_s: null } });
+  assert.deepStrictEqual(P.inputRates(null, cur.slice(0, 1), 1), { a: { obs_s: null, msg_s: null } });
+});
+
+test('statusStale after 3 intervals', () => {
+  const at = Date.parse('2026-11-02T12:00:00.000Z');
+  const ds = { received_at: '2026-11-02T12:00:00.000Z' };
+  assert.strictEqual(P.statusStale(ds, 30, at + 90000), false);
+  assert.strictEqual(P.statusStale(ds, 30, at + 90001), true);
+  assert.strictEqual(P.statusStale(ds, 5, at + 14000), false);
+  assert.strictEqual(P.statusStale(ds, 5, at + 16000), true);
+  assert.strictEqual(P.statusStale(null, 30, at), false);
+  assert.strictEqual(P.statusStale({ received_at: 'x' }, 30, at), true);
+});
+
+test('inputEndpoint forms', () => {
+  assert.strictEqual(P.inputEndpoint({ type: 'pingstation_json', bind: '0.0.0.0', port: 4000 }), 'udp 0.0.0.0:4000');
+  assert.strictEqual(P.inputEndpoint({ type: 'pingstation_cat021', transport: 'udp', bind: '0.0.0.0', port: 4000 }),
+    'udp 0.0.0.0:4000');
+  assert.strictEqual(P.inputEndpoint({ type: 'pingstation_cat021', transport: 'tcp_connect', host: '192.0.2.10', port: 4000 }),
+    'tcp → 192.0.2.10:4000');
+  assert.strictEqual(P.inputEndpoint({ type: 'pingstation_cat021', transport: 'tcp_listen', bind: '0.0.0.0', port: 4000 }),
+    'tcp listen 0.0.0.0:4000');
+  assert.strictEqual(P.inputEndpoint({ type: 'readsb', host: '127.0.0.1', port: 30047 }), 'readsb 127.0.0.1:30047');
+  assert.strictEqual(P.inputEndpoint({ type: 'dump978', host: '127.0.0.1', port: 30978 }), 'dump978 127.0.0.1:30978');
+  assert.strictEqual(P.inputEndpoint({ type: 'replay' }), 'replay');
+});
+
+test('inputsSummary counts', () => {
+  assert.deepStrictEqual(P.inputsSummary([]), { connected: 0, enabled: 0 });
+  assert.deepStrictEqual(P.inputsSummary(null), { connected: 0, enabled: 0 });
+  assert.deepStrictEqual(P.inputsSummary([live({}), live({ connected: false }), live({}, { enabled: false }),
+    live({ connected: true, receiving: false })]), { connected: 2, enabled: 3 });
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

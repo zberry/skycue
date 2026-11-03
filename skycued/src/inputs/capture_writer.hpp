@@ -13,7 +13,8 @@
 //   RECORD_DIR/raw-<id>-<stamp>.txt as "<epoch_ms> -<hex>;" (parseUatLine;
 //   rawplay serves it as dump978 raw).
 //
-// Write failures follow RotatingFile (data dropped with a backoff). Not
+// Write failures follow RotatingFile (data dropped with a backoff); the
+// inputs count each dropped line or frame in capture_dropped. Not
 // thread-safe; files are opened on the first write.
 
 #include "asterix/capture_line.hpp"
@@ -67,7 +68,9 @@ private:
 class RawFrameWriter {
 public:
     RawFrameWriter(std::string record_dir, std::string input_id, uint64_t max_bytes);
-    void write(const RawFrame& frame);
+    // False when dropped by a failed write (a frame before 1970 has no line
+    // format and is skipped: true).
+    bool write(const RawFrame& frame);
     void flush();
 
 private:

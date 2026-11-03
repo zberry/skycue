@@ -28,7 +28,8 @@ struct DeviceStatus {
 struct InputCounters {
     uint64_t connects = 0, bytes = 0, messages = 0, observations = 0, uplinks = 0, rejected = 0,
              records_skipped = 0, sac_sic_mismatch = 0, nogo_records = 0, clock_rejects = 0,
-             rejected_peer = 0, raw_unknown_len = 0, status_ok = 0, status_fail = 0;
+             rejected_peer = 0, raw_unknown_len = 0, status_ok = 0, status_fail = 0,
+             capture_dropped = 0;  // capture lines and raw frames a failed write dropped
 
     InputCounters& operator+=(const InputCounters& o)
     {
@@ -46,6 +47,7 @@ struct InputCounters {
         raw_unknown_len += o.raw_unknown_len;
         status_ok += o.status_ok;
         status_fail += o.status_fail;
+        capture_dropped += o.capture_dropped;
         return *this;
     }
 };

@@ -450,3 +450,39 @@ BOOST_AUTO_TEST_CASE(record_raw_without_record_dir_warns_once)
     BOOST_TEST(warns == 1u, log);
     BOOST_TEST(dirEntries(tmp.path).empty());
 }
+
+BOOST_AUTO_TEST_CASE(capture_write_failures_counted)
+{
+    TempDir tmp, logdir;
+    // A record_dir under a regular file: no capture or raw file can be created.
+    const std::string blocker = tmp.path + "/not-a-dir";
+    { std::ofstream(blocker) << "x"; }
+    const RecordOptions rec{blocker + "/rec", true, 0};
+    std::string log;
+    {
+        StderrCapture cap(logdir.path + "/stderr.txt");
+        IoThread t;
+        UdpSender tx;
+        const uint16_t cport = freeUdpPort(), jport = freeUdpPort();
+        Probe c(t, std::make_unique<PingCat021Input>(t.io, cat021("cf", "udp", cport, R"(,"capture":true)"), rec));
+        Probe j(t, std::make_unique<PingJsonInput>(t.io, psJson("jf", jport, R"(,"capture":true)"), rec));
+        BOOST_REQUIRE(eventually([&] { return c.state().connected && j.state().connected; }));
+        tx.send(cport, block(0xABC001));
+        tx.send(cport, block(0xABC002));
+        tx.send(jport, fixture("uat-detail.json"));  // one capture line and one raw frame
+        BOOST_REQUIRE(eventually([&] { return c.state().counters.messages == 2 && j.state().counters.messages == 1; }));
+        BOOST_TEST(c.state().counters.capture_dropped == 2u);
+        BOOST_TEST(j.state().counters.capture_dropped == 2u);
+        log = cap.text();
+    }
+    BOOST_TEST(contains(log, "cannot create"), log);
+}
+
+BOOST_AUTO_TEST_CASE(capture_dropped_added)
+{
+    skycued::InputCounters a, b;
+    a.capture_dropped = 1;
+    b.capture_dropped = 2;
+    a += b;
+    BOOST_TEST(a.capture_dropped == 3u);
+}

@@ -47,14 +47,15 @@ void PingJsonInput::handleData(const TransportData& data)
 {
     ++counters_.messages;
     const auto arrival = std::chrono::system_clock::now();
-    if (capture_)
-        capture_->write(CaptureLine{arrival, def().id, transportName(def().transport),
-                                    std::vector<uint8_t>(data.data, data.data + data.size)});
+    if (capture_ && !capture_->write(CaptureLine{arrival, def().id, transportName(def().transport),
+                                                 std::vector<uint8_t>(data.data, data.data + data.size)}))
+        ++counters_.capture_dropped;
     const std::string text(reinterpret_cast<const char*>(data.data), data.size);
     PingResult r = parsePingDatagram(text, PingContext{arrival, def().time_mode});
     if (raw_)
         for (const auto& frame : r.raw_frames)
-            raw_->write(frame);
+            if (!raw_->write(frame))
+                ++counters_.capture_dropped;
     counters_.rejected += r.rejected;
     counters_.clock_rejects += r.clock_rejects;
     counters_.raw_unknown_len += r.raw_unknown_len;

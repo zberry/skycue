@@ -78,11 +78,11 @@ void RawFrameWriter::enforceRetention()
     enforce(dir_, max_bytes_, open_files);
 }
 
-void RawFrameWriter::write(const RawFrame& frame)
+bool RawFrameWriter::write(const RawFrame& frame)
 {
     const int64_t ns = epochNs(frame.time);
     if (ns < 0)
-        return;  // before 1970: no line format for it
+        return true;  // before 1970: no line format for it
     char stamp[48];
     if (frame.kind == RawFrame::Kind::adsb_1090) {
         std::snprintf(stamp, sizeof stamp, "%lld.%09lld,", static_cast<long long>(ns / 1000000000),
@@ -91,11 +91,10 @@ void RawFrameWriter::write(const RawFrame& frame)
         for (const char c : frame.hex)
             line += (c >= 'a' && c <= 'f') ? static_cast<char>(c - 'a' + 'A') : c;
         line += '\n';
-        csv_.write(line);
-    } else {
-        std::snprintf(stamp, sizeof stamp, "%lld -", static_cast<long long>(ns / 1000000));
-        txt_.write(stamp + frame.hex + ";\n");
+        return csv_.write(line);
     }
+    std::snprintf(stamp, sizeof stamp, "%lld -", static_cast<long long>(ns / 1000000));
+    return txt_.write(stamp + frame.hex + ";\n");
 }
 
 void RawFrameWriter::flush()

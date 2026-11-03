@@ -34,9 +34,9 @@ void PingCat021Input::tick(std::chrono::system_clock::time_point now)
 
 void PingCat021Input::capture(const uint8_t* data, std::size_t size)
 {
-    if (capture_)
-        capture_->write(CaptureLine{std::chrono::system_clock::now(), def().id, transportName(def().transport),
-                                    std::vector<uint8_t>(data, data + size)});
+    if (capture_ && !capture_->write(CaptureLine{std::chrono::system_clock::now(), def().id,
+                                                 transportName(def().transport), std::vector<uint8_t>(data, data + size)}))
+        ++counters_.capture_dropped;
 }
 
 void PingCat021Input::resetStreams() { framers_.clear(); }

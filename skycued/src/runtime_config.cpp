@@ -203,6 +203,7 @@ std::vector<std::string> restartKeysChanged(const Config& a, const Config& b)
     check(a.cue_udp_targets != b.cue_udp_targets, "CUE_UDP_TARGETS");
     check(a.record_dir != b.record_dir, "RECORD_DIR");
     check(a.record_formats != b.record_formats, "RECORD_FORMATS");
+    check(a.record_raw != b.record_raw, "RECORD_RAW");
     check(a.record_max_gb != b.record_max_gb, "RECORD_MAX_GB");
     check(a.min_interval_s != b.min_interval_s, "MIN_INTERVAL_S");
     check(a.max_interval_s != b.max_interval_s, "MAX_INTERVAL_S");
@@ -210,6 +211,8 @@ std::vector<std::string> restartKeysChanged(const Config& a, const Config& b)
     check(a.keyframe_interval_s != b.keyframe_interval_s, "KEYFRAME_INTERVAL_S");
     check(a.trail_seconds != b.trail_seconds, "TRAIL_SECONDS");
     check(a.inputs_file != b.inputs_file, "INPUTS_FILE");
+    check(a.fisb_enable != b.fisb_enable, "FISB_ENABLE");
+    check(a.fisb_experimental != b.fisb_experimental, "FISB_EXPERIMENTAL");
     return out;
 }
 

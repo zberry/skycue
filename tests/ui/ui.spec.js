@@ -393,6 +393,18 @@ test('screenshots', async ({ page }, testInfo) => {
   expect(nums).toEqual([...nums].sort((a, b) => b - a));
   await th.click();
   await page.screenshot({ path: testInfo.outputPath(`skycue-table-${testInfo.project.name}.png`), fullPage: true });
+  // Back to the map: the Cues tab (a block and its removal make TARGET's rows) and the Config tab.
+  await page.locator('#table-toggle').click();
+  await expect(page.locator('#table-view')).toBeHidden();
+  await page.locator('#tab-cues').click();
+  expect(await blockTarget(page, 'add')).toBe(200);
+  expect(await blockTarget(page, 'remove')).toBe(200);
+  await expect.poll(() => page.locator('#cues-recent tbody tr').count(), { timeout: 15000 }).toBeGreaterThan(1);
+  await expect(page.locator('#cues-filters li').first()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath(`skycue-cues-${testInfo.project.name}.png`), fullPage: true });
+  await page.locator('#tab-config').click();
+  await expect(page.locator('#pane-config tr[data-key="RECEIVER_LAT"] .cfg-value')).toHaveText('38.9');
+  await page.screenshot({ path: testInfo.outputPath(`skycue-config-${testInfo.project.name}.png`), fullPage: true });
 });
 
 // ---- Cues tab ------------------------------------------------------------------
@@ -706,6 +718,15 @@ test.describe('fisb radar (tg30)', () => {
     await expect.poll(() => page.locator('#wx-list li.wx-row').count()).toBeGreaterThan(100);
     await page.waitForTimeout(500);
     await page.screenshot({ path: testInfo.outputPath(`fisb-radar-${testInfo.project.name}.png`), fullPage: true });
+    // The Weather tab with the report symbols on the map and one report card
+    // open (SIGMET off so no shape lies over the symbol clicked).
+    await layerToggle(page, 'SIGMET').uncheck();
+    await expect.poll(() => page.locator('.wx-sym.wx-metar').count()).toBeGreaterThan(0);
+    await expect.poll(() => page.locator('.wx-sym.wx-winds').count()).toBeGreaterThan(0);
+    await page.locator('.wx-sym.wx-metar[data-station="KCVG"]').click();
+    await expect(page.locator('#shape-title')).toHaveText('METAR KCVG');
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: testInfo.outputPath(`fisb-symbols-${testInfo.project.name}.png`), fullPage: true });
   });
 
   test('metar_taf_symbols_have_category_classes', async ({ page }) => {

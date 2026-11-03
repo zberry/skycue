@@ -132,7 +132,8 @@ Origins, endpoints and callsigns are set with `textContent`.
 
 The Config tab (`showConfig`) is read only and fetches `GET /api/config`
 each time it is shown and on `#config-refresh`. `#config-daemon` lists the
-daemon facts; `groupConfig` sorts the keys into one `table[data-group]`
+daemon facts (the run mode through `daemonModeText`, the learned and
+operator locations through `daemonLocationsText`); `groupConfig` sorts the keys into one `table[data-group]`
 per `CONFIG_GROUPS` entry (a key no group names goes to a trailing
 `Other`, an empty group is left out), each key a `tr[data-key]` with
 `td.cfg-value`, `td.cfg-source` and `td.cfg-restart` (a `restart` badge

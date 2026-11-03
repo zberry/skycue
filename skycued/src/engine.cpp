@@ -345,6 +345,7 @@ std::optional<EngineEvent> Engine::learnLocation(const fisb::TwgoRecord& record)
 void Engine::loadLocations(const std::string& learned_path, const std::string& operator_csv_path)
 {
     locations_path_ = learned_path;
+    operator_locations_path_ = operator_csv_path;
     if (!learned_path.empty()) {
         const auto text = readWholeFile(learned_path);
         if (text) {

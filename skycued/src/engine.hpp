@@ -163,6 +163,11 @@ public:
     void loadLocations(const std::string& learned_path, const std::string& operator_csv_path);
     // Every known location id with its position, learned over operator (LocationIndex::merged()).
     std::map<std::string, std::pair<double, double>> locationPositions() const;
+    // For GET /api/config: the learned file (fisb-locations.json; "" when it
+    // is not saved this run), the operator CSV ("" for none) and the index.
+    const std::string& learnedLocationsPath() const { return locations_path_; }
+    const std::string& operatorLocationsPath() const { return operator_locations_path_; }
+    const fisb::LocationIndex& locationIndex() const { return locations_; }
     // The tick's save interval (kLocationsSaveInterval unless set; tests shorten it). 0: every tick while changed.
     void setLocationsSaveInterval(std::chrono::seconds interval) { locations_save_interval_ = interval; }
 
@@ -244,6 +249,7 @@ private:
     fisb::LocationIndex locations_;
     fisb::LocationAnnouncer announced_;  // what the fisb_location items said
     std::string locations_path_;  // fisb-locations.json; "" until loadLocations
+    std::string operator_locations_path_;  // LOCATIONS_FILE resolved; "" for none
     std::chrono::steady_clock::time_point last_locations_save_{};  // the last save attempt (or start())
     bool locations_save_failing_ = false;                           // the last save attempt failed
     std::chrono::seconds locations_save_interval_ = kLocationsSaveInterval;

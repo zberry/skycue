@@ -301,6 +301,28 @@
     return out;
   }
 
+  // GET /api/config's daemon facts as the Config tab's Daemon rows: how it
+  // runs (a replay, or live and which built-in decoders it connects to) and
+  // the report locations it holds.
+  function daemonModeText(d) {
+    if (d.mode === 'replay' && d.replay) {
+      var r = d.replay;
+      return 'replay of ' + r.file + ' (' + (r.speed === 0 ? 'unpaced' : 'speed ' + r.speed) +
+        (r.loop ? ', looped' : '') + ')';
+    }
+    return 'live: ' + (d.readsb === false ? 'no readsb (--no-readsb)' : 'readsb') + ', ' +
+      (d.dump978 === false ? 'no dump978 (--no-uat)' : 'dump978');
+  }
+  function daemonLocationsText(d) {
+    var l = d.locations || {};
+    var learned = (l.learned || 0) + ' learned, ' + (l.learned_path ? 'kept in ' + l.learned_path : 'not saved this run');
+    var op = !l.operator_path ? 'no LOCATIONS_FILE'
+      : (l.operator || 0) + ' from ' + l.operator_path +
+        (l.operator_rejected ? ', ' + l.operator_rejected + ' lines rejected' : '') +
+        (l.operator_overflow ? ', ' + l.operator_overflow + ' over the cap' : '');
+    return [learned, op];
+  }
+
   // A value as skycue.conf spells it, the same rules as conf_rewrite.cpp
   // quoteValue: bare when every character is one of the grammar's unquoted
   // ones, else "..." when it has none of " $ ` \, else '...' when it has no
@@ -973,6 +995,7 @@
     CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
     filterHistoryRows: filterHistoryRows,
     CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText, confValue: confValue,
+    daemonModeText: daemonModeText, daemonLocationsText: daemonLocationsText,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,

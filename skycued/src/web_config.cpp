@@ -32,7 +32,8 @@ std::string stringArray(const std::vector<std::string>& values)
 
 }  // namespace
 
-std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, std::chrono::system_clock::time_point now)
+std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, const LocationFacts& locations,
+                       std::chrono::system_clock::time_point now)
 {
     const Config effective = runtime.effective();
     const Overlay overlay = runtime.overlay();
@@ -48,7 +49,8 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, std
         }
     }
     const auto uptime = std::chrono::duration_cast<std::chrono::seconds>(now - info.started).count();
-    const std::string daemon = JsonWriter()
+    JsonWriter daemon;
+    daemon
                                    .add("version", info.version)
                                    .add("started", formatIso8601Ms(info.started))
                                    .add("uptime_s", static_cast<int64_t>(std::max<decltype(uptime)>(0, uptime)))
@@ -60,7 +62,22 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, std
                                    .add("record_dir", effective.record_dir)
                                    .addRaw("recording_files", stringArray(files))
                                    .add("log_level", info.log_level)
-                                   .str();
+                                   .add("mode", info.replay_file.empty() ? "live" : "replay");
+    if (!info.replay_file.empty())
+        daemon.addRaw("replay", JsonWriter()
+                                    .add("file", info.replay_file)
+                                    .add("speed", info.replay_speed)
+                                    .add("loop", info.replay_loop)
+                                    .str());
+    daemon.add("readsb", info.readsb).add("dump978", info.dump978);
+    daemon.addRaw("locations", JsonWriter()
+                                   .add("learned_path", locations.learned_path)
+                                   .add("learned", static_cast<int64_t>(locations.learned))
+                                   .add("operator_path", locations.operator_path)
+                                   .add("operator", static_cast<int64_t>(locations.operator_rows))
+                                   .add("operator_rejected", static_cast<int64_t>(locations.operator_rejected))
+                                   .add("operator_overflow", static_cast<int64_t>(locations.operator_overflow))
+                                   .str());
 
     const auto& restart = restartConfigKeys();
     std::vector<std::string> keys;
@@ -86,7 +103,7 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, std
                            .add("restart", std::find(restart.begin(), restart.end(), key) != restart.end())
                            .str());
     }
-    return JsonWriter().addRaw("daemon", daemon).addRaw("keys", jsonArray(keys)).str();
+    return JsonWriter().addRaw("daemon", daemon.str()).addRaw("keys", jsonArray(keys)).str();
 }
 
 }  // namespace skycued

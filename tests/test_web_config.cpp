@@ -210,3 +210,52 @@ BOOST_AUTO_TEST_CASE(config_without_daemon_info_500)
     });
     BOOST_TEST(put.status == 405u);
 }
+
+BOOST_AUTO_TEST_CASE(config_daemon_mode_and_locations)
+{
+    ConfigFx f;
+    // Live by default, both built-in decoders used, no location files.
+    auto daemon = parsed(request(f.port, http::verb::get, "/api/config").body).getObject("daemon");
+    BOOST_REQUIRE(daemon);
+    BOOST_TEST(daemon->getString("mode").value_or("") == "live");
+    BOOST_TEST(!daemon->getObject("replay").has_value());
+    BOOST_TEST(daemon->getBool("readsb").value_or(false) == true);
+    BOOST_TEST(daemon->getBool("dump978").value_or(false) == true);
+    auto loc = daemon->getObject("locations");
+    BOOST_REQUIRE(loc);
+    BOOST_TEST(loc->getString("learned_path").value_or("x") == "");
+    BOOST_TEST(loc->getString("operator_path").value_or("x") == "");
+    BOOST_TEST(loc->getInt("learned").value_or(-1) == 0);
+    BOOST_TEST(loc->getInt("operator").value_or(-1) == 0);
+
+    // A replay without readsb/dump978, a learned file and an operator CSV
+    // (two rows, one rejected line).
+    const std::string learned = f.tmp.path + "/fisb-locations.json", csv = f.tmp.path + "/locs.csv";
+    std::ofstream(learned) << "{\"version\":1,\"locations\":{\"KPRG\":[39.699097,-87.670212,3]}}\n";
+    std::ofstream(csv) << "id,lat,lon\nIND,39.81,-86.37\nROD,40.29,-84.04\nnot a row\n";
+    f.fx->t.call([&] {
+        f.info.replay_file = "/data/received.jsonl";
+        f.info.replay_speed = 0;
+        f.info.replay_loop = true;
+        f.info.readsb = f.info.dump978 = false;
+        f.fx->engine->loadLocations(learned, csv);
+    });
+    daemon = parsed(request(f.port, http::verb::get, "/api/config").body).getObject("daemon");
+    BOOST_REQUIRE(daemon);
+    BOOST_TEST(daemon->getString("mode").value_or("") == "replay");
+    const auto replay = daemon->getObject("replay");
+    BOOST_REQUIRE(replay);
+    BOOST_TEST(replay->getString("file").value_or("") == "/data/received.jsonl");
+    BOOST_TEST(replay->getDouble("speed").value_or(-1) == 0.0);
+    BOOST_TEST(replay->getBool("loop").value_or(false) == true);
+    BOOST_TEST(daemon->getBool("readsb").value_or(true) == false);
+    BOOST_TEST(daemon->getBool("dump978").value_or(true) == false);
+    loc = daemon->getObject("locations");
+    BOOST_REQUIRE(loc);
+    BOOST_TEST(loc->getString("learned_path").value_or("") == learned);
+    BOOST_TEST(loc->getInt("learned").value_or(-1) == 1);
+    BOOST_TEST(loc->getString("operator_path").value_or("") == csv);
+    BOOST_TEST(loc->getInt("operator").value_or(-1) == 2);
+    BOOST_TEST(loc->getInt("operator_rejected").value_or(-1) == 1);
+    BOOST_TEST(loc->getInt("operator_overflow").value_or(-1) == 0);
+}

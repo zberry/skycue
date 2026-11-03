@@ -524,6 +524,10 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   await expect(row('MAX_RANGE_NM').locator('.cfg-restart')).not.toContainText('restart');
   await expect(page.locator('#pane-config table[data-group="FIS-B"] tr[data-key="LOCATIONS_FILE"]')).toHaveCount(1);
   await expect(page.locator('#config-daemon')).toContainText('skycued');
+  // run.sh's skycued replays the readsb fixture in real time, looped.
+  await expect(page.locator('#config-daemon tr', { hasText: 'Runs' })).toContainText(/replay of \S*readsb-sample\.jsonl \(speed 1, looped\)/);
+  await expect(page.locator('#config-daemon tr', { hasText: 'Learned locations' })).toContainText(/learned, kept in \S*fisb-locations\.json/);
+  await expect(page.locator('#config-daemon tr', { hasText: 'Operator locations' })).toContainText('no LOCATIONS_FILE');
   const text = await page.evaluate(() => window.skycueApp.configText());
   expect(text).toContain(`\n# WEB_PORT: conf, restart\nWEB_PORT=${port}\n`);
   await page.locator('#config-copy').click();

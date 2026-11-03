@@ -869,6 +869,19 @@ test('config_text', () => {
   assert.ok(t.includes('# MAX_RANGE_NM: overlay\nMAX_RANGE_NM=20\n'));
   assert.ok(t.includes('# RECORD_DIR: default, restart\nRECORD_DIR=\n'));
 });
+test('daemon_mode_and_locations_text', () => {
+  assert.strictEqual(P.daemonModeText({ mode: 'live', readsb: true, dump978: true }), 'live: readsb, dump978');
+  assert.strictEqual(P.daemonModeText({ mode: 'live', readsb: true, dump978: false }), 'live: readsb, no dump978 (--no-uat)');
+  assert.strictEqual(P.daemonModeText({ mode: 'live', readsb: false, dump978: true }), 'live: no readsb (--no-readsb), dump978');
+  assert.strictEqual(P.daemonModeText({ mode: 'replay', replay: { file: '/d/r.jsonl', speed: 0, loop: true } }),
+    'replay of /d/r.jsonl (unpaced, looped)');
+  assert.strictEqual(P.daemonModeText({ mode: 'replay', replay: { file: 'r.jsonl', speed: 2, loop: false } }), 'replay of r.jsonl (speed 2)');
+  assert.deepStrictEqual(P.daemonLocationsText({ locations: { learned_path: '/e/fisb-locations.json', learned: 42,
+    operator_path: '', operator: 0 } }), ['42 learned, kept in /e/fisb-locations.json', 'no LOCATIONS_FILE']);
+  assert.deepStrictEqual(P.daemonLocationsText({ locations: { learned_path: '', learned: 0, operator_path: '/e/l.csv',
+    operator: 2, operator_rejected: 1, operator_overflow: 3 } }),
+    ['0 learned, not saved this run', '2 from /e/l.csv, 1 lines rejected, 3 over the cap']);
+});
 test('conf_value_every_branch', () => {
   assert.strictEqual(P.confValue('38.9'), '38.9');
   assert.strictEqual(P.confValue(''), '');

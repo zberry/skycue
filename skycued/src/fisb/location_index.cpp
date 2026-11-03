@@ -321,6 +321,7 @@ bool LocationAnnouncer::update(const std::string& id, const std::optional<std::p
 }
 
 std::size_t LocationIndex::learnedCount() const { return learned_.size(); }
+std::size_t LocationIndex::operatorCount() const { return operator_.size(); }
 
 bool LocationIndex::dirty() const { return dirty_; }
 

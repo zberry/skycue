@@ -633,7 +633,14 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
                 return notAllowed("GET");
             if (!context.daemon)
                 return error(500, "no daemon info");
-            return json(200, configJson(*context.daemon, runtime, std::chrono::system_clock::now()));
+            LocationFacts loc;
+            loc.learned_path = engine.learnedLocationsPath();
+            loc.operator_path = engine.operatorLocationsPath();
+            loc.learned = engine.locationIndex().learnedCount();
+            loc.operator_rows = engine.locationIndex().operatorCount();
+            loc.operator_rejected = engine.locationIndex().operatorRejected();
+            loc.operator_overflow = engine.locationIndex().operatorOverflow();
+            return json(200, configJson(*context.daemon, runtime, loc, std::chrono::system_clock::now()));
         }
         if (path == "/api/cues/clients")
             return get ? json(200, cueClientsJson(engine.forwarder())) : notAllowed("GET");

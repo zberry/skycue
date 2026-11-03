@@ -283,6 +283,13 @@ int main(int argc, char** argv)
     if (vm.count("inputs-file"))
         daemon.cli_overrides["INPUTS_FILE"] = inputs_file;
     daemon.recorders = {{"received", received.get()}, {"sent", sent.get()}, {"fisb", fisb.get()}};
+    if (replaying) {
+        daemon.replay_file = replay_path;
+        daemon.replay_speed = replay_speed;
+        daemon.replay_loop = vm.count("replay-loop") > 0;
+    }
+    daemon.readsb = !replaying && !vm.count("no-readsb");
+    daemon.dump978 = !replaying && !vm.count("no-uat");
     // The web UI (WEB_BIND:WEB_PORT); WEB_PORT=0: none.
     std::unique_ptr<WebServer> web;
     if (config.web_port == 0) {

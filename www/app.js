@@ -2316,7 +2316,10 @@
       ['www directory', d.www_dir],
       ['Recording to', d.record_dir || 'not recording'],
       ['Recording files', (d.recording_files || []).join(', ') || 'none'],
-      ['Log level', d.log_level]];
+      ['Log level', d.log_level],
+      ['Runs', P.daemonModeText(d)],
+      ['Learned locations', P.daemonLocationsText(d)[0]],
+      ['Operator locations', P.daemonLocationsText(d)[1]]];
     body.textContent = '';
     rows.forEach(function (r) {
       var tr = el('tr');

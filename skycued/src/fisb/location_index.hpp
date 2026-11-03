@@ -53,6 +53,7 @@ public:
     std::optional<std::pair<double, double>> find(const std::string& id) const;   // learned wins over operator
     std::map<std::string, std::pair<double, double>> merged() const;
     std::size_t learnedCount() const;
+    std::size_t operatorCount() const;
     bool dirty() const;      // learned set changed since markSaved()/loadLearned()
     void markSaved();
 

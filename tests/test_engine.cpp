@@ -804,3 +804,93 @@ BOOST_AUTO_TEST_CASE(builtin_enabled_again_restarts)
     BOOST_TEST(fx.t.call([&] { return in["a"]->starts; }) == 2);
     BOOST_TEST(fx.t.call([&] { return fx.engine->inputs().anyTrackInputConnected(); }));
 }
+
+// ---- drop counters per filter decision, enriched drop events ----
+
+BOOST_AUTO_TEST_CASE(filtered_drops_counted_by_decision)
+{
+    Config cfg = baseConfig();  // max range 150 nm, min elevation 0
+    std::map<std::string, FakeInput*> in;
+    EngineFx fx(cfg, fakeInputs({fakeDef("a")}, in));
+    fx.t.call([&] {
+        in["a"]->connection(true);
+        in["a"]->emit(from("a", 0xa00001, 0));    // about 3 nm
+        in["a"]->emit(from("a", 0xa00002, 0.1));  // about 9 nm
+    });
+    BOOST_TEST(fx.stats().tracks_forwarded == 2u);
+
+    fx.t.call([&] { fx.engine->addListEntry(skycued::ListKind::block, "a00001", "test"); });
+    BOOST_TEST(fx.stats().drops_blocked == 1u);
+
+    fx.t.call([&] { fx.engine->setFilterConfig(skycued::FilterConfig{0.5, 0}, "test"); });
+    BOOST_TEST(fx.stats().drops_out_of_range == 1u);
+
+    fx.t.call([&] { fx.engine->setFilterConfig(skycued::FilterConfig{150, 0}, "test"); });
+    BOOST_TEST(fx.stats().tracks_forwarded == 1u);  // 0xa00002 again; 0xa00001 is still blocked
+    fx.t.call([&] { fx.engine->setFilterConfig(skycued::FilterConfig{150, 89}, "test"); });
+    BOOST_TEST(fx.stats().drops_below_elevation == 1u);
+
+    const auto s = fx.stats();
+    BOOST_TEST(s.drops_filtered == 3u);
+    BOOST_TEST(s.drops_filtered == s.drops_blocked + s.drops_out_of_range + s.drops_below_elevation + s.drops_no_position);
+    BOOST_TEST(s.drops_no_position == 0u);
+    BOOST_TEST(s.sent_drops == 3u);
+}
+
+BOOST_AUTO_TEST_CASE(drop_event_carries_decision_callsign_time)
+{
+    Config cfg = baseConfig();
+    cfg.track_timeout_s = 1;
+    std::mutex m;  // declared before fx: they outlive the engine's sink
+    std::condition_variable cv;
+    std::vector<skycued::EngineEvent> drops;
+    std::map<std::string, FakeInput*> in;
+    EngineFx fx(cfg, fakeInputs({fakeDef("a")}, in));
+    const TrackId one{0xa00001, AddressType::icao}, two{0xa00002, AddressType::icao};
+    std::chrono::system_clock::time_point observed_at{};
+    fx.t.call([&] {
+        fx.engine->onEvent([&](const skycued::EngineEvent& e) {
+            if (e.kind != skycued::EventKind::drop)
+                return;
+            std::lock_guard<std::mutex> lk(m);
+            drops.push_back(e);
+            cv.notify_all();
+        });
+        in["a"]->connection(true);
+        auto o1 = from("a", one.address, 0);
+        o1.callsign = std::string("TEST1");
+        observed_at = o1.received_time;
+        in["a"]->emit(o1);
+        auto o2 = from("a", two.address, 0.1);
+        o2.callsign = std::string("TEST2");
+        in["a"]->emit(o2);
+    });
+    BOOST_TEST(fx.stats().tracks_forwarded == 2u);
+
+    fx.t.call([&] { fx.engine->addListEntry(skycued::ListKind::block, "a00001", "test"); });
+    {
+        std::lock_guard<std::mutex> lk(m);
+        BOOST_REQUIRE(drops.size() == 1u);
+        const auto& d = drops[0];
+        BOOST_REQUIRE(d.id.has_value());
+        BOOST_TEST((*d.id == one));
+        BOOST_TEST((d.reason == DropReason::filtered));
+        BOOST_TEST((d.decision == skycued::Decision::blocked));
+        BOOST_TEST((d.callsign == std::string("TEST1")));
+        BOOST_REQUIRE(d.time.has_value());
+        BOOST_TEST((*d.time >= observed_at));
+    }
+
+    // No more observations for 0xa00002: tick()'s expiry path drops it.
+    std::unique_lock<std::mutex> lk(m);
+    BOOST_REQUIRE(cv.wait_for(lk, 3s, [&] { return drops.size() >= 2; }));
+    const auto& d = drops[1];
+    BOOST_REQUIRE(d.id.has_value());
+    BOOST_TEST((*d.id == two));
+    BOOST_TEST((d.reason == DropReason::timeout));
+    BOOST_TEST(!d.decision.has_value());
+    BOOST_TEST((d.callsign == std::string("TEST2")));
+    BOOST_TEST(d.time.has_value());
+    lk.unlock();
+    fx.t.call([&] { fx.engine->onEvent({}); });
+}

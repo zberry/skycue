@@ -76,6 +76,10 @@ void putStats(JsonWriter& w, const EngineStats& s)
         .add("udp_targets", n(s.udp_targets))
         .add("drops_timeout", n(s.drops_timeout))
         .add("drops_filtered", n(s.drops_filtered))
+        .add("drops_blocked", n(s.drops_blocked))
+        .add("drops_out_of_range", n(s.drops_out_of_range))
+        .add("drops_below_elevation", n(s.drops_below_elevation))
+        .add("drops_no_position", n(s.drops_no_position))
         .add("drops_source_lost", n(s.drops_source_lost))
         .add("recorder_dropped_received", n(s.recorder_dropped_received))
         .add("recorder_dropped_sent", n(s.recorder_dropped_sent))
@@ -438,14 +442,22 @@ std::string trackJson(const TrackSnapshot& track, const char* type)
     return w.str();
 }
 
-std::string dropJson(skycue::TrackId id, skycue::DropReason reason)
+std::string dropJson(const EngineEvent& event)
 {
-    return JsonWriter()
-        .add("type", "drop")
-        .add("hex", hexAddress(id.address))
-        .add("addr_type", addressTypeName(id.type))
-        .add("reason", dropReasonName(reason))
-        .str();
+    if (!event.id || !event.reason)
+        return std::string();
+    JsonWriter w;
+    w.add("type", "drop")
+        .add("hex", hexAddress(event.id->address))
+        .add("addr_type", addressTypeName(event.id->type))
+        .add("reason", dropReasonName(*event.reason));
+    if (event.decision)
+        w.add("decision", decisionName(*event.decision));
+    if (event.callsign)
+        w.add("callsign", *event.callsign);
+    if (event.time)
+        w.add("time", formatIso8601Ms(*event.time));
+    return w.str();
 }
 
 std::string expiredJson(skycue::TrackId id)
@@ -465,7 +477,7 @@ std::string eventJson(const EngineEvent& event)
     case EventKind::observed:
         return event.track ? trackJson(*event.track, "observed") : std::string();
     case EventKind::drop:
-        return event.id && event.reason ? dropJson(*event.id, *event.reason) : std::string();
+        return dropJson(event);
     case EventKind::expired:
         return event.id ? expiredJson(*event.id) : std::string();
     case EventKind::stats:

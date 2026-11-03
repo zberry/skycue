@@ -4,6 +4,7 @@
 #include "engine_test_support.hpp"
 
 #include "runtime_config.hpp"
+#include "time_util.hpp"
 #include "web_api.hpp"
 #include "web_server.hpp"
 
@@ -525,6 +526,8 @@ BOOST_AUTO_TEST_CASE(api_state_shape)
     BOOST_TEST(s.get<int>("stats.tracks_forwarded") == 1);
     BOOST_TEST(s.get<bool>("stats.readsb_connected") == true);
     BOOST_TEST(s.count("stats") == 1u);
+    for (const char* key : {"drops_blocked", "drops_out_of_range", "drops_below_elevation", "drops_no_position"})
+        BOOST_TEST(s.get_child("stats").count(key) == 1u, key);
 
     const auto& tracks = s.get_child("tracks");
     BOOST_TEST(tracks.size() == 2u);
@@ -595,6 +598,23 @@ BOOST_AUTO_TEST_CASE(api_state_shape)
     BOOST_TEST(get(f.port, "/api/lists/allow").allow == "POST");
     BOOST_TEST(get(f.port, "/api/filters/save-baseline").status == 405u);
     BOOST_TEST(get(f.port, "/ws").status == 400u);  // not an upgrade
+}
+
+BOOST_AUTO_TEST_CASE(drop_json_fields)
+{
+    skycued::EngineEvent ev;
+    ev.kind = skycued::EventKind::drop;
+    ev.id = TrackId{0xa1b2c3, AddressType::icao};
+    ev.reason = DropReason::filtered;
+    ev.decision = skycued::Decision::out_of_range;
+    ev.callsign = std::string("UAL1423");
+    ev.time = skycued::parseIso8601Ms("2020-10-30T09:00:17.000Z").value();
+    BOOST_TEST(skycued::webapi::eventJson(ev) == "{\"type\":\"drop\",\"hex\":\"a1b2c3\",\"addr_type\":\"icao\",\"reason\":\"filtered\","
+                                                 "\"decision\":\"out_of_range\",\"callsign\":\"UAL1423\",\"time\":\"2020-10-30T09:00:17.000Z\"}");
+    ev.reason = DropReason::timeout;
+    ev.decision.reset();
+    ev.callsign.reset();
+    BOOST_TEST(skycued::webapi::eventJson(ev) == "{\"type\":\"drop\",\"hex\":\"a1b2c3\",\"addr_type\":\"icao\",\"reason\":\"timeout\",\"time\":\"2020-10-30T09:00:17.000Z\"}");
 }
 
 BOOST_AUTO_TEST_CASE(track_json_input_present_when_known)

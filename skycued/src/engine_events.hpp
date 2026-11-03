@@ -26,6 +26,8 @@ struct EngineStats {
     uint64_t tcp_clients = 0, udp_targets = 0;  // Forwarder destinations now
     // sent_drops by reason (the shutdown drops are counted in sent_drops only).
     uint64_t drops_timeout = 0, drops_filtered = 0, drops_source_lost = 0;
+    // drops_filtered by the filter decision that dropped the track (they sum to it).
+    uint64_t drops_blocked = 0, drops_out_of_range = 0, drops_below_elevation = 0, drops_no_position = 0;
     uint64_t recorder_dropped_received = 0, recorder_dropped_sent = 0;  // Recorder::droppedRecords()
     uint32_t web_clients = 0;  // as set by Engine::setWebClientCount
     // FIS-B (all 0 with FISB_ENABLE=no): uplinks fed to the decoder, products
@@ -105,7 +107,9 @@ struct FisbNotice {
 
 // update: `track` (the track just sent). observed: `track` (after an
 // observation with a position, whatever the decision: every track, forwarded
-// or not). drop: `id` and `reason` (any reason but shutdown). expired: `id`
+// or not). drop: `id`, `reason` (any reason but shutdown), `callsign` (the
+// track's last known one), `time` (the data clock at the drop) and, for
+// reason filtered, `decision` (the filter decision that dropped it). expired: `id`
 // (a track that was not being forwarded left the table: no drop is sent for
 // it, but an observer showing it should remove it). stats: `stats`.
 // filters_changed, lists_changed, inputs_changed: nothing set (inputs_changed:
@@ -115,6 +119,9 @@ struct EngineEvent {
     std::optional<TrackSnapshot> track;
     std::optional<skycue::TrackId> id;
     std::optional<skycue::DropReason> reason;
+    std::optional<Decision> decision;                           // drop, reason filtered: the decision that dropped it
+    std::optional<std::string> callsign;                        // drop: the track's last known callsign
+    std::optional<std::chrono::system_clock::time_point> time;  // drop: the data clock at the drop
     std::optional<EngineStats> stats;
     std::optional<FisbNotice> fisb;
 };

@@ -13,7 +13,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -67,7 +67,9 @@ const char* listName(ListKind list) { return list == ListKind::allow ? "allow" :
 
 EngineEvent kindEvent(EventKind kind)
 {
-    return EngineEvent{kind, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt};
+    EngineEvent ev;
+    ev.kind = kind;
+    return ev;
 }
 
 // The whole regular file; nullopt with errno set when it cannot be opened
@@ -433,7 +435,7 @@ void Engine::decide(TrackState& state, steady::time_point now)
             return;  // still eligible; nothing worth sending yet
         forward(state, result, now);
     } else if (state.currently_forwarded) {
-        drop(state, skycue::DropReason::filtered);
+        drop(state, skycue::DropReason::filtered, result.decision);
     }
 }
 
@@ -453,27 +455,42 @@ void Engine::forward(TrackState& state, const FilterResult& result, steady::time
     }
 }
 
-void Engine::drop(TrackState& state, skycue::DropReason reason)
+void Engine::drop(TrackState& state, skycue::DropReason reason, std::optional<Decision> decision)
 {
     forwarder_.sendDrop(state.id, reason);
     state.currently_forwarded = false;
-    countDrop(reason);
+    countDrop(reason, decision);
     if (sent_)
         sent_->writeDrop(state.id, reason);
-    emitDrop(state.id, reason);
+    emitDrop(state, reason, decision);
 }
 
-void Engine::emitDrop(skycue::TrackId id, skycue::DropReason reason)
+void Engine::emitDrop(const TrackState& state, skycue::DropReason reason, std::optional<Decision> decision)
+{
+    if (!sink_)
+        return;
+    EngineEvent ev = kindEvent(EventKind::drop);
+    ev.id = state.id;
+    ev.reason = reason;
+    ev.decision = decision;
+    ev.callsign = state.latest.callsign;
+    ev.time = dataNow();
+    emit(ev);
+}
+
+void Engine::emitDrop(skycue::TrackId id, const std::optional<std::string>& callsign, skycue::DropReason reason)
 {
     if (!sink_)
         return;
     EngineEvent ev = kindEvent(EventKind::drop);
     ev.id = id;
     ev.reason = reason;
+    ev.callsign = callsign;
+    ev.time = dataNow();
     emit(ev);
 }
 
-void Engine::countDrop(skycue::DropReason reason)
+void Engine::countDrop(skycue::DropReason reason, std::optional<Decision> decision)
 {
     ++sent_drops_;
     switch (reason) {
@@ -481,6 +498,15 @@ void Engine::countDrop(skycue::DropReason reason)
     case skycue::DropReason::filtered: ++drops_filtered_; break;
     case skycue::DropReason::source_lost: ++drops_source_lost_; break;
     default: break;
+    }
+    if (reason != skycue::DropReason::filtered || !decision)
+        return;
+    switch (*decision) {
+    case Decision::blocked: ++drops_blocked_; break;
+    case Decision::out_of_range: ++drops_out_of_range_; break;
+    case Decision::below_elevation: ++drops_below_elevation_; break;
+    case Decision::no_position: ++drops_no_position_; break;
+    default: break;  // send, allow_listed: never a drop
     }
 }
 
@@ -514,7 +540,7 @@ void Engine::reevaluate()
         const FilterResult r = filters_.evaluate(s);
         if (s.currently_forwarded) {
             if (!isSend(r.decision))
-                drop(s, skycue::DropReason::filtered);
+                drop(s, skycue::DropReason::filtered, r.decision);
         } else if (isSend(r.decision)) {  // implies a position
             forward(s, r, now);
         }
@@ -607,15 +633,17 @@ void Engine::tick()
 {
     if (have_data_clock_) {
         const auto now = dataNow();
-        std::unordered_set<skycue::TrackId> forwarded;
+        // Forwarded ids with their callsigns, taken before expire() removes them.
+        std::unordered_map<skycue::TrackId, std::optional<std::string>> forwarded;
         table_.forEach([&](TrackState& s) {
             if (s.currently_forwarded)
-                forwarded.insert(s.id);
+                forwarded.emplace(s.id, s.latest.callsign);
         });
         // A track that ages out while the inputs are lost went because of it.
         const auto reason = track_connected_ ? skycue::DropReason::timeout : skycue::DropReason::source_lost;
         for (const auto& id : table_.expire(now, track_timeout_)) {
-            if (!forwarded.count(id)) {
+            const auto f = forwarded.find(id);
+            if (f == forwarded.end()) {
                 if (sink_) {
                     EngineEvent ev = kindEvent(EventKind::expired);
                     ev.id = id;
@@ -627,7 +655,7 @@ void Engine::tick()
             countDrop(reason);
             if (sent_)
                 sent_->writeDrop(id, reason);
-            emitDrop(id, reason);
+            emitDrop(id, f->second, reason);
         }
     }
     if (fisb_decoder_ && have_data_clock_) {
@@ -720,6 +748,10 @@ EngineStats Engine::stats() const
     s.drops_timeout = drops_timeout_;
     s.drops_filtered = drops_filtered_;
     s.drops_source_lost = drops_source_lost_;
+    s.drops_blocked = drops_blocked_;
+    s.drops_out_of_range = drops_out_of_range_;
+    s.drops_below_elevation = drops_below_elevation_;
+    s.drops_no_position = drops_no_position_;
     s.recorder_dropped_received = received_ ? received_->droppedRecords() : 0;
     s.recorder_dropped_sent = sent_ ? sent_->droppedRecords() : 0;
     s.web_clients = web_clients_;

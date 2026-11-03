@@ -203,15 +203,17 @@ private:
     void process(TrackState& state, std::chrono::steady_clock::time_point now, bool positioned);
     void decide(TrackState& state, std::chrono::steady_clock::time_point now);
     void forward(TrackState& state, const FilterResult& result, std::chrono::steady_clock::time_point now);
-    void drop(TrackState& state, skycue::DropReason reason);
-    void countDrop(skycue::DropReason reason);
+    void drop(TrackState& state, skycue::DropReason reason, std::optional<Decision> decision = std::nullopt);
+    void countDrop(skycue::DropReason reason, std::optional<Decision> decision = std::nullopt);
     void applied(const std::string& note, EventKind kind);
     void reevaluate();
     TrackSnapshot trackSnapshot(const TrackState& state, const FilterResult& result) const;
     std::chrono::system_clock::time_point dataNow() const;
     void advanceDataClock(std::chrono::system_clock::time_point t);
     void emit(const EngineEvent& event);
-    void emitDrop(skycue::TrackId id, skycue::DropReason reason);
+    void emitDrop(const TrackState& state, skycue::DropReason reason, std::optional<Decision> decision);
+    // For a track already removed from the table (tick()'s expiry path).
+    void emitDrop(skycue::TrackId id, const std::optional<std::string>& callsign, skycue::DropReason reason);
     void dropAllForwarded(skycue::DropReason reason);
     void tick();
     void armTick();
@@ -251,6 +253,7 @@ private:
     unsigned lost_gen_ = 0;
     uint64_t observations_ = 0, sent_updates_ = 0, sent_drops_ = 0;
     uint64_t drops_timeout_ = 0, drops_filtered_ = 0, drops_source_lost_ = 0;
+    uint64_t drops_blocked_ = 0, drops_out_of_range_ = 0, drops_below_elevation_ = 0, drops_no_position_ = 0;
     uint64_t uplink_duplicates_ = 0;
     uint32_t web_clients_ = 0;
     std::function<void(const EngineEvent&)> sink_;

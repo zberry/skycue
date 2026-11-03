@@ -16,4 +16,8 @@ namespace skycued {
 // is written as U+FFFD, one per byte; valid sequences pass unchanged.
 void appendJsonString(std::string& out, const std::string& s);
 
+// True when s is well-formed UTF-8 (RFC 3629, the rule above): exactly the
+// strings appendJsonString writes unchanged apart from its escapes.
+bool isValidUtf8(const std::string& s);
+
 }  // namespace skycued

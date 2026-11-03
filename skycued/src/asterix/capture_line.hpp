@@ -25,8 +25,9 @@ std::string captureLineJson(const CaptureLine& line);
 
 // The inverse; also accepts uppercase hex, any key order and a trailing line
 // end. nullopt for anything malformed: not a JSON object, a key missing or
-// not a string, a bad time, an empty input, an unknown transport, hex of odd
-// length or with a non-hex character. Never throws.
+// not a string, a bad time, an empty input or one that is not valid UTF-8,
+// an unknown transport, hex of odd length or with a non-hex character. Never
+// throws.
 std::optional<CaptureLine> parseCaptureLine(const std::string& text);
 
 }  // namespace skycued

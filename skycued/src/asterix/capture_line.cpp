@@ -72,7 +72,9 @@ std::optional<CaptureLine> parseCaptureLine(const std::string& text)
     }
     const auto t = stringKey(tree, "t"), input = stringKey(tree, "input"), transport = stringKey(tree, "transport"),
                hex = stringKey(tree, "hex");
-    if (!t || !input || !transport || !hex || input->empty())
+    // An input that is not valid UTF-8 would come back from captureLineJson
+    // with U+FFFD in it, so it is refused rather than changed.
+    if (!t || !input || !transport || !hex || input->empty() || !isValidUtf8(*input))
         return std::nullopt;
     if (*transport != "udp" && *transport != "tcp_connect" && *transport != "tcp_listen")
         return std::nullopt;

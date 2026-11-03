@@ -45,6 +45,23 @@ std::size_t utf8SequenceLength(const unsigned char* p, std::size_t i, std::size_
 
 }  // namespace
 
+bool isValidUtf8(const std::string& s)
+{
+    const auto* p = reinterpret_cast<const unsigned char*>(s.data());
+    const std::size_t n = s.size();
+    for (std::size_t i = 0; i < n;) {
+        if (p[i] < 0x80) {
+            ++i;
+            continue;
+        }
+        const std::size_t len = utf8SequenceLength(p, i, n);
+        if (len == 0)
+            return false;
+        i += len;
+    }
+    return true;
+}
+
 void appendJsonString(std::string& out, const std::string& s)
 {
     const auto* p = reinterpret_cast<const unsigned char*>(s.data());

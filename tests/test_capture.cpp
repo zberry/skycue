@@ -288,6 +288,27 @@ BOOST_AUTO_TEST_CASE(fuzz_recording_capture_time_out_of_range)
         R"({"t":"9999-11-02T10:15:00.123Z","input":"ps","transport":"udp","hex":"15ab"})"));
 }
 
+// Found by fuzz_recording (final rerun of the sweep): a capture line whose
+// "input" held invalid UTF-8 (an overlong C0 A3, which PropertyTree lets
+// through) parsed, but captureLineJson writes such bytes as U+FFFD, so the
+// line did not come back from its own JSON. Such an input is refused.
+BOOST_AUTO_TEST_CASE(fuzz_recording_capture_input_invalid_utf8)
+{
+    const std::string head = R"({"t":"2026-11-02T10:15:00.123Z","input":")";
+    const std::string tail = R"(","transport":"udp","hex":"15ab"})";
+    for (const std::string& bad : {std::string("ps\xC0\xA3"), std::string("ps\xC0\xAF"), std::string("\xED\xA0\x80"),
+                                  std::string("ps\x80"), std::string("\xF4\x90\x80\x80")}) {
+        const auto c = skycued::parseCaptureLine(head + bad + tail);
+        BOOST_TEST(!c.has_value());
+    }
+    // Valid UTF-8 beyond ASCII still parses and round-trips.
+    const auto ok = skycued::parseCaptureLine(head + "ps-\xC3\xA9" + tail);
+    BOOST_REQUIRE(ok.has_value());
+    const auto back = skycued::parseCaptureLine(skycued::captureLineJson(*ok));
+    BOOST_REQUIRE(back.has_value());
+    BOOST_TEST(back->input == ok->input);
+}
+
 BOOST_AUTO_TEST_CASE(capture_line_deep_nesting_refused_without_parsing)
 {
     // Deep enough to overflow the stack in read_json if it got there.

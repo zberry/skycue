@@ -146,6 +146,7 @@ void InputManager::load()
         rejectFile(e.what(), "built-in inputs only");
         return;
     }
+    warnCapture(file.inputs);
     file_builtin_ = file.builtin_enabled;
     for (std::size_t i = 0; i < builtin_count_; ++i) {
         const auto it = file_builtin_.find(slots_[i].def.id);
@@ -217,6 +218,7 @@ InputEntry InputManager::create(const InputDef& def)
         throw InputConflict("input '" + d.id + "' already exists");
     auto user = userDefs();
     user.push_back(d);
+    checkCapture(d);
     checkSet(user);
     persist(user, builtinStates());
     slots_.push_back(Slot{d, build(d)});
@@ -243,6 +245,7 @@ InputEntry InputManager::replace(const std::string& id, const InputDef& def)
     for (auto& u : user)
         if (u.id == id)
             u = d;
+    checkCapture(d);
     checkSet(user);
     persist(user, builtinStates());
     retire(*s, true);
@@ -391,10 +394,23 @@ void InputManager::checkSet(const std::vector<InputDef>& user) const
         all.push_back(slots_[i].def);
     all.insert(all.end(), user.begin(), user.end());
     validateInputSet(all);
-    if (config_.record_dir.empty())
-        for (const auto& d : user)
-            if (d.capture)
-                throw InputDefError("capture needs RECORD_DIR");
+}
+
+void InputManager::checkCapture(const InputDef& d) const
+{
+    if (d.capture && config_.record_dir.empty())
+        throw InputDefError("capture needs RECORD_DIR");
+}
+
+void InputManager::warnCapture(const std::vector<InputDef>& user) const
+{
+    if (!config_.record_dir.empty())
+        return;
+    for (const auto& d : user)
+        if (d.capture) {
+            LOG_WARN(config_.inputs_file << ": capture needs RECORD_DIR: not capturing");
+            return;
+        }
 }
 
 std::vector<InputDef> InputManager::userDefs() const
@@ -515,6 +531,7 @@ void InputManager::reloadFromDisk()
         rejectFile(e.what(), "inputs unchanged");
         return;
     }
+    warnCapture(file.inputs);
     applyFile(file.inputs, file.builtin_enabled);
 }
 

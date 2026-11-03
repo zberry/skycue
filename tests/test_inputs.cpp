@@ -939,6 +939,47 @@ BOOST_AUTO_TEST_CASE(malformed_file_at_load_renamed_rejected)
     BOOST_TEST(m.on([&](InputManager&) { return hub.starts; }) == 1);
 }
 
+BOOST_AUTO_TEST_CASE(capture_without_record_dir_in_file_keeps_inputs)
+{
+    TempDir tmp, logdir;
+    const auto cfg = fileConfig(tmp);  // no record_dir
+    const uint16_t a = freeUdpPort(), b = freeUdpPort(), c = freeUdpPort();
+    const std::string text = fileOf({psJson("a", a, R"(,"capture":true)"), psJson("b", b)});
+    handWrite(cfg.inputs_file, text);
+    std::string log;
+    {
+        StderrCapture cap(logdir.path + "/stderr.txt");
+        IoThread t;
+        Mgr m(t, cfg);
+        BOOST_TEST(m.ids() == (std::vector<std::string>{"a", "b"}));
+        BOOST_TEST(m.find("a")->def.capture);
+        BOOST_REQUIRE(eventually([&] { return m.state("a").connected; }));
+        BOOST_TEST(!exists(cfg.inputs_file + ".rejected"));
+        BOOST_TEST(readAll(cfg.inputs_file) == text);
+
+        // A hand edit that adds another capture entry is applied too.
+        handWrite(cfg.inputs_file, fileOf({psJson("a", a, R"(,"capture":true)"), psJson("b", b),
+                                           psJson("c", c, R"(,"capture":true)")}));
+        BOOST_REQUIRE(eventuallyWithin(3s, [&] { return m.find("c").has_value(); }));
+        BOOST_TEST(!exists(cfg.inputs_file + ".rejected"));
+        BOOST_TEST(m.ids().size() == 3u);
+
+        // An API write of an unrelated entry still succeeds; one that asks
+        // for capture is refused.
+        m.on([&](InputManager& im) { return im.setEnabled("b", false); });
+        BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.create(psJson("d", freeUdpPort(), R"(,"capture":true)")); }),
+                          InputDefError);
+        log = cap.text();
+    }
+    std::size_t warns = 0;
+    const std::string warn = "capture needs RECORD_DIR: not capturing";
+    for (auto at = log.find(warn); at != std::string::npos; at = log.find(warn, at + 1))
+        ++warns;
+    BOOST_TEST(warns == 2u, log);  // the load, the hand edit
+    for (const auto& name : dirEntries(tmp.path))
+        BOOST_TEST(!contains(name, "capture-"), name);  // nothing captured
+}
+
 BOOST_AUTO_TEST_CASE(hand_edit_applied_within_3s)
 {
     IoThread t;

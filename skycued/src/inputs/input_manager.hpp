@@ -160,8 +160,13 @@ private:
     // `def` as parseInputDef reads it back; throws InputDefError for one it
     // would refuse.
     static InputDef normalized(const InputDef& def);
-    // validateInputSet, and capture needs record_dir.
+    // validateInputSet over the built-ins and `user`.
     void checkSet(const std::vector<InputDef>& user) const;
+    // API writes only: capture needs record_dir (InputDefError).
+    void checkCapture(const InputDef& def) const;
+    // Loads and hand edits: one WARN when an entry asks for capture without
+    // record_dir. The entry is kept; its input writes no capture file.
+    void warnCapture(const std::vector<InputDef>& user) const;
     std::vector<InputDef> userDefs() const;
     // Writes the file for `user` and the current built-in states (no-op when
     // in-memory). Throws std::runtime_error.

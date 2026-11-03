@@ -179,6 +179,27 @@ for (( i=0; i<100; i++ )); do
 done
 [ "$up" = 1 ] || fail "tiles skycued did not come up"
 
+# Overlays without tiles: one more skycued (the readsb fixture) whose www
+# has no tiles/ and an overlays/ with the border line, while meta.json lists
+# a cities.json that is not there (its fetch fails with a 404).
+ov_www="$tmp/www-overlays"
+mkdir -p "$ov_www/overlays" || fail "overlays-only www dir"
+for f in "$tiles_www"/*; do
+  case $(basename "$f") in tiles|overlays) continue ;; esac
+  cp -r "$f" "$ov_www/" || fail "overlays-only www copy"
+done
+cp "$tiles_www/overlays/meta.json" "$tiles_www/overlays/admin0.json" "$ov_www/overlays/" || fail "overlays-only fixture"
+ov_port=$(free_port)
+sed -e "s/^WEB_PORT=.*/WEB_PORT=$ov_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/overlays.conf"
+bash -c "echo \$\$ > '$tmp/fisb-overlays.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/overlays.conf' --www-dir '$ov_www' >>'$tmp/overlays.log' 2>&1" </dev/null >/dev/null 2>&1 &
+ov_base="http://127.0.0.1:$ov_port"
+up=0
+for (( i=0; i<100; i++ )); do
+  python3 -I -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)' "$ov_base/api/stats" 2>/dev/null && { up=1; break; }
+  sleep 0.1
+done
+[ "$up" = 1 ] || fail "overlays-only skycued did not come up"
+
 out_dir=$(dirname "$www")/ui-test-results
 rm -rf "$out_dir"
 export SKYCUE_BASE_URL="$base"
@@ -188,6 +209,7 @@ export SKYCUE_PID_FILE="$pidfile"
 export SKYCUE_FISB_URL="$fisb_base"
 export SKYCUE_RADAR_URL="$radar_base"
 export SKYCUE_TILES_URL="$tiles_base"
+export SKYCUE_OVERLAYS_URL="$ov_base"
 export SKYCUE_UI_OUT="$out_dir"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 (cd "$here" && npx --no-install playwright test)

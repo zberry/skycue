@@ -84,11 +84,12 @@ test('page_loads_without_console_errors', async ({ page }) => {
   page.on('pageerror', (e) => errors.push(String(e)));
   await openPage(page);
   await expect(page.locator('#map.leaflet-container')).toBeVisible();
-  // No overlays here: the style select is offered, the overlay toggles not.
-  await expect(page.locator('#map-style')).toBeVisible();
+  // No overlays here: no overlay toggles; the style select only with tiles.
   await expect(page.locator('#ov-borders')).toBeHidden();
   await expect(page.locator('#ov-cities')).toBeHidden();
   const tiles = (await api('/api/tiles-available')).body;
+  if (tiles.tiles) await expect(page.locator('#map-style')).toBeVisible();
+  else await expect(page.locator('.view-control')).toBeHidden();
   if (!tiles.tiles) {
     await expect.poll(() => page.locator('path.graticule').count()).toBeGreaterThan(0);
     await expect(page.locator('.leaflet-control-scale')).toBeVisible();
@@ -923,6 +924,57 @@ test.describe('map tiles fallback', () => {
     await expect(page.locator('.leaflet-borders-pane path')).toHaveCount(0);
     await page.locator('#ov-cities').uncheck();
     await expect(page.locator('.city-label')).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+  });
+});
+
+// Overlays without tiles, against the skycued run.sh starts with a www that
+// has no tiles/ and an overlays/ holding the border line, while its
+// meta.json lists a cities.json that is missing (404).
+const OVERLAYS_BASE = process.env.SKYCUE_OVERLAYS_URL;
+
+test.describe('overlays without tiles', () => {
+  test.use({ baseURL: OVERLAYS_BASE });
+
+  test('no_tiles_hides_style_and_borders_draw_dark', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (e) => pageErrors.push(String(e)));
+    expect((await apiAt(OVERLAYS_BASE, '/api/tiles-available')).body.tiles).toBe(false);
+    await openPage(page);
+    await waitMarkers(page, 1);
+    await expect(page.locator('.view-control')).toBeVisible();
+    await expect(page.locator('#map-style')).toBeHidden();
+    await expect(page.locator('#ov-borders')).toBeVisible();
+    await expect(page.locator('#ov-cities')).toBeVisible();
+    await page.locator('#ov-borders').check();
+    const path = page.locator('.leaflet-borders-pane path');
+    await expect.poll(() => path.count()).toBeGreaterThan(0);
+    // On the plain dark background the borders take the dark style's colour.
+    const expected = await page.evaluate(() => window.skycuePure.borderStyle('admin0', 'dark', 6).color);
+    expect(await path.first().getAttribute('stroke')).toBe(expected);
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('failed_cities_fetch_draws_no_labels', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (e) => pageErrors.push(String(e)));
+    await openPage(page);
+    await waitMarkers(page, 1);
+    await expect(page.locator('#ov-cities')).toBeVisible();
+    let asked = 0;
+    page.on('request', (r) => { if (r.url().endsWith('/overlays/cities.json')) asked++; });
+    const failed = page.waitForResponse((r) => r.url().endsWith('/overlays/cities.json'));
+    await page.locator('#ov-cities').check();
+    expect((await failed).status()).toBe(404);
+    // Moving the map does not ask again (only ticking the box again does).
+    await page.evaluate(() => window.skycueApp.setView(38.9, -77.0, 8));
+    await page.evaluate(() => window.skycueApp.setView(39.2, -76.5, 7));
+    await page.waitForTimeout(500);
+    expect(asked).toBe(1);
+    expect(await page.locator('#ov-cities').isChecked()).toBe(true);
+    expect(await page.locator('.city-label').count()).toBe(0);
+    expect(await page.evaluate(() => window.skycueApp.cityLabels())).toEqual([]);
+    expect(await page.evaluate(() => window.skycueApp.mapView().citiesLoaded)).toBe(false);
     expect(pageErrors).toEqual([]);
   });
 });

@@ -4,6 +4,12 @@
 #include "inputs/tcp_listener.hpp"
 #include "inputs/udp_listener.hpp"
 
+#ifdef __linux__
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#endif
+
 #include <stdexcept>
 #include <utility>
 
@@ -36,6 +42,19 @@ std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer)
     if (ec)
         throw std::invalid_argument("peer is not an IP address: " + peer);
     return addr;
+}
+
+void enableKeepalive(boost::asio::ip::tcp::socket& sock)
+{
+    boost::system::error_code ignored;
+    sock.set_option(boost::asio::socket_base::keep_alive(true), ignored);
+#ifdef __linux__
+    const int fd = sock.native_handle();
+    const int idle = 30, interval = 10, count = 3;
+    ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
+    ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof interval);
+    ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof count);
+#endif
 }
 
 std::unique_ptr<Transport> makeTransport(boost::asio::io_context& io, const InputDef& def)

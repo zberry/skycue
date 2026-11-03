@@ -7,8 +7,10 @@
 // set), is accepted and closed at once, counted in rejectedPeer() and noted
 // in lastError. Connected means peers() > 0: onConnection(true) with the
 // first peer, onConnection(false) when the last one leaves. A bind failure is
-// reported and retried as in UdpListener; the acceptor does not set
-// reuse_address.
+// reported and retried as in UdpListener. The acceptor sets reuse_address,
+// which on Linux only allows binding past TIME_WAIT: a port another process
+// listens on still shows as a bind failure. Accepted sockets use TCP
+// keepalive (enableKeepalive), so a vanished peer frees its slot.
 
 #include "inputs/transport.hpp"
 

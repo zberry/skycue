@@ -8,7 +8,10 @@
 #include "inputs/transport.hpp"
 #include "inputs/udp_listener.hpp"
 
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
+#include <sys/socket.h>
 
 using namespace enginetest;
 using asio::ip::udp;
@@ -127,6 +130,45 @@ tcp::socket connectTo(asio::io_context& io, uint16_t port)
     tcp::socket s(io);
     s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
     return s;
+}
+
+// The fd in this process whose local end is `local` and remote end `remote`:
+// the transport's side of a connection the test opened.
+int findSocket(const tcp::endpoint& local, const tcp::endpoint& remote)
+{
+    for (int fd = 0; fd < 4096; ++fd) {
+        sockaddr_in a{}, b{};
+        socklen_t la = sizeof a, lb = sizeof b;
+        if (::getsockname(fd, reinterpret_cast<sockaddr*>(&a), &la) != 0 || a.sin_family != AF_INET)
+            continue;
+        if (::getpeername(fd, reinterpret_cast<sockaddr*>(&b), &lb) != 0)
+            continue;
+        if (ntohs(a.sin_port) == local.port() && ntohs(b.sin_port) == remote.port() &&
+            ntohl(a.sin_addr.s_addr) == local.address().to_v4().to_uint() &&
+            ntohl(b.sin_addr.s_addr) == remote.address().to_v4().to_uint())
+            return fd;
+    }
+    return -1;
+}
+
+int sockOpt(int fd, int level, int name)
+{
+    int v = -1;
+    socklen_t len = sizeof v;
+    if (::getsockopt(fd, level, name, &v, &len) != 0)
+        return -1;
+    return v;
+}
+
+void checkKeepalive(int fd)
+{
+    BOOST_REQUIRE_GE(fd, 0);
+    BOOST_CHECK_EQUAL(sockOpt(fd, SOL_SOCKET, SO_KEEPALIVE), 1);
+#ifdef __linux__
+    BOOST_CHECK_EQUAL(sockOpt(fd, IPPROTO_TCP, TCP_KEEPIDLE), 30);
+    BOOST_CHECK_EQUAL(sockOpt(fd, IPPROTO_TCP, TCP_KEEPINTVL), 10);
+    BOOST_CHECK_EQUAL(sockOpt(fd, IPPROTO_TCP, TCP_KEEPCNT), 3);
+#endif
 }
 
 }  // namespace
@@ -591,4 +633,119 @@ BOOST_AUTO_TEST_CASE(make_transport_by_type)
         d.transport = skycued::InputTransport::tcp_connect;
         BOOST_CHECK_THROW(skycued::makeTransport(t.io, d), std::invalid_argument);
     });
+}
+
+BOOST_AUTO_TEST_CASE(tcp_sockets_use_keepalive)
+{
+    IoThread t;
+    // Accepted by a TcpListener.
+    {
+        const uint16_t port = freeTcpPort();
+        std::unique_ptr<TcpListener> l;
+        t.call([&] {
+            l = std::make_unique<TcpListener>(t.io, "127.0.0.1", port, "", kRebind);
+            l->start();
+        });
+        asio::io_context cio;
+        tcp::socket s(cio);
+        BOOST_REQUIRE(eventually([&] {
+            boost::system::error_code ec;
+            s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port), ec);
+            return !ec;
+        }));
+        BOOST_REQUIRE(eventually([&] { return t.call([&] { return l->peers() == 1; }); }));
+        t.call([&] { checkKeepalive(findSocket(s.remote_endpoint(), s.local_endpoint())); });
+        t.call([&] { l.reset(); });
+    }
+    // Connected by a TcpConnectClient.
+    {
+        asio::io_context sio;
+        tcp::acceptor server(sio, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+        std::unique_ptr<TcpConnectClient> c;
+        t.call([&] {
+            c = std::make_unique<TcpConnectClient>(t.io, "127.0.0.1", server.local_endpoint().port());
+            c->start();
+        });
+        tcp::socket s(sio);
+        server.accept(s);
+        BOOST_REQUIRE(eventually([&] { return t.call([&] { return c->connected(); }); }));
+        t.call([&] { checkKeepalive(findSocket(s.remote_endpoint(), s.local_endpoint())); });
+        t.call([&] { c.reset(); });
+    }
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_rebinds_after_live_peers)
+{
+    IoThread t;
+    const uint16_t port = freeTcpPort();
+    std::unique_ptr<TcpListener> first, second;
+    t.call([&] {
+        first = std::make_unique<TcpListener>(t.io, "127.0.0.1", port, "", kRebind);
+        first->start();
+    });
+    asio::io_context cio;
+    tcp::socket s(cio);
+    BOOST_REQUIRE(eventually([&] {
+        boost::system::error_code ec;
+        s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port), ec);
+        return !ec;
+    }));
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return first->peers() == 1; }); }));
+    // The daemon closes first, so its end of the connection sits in TIME_WAIT.
+    t.call([&] { first->stop(); });
+    BOOST_CHECK(closedByPeer(s));
+    s.close();
+    t.call([&] {
+        second = std::make_unique<TcpListener>(t.io, "127.0.0.1", port, "", kRebind);
+        second->start();
+    });
+    tcp::socket s2(cio);
+    BOOST_REQUIRE(eventually([&] {
+        boost::system::error_code ec;
+        s2.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port), ec);
+        return !ec;
+    }));
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return second->peers() == 1; }); }));
+    t.call([&] {
+        BOOST_CHECK_EQUAL(second->lastError(), "");
+        first.reset();
+        second.reset();
+    });
+}
+
+BOOST_AUTO_TEST_CASE(tcp_listen_bind_failure_reported_and_retried)
+{
+    IoThread t;
+    Rec rec;
+    asio::io_context tio;
+    auto blocker = std::make_unique<tcp::acceptor>(tio, tcp::endpoint(asio::ip::make_address("0.0.0.0"), 0));
+    const uint16_t port = blocker->local_endpoint().port();
+    std::unique_ptr<TcpListener> l;
+    t.call([&] {
+        l = std::make_unique<TcpListener>(t.io, "0.0.0.0", port, "", kRebind);
+        rec.attach(*l);
+        l->start();
+    });
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return !l->lastError().empty(); }); }));
+    t.call([&] {
+        BOOST_CHECK(!l->connected());
+        BOOST_CHECK_EQUAL(l->lastError(), "bind 0.0.0.0:" + std::to_string(port) + ": Address already in use");
+    });
+
+    blocker.reset();
+    const auto freed = steady::now();
+    asio::io_context cio;
+    tcp::socket s(cio);
+    BOOST_REQUIRE(eventually([&] {
+        boost::system::error_code ec;
+        s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port), ec);
+        return !ec;
+    }));
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return l->connected(); }); }));
+    BOOST_CHECK(steady::now() - freed < 1s);
+    t.call([&] {
+        BOOST_CHECK_EQUAL(l->connects(), 1u);
+        l.reset();
+    });
+    rec.with([&] { BOOST_CHECK(rec.conn == std::vector<bool>{true}); });
 }

@@ -50,6 +50,10 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
         const auto addr = asio::ip::make_address(bind, ec);
         if (!ec)
             acceptor.open(addr.is_v6() ? tcp::v6() : tcp::v4(), ec);
+        // Only lets the port be reused past TIME_WAIT (after a restart with
+        // live peers); on Linux a second listener on the port still fails.
+        if (!ec)
+            acceptor.set_option(tcp::acceptor::reuse_address(true), ec);
         if (!ec)
             acceptor.bind(tcp::endpoint(addr, port), ec);
         if (!ec)
@@ -115,6 +119,7 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
             s->sock.close(ec);
             return;
         }
+        enableKeepalive(s->sock);
         const uint64_t id = ++next_stream;
         sessions.emplace(id, s);
         peers = sessions.size();

@@ -19,6 +19,7 @@ using asio::ip::tcp;
 using boost::system::error_code;
 
 namespace {
+// inputs/tcp_connect_client.cpp copies this backoff; keep the two in step.
 constexpr std::chrono::milliseconds kMinBackoff{500};
 constexpr std::chrono::milliseconds kMaxBackoff{10000};
 }  // namespace

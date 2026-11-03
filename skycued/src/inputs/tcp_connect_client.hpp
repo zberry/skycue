@@ -6,7 +6,8 @@
 // successful connect. Connected means it has a session. `stream` is the
 // connection number (1, 2, ...); onStreamClosed(stream) fires on every
 // disconnect, before onConnection(false). lastError holds the last resolve,
-// connect or read failure.
+// connect or read failure. The socket uses TCP keepalive (enableKeepalive),
+// so a peer that vanished is noticed and the client reconnects.
 
 #include "inputs/transport.hpp"
 

@@ -16,7 +16,7 @@ using asio::ip::tcp;
 using boost::system::error_code;
 
 namespace {
-// The LineClient backoff.
+// The LineClient backoff (line_client.cpp); keep the two in step.
 constexpr std::chrono::milliseconds kMinBackoff{500};
 constexpr std::chrono::milliseconds kMaxBackoff{10000};
 }  // namespace
@@ -70,6 +70,7 @@ struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Imp
     void connectedNow(const asio::ip::address& addr)
     {
         backoff = kMinBackoff;
+        enableKeepalive(sock);
         session = true;
         remote = addr;
         peers = 1;

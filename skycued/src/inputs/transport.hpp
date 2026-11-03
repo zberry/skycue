@@ -18,6 +18,7 @@
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
+#include <boost/asio/ip/tcp.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -75,6 +76,12 @@ protected:
 // For the listeners: `peer` as an address, nullopt for "" (accept any).
 // Throws std::invalid_argument when it is not an IP address.
 std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer);
+
+// For the TCP transports, which only read: turns on TCP keepalive (on Linux
+// idle 30 s, probes every 10 s, 3 probes) so a peer that vanished without a
+// FIN or RST is dropped in about a minute, freeing its listener slot or
+// starting a reconnect. Best effort: a failing option is ignored.
+void enableKeepalive(boost::asio::ip::tcp::socket& sock);
 
 // The transport a pingStation input definition names. Throws
 // std::invalid_argument for any other type.

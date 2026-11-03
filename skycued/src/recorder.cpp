@@ -745,6 +745,7 @@ bool Recorder::openFiles(bool reuse)
             if (jsonl_.is_open()) {
                 jsonl_.close();
                 if (!reuse)
+                    // NOLINTNEXTLINE(cert-err33-c): best effort: the open error is what gets reported
                     std::remove((stem_ + ".jsonl").c_str());  // leave no half pair behind
             }
             errno = err;

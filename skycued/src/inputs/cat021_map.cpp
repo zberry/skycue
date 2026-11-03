@@ -173,6 +173,7 @@ std::optional<TrackObservation> mapCat021Record(const Cat021Record& r, const Cat
     }
     if (r.mode3a) {
         char buf[8];
+        // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
         std::snprintf(buf, sizeof buf, "%04o", static_cast<unsigned>(*r.mode3a & 07777));
         obs.squawk = std::string(buf);
     }

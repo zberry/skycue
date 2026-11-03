@@ -99,6 +99,7 @@ std::string mosaicHead(const fisb::MosaicHead& m, TimePoint now)
 std::string siteId(uint64_t key)
 {
     char buf[24];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(buf, sizeof buf, "%016llx", static_cast<unsigned long long>(key));
     return buf;
 }
@@ -242,6 +243,7 @@ std::string ramp(Rgb a, Rgb b, double t)
 {
     auto mix = [t](int x, int y) { return static_cast<int>(std::lround(x + (y - x) * t)); };
     char buf[16];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(buf, sizeof buf, "#%02x%02x%02x", mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b));
     return buf;
 }
@@ -354,12 +356,16 @@ std::pair<std::string, std::string> rasterPaletteLegend(const Mosaic& m)
         for (int l = 0; l < 16; ++l) {
             char label[48];
             if (l == 0)
+                // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
                 std::snprintf(label, sizeof label, "EDR < 0.07");
             else if (l == 14)
+                // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
                 std::snprintf(label, sizeof label, "EDR >= 0.98");
             else if (l == 15)
+                // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
                 std::snprintf(label, sizeof label, "no data");
             else
+                // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
                 std::snprintf(label, sizeof label, "EDR %.2f-%.2f", l * 0.07, l * 0.07 + 0.06);
             levels.push_back(levelJson(l, label));
             palette.push_back(colorJson(

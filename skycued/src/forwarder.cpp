@@ -666,6 +666,7 @@ Forwarder::Forwarder(boost::asio::io_context& io, ForwarderConfig config)
 {
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
 Forwarder::~Forwarder() { impl_->closeAll(); }
 
 void Forwarder::start() { impl_->start(); }

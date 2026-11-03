@@ -85,6 +85,7 @@ bool RawFrameWriter::write(const RawFrame& frame)
         return true;  // before 1970: no line format for it
     char stamp[48];
     if (frame.kind == RawFrame::Kind::adsb_1090) {
+        // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
         std::snprintf(stamp, sizeof stamp, "%lld.%09lld,", static_cast<long long>(ns / 1000000000),
                       static_cast<long long>(ns % 1000000000));
         std::string line = stamp;
@@ -93,6 +94,7 @@ bool RawFrameWriter::write(const RawFrame& frame)
         line += '\n';
         return csv_.write(line);
     }
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(stamp, sizeof stamp, "%lld -", static_cast<long long>(ns / 1000000));
     return txt_.write(stamp + frame.hex + ";\n");
 }

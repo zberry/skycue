@@ -397,6 +397,7 @@ RuntimeConfig::RuntimeConfig(boost::asio::io_context& io, std::string conf_path,
 {
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
 RuntimeConfig::~RuntimeConfig()
 {
     alive_.reset();

@@ -69,6 +69,7 @@ std::optional<std::string> squawkText(int64_t v)
         if (rest % 10 > 7)
             return std::nullopt;
     char buf[8];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(buf, sizeof buf, "%04d", static_cast<int>(v));
     return std::string(buf);
 }

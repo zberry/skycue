@@ -468,6 +468,7 @@ int main(int argc, char** argv)
     if (!by_kind[static_cast<int>(Kind::uat)].empty() && !vm.count("uat-listen"))
         return usage("UAT files need --uat-listen PORT");
 
+    // NOLINTNEXTLINE(cert-err33-c): constant, valid arguments: cannot fail
     std::signal(SIGPIPE, SIG_IGN);
     // Every output is set up (the UAT port bound) before anything plays.
     std::vector<std::pair<Kind, std::unique_ptr<Output>>> outs;

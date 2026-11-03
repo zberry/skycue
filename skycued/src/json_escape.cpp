@@ -75,6 +75,7 @@ void appendJsonString(std::string& out, const std::string& s)
         default:
             if (c < 0x20) {
                 char buf[8];
+                // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
                 std::snprintf(buf, sizeof buf, "\\u%04x", static_cast<unsigned>(c));
                 out += buf;
             } else {

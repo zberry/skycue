@@ -40,6 +40,7 @@ std::string formatLogLine(LogLevel level, const std::string& message,
     std::tm tm{};
     gmtime_r(&t, &tm);
     char stamp[80];  // room for any int fields: gcc 8 -Wformat-truncation
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(stamp, sizeof stamp, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ ", tm.tm_year + 1900,
                   tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<int>(frac));
     std::string line = stamp;
@@ -53,6 +54,7 @@ std::string formatLogLine(LogLevel level, const std::string& message,
 void logWrite(LogLevel level, const std::string& message)
 {
     std::string line = formatLogLine(level, message, std::chrono::system_clock::now());
+    // NOLINTNEXTLINE(cert-err33-c): nowhere to report a failed log write
     std::fwrite(line.data(), 1, line.size(), stderr);
 }
 

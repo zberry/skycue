@@ -281,6 +281,7 @@ StatusPoller::StatusPoller(asio::io_context& io, HttpUrl url, std::chrono::secon
 {
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
 StatusPoller::~StatusPoller() { impl_->stop(); }
 
 void StatusPoller::onResult(ResultHandler handler) { impl_->handler = std::move(handler); }

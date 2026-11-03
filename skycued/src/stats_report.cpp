@@ -543,6 +543,7 @@ namespace {
 #if defined(__GNUC__)
 __attribute__((format(printf, 1, 2)))
 #endif
+// NOLINTNEXTLINE(cert-dcl50-cpp): a printf-style wrapper: the format attribute has the compiler check every call
 std::string fmt(const char* format, ...)
 {
     char buf[512];
@@ -556,6 +557,7 @@ std::string fmt(const char* format, ...)
         return std::string(buf, static_cast<std::size_t>(n));
     std::string out(static_cast<std::size_t>(n) + 1, '\0');
     va_start(ap, format);
+    // NOLINTNEXTLINE(cert-err33-c): the first vsnprintf sized this buffer
     std::vsnprintf(&out[0], out.size(), format, ap);
     va_end(ap);
     out.resize(static_cast<std::size_t>(n));

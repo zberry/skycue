@@ -454,6 +454,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // NOLINTNEXTLINE(cert-err33-c): constant, valid arguments: cannot fail
     std::signal(SIGPIPE, SIG_IGN);
     asio::io_context io;
     std::optional<Output> out;

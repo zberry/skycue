@@ -40,6 +40,7 @@ public:
     virtual void onConnection(std::function<void(bool)> handler) = 0;
     // UAT uplinks the source carries (a replay's "uat_uplink" records), with
     // their receive time and payload hex. Most sources have none.
+    // NOLINTNEXTLINE(performance-unnecessary-value-param): the default no-op of a virtual whose overrides take the handler by value and move it
     virtual void onUplink(std::function<void(std::chrono::system_clock::time_point, const std::string& hex)>) {}
     virtual void start() = 0;
     virtual void stop() = 0;

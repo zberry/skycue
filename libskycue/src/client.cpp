@@ -794,6 +794,7 @@ struct Client::Impl {
 
 Client::Client(Config config) : impl_(std::make_unique<Impl>(std::move(config))) {}
 
+// NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
 Client::~Client() { stop(); }
 
 void Client::onTrackUpdate(std::function<void(const Track&)> cb) { impl_->on_update = std::move(cb); }

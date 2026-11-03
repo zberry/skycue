@@ -210,6 +210,7 @@ std::string avrLine(int64_t epoch_ns, const std::string& hex)
     const uint64_t ns = static_cast<uint64_t>(epoch_ns);
     const uint64_t ticks = (ns / 250u * 3u + ns % 250u * 3u / 250u) & beast::kTimestampMask;
     char ts[16];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(ts, sizeof ts, "%012llX", static_cast<unsigned long long>(ticks));
     std::string out;
     out.reserve(1 + 12 + hex.size() + 1);

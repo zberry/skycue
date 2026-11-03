@@ -85,6 +85,7 @@ constexpr double kMaxPadMs = 60000;        // one minute
 std::string fmt3(double v)
 {
     char buf[64];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(buf, sizeof buf, "%.3f", v);
     return buf;
 }
@@ -92,6 +93,7 @@ std::string fmt3(double v)
 std::string fmt0(double v)
 {
     char buf[64];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(buf, sizeof buf, "%.0f", v);
     return buf;
 }

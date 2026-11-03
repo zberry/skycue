@@ -181,6 +181,7 @@ std::string textKey(const TextRecord& r)
     case TextRecord::other: break;
     }
     char hash[16];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(hash, sizeof hash, "%08x", fnv1a(r.text));
     return kind + ":" + r.station + ":" + std::to_string(epochSeconds(r.issued)) + ":" + hash;
 }

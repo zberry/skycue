@@ -58,6 +58,7 @@ std::string iso8601(std::chrono::system_clock::time_point tp)
     if (!gmtime_r(&t, &tm))
         return "invalid-time";
     char buf[64];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(buf, sizeof buf, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900, tm.tm_mon + 1,
                   tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<int>(frac));
     return buf;
@@ -87,6 +88,7 @@ std::string num(double v, const char* fmt = "%g")
     if (!std::isfinite(v))
         return "null";
     char buf[64];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(buf, sizeof buf, fmt, v);
     return buf;
 }
@@ -140,6 +142,7 @@ const char* frameTypeName(FrameType t)
 std::string hex(uint32_t address)
 {
     char buf[16];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(buf, sizeof buf, "%06X", static_cast<unsigned>(address & 0xFFFFFFu));
     return buf;
 }
@@ -254,6 +257,7 @@ std::string cat021Line(const skycued::asterix::Cat021Record& r)
         s += " fl=" + num(*r.fl145 * kFt145 / 100.0, "%.2f");
     if (r.mode3a) {
         char buf[8];
+        // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
         std::snprintf(buf, sizeof buf, "%04o", static_cast<unsigned>(*r.mode3a & 07777));
         s += " squawk=" + std::string(buf);
     }
@@ -313,8 +317,10 @@ int dumpCapture(const std::string& path, skycued::asterix::Edition edition)
             if (split.truncated)
                 out += "  BAD truncated block\n";
         }
+        // NOLINTNEXTLINE(cert-err33-c): stdout errors: a closed pipe ends the tool with SIGPIPE, nothing better to do
         std::fwrite(out.data(), 1, out.size(), stdout);
     }
+    // NOLINTNEXTLINE(cert-err33-c): stdout errors: a closed pipe ends the tool with SIGPIPE, nothing better to do
     std::fflush(stdout);
     return 0;
 }
@@ -346,6 +352,7 @@ int main(int argc, char** argv)
         "edition", po::value(&edition_text), "with --capture: the CAT021 edition, 2.2-2.7 (default 2.5)");
     // Numbers are printed with snprintf, whose decimal point follows
     // LC_NUMERIC; pin it so the JSON stays valid whatever setlocale callers do.
+    // NOLINTNEXTLINE(cert-err33-c): the "C" locale always exists
     std::setlocale(LC_NUMERIC, "C");
     po::variables_map vm;
     try {
@@ -413,7 +420,9 @@ int main(int argc, char** argv)
     unsigned long frames = 0; // frame lines printed: what --count and exit 3 look at
     bool done = false;
     const auto print = [&](const std::string& line) {
+        // NOLINTNEXTLINE(cert-err33-c): stdout errors: a closed pipe ends the tool with SIGPIPE, nothing better to do
         std::fwrite(line.data(), 1, line.size(), stdout);
+        // NOLINTNEXTLINE(cert-err33-c): stdout errors: a closed pipe ends the tool with SIGPIPE, nothing better to do
         std::fflush(stdout);
     };
     const auto frameLine = [&](const std::string& line) {
@@ -484,7 +493,9 @@ int main(int argc, char** argv)
         eventLine(Line(json, "conn", "CONN").add("connected", up ? "true" : "false", up ? "up" : "down").uncounted().str());
     });
 
+    // NOLINTNEXTLINE(cert-err33-c): constant, valid arguments: cannot fail
     std::signal(SIGINT, onSignal);
+    // NOLINTNEXTLINE(cert-err33-c): constant, valid arguments: cannot fail
     std::signal(SIGTERM, onSignal);
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(

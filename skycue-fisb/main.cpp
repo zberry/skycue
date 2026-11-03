@@ -71,6 +71,7 @@ namespace {
 using Reader = GzLineReader;
 
 std::string format(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+// NOLINTNEXTLINE(cert-dcl50-cpp): a printf-style wrapper: the format attribute has the compiler check every call
 std::string format(const char* fmt, ...)
 {
     char buf[1024];

@@ -25,6 +25,7 @@ void logWrite(LogLevel level, const std::string& message);
     do {                                                           \
         if (::skycued::logEnabled(level)) {                        \
             std::ostringstream skycued_log_ss_;                    \
+            /* NOLINTNEXTLINE(bugprone-macro-parentheses): expr is a << chain, (expr) would stream its first << */ \
             skycued_log_ss_ << expr;                               \
             ::skycued::logWrite(level, skycued_log_ss_.str());     \
         }                                                          \

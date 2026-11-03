@@ -89,6 +89,7 @@ std::string pingJsonFromObservation(const TrackObservation& o, system_clock::tim
 {
     JsonWriter w, detail;
     char hex[8];
+    // NOLINTNEXTLINE(cert-err33-c): bounded write into a local buffer sized for the format
     std::snprintf(hex, sizeof hex, "%06X", static_cast<unsigned>(o.id.address & 0xFFFFFFu));
     w.add("icaoAddress", std::string(hex));
 

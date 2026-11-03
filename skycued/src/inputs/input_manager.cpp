@@ -101,6 +101,7 @@ InputManager::InputManager(boost::asio::io_context& io, InputManagerConfig confi
         LOG_WARN("RECORD_RAW=yes without RECORD_DIR: pingStation raw frames are not written");
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
 InputManager::~InputManager() { stop(); }
 
 void InputManager::addBuiltin(std::unique_ptr<Input> input)

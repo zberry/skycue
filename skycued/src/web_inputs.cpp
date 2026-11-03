@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -154,7 +155,7 @@ ApiResponse putRoute(InputManager& m, const std::string& id, const std::string& 
     if (o.has("id")) {
         const std::string given = o.getString("id").value_or("");
         if (given != id)
-            throw InputDefError("id '" + given + "' does not match the path's '" + id + "'");
+            throw InputDefError("id '" + clipForMessage(given) + "' does not match the path's '" + id + "'");
         return reply(200, entryJson(m.replace(id, parseInputDef(o))));
     }
     return reply(200, entryJson(m.replace(id, parseInputDef(bodyObject(withId(body, id))))));
@@ -167,6 +168,19 @@ ApiResponse toggleRoute(InputManager& m, const std::string& id, const std::strin
     return reply(200, entryJson(m.setEnabled(id, enabled)));
 }
 
+ApiResponse noPath(const std::string& path) { return fail(404, "no such API path: " + clipForMessage(path)); }
+
+// rejectUnsafe, then 409 while replaying: before the body is read or an id
+// looked up.
+std::optional<ApiResponse> rejectWrite(const ApiRequest& req, const InputManager& m)
+{
+    if (auto rejected = rejectUnsafe(req))
+        return rejected;
+    if (m.config().replaying)
+        return fail(409, "inputs cannot be changed while replaying a recording");
+    return std::nullopt;
+}
+
 ApiResponse route(const ApiRequest& req, InputManager& m)
 {
     const std::string& method = req.method;
@@ -175,7 +189,7 @@ ApiResponse route(const ApiRequest& req, InputManager& m)
             return reply(200, inputsJson(m));
         if (method != "POST")
             return notAllowed("GET, POST");
-        if (auto rejected = rejectUnsafe(req))
+        if (auto rejected = rejectWrite(req, m))
             return *rejected;
         return reply(201, entryJson(m.create(parseInputDef(bodyObject(req.body)))));
     }
@@ -183,11 +197,13 @@ ApiResponse route(const ApiRequest& req, InputManager& m)
     const std::size_t slash = rest.find('/');
     const std::string id = rest.substr(0, slash), sub = slash == std::string::npos ? "" : rest.substr(slash + 1);
     if (id.empty() || sub.find('/') != std::string::npos)
-        return fail(404, "no such API path: " + req.path);
+        return noPath(req.path);
+    if (!isValidInputId(id))  // before any lookup; the segment is not echoed
+        return fail(400, "invalid input id (1 to 32 characters of a-z, 0-9 and -)");
     if (slash == std::string::npos) {
         if (method != "PUT" && method != "DELETE")
             return notAllowed("PUT, DELETE");
-        if (auto rejected = rejectUnsafe(req))
+        if (auto rejected = rejectWrite(req, m))
             return *rejected;
         if (method == "PUT")
             return putRoute(m, id, req.body);
@@ -199,7 +215,7 @@ ApiResponse route(const ApiRequest& req, InputManager& m)
     if (sub == "enable" || sub == "disable") {
         if (method != "POST")
             return notAllowed("POST");
-        if (auto rejected = rejectUnsafe(req))
+        if (auto rejected = rejectWrite(req, m))
             return *rejected;
         return toggleRoute(m, id, req.body, sub == "enable");
     }
@@ -211,7 +227,7 @@ ApiResponse route(const ApiRequest& req, InputManager& m)
             return fail(404, "no input '" + id + "'");
         return reply(200, statusJson(*found));
     }
-    return fail(404, "no such API path: " + req.path);
+    return noPath(req.path);
 }
 
 }  // namespace

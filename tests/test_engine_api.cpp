@@ -543,7 +543,8 @@ std::optional<JsonObject> listed(const std::string& body, const std::string& id)
 
 // An Engine over a FakeSource built-in "readsb", its InputManager backed by
 // <tmp>/skycue.inputs.json, and a RuntimeConfig, all on the io thread;
-// call() answers one request through handleApi there.
+// call() answers one request through handleApi there. With `replaying` the
+// built-in is "replay" and the manager is in replay mode.
 struct ApiFx {
     TempDir tmp;
     std::string conf, inputs_file;
@@ -551,15 +552,27 @@ struct ApiFx {
     std::unique_ptr<EngineFx> fx;
     std::unique_ptr<skycued::RuntimeConfig> rc;
 
-    ApiFx()
+    explicit ApiFx(bool replaying = false)
     {
         conf = tmp.path + "/skycue.conf";
         inputs_file = tmp.path + "/skycue.inputs.json";
         std::ofstream(conf) << "RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\nTRACK_TIMEOUT_S=5\n";
-        std::function<std::unique_ptr<InputManager>(asio::io_context&)> make = [this](asio::io_context& io) {
+        std::function<std::unique_ptr<InputManager>(asio::io_context&)> make = [this, replaying](
+                                                                                   asio::io_context& io) {
             auto s = std::make_unique<FakeSource>();
             src = s.get();
-            return sourceInputs(io, std::move(s), "readsb", inputs_file);
+            if (!replaying)
+                return sourceInputs(io, std::move(s), "readsb", inputs_file);
+            skycued::InputManagerConfig mc;
+            mc.inputs_file = inputs_file;
+            mc.replaying = true;
+            auto m = std::make_unique<InputManager>(io, mc);
+            InputDef def;
+            def.id = "replay";
+            def.type = InputType::replay;
+            m->addBuiltin(std::make_unique<skycued::SourceInput>(def, std::move(s)));
+            m->load();
+            return m;
         };
         fx = std::make_unique<EngineFx>(skycued::parseConfigFile(conf), make);
         fx->t.call([&] {
@@ -895,4 +908,93 @@ BOOST_AUTO_TEST_CASE(fisb_status_has_uplink_duplicates)
     const auto r = a.get("/api/fisb/status");
     BOOST_TEST(r.status == 200u);
     BOOST_TEST(parsed(r.body).getInt("uplink_duplicates") == std::optional<int64_t>(0), r.body);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_path_id_invalid_400)
+{
+    ApiFx a;
+    const std::string longer(7000, 'a');
+    for (const std::string& bad : {std::string("Bad_Id"), std::string("a b"), longer}) {
+        const std::vector<std::pair<std::string, std::string>> routes{
+            {"PUT", "/api/inputs/" + bad},
+            {"DELETE", "/api/inputs/" + bad},
+            {"POST", "/api/inputs/" + bad + "/enable"},
+            {"GET", "/api/inputs/" + bad + "/status"},
+        };
+        for (const auto& rt : routes) {
+            const auto r = a.call(rt.first, rt.second, R"({"enabled":true})");
+            BOOST_TEST(r.status == 400u, rt.first << " " << bad.substr(0, 10));
+            BOOST_TEST(!has(r.body, bad), r.body);
+            BOOST_TEST(r.body.size() < 100u);
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(replay_writes_409)
+{
+    ApiFx a(true);
+    const uint16_t port = freeUdpPort();
+    const std::vector<std::tuple<std::string, std::string, std::string>> writes{
+        {"POST", "/api/inputs", psJson("ps-a", port)},
+        {"POST", "/api/inputs", "not json"},           // 409 before the body is read
+        {"PUT", "/api/inputs/nope", psJson("", port)},  // 409 before the lookup
+        {"PUT", "/api/inputs/replay", R"({"enabled":false})"},
+        {"DELETE", "/api/inputs/replay", ""},
+        {"DELETE", "/api/inputs/nope", ""},
+        {"POST", "/api/inputs/replay/disable", "{}"},
+        {"POST", "/api/inputs/replay/enable", "{}"},
+    };
+    for (const auto& w : writes) {
+        const auto r = a.call(std::get<0>(w), std::get<1>(w), std::get<2>(w));
+        BOOST_TEST(r.status == 409u, std::get<0>(w) << " " << std::get<1>(w) << ": " << r.body);
+    }
+    // Reads still work, and nothing changed.
+    const auto list = a.get("/api/inputs");
+    BOOST_TEST(list.status == 200u);
+    BOOST_TEST(listed(list.body, "replay")->getBool("enabled") == std::optional<bool>(true));
+    BOOST_TEST(!listed(list.body, "ps-a"));
+    BOOST_TEST(a.get("/api/inputs/replay/status").status == 200u);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_error_messages_clipped)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    const std::string longer(5000, 'b');
+    auto r = a.call("PUT", "/api/inputs/ps-a", psJson(longer, freeUdpPort()));
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(!has(r.body, longer), r.body.size());
+    BOOST_TEST(has(r.body, std::string(64, 'b') + "..."), r.body);
+    BOOST_TEST(r.body.size() < 200u);
+    r = a.call("POST", "/api/inputs", psJson("ps-b", freeUdpPort(), ",\"" + longer + "\":1"));
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(has(r.body, "unknown key '" + std::string(64, 'b') + "...'"), r.body);
+    r = a.get("/api/inputs/ps-a/" + longer);
+    BOOST_TEST(r.status == 404u);
+    BOOST_TEST(r.body.size() < 200u);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_writes_cross_origin_403)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    const Headers foreign{
+        {"host", "127.0.0.1:8080"}, {"content-type", "application/json"}, {"origin", "http://evil.example"}};
+    BOOST_TEST(a.call("PUT", "/api/inputs/ps-a", psJson("", freeUdpPort(), R"(,"name":"Evil")"), foreign).status ==
+               403u);
+    BOOST_TEST(a.call("PUT", "/api/inputs/readsb", R"({"enabled":false})", foreign).status == 403u);
+    BOOST_TEST(a.call("POST", "/api/inputs/ps-a/disable", "{}", foreign).status == 403u);
+    BOOST_TEST(a.call("POST", "/api/inputs/readsb/enable", "{}", foreign).status == 403u);
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-b", freeUdpPort()), foreign).status == 403u);
+    const auto list = a.get("/api/inputs").body;
+    BOOST_TEST(listed(list, "ps-a")->getString("name") == std::optional<std::string>(""));
+    BOOST_TEST(listed(list, "ps-a")->getBool("enabled") == std::optional<bool>(true));
+    BOOST_TEST(listed(list, "readsb")->getBool("enabled") == std::optional<bool>(true));
+    BOOST_TEST(!listed(list, "ps-b"));
+    // Without an Origin header (curl, scripts) a write is allowed, as for the
+    // other routes: browsers always send one on these requests.
+    const Headers none{{"host", "127.0.0.1:8080"}, {"content-type", "application/json"}};
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-b", freeUdpPort()), none).status == 201u);
+    BOOST_TEST(a.call("POST", "/api/inputs/ps-b/disable", "{}", none).status == 200u);
+    BOOST_TEST(a.call("DELETE", "/api/inputs/ps-b", "", Headers{{"host", "127.0.0.1:8080"}}).status == 204u);
 }

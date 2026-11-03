@@ -240,9 +240,9 @@ InputDef parseInputDef(const JsonObject& o)
     std::set<std::string> seen;
     for (const auto& key : o.keys()) {
         if (std::find(std::begin(kKeys), std::end(kKeys), key) == std::end(kKeys))
-            fail("unknown key '" + key + "'");
+            fail("unknown key '" + clipForMessage(key) + "'");
         if (!seen.insert(key).second)
-            fail("duplicate key '" + key + "'");
+            fail("duplicate key '" + clipForMessage(key) + "'");
     }
 
     InputDef d;
@@ -399,6 +399,19 @@ std::optional<HttpUrl> parseHttpUrl(const std::string& url)
     if (end < url.size())
         out.target = url[end] == '/' ? url.substr(end) : "/" + url.substr(end);
     return out;
+}
+
+bool isValidInputId(const std::string& id) { return validId(id); }
+
+std::string clipForMessage(const std::string& text)
+{
+    constexpr std::size_t kMax = 64;
+    if (text.size() <= kMax)
+        return text;
+    std::size_t end = kMax;
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80)
+        --end;  // text[end] continues a character: cut before that character
+    return text.substr(0, end) + "...";
 }
 
 }  // namespace skycued

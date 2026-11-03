@@ -65,6 +65,12 @@ struct InputDefError : std::runtime_error {
 // the number ("80" as 80) and "true" as true.
 InputDef parseInputDef(const JsonObject& object);
 
+// The id rule: 1 to 32 characters of a-z, 0-9 and '-' (reserved ids pass).
+bool isValidInputId(const std::string& id);
+// `text` for an error message: as is up to 64 bytes, else its first 64
+// bytes (never splitting a UTF-8 character) and "...".
+std::string clipForMessage(const std::string& text);
+
 // The definition as one JSON object: only the keys that apply to its type and
 // transport, defaults included (unset optionals as null); never `builtin`.
 // For a user input, parseInputDef(parse(inputDefJson(d))) == d.

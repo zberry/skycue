@@ -28,7 +28,7 @@ const std::vector<std::string>& knownConfigKeys()
         "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
         "RECORD_RAW",
         "WEB_BIND",        "RECORD_MAX_GB",     "TRAIL_SECONDS",
-        "FISB_ENABLE",     "FISB_EXPERIMENTAL", "INPUTS_FILE",
+        "FISB_ENABLE",     "FISB_EXPERIMENTAL", "INPUTS_FILE",       "LOCATIONS_FILE",
     };
     return keys;
 }
@@ -266,6 +266,7 @@ Config parseConfigText(const std::string& text, const std::string& name)
     conv.yesNo("FISB_ENABLE", c.fisb_enable);
     conv.yesNo("FISB_EXPERIMENTAL", c.fisb_experimental);
     conv.str("INPUTS_FILE", c.inputs_file);
+    conv.str("LOCATIONS_FILE", c.locations_file);
 
     conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
     conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);

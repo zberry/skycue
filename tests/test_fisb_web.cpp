@@ -7,6 +7,7 @@
 
 #include "engine_test_support.hpp"
 
+#include "fisb/location_index.hpp"
 #include "runtime_config.hpp"
 #include "time_util.hpp"
 #include "web_api.hpp"
@@ -46,6 +47,37 @@ void writeFile(const std::string& path, const std::string& text)
 }
 
 bool has(const std::string& text, const std::string& needle) { return text.find(needle) != std::string::npos; }
+
+// Redirects fd 2 to `path` until restore() or destruction.
+struct StderrCapture {
+    std::string path;
+    int saved = -1;
+    explicit StderrCapture(const std::string& p) : path(p)
+    {
+        std::fflush(stderr);
+        saved = ::dup(2);
+        std::FILE* f = std::fopen(path.c_str(), "w");
+        ::dup2(::fileno(f), 2);
+        std::fclose(f);
+    }
+    ~StderrCapture() { restore(); }
+    std::string text()
+    {
+        std::fflush(stderr);
+        return readAll(path);
+    }
+    void restore()
+    {
+        if (saved < 0)
+            return;
+        std::fflush(stderr);
+        ::dup2(saved, 2);
+        ::close(saved);
+        saved = -1;
+    }
+};
+
+bool exists(const std::string& path) { return ::access(path.c_str(), F_OK) == 0; }
 
 pt::ptree parseJson(const std::string& text)
 {
@@ -147,6 +179,9 @@ struct FisbWebOptions {
     bool replay = true;       // replay the fixture unpaced, else a FakeSource
     bool start_engine = true; // else startEngine() later (to connect a client first)
     std::string recording = kReceivedWithUplinks;  // what replay replays
+    // Non-empty: engine->loadLocations(locations_dir + "/fisb-locations.json", locations_csv) before start().
+    std::string locations_dir{};
+    std::string locations_csv{};
 };
 
 // Engine (+ Forwarder, RuntimeConfig, WebServer) on an IoThread.
@@ -180,6 +215,8 @@ struct FisbWebFx {
             else
                 source = fakeSource(src)(t.io);
             engine = std::make_unique<Engine>(t.io, cfg, sourceInputs(t.io, std::move(source)), *fwd, nullptr, nullptr);
+            if (!o.locations_dir.empty())
+                engine->loadLocations(o.locations_dir + "/fisb-locations.json", o.locations_csv);
             rc = std::make_unique<RuntimeConfig>(t.io, conf, *engine);
             rc->load();
             WebConfig wc;
@@ -721,6 +758,14 @@ BOOST_AUTO_TEST_CASE(event_json_items)
     BOOST_TEST(rs.get<int>("altitude_code") == 3);
     BOOST_TEST(rs.get<int>("blocks") == 12);
     BOOST_TEST(rs.get<std::string>("key") == "70-3");
+
+    EngineEvent loc;
+    loc.kind = EventKind::fisb_location;
+    FisbNotice ln;
+    ln.key = "KPRG";
+    ln.position = std::make_pair(39.699097, -87.670212);
+    loc.fisb = ln;
+    BOOST_TEST(skycued::webapi::eventJson(loc) == "{\"type\":\"fisb_location\",\"id\":\"KPRG\",\"lat\":39.699097,\"lon\":-87.670212}");
 }
 
 // tg30.978 carries the rasters and a CONUS mosaic that the 2015 sample has
@@ -783,6 +828,184 @@ BOOST_AUTO_TEST_CASE(raster_routes_on_tg30)
         if (r.status == 200u)
             BOOST_TEST(parseJson(r.body).count("legend") == 1u);
     }
+}
+
+namespace {
+
+using Locations = std::map<std::string, std::pair<double, double>>;
+
+// GET /api/fisb/locations's body: {"<id>":[lat,lon],...}.
+Locations locationsOf(const std::string& body)
+{
+    Locations out;
+    for (const auto& [id, pos] : parseJson(body)) {
+        BOOST_REQUIRE_EQUAL(pos.size(), 2u);
+        out[id] = {num(pos.front().second), num(pos.back().second)};
+    }
+    return out;
+}
+
+bool near(std::pair<double, double> a, double lat, double lon)
+{
+    return std::abs(a.first - lat) <= 1e-6 && std::abs(a.second - lon) <= 1e-6;
+}
+
+// The ids of fisb-locations.json at `path`.
+std::set<std::string> savedIds(const std::string& path)
+{
+    std::set<std::string> ids;
+    const pt::ptree doc = parseJson(readAll(path));
+    for (const auto& kv : doc.get_child("locations"))
+        ids.insert(kv.first);
+    return ids;
+}
+
+// FisbWebOptions replaying tg30 (written into `dir`), locations kept in `dir`.
+FisbWebOptions tg30Options(const TempDir& dir, std::size_t& uplinks)
+{
+    FisbWebOptions o;
+    o.recording = dir.path + "/tg30-received.jsonl";
+    uplinks = tg30AsRecording(o.recording);
+    o.locations_dir = dir.path;
+    return o;
+}
+
+}  // namespace
+
+// Every NOTAM point location in tg30 is learned, served and announced.
+BOOST_AUTO_TEST_CASE(locations_learned_on_tg30)
+{
+    TempDir dir;
+    std::size_t uplinks = 0;
+    FisbWebOptions o = tg30Options(dir, uplinks);
+    o.start_engine = false;
+    FisbWebFx f(o);
+    WsClient c(f.port);
+    BOOST_REQUIRE(!c.waitFor("\"type\":\"snapshot\"").empty());
+    f.startEngine();
+    BOOST_REQUIRE(f.waitReplayed(uplinks, 0));
+
+    const Reply r = get(f.port, "/api/fisb/locations");
+    BOOST_TEST(r.status == 200u);
+    const Locations locs = locationsOf(r.body);
+    BOOST_TEST(locs.size() == 42u);
+    BOOST_REQUIRE(locs.count("KPRG") == 1u);
+    BOOST_TEST(near(locs.at("KPRG"), 39.699097, -87.670212));
+    BOOST_TEST(locs.count("KCVG") == 1u);
+    for (const auto& kv : locs)
+        BOOST_TEST(skycued::fisb::airportStyleId(kv.first), kv.first);
+
+    BOOST_REQUIRE(!c.waitFor("\"type\":\"fisb_location\",\"id\":\"KPRG\"").empty());
+    std::size_t items = 0;
+    for (const auto& msg : c.all()) {
+        const pt::ptree m = parseJson(msg);
+        if (m.get<std::string>("type") != "events")
+            continue;
+        for (const auto& item : m.get_child("items")) {
+            if (item.second.get<std::string>("type") != "fisb_location")
+                continue;
+            ++items;
+            BOOST_TEST(item.second.size() == 4u);
+            BOOST_TEST(locs.count(item.second.get<std::string>("id")) == 1u);
+            if (item.second.get<std::string>("id") == "KPRG")
+                BOOST_TEST(std::abs(item.second.get<double>("lat") - 39.699097) < 1e-3);
+        }
+    }
+    BOOST_TEST(items >= 42u);
+}
+
+// stop() saves fisb-locations.json; a fresh Engine on the same file serves it before any uplink.
+BOOST_AUTO_TEST_CASE(locations_persisted_and_reloaded)
+{
+    TempDir dir;
+    const std::string file = dir.path + "/fisb-locations.json";
+    std::size_t uplinks = 0;
+    const FisbWebOptions o = tg30Options(dir, uplinks);
+    Locations first;
+    {
+        FisbWebFx f(o);
+        BOOST_REQUIRE(f.waitReplayed(uplinks, 0));
+        first = locationsOf(get(f.port, "/api/fisb/locations").body);
+        f.t.call([&] { f.engine->stop(); });
+    }
+    BOOST_REQUIRE(exists(file));
+    BOOST_TEST(savedIds(file).size() == 42u);
+    BOOST_TEST(first.size() == 42u);
+
+    FisbWebOptions o2;
+    o2.replay = false;
+    o2.locations_dir = dir.path;
+    FisbWebFx g(o2);
+    const Locations again = locationsOf(get(g.port, "/api/fisb/locations").body);
+    BOOST_REQUIRE_EQUAL(again.size(), first.size());
+    for (const auto& kv : first) {
+        BOOST_REQUIRE(again.count(kv.first) == 1u);
+        BOOST_TEST(near(again.at(kv.first), kv.second.first, kv.second.second), kv.first);
+    }
+}
+
+// LOCATIONS_FILE rows fill in what was not learned; learned positions win; the operator rows are not saved.
+BOOST_AUTO_TEST_CASE(operator_file_merged_under_learned)
+{
+    TempDir dir;
+    std::size_t uplinks = 0;
+    FisbWebOptions o = tg30Options(dir, uplinks);
+    o.locations_csv = dir.path + "/operator.csv";
+    writeFile(o.locations_csv, "KPRG,1,1\nZZZ9,2,2\n");
+    FisbWebFx f(o);
+    BOOST_REQUIRE(f.waitReplayed(uplinks, 0));
+    const Locations locs = locationsOf(get(f.port, "/api/fisb/locations").body);
+    BOOST_REQUIRE(locs.count("KPRG") == 1u);
+    BOOST_TEST(near(locs.at("KPRG"), 39.699097, -87.670212));
+    BOOST_REQUIRE(locs.count("ZZZ9") == 1u);
+    BOOST_TEST(near(locs.at("ZZZ9"), 2, 2));
+    f.t.call([&] { f.engine->stop(); });
+    const std::set<std::string> saved = savedIds(dir.path + "/fisb-locations.json");
+    BOOST_TEST(saved.count("KPRG") == 1u);
+    BOOST_TEST(saved.count("ZZZ9") == 0u);
+}
+
+// A learned file that does not parse is set aside, not fatal.
+BOOST_AUTO_TEST_CASE(malformed_locations_file_renamed_rejected)
+{
+    TempDir dir;
+    const std::string file = dir.path + "/fisb-locations.json";
+    writeFile(file, "{");
+    FisbWebOptions o;
+    o.replay = false;
+    o.locations_dir = dir.path;
+    StderrCapture err(dir.path + "/stderr.txt");
+    std::unique_ptr<FisbWebFx> f;
+    BOOST_REQUIRE_NO_THROW(f = std::make_unique<FisbWebFx>(o));
+    err.restore();
+    BOOST_TEST(readAll(file + ".rejected") == "{");
+    BOOST_TEST(!exists(file));
+    std::size_t errors = 0;
+    std::istringstream lines(err.text());
+    for (std::string line; std::getline(lines, line);)
+        if (has(line, " ERROR ")) {
+            ++errors;
+            BOOST_TEST(has(line, file), line);
+        }
+    BOOST_TEST(errors == 1u, err.text());
+    BOOST_TEST(get(f->port, "/api/fisb/locations").body == "{}");
+}
+
+// LOCATIONS_FILE that cannot be read stops the start.
+BOOST_AUTO_TEST_CASE(unreadable_operator_file_throws)
+{
+    TempDir dir;
+    FisbWebOptions o;
+    o.replay = false;
+    o.start_engine = false;
+    FisbWebFx f(o);
+    std::string what;
+    try {
+        f.t.call([&] { f.engine->loadLocations(dir.path + "/fisb-locations.json", dir.path + "/missing.csv"); });
+    } catch (const std::runtime_error& e) {
+        what = e.what();
+    }
+    BOOST_TEST(has(what, "missing.csv"), what);
 }
 
 // Text with quotes, backslashes and control characters comes back intact

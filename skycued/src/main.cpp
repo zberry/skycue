@@ -244,6 +244,16 @@ int main(int argc, char** argv)
         std::cerr << "skycued: " << config_path << ": " << e.what() << "\n";
         return 2;
     }
+    // The learned FIS-B report locations (fisb-locations.json next to the
+    // config) and LOCATIONS_FILE under them.
+    try {
+        const auto slash = config_path.rfind('/');
+        const std::string dir = slash == std::string::npos ? std::string(".") : config_path.substr(0, slash);
+        engine->loadLocations(dir + "/fisb-locations.json", config.locations_file);
+    } catch (const std::exception& e) {
+        std::cerr << "skycued: " << e.what() << "\n";
+        return 2;
+    }
     // The runtime overlay (skycue.runtime.json) on top of skycue.conf, and
     // hot reload of both and of the list files.
     std::unique_ptr<RuntimeConfig> runtime;

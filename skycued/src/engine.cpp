@@ -1,10 +1,16 @@
 #include "engine.hpp"
 
+#include "file_util.hpp"
 #include "inputs/dump978_input.hpp"
 #include "log.hpp"
 
 #include <cctype>
+#include <cerrno>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -59,6 +65,25 @@ const char* listName(ListKind list) { return list == ListKind::allow ? "allow" :
 EngineEvent kindEvent(EventKind kind)
 {
     return EngineEvent{kind, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt};
+}
+
+// A learned position this far from the last one announced is announced again.
+constexpr double kLocationMoveDeg = 1e-4;
+
+// The whole file; nullopt (errno set) when it cannot be opened or read.
+std::optional<std::string> readWholeFile(const std::string& path)
+{
+    errno = 0;
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return std::nullopt;
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (in.bad()) {
+        if (errno == 0)
+            errno = EIO;
+        return std::nullopt;
+    }
+    return text;
 }
 
 }  // namespace
@@ -141,6 +166,7 @@ void Engine::start()
     if (sent_)
         sent_->writeFilterChange(description);
     inputs_->start();
+    last_locations_save_ = steady::now();
     armTick();
     armStats();
 }
@@ -178,6 +204,8 @@ void Engine::stop()
         sent_->flush();
     if (fisb_rec_)
         fisb_rec_->flush();
+    if (!locations_path_.empty() && locations_.dirty())
+        saveLocations();
     LOG_INFO("stopping: " << shutdown_drops << " shutdown drops; " << statsLine());
 }
 
@@ -215,6 +243,9 @@ void Engine::handleFisbEvents(std::vector<fisb::FisbEvent>& events)
     for (const auto& e : events) {
         if (fisb_rec_)
             fisb_rec_->writeFisb(e, now);
+        std::optional<EngineEvent> location;
+        if (e.kind == fisb::FisbEvent::Kind::twgo && e.twgo && e.twgo->has_graphics)
+            location = learnLocation(*e.twgo);
         if (!sink_)
             continue;
         FisbNotice n;
@@ -251,6 +282,81 @@ void Engine::handleFisbEvents(std::vector<fisb::FisbEvent>& events)
         EngineEvent ev = kindEvent(kind);
         ev.fisb = std::move(n);
         emit(ev);
+        if (location && sink_)
+            emit(*location);
+    }
+}
+
+std::optional<EngineEvent> Engine::learnLocation(const fisb::TwgoRecord& record)
+{
+    const auto before = locations_.find(record.location);
+    const bool is_new = locations_.learn(record);
+    const auto after = locations_.find(record.location);
+    if (!after)
+        return std::nullopt;
+    const bool moved = before && (std::abs(after->first - before->first) >= kLocationMoveDeg ||
+                                  std::abs(std::remainder(after->second - before->second, 360.0)) >= kLocationMoveDeg);
+    if (!is_new && !moved)
+        return std::nullopt;
+    FisbNotice n;
+    n.key = record.location;
+    n.position = after;
+    EngineEvent ev = kindEvent(EventKind::fisb_location);
+    ev.fisb = std::move(n);
+    return ev;
+}
+
+void Engine::loadLocations(const std::string& learned_path, const std::string& operator_csv_path)
+{
+    locations_path_ = learned_path;
+    if (!learned_path.empty()) {
+        const auto text = readWholeFile(learned_path);
+        if (text) {
+            try {
+                locations_.loadLearned(*text);
+                LOG_INFO(learned_path << ": " << locations_.learnedCount() << " learned locations");
+            } catch (const std::exception& e) {
+                const std::string rejected = learned_path + ".rejected";
+                const bool renamed = std::rename(learned_path.c_str(), rejected.c_str()) == 0;
+                LOG_ERROR(learned_path << ": " << e.what() << "; "
+                                       << (renamed ? "renamed " + rejected
+                                                   : "could not rename it to " + rejected + ": " +
+                                                         std::strerror(errno))
+                                       << "; starting with no learned locations");
+            }
+        } else if (errno != ENOENT) {
+            LOG_ERROR(learned_path << ": cannot read: " << std::strerror(errno)
+                                   << "; starting with no learned locations");
+        }
+    }
+    if (!operator_csv_path.empty()) {
+        const auto text = readWholeFile(operator_csv_path);
+        if (!text)
+            throw std::runtime_error(operator_csv_path + ": cannot read: " + std::strerror(errno));
+        const std::size_t n = locations_.loadOperatorCsv(*text);
+        if (locations_.operatorRejected() > 0)
+            LOG_WARN(operator_csv_path << ": " << locations_.operatorRejected() << " lines rejected (first: line "
+                                       << locations_.operatorRejectedFirstLine() << ")");
+        LOG_INFO(operator_csv_path << ": " << n << " operator locations");
+    }
+}
+
+std::map<std::string, std::pair<double, double>> Engine::locationPositions() const { return locations_.merged(); }
+
+void Engine::saveLocations()
+{
+    last_locations_save_ = steady::now();
+    try {
+        atomicWrite(locations_path_, locations_.learnedJson());
+        locations_.markSaved();
+        if (locations_save_failing_)
+            LOG_INFO(locations_path_ << ": saved again");
+        locations_save_failing_ = false;
+    } catch (const std::exception& e) {
+        if (!locations_save_failing_)
+            LOG_WARN("fisb locations not saved: " << e.what() << "; retrying every " << kLocationsSaveInterval.count()
+                                                  << " s");
+        locations_save_failing_ = true;
     }
 }
 
@@ -488,6 +594,8 @@ void Engine::tick()
         auto events = fisb_store_.sweep(now);
         handleFisbEvents(events);
     }
+    if (!locations_path_.empty() && locations_.dirty() && steady::now() - last_locations_save_ >= kLocationsSaveInterval)
+        saveLocations();
     if (received_)
         received_->flush();
     if (sent_)

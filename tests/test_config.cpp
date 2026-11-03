@@ -403,6 +403,13 @@ BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_the_config)
     BOOST_TEST(resolveInputsFile("/skycue.conf", "") == "/skycue.inputs.json");
 }
 
+BOOST_AUTO_TEST_CASE(locations_file_parsed)
+{
+    BOOST_TEST(parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\nLOCATIONS_FILE=/x/loc.csv\n", "t").locations_file ==
+               "/x/loc.csv");
+    BOOST_TEST(parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\n", "t").locations_file.empty());
+}
+
 BOOST_AUTO_TEST_CASE(known_keys_match_example)
 {
     std::string text = readExample();

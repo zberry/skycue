@@ -64,6 +64,14 @@
 // writeFisb, "time" = the data clock) and one fisb_text / fisb_shape /
 // fisb_radar / fisb_raster / fisb_expired event (FisbNotice).
 //
+// Locations (design §3.2): every TWGO record with graphics is fed to a
+// fisb::LocationIndex; an id learned for the first time, or a learned
+// position that moves by 1e-4 degrees or more, emits fisb_location (after
+// the record's own event). The learned set is saved (atomicWrite) to the
+// loadLocations file on the 1 s tick when it changed and
+// kLocationsSaveInterval has passed since the last attempt, and by stop();
+// a failed save logs one WARN per run of failures and is retried.
+//
 // Threading: lives on the caller's io_context; call everything (including
 // every method below) from its thread. The Forwarder and the recorders must
 // outlive the Engine.
@@ -80,6 +88,7 @@
 #include "change_detector.hpp"
 #include "fisb/fisb_decoder.hpp"
 #include "fisb/fisb_store.hpp"
+#include "fisb/location_index.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -87,11 +96,15 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace skycued {
+
+constexpr std::chrono::seconds kLocationsSaveInterval{60};
 
 class Engine {
 public:
@@ -138,6 +151,13 @@ public:
     // FisbStore::blocksCopied (a diagnostic for tests).
     uint64_t fisbBlocksCopied() const;
 
+    // Loads the learned file (missing: empty; malformed: one ERROR line, renamed "<path>.rejected", empty) and the
+    // operator CSV (empty path: none; unreadable: throws std::runtime_error naming it; rejected lines: one WARN with
+    // the count and the first line number). Call before start(). Remembers learned_path for saving ("": never saved).
+    void loadLocations(const std::string& learned_path, const std::string& operator_csv_path);
+    // Every known location id with its position, learned over operator (LocationIndex::merged()).
+    std::map<std::string, std::pair<double, double>> locationPositions() const;
+
     // Live changes (see the top of this file). `origin` names who made the
     // change in the record ("ui", say). Ignored after stop().
     // Throws std::invalid_argument, changing nothing, unless max_range_nm is
@@ -170,6 +190,10 @@ private:
     bool dump978Off() const;
     void handleUplink(std::chrono::system_clock::time_point when, const std::string& hex);
     void handleFisbEvents(std::vector<fisb::FisbEvent>& events);
+    // Feeds a TWGO record to the location index; the fisb_location event to emit, if any.
+    std::optional<EngineEvent> learnLocation(const fisb::TwgoRecord& record);
+    // Writes the learned locations now (the caller checks dirty()).
+    void saveLocations();
     // `positioned`: the observation carried a position (an observed event follows).
     void process(TrackState& state, std::chrono::steady_clock::time_point now, bool positioned);
     void decide(TrackState& state, std::chrono::steady_clock::time_point now);
@@ -201,6 +225,10 @@ private:
     std::unique_ptr<fisb::FisbDecoder> fisb_decoder_;  // null with FISB_ENABLE=no
     fisb::FisbStore fisb_store_;
     std::optional<std::chrono::system_clock::time_point> last_uplink_;
+    fisb::LocationIndex locations_;
+    std::string locations_path_;  // fisb-locations.json; "" until loadLocations
+    std::chrono::steady_clock::time_point last_locations_save_{};  // the last save attempt (or start())
+    bool locations_save_failing_ = false;                           // the last save attempt failed
 
     FilterSet filters_;
     Thresholds thresholds_;

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace skycued {
@@ -82,6 +83,7 @@ enum class EventKind {
     fisb_raster,   // another raster layer (70/71/84/90/91/103) was published
     fisb_expired,  // a FIS-B item left the store, or a TWGO record was cancelled
     inputs_changed,  // an input was added, changed, removed, enabled, disabled, connected or lost
+    fisb_location,   // a location id was learned, or its learned position moved (FisbNotice key, position)
 };
 
 // What a fisb_* event carries. Radar and raster events are notifications:
@@ -98,6 +100,7 @@ struct FisbNotice {
     std::optional<std::chrono::system_clock::time_point> expires;  // the item's expiry (fisb_expired: when due)
     std::optional<fisb::TextRecord> text;  // fisb_text from product 413; fisb_expired of a text record
     std::optional<fisb::TwgoRecord> twgo;  // fisb_text / fisb_shape from TWGO; fisb_expired "cancelled"
+    std::optional<std::pair<double, double>> position;   // fisb_location: the learned position; key = the id
 };
 
 // update: `track` (the track just sent). observed: `track` (after an

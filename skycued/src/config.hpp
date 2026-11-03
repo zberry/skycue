@@ -32,6 +32,7 @@ struct Config {
     bool fisb_enable = true;             // FISB_ENABLE: decode FIS-B weather from the UAT uplinks
     bool fisb_experimental = false;      // FISB_EXPERIMENTAL: APDU time options 1/3, radar blocks >= 60 N
     std::string inputs_file;             // INPUTS_FILE as written; see resolveInputsFile
+    std::string locations_file;          // LOCATIONS_FILE: operator CSV id,lat,lon; empty: none
     // Accepted (they are skycue-start.sh's), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";
 };

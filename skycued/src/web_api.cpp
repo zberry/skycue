@@ -479,6 +479,7 @@ std::string eventJson(const EngineEvent& event)
     case EventKind::fisb_radar:
     case EventKind::fisb_raster:
     case EventKind::fisb_expired:
+    case EventKind::fisb_location:
         return fisbEventJson(event);
     }
     return std::string();

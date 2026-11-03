@@ -4,6 +4,7 @@
 #include "engine_test_support.hpp"
 
 #include "runtime_config.hpp"
+#include "time_util.hpp"
 #include "web_api.hpp"
 #include "web_server.hpp"
 
@@ -418,22 +419,40 @@ BOOST_AUTO_TEST_CASE(static_index_served)
     // Tiles: none, then a meta.json, then zoom directories only.
     r = get(f.port, "/api/tiles-available");
     BOOST_TEST(r.status == 200u);
-    BOOST_TEST(r.body == "{\"tiles\":false}");
+    BOOST_TEST(r.body == "{\"tiles\":false,\"overlays\":false}");
     ::mkdir((f.www + "/tiles").c_str(), 0755);
     // As scripts/make-tiles.sh writes it: the bbox array and strings are ignored.
     writeFile(f.www + "/tiles/meta.json", "{\"minZoom\":5,\"maxZoom\":9,\"bbox\":[-10.5,35,30,60],"
                                           "\"source\":\"Natural Earth 1:10m\",\"generated\":\"2026-11-01T00:00:00Z\"}");
-    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":5,\"maxZoom\":9}");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":5,\"maxZoom\":9,\"overlays\":false}");
     ::remove((f.www + "/tiles/meta.json").c_str());
     for (const char* z : {"/tiles/4", "/tiles/7", "/tiles/6"})
         ::mkdir((f.www + z).c_str(), 0755);
     ::mkdir((f.www + "/tiles/7/37").c_str(), 0755);
     writeFile(f.www + "/tiles/7/37/49.png", "PNG");
-    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":4,\"maxZoom\":7}");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":4,\"maxZoom\":7,\"overlays\":false}");
     r = get(f.port, "/tiles/7/37/49.png");
     BOOST_TEST(r.status == 200u);
     BOOST_TEST(r.content_type == "image/png");
     BOOST_TEST(r.cache_control == "max-age=86400");
+}
+
+BOOST_AUTO_TEST_CASE(tiles_available_overlays_flag)
+{
+    WebFx f;
+    const auto ends = [&](const char* tail) {
+        const std::string b = get(f.port, "/api/tiles-available").body;
+        const std::string t = tail;
+        return b.size() >= t.size() && b.compare(b.size() - t.size(), t.size(), t) == 0;
+    };
+    BOOST_TEST(ends(",\"overlays\":false}"));
+    ::mkdir((f.www + "/overlays").c_str(), 0755);
+    writeFile(f.www + "/overlays/meta.json", "{\"files\":{}}");
+    BOOST_TEST(ends(",\"overlays\":true}"));
+    writeFile(f.www + "/overlays/meta.json", "{");
+    BOOST_TEST(ends(",\"overlays\":false}"));
+    ::remove((f.www + "/overlays/meta.json").c_str());
+    BOOST_TEST(ends(",\"overlays\":false}"));
 }
 
 BOOST_AUTO_TEST_CASE(static_file_over_8mib_500)
@@ -458,7 +477,7 @@ BOOST_AUTO_TEST_CASE(missing_www_dir_api_still_works)
     WebFx f(o);
     BOOST_TEST(get(f.port, "/").status == 404u);
     BOOST_TEST(get(f.port, "/api/state").status == 200u);
-    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false}");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
 }
 
 BOOST_AUTO_TEST_CASE(path_traversal_rejected)
@@ -525,6 +544,8 @@ BOOST_AUTO_TEST_CASE(api_state_shape)
     BOOST_TEST(s.get<int>("stats.tracks_forwarded") == 1);
     BOOST_TEST(s.get<bool>("stats.readsb_connected") == true);
     BOOST_TEST(s.count("stats") == 1u);
+    for (const char* key : {"drops_blocked", "drops_out_of_range", "drops_below_elevation", "drops_no_position"})
+        BOOST_TEST(s.get_child("stats").count(key) == 1u, key);
 
     const auto& tracks = s.get_child("tracks");
     BOOST_TEST(tracks.size() == 2u);
@@ -595,6 +616,23 @@ BOOST_AUTO_TEST_CASE(api_state_shape)
     BOOST_TEST(get(f.port, "/api/lists/allow").allow == "POST");
     BOOST_TEST(get(f.port, "/api/filters/save-baseline").status == 405u);
     BOOST_TEST(get(f.port, "/ws").status == 400u);  // not an upgrade
+}
+
+BOOST_AUTO_TEST_CASE(drop_json_fields)
+{
+    skycued::EngineEvent ev;
+    ev.kind = skycued::EventKind::drop;
+    ev.id = TrackId{0xa1b2c3, AddressType::icao};
+    ev.reason = DropReason::filtered;
+    ev.decision = skycued::Decision::out_of_range;
+    ev.callsign = std::string("UAL1423");
+    ev.time = skycued::parseIso8601Ms("2020-10-30T09:00:17.000Z").value();
+    BOOST_TEST(skycued::webapi::eventJson(ev) == "{\"type\":\"drop\",\"hex\":\"a1b2c3\",\"addr_type\":\"icao\",\"reason\":\"filtered\","
+                                                 "\"decision\":\"out_of_range\",\"callsign\":\"UAL1423\",\"time\":\"2020-10-30T09:00:17.000Z\"}");
+    ev.reason = DropReason::timeout;
+    ev.decision.reset();
+    ev.callsign.reset();
+    BOOST_TEST(skycued::webapi::eventJson(ev) == "{\"type\":\"drop\",\"hex\":\"a1b2c3\",\"addr_type\":\"icao\",\"reason\":\"timeout\",\"time\":\"2020-10-30T09:00:17.000Z\"}");
 }
 
 BOOST_AUTO_TEST_CASE(track_json_input_present_when_known)
@@ -1168,4 +1206,62 @@ BOOST_AUTO_TEST_CASE(main_serves_with_overrides)
     BOOST_TEST(get(port, "/api/state").status == 200u);
     ::kill(pid, SIGTERM);
     BOOST_TEST(waitExit(pid, 5s) == 0);
+}
+
+BOOST_AUTO_TEST_CASE(filters_history_route)
+{
+    WebFx f;
+    BOOST_TEST(request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":20}").status == 200u);
+
+    const Reply r = get(f.port, "/api/filters/history");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.content_type == "application/json");
+    const pt::ptree h = parseJson(r.body);
+    const auto& changes = h.get_child("changes");
+    BOOST_REQUIRE(changes.size() == 2u);
+    auto it = changes.begin();
+    const pt::ptree& first = it->second;
+    const pt::ptree& second = (++it)->second;
+    BOOST_TEST(first.get<std::string>("origin") == "startup");
+    BOOST_TEST(first.get<double>("filters.max_range_nm") == 150.0);
+    BOOST_TEST(second.get<std::string>("origin") == "ui");
+    BOOST_TEST(second.get<double>("filters.max_range_nm") == 20.0);
+    BOOST_TEST(second.get<double>("filters.min_elevation_deg") == 0.0);
+    const std::regex iso("^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$");
+    BOOST_TEST(std::regex_match(first.get<std::string>("time"), iso));
+    BOOST_TEST(std::regex_match(second.get<std::string>("time"), iso));
+
+    const Reply p = request(f.port, http::verb::post, "/api/filters/history");
+    BOOST_TEST(p.status == 405u);
+    BOOST_TEST(p.allow == "GET");
+}
+
+BOOST_AUTO_TEST_CASE(cues_clients_route)
+{
+    WebFx f;
+    std::atomic<bool> hello{false};
+    skycue::Client client(clientConfig(f.fx->port()));
+    client.onFrame([&](const skycue::Frame& fr) {
+        if (fr.type == skycue::FrameType::hello)
+            hello = true;
+    });
+    client.start();
+    BOOST_REQUIRE(pollUntil([&] { return hello.load(); }));
+
+    const Reply r = get(f.port, "/api/cues/clients");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.content_type == "application/json");
+    BOOST_TEST(has(r.body, "\"udp\":[]"));
+    const pt::ptree j = parseJson(r.body);
+    const auto& tcp = j.get_child("tcp");
+    BOOST_REQUIRE(tcp.size() == 1u);
+    const pt::ptree& c = tcp.begin()->second;
+    BOOST_TEST(c.get<std::string>("direction") == "accepted");
+    BOOST_TEST(has(c.get<std::string>("endpoint"), "127.0.0.1:"));
+    BOOST_TEST(c.get<uint64_t>("bytes_sent") > 0u);
+    const std::regex iso("^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$");
+    BOOST_TEST(std::regex_match(c.get<std::string>("connected_since"), iso));
+
+    BOOST_TEST(request(f.port, http::verb::post, "/api/cues/clients").status == 405u);
+    client.stop();
 }

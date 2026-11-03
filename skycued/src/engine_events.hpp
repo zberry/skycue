@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace skycued {
@@ -25,6 +26,8 @@ struct EngineStats {
     uint64_t tcp_clients = 0, udp_targets = 0;  // Forwarder destinations now
     // sent_drops by reason (the shutdown drops are counted in sent_drops only).
     uint64_t drops_timeout = 0, drops_filtered = 0, drops_source_lost = 0;
+    // drops_filtered by the filter decision that dropped the track (they sum to it).
+    uint64_t drops_blocked = 0, drops_out_of_range = 0, drops_below_elevation = 0, drops_no_position = 0;
     uint64_t recorder_dropped_received = 0, recorder_dropped_sent = 0;  // Recorder::droppedRecords()
     uint32_t web_clients = 0;  // as set by Engine::setWebClientCount
     // FIS-B (all 0 with FISB_ENABLE=no): uplinks fed to the decoder, products
@@ -43,6 +46,15 @@ struct EngineStats {
     // the built-ins readsb (or replay) and dump978, kept for one release.
     std::vector<InputStatsLine> inputs;
 };
+
+// One filter change (Engine::filterHistory): the new state only, never a
+// diff. The list changes are not recorded here.
+struct FilterChange {
+    std::chrono::system_clock::time_point time;  // the data clock
+    std::string origin;                          // "startup", "ui", "file:<name>", "save-baseline", ...
+    FilterConfig filters;                        // the new state
+};
+constexpr std::size_t kFilterHistoryMax = 100;
 
 // One track as the Engine sees it now.
 struct TrackSnapshot {
@@ -82,6 +94,7 @@ enum class EventKind {
     fisb_raster,   // another raster layer (70/71/84/90/91/103) was published
     fisb_expired,  // a FIS-B item left the store, or a TWGO record was cancelled
     inputs_changed,  // an input was added, changed, removed, enabled, disabled, connected or lost
+    fisb_location,   // a location id was learned, or its learned position moved (FisbNotice key, position)
 };
 
 // What a fisb_* event carries. Radar and raster events are notifications:
@@ -98,11 +111,14 @@ struct FisbNotice {
     std::optional<std::chrono::system_clock::time_point> expires;  // the item's expiry (fisb_expired: when due)
     std::optional<fisb::TextRecord> text;  // fisb_text from product 413; fisb_expired of a text record
     std::optional<fisb::TwgoRecord> twgo;  // fisb_text / fisb_shape from TWGO; fisb_expired "cancelled"
+    std::optional<std::pair<double, double>> position;   // fisb_location: the learned position; key = the id
 };
 
 // update: `track` (the track just sent). observed: `track` (after an
 // observation with a position, whatever the decision: every track, forwarded
-// or not). drop: `id` and `reason` (any reason but shutdown). expired: `id`
+// or not). drop: `id`, `reason` (any reason but shutdown), `callsign` (the
+// track's last known one), `time` (the data clock at the drop) and, for
+// reason filtered, `decision` (the filter decision that dropped it). expired: `id`
 // (a track that was not being forwarded left the table: no drop is sent for
 // it, but an observer showing it should remove it). stats: `stats`.
 // filters_changed, lists_changed, inputs_changed: nothing set (inputs_changed:
@@ -112,6 +128,9 @@ struct EngineEvent {
     std::optional<TrackSnapshot> track;
     std::optional<skycue::TrackId> id;
     std::optional<skycue::DropReason> reason;
+    std::optional<Decision> decision;                           // drop, reason filtered: the decision that dropped it
+    std::optional<std::string> callsign;                        // drop: the track's last known callsign
+    std::optional<std::chrono::system_clock::time_point> time;  // drop: the data clock at the drop
     std::optional<EngineStats> stats;
     std::optional<FisbNotice> fisb;
 };

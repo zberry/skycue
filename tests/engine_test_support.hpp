@@ -166,6 +166,7 @@ struct Events {
     std::mutex m;
     std::condition_variable cv;
     std::vector<Track> updates;
+    std::vector<steady::time_point> update_times;  // when each of `updates` arrived
     std::vector<std::pair<TrackId, DropReason>> drops;
     std::vector<steady::time_point> drop_times;
 
@@ -174,6 +175,7 @@ struct Events {
         c.onTrackUpdate([this](const Track& tr) {
             std::lock_guard<std::mutex> lk(m);
             updates.push_back(tr);
+            update_times.push_back(steady::now());
             cv.notify_all();
         });
         c.onTrackDropped([this](TrackId id, DropReason r) {

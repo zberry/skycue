@@ -19,6 +19,7 @@ namespace skycued {
 
 class Engine;
 class RuntimeConfig;
+struct DaemonInfo;
 
 namespace webapi {
 
@@ -30,7 +31,8 @@ std::string statsJson(const EngineStats& stats, const char* type = nullptr);
 std::string filtersJson(const RuntimeConfig& runtime, const char* type = nullptr);
 std::string listsJson(const Engine& engine, const RuntimeConfig& runtime, const char* type = nullptr);
 std::string trackJson(const TrackSnapshot& track, const char* type = nullptr);
-std::string dropJson(skycue::TrackId id, skycue::DropReason reason);  // {"type":"drop",...}
+// {"type":"drop",...} from a drop event; "" without id and reason.
+std::string dropJson(const EngineEvent& event);
 std::string expiredJson(skycue::TrackId id);                          // {"type":"expired",...}
 std::string tilesAvailableJson(const std::string& www_dir);
 std::string errorJson(const std::string& message);  // {"error":"..."}
@@ -62,6 +64,7 @@ struct ApiContext {
     Engine& engine;
     RuntimeConfig& runtime;
     std::string www_dir;
+    const DaemonInfo* daemon = nullptr;  // GET /api/config (web_config.hpp); nullptr: that is a 500
 };
 
 // True for "/api" and every path under "/api/".

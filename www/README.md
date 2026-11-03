@@ -49,7 +49,10 @@ From the `fisb` status in the snapshot the page GETs `/api/fisb/text`,
 WebSocket items (docs/web-api.md, FIS-B). Map layers (the layer control,
 top right): "Radar (regional)" and "Radar (CONUS)" (on by default), "Other
 rasters" (lightning, icing, turbulence, cloud tops: one at a time from a
-dropdown, legend marked approximate) and one layer per shape family (NOTAM / TFR,
+product dropdown, legend marked approximate; icing and turbulence also get
+an altitude band dropdown, `≈ 4,000 ft` per 3-bit code, bands without data
+disabled, defaulting to the lowest band with data, the legend title naming
+the band; `rasterProducts`, `defaultBand`) and one layer per shape family (NOTAM / TFR,
 SIGMET, AIRMET/G-AIRMET, CWA, SUA; off by default). A mosaic's blocks are
 expanded from their RLE and painted on one canvas over their box (rows
 spaced in Web Mercator, at most 4096 x 4096), shown as an image overlay;
@@ -62,6 +65,31 @@ PIREP, winds aloft and the TWGO reports without graphics ("NOTAM / SIGMET
 text") with a station-prefix filter and age colouring (fresh < 30 min,
 aging < 90 min, old). A TWGO text item without graphics clears the shapes
 drawn for its key (an amended text drops the old graphics).
+
+Weather symbols on the map: a METAR is a filled circle coloured by flight
+category (VFR green, MVFR blue, IFR red, LIFR magenta, grey when visibility
+or ceiling cannot be parsed) with a wind barb (a ring when calm, no barb
+when variable); a TAF an outlined square right of it, coloured by its first
+group; a PIREP a triangle (filled UA, outlined with "!" for UUA); winds aloft
+a barb with the temperature, drawn just below the station, from the record
+of the picked forecast period at the picked level. The period picker (shown
+with the Winds toggle) offers the periods present (6, 12, 24 h), defaulting
+to the one whose valid time is nearest the data clock; the level picker the
+levels present in that period, defaulting to the lowest; a pick stays until
+it is no longer offered (`windsPeriods`, `windsLevelsFor`). Other winds rows,
+and stations whose table lacks the level, say "no barb" and have no symbol. Symbols fade
+with the list's age classes and go when their record expires; hover shows
+the station, a click the parsed report and raw text. The Reports toggles
+(METAR, TAF, PIREP, Winds, each with its count) and the station filter apply
+to the list and the symbols alike. Positions come from `/api/fisb/locations`
+and `fisb_location` (ids learned from NOTAM points, or `LOCATIONS_FILE`): a
+report whose station has no known position is listed with "no position" and
+never plotted, and the Reports header shows "n of m positioned" (n: the
+reports with a symbol); those rows get a "show" link that pans to the symbol.
+Only symbols inside the view (grown by a quarter on each side) are drawn, at
+most 300: METAR first, then TAF, PIREP and winds, each nearest the map centre
+first. They are redrawn at most once a second, only on a change (a record, a
+location, a toggle, the filter, a pan or zoom, the age tick).
 
 ## Side panel tabs and the Receiver tab
 
@@ -83,6 +111,40 @@ messages, before it sends; skycued's 400 message is shown as it comes.
 Device positions are `.device-marker` markers, FIS-B ground stations
 `.station-marker`. Everything from an input's definition, the device or a
 server error is set with `textContent`, never as markup.
+
+## Cues tab
+
+The Cues tab (`showCues`) shows skycued's output side. `#cues-counters` has
+one row per `CUE_COUNTERS` entry, from every `stats` item. Every `update`
+and `drop` WebSocket item becomes a `decisionRow` pushed into a ring of the
+last `DECISIONS_RING` (200) with `pushRing`, whether the tab is shown or
+not; `#cues-recent` lists it newest first (with `#cues-drops-only`, a
+localStorage view option `skycue.cues.dropsOnly`, a second ring of drops
+alone) and a row click selects the track
+(`data-key` is `trackKey`). `#cues-filters` is `GET /api/filters/history`
+through `filterHistoryRows`, which diffs consecutive entries (newest first;
+the startup entry has every field, from `null`), and `#cues-clients` is
+`GET /api/cues/clients` (`tr.tcp`, `tr.udp`). While the tab is shown both
+are fetched again every 5 s, and the history also on every `filters` item.
+Origins, endpoints and callsigns are set with `textContent`.
+
+## Config tab
+
+The Config tab (`showConfig`) is read only and fetches `GET /api/config`
+each time it is shown and on `#config-refresh`. `#config-daemon` lists the
+daemon facts (the run mode through `daemonModeText`, the learned and
+operator locations through `daemonLocationsText`); `groupConfig` sorts the keys into one `table[data-group]`
+per `CONFIG_GROUPS` entry (a key no group names goes to a trailing
+`Other`, an empty group is left out), each key a `tr[data-key]` with
+`td.cfg-value`, `td.cfg-source` and `td.cfg-restart` (a `restart` badge
+when the key needs one). `#config-copy` writes `configText` (skycue.conf
+text, quoted as `conf_rewrite.cpp`'s `quoteValue` does, each key preceded
+by a `# KEY: source[, restart]` comment line so the text parses as it is;
+`confValue` returns null for a value the grammar cannot hold, which is left
+as a comment) with `navigator.clipboard.writeText`;
+`#config-copy-status` says `Copied`, or `Copy failed` with the text shown
+selected in the read-only `#config-copy-text`. Keys, values and paths are
+set with `textContent`.
 
 ## Geometry
 

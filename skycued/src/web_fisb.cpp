@@ -535,6 +535,15 @@ ApiResponse rasterRoute(const std::map<std::string, std::string>& params, const 
     return reply(200, withPaletteLegend(fisb::mosaicJson(*best), pl.first, pl.second));
 }
 
+// {"<id>":[lat,lon],...}: every known location, ids sorted.
+ApiResponse locationsRoute(const Engine& engine)
+{
+    JsonWriter w;
+    for (const auto& [id, pos] : engine.locationPositions())
+        w.addRaw(id.c_str(), "[" + deg(pos.first) + "," + deg(pos.second) + "]");
+    return reply(200, w.str());
+}
+
 // What left the store, as the store said (FisbEvent::expired_kind).
 const char* expiredKind(const FisbNotice& n)
 {
@@ -661,6 +670,14 @@ std::string fisbEventJson(const EngineEvent& event)
             w.add("expires", iso(*n.expires));
         return w.str();
     }
+    case EventKind::fisb_location:
+        if (!n.position)
+            return std::string();
+        return w.add("type", "fisb_location")
+            .add("id", n.key)
+            .addRaw("lat", deg(n.position->first))
+            .addRaw("lon", deg(n.position->second))
+            .str();
     default:
         break;
     }
@@ -672,7 +689,7 @@ bool isFisbPath(const std::string& path) { return path.compare(0, 10, "/api/fisb
 ApiResponse handleFisbApi(const ApiRequest& request, const Engine& engine)
 {
     const std::string& path = request.path;
-    enum class Route { status, text, shapes, radar, raster };
+    enum class Route { status, text, shapes, radar, raster, locations };
     Route route;
     if (path == "/api/fisb/status")
         route = Route::status;
@@ -684,6 +701,8 @@ ApiResponse handleFisbApi(const ApiRequest& request, const Engine& engine)
         route = Route::radar;
     else if (path == "/api/fisb/raster")
         route = Route::raster;
+    else if (path == "/api/fisb/locations")
+        route = Route::locations;
     else
         return fail(404, "no such API path: " + path);
     if (request.method != "GET") {
@@ -700,6 +719,7 @@ ApiResponse handleFisbApi(const ApiRequest& request, const Engine& engine)
     case Route::shapes: return shapesRoute(params, engine.fisbRecords());
     case Route::radar: return radarRoute(params, engine);
     case Route::raster: return rasterRoute(params, engine);
+    case Route::locations: return locationsRoute(engine);
     }
     return fail(404, "no such API path: " + path);
 }

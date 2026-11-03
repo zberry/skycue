@@ -225,6 +225,137 @@
   // observed (and shown, recoloured). Any other reason ends the track.
   function dropRemovesMarker(reason) { return reason !== 'filtered'; }
 
+  // ---- Cues tab ----
+  // The stats counters the tab shows, in this order (docs/web-api.md, the
+  // stats object): what was sent, then the drops by reason and the
+  // filtered drops by the decision that dropped them.
+  var CUE_COUNTERS = [
+    ['sent_updates', 'Updates sent'], ['sent_drops', 'Drops sent'],
+    ['drops_timeout', 'Dropped: timeout'], ['drops_filtered', 'Dropped: filtered'],
+    ['drops_blocked', 'Filtered: blocked'], ['drops_out_of_range', 'Filtered: out of range'],
+    ['drops_below_elevation', 'Filtered: below elevation'], ['drops_no_position', 'Filtered: no position'],
+    ['drops_source_lost', 'Dropped: source lost']
+  ];
+  var DECISIONS_RING = 200;         // update / drop items kept for the Recent decisions table
+
+  // Appends `item`, drops the oldest past `cap`; the same array.
+  function pushRing(ring, item, cap) {
+    ring.push(item);
+    if (ring.length > cap) ring.splice(0, ring.length - cap);
+    return ring;
+  }
+
+  // One Recent decisions row from an `update` or `drop` ws item.
+  function decisionRow(it) {
+    var drop = it.type === 'drop';
+    return {
+      key: trackKey(it), time: drop ? it.time : it.last_seen, hex: it.hex, callsign: it.callsign || '',
+      decision: drop ? (it.decision || '') : it.decision, reason: drop ? it.reason : 'sent'
+    };
+  }
+
+  // GET /api/filters/history's changes (oldest first, each the new state)
+  // as rows newest first, each with what changed from the entry before it;
+  // the first (startup) entry has every field, from null.
+  function filterHistoryRows(changes) {
+    var rows = [];
+    changes.forEach(function (c, i) {
+      var prev = i ? changes[i - 1].filters || {} : null, cur = c.filters || {}, diffs = [];
+      Object.keys(cur).forEach(function (f) {
+        var from = prev && f in prev ? prev[f] : null;
+        if (!prev || from !== cur[f]) diffs.push({ field: f, from: from, to: cur[f] });
+      });
+      rows.unshift({ time: c.time, origin: c.origin, diffs: diffs });
+    });
+    return rows;
+  }
+
+  // ---- Config tab ----
+  // GET /api/config's keys in the tab's tables, in this order; a key no
+  // group names (one added to skycued later) goes to a trailing Other.
+  var CONFIG_GROUPS = [
+    ['Receiver site', ['RECEIVER_LAT', 'RECEIVER_LON', 'RECEIVER_ALT_M', 'ANTENNA_HEIGHT_M']],
+    ['Decoders', ['SDR_1090_SERIAL', 'SDR_978_SERIAL', 'GAIN_1090', 'GAIN_978', 'DUMP978_RAW_PORT', 'DUMP978_JSON_PORT', 'READSB_JSON_PORT', 'INPUTS_FILE']],
+    ['Cue outputs', ['CUE_TCP_PORT', 'CUE_TCP_CONNECT', 'CUE_UDP_TARGETS', 'MIN_INTERVAL_S', 'MAX_INTERVAL_S', 'TRACK_TIMEOUT_S', 'KEYFRAME_INTERVAL_S']],
+    ['Recording', ['RECORD_DIR', 'RECORD_FORMATS', 'RECORD_MAX_GB', 'RECORD_RAW']],
+    ['Filters', ['MAX_RANGE_NM', 'MIN_ELEVATION_DEG', 'ALLOW_LIST_FILE', 'BLOCK_LIST_FILE']],
+    ['Web', ['WEB_BIND', 'WEB_PORT', 'TRAIL_SECONDS']],
+    ['FIS-B', ['FISB_ENABLE', 'FISB_EXPERIMENTAL', 'LOCATIONS_FILE']]];
+
+  // [{group, rows}] in CONFIG_GROUPS order, each group's rows in its key
+  // order; groups with no key are left out.
+  function groupConfig(keys) {
+    var byKey = {}, named = {};
+    keys.forEach(function (k) { byKey[k.key] = k; });
+    var out = [];
+    CONFIG_GROUPS.forEach(function (g) {
+      var rows = [];
+      g[1].forEach(function (name) {
+        named[name] = true;
+        if (byKey[name]) rows.push(byKey[name]);
+      });
+      if (rows.length) out.push({ group: g[0], rows: rows });
+    });
+    var other = keys.filter(function (k) { return !named[k.key]; });
+    if (other.length) out.push({ group: 'Other', rows: other });
+    return out;
+  }
+
+  // GET /api/config's daemon facts as the Config tab's Daemon rows: how it
+  // runs (a replay, or live and which built-in decoders it connects to) and
+  // the report locations it holds.
+  function daemonModeText(d) {
+    if (d.mode === 'replay' && d.replay) {
+      var r = d.replay;
+      return 'replay of ' + r.file + ' (' + (r.speed === 0 ? 'unpaced' : 'speed ' + r.speed) +
+        (r.loop ? ', looped' : '') + ')';
+    }
+    return 'live: ' + (d.readsb === false ? 'no readsb (--no-readsb)' : 'readsb') + ', ' +
+      (d.dump978 === false ? 'no dump978 (--no-uat)' : 'dump978');
+  }
+  function daemonLocationsText(d) {
+    var l = d.locations || {};
+    var learned = (l.learned || 0) + ' learned, ' + (l.learned_path ? 'kept in ' + l.learned_path : 'not saved this run');
+    var op = !l.operator_path ? 'no LOCATIONS_FILE'
+      : (l.operator || 0) + ' from ' + l.operator_path +
+        (l.operator_rejected ? ', ' + l.operator_rejected + ' lines rejected' : '') +
+        (l.operator_overflow ? ', ' + l.operator_overflow + ' over the cap' : '');
+    return [learned, op];
+  }
+
+  // A value as skycue.conf spells it, the same rules as conf_rewrite.cpp
+  // quoteValue: bare when every character is one of the grammar's unquoted
+  // ones, else "..." when it has none of " $ ` \, else '...' when it has no
+  // '; null when the grammar cannot hold it (both kinds, or a line break).
+  function confValue(v) {
+    if (/[\r\n]/.test(v)) return null;
+    if (/^[A-Za-z0-9_.,:/+@%=-]*$/.test(v)) return v;
+    if (!/["$`\\]/.test(v)) return '"' + v + '"';
+    if (v.indexOf("'") < 0) return "'" + v + "'";
+    return null;
+  }
+
+  // The whole configuration as skycue.conf text (the Config tab's copy):
+  // a `# <group>` line before each group, and before each key a comment
+  // with its source and whether it needs a restart, so every line is one
+  // parseConfigText and skycue-start.sh accept. A value the grammar cannot
+  // hold is left as a comment saying so.
+  function configText(cfg) {
+    var d = cfg.daemon || {}, out = '# ' + d.version + ', started ' + d.started + '\n';
+    groupConfig(cfg.keys || []).forEach(function (g) {
+      out += '# ' + g.group + '\n';
+      g.rows.forEach(function (r) {
+        var v = String(r.value), q = confValue(v);
+        out += '# ' + r.key + ': ' + r.source + (r.restart ? ', restart' : '') + '\n';
+        out += q === null
+          ? '# ' + r.key + ' cannot be written in skycue.conf (it holds both \' and one of " $ ` \\, or a line break): ' +
+            v.replace(/[\r\n]+/g, ' ') + '\n'
+          : r.key + '=' + q + '\n';
+      });
+    });
+    return out;
+  }
+
   function backoffMs(attempt) { return Math.min(5000, 500 * Math.pow(2, attempt)); }
 
   // skycued's data clock minus the browser's clock, after seeing the
@@ -332,6 +463,35 @@
   function radarNeedsFetch(drawnHead, head) {
     if (!head || !head.published) return false;
     return !drawnHead || drawnHead.published !== head.published;
+  }
+
+  // Raster layers by product. Icing and turbulence (70/71/90/91) come per
+  // 3-bit altitude code; a band's altitude is approximate (docs/web-api.md).
+  var RASTER_BAND_PRODUCTS = [70, 71, 90, 91];
+  function rasterBandFt(product, code) {
+    return (product === 71 || product === 91 ? 18000 : 2000) + 2000 * code;
+  }
+  // heads (status.rasters[]) -> one entry per product id, sorted: a band
+  // product lists codes 0..7 (key null: no layer at that code), any other
+  // has its head's key and no bands.
+  function rasterProducts(heads) {
+    var by = {};
+    (heads || []).forEach(function (h) {
+      var e = by[h.product];
+      if (!e) {
+        var band = RASTER_BAND_PRODUCTS.indexOf(h.product) >= 0, bands = [];
+        for (var c = 0; band && c < 8; c++) bands.push({ code: c, ft: rasterBandFt(h.product, c), key: null });
+        e = by[h.product] = { product: h.product, name: h.name || 'product ' + h.product, key: null, bands: bands };
+      }
+      if (!e.bands.length) e.key = h.key;
+      else if (typeof h.altitude_code === 'number' && e.bands[h.altitude_code]) e.bands[h.altitude_code].key = h.key;
+    });
+    return Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) { return a.product - b.product; });
+  }
+  function defaultBand(entry) {
+    var bands = (entry && entry.bands) || [];
+    for (var i = 0; i < bands.length; i++) if (bands[i].key) return bands[i].code;
+    return null;
   }
 
   // Age colouring of a text report: fresh < 30 min, aging < 90 min, else old
@@ -562,6 +722,268 @@
     return out;
   }
 
+  // ---- FIS-B weather text (spec §3.2-§3.3) ----
+
+  // Flight category from the standard thresholds: ceiling (lowest BKN/OVC/VV
+  // layer, ft) and prevailing visibility (statute miles); the worse wins.
+  var FLIGHT_CATEGORIES = ['VFR', 'MVFR', 'IFR', 'LIFR', 'unknown'];
+  var METRES_PER_SM = 1609.344;
+
+  // A report's whitespace tokens, the trailing '=' removed, up to (not
+  // including) the remarks.
+  function reportBody(text) {
+    var out = [];
+    var toks = String(text || '').split(/\s+/);
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i].replace(/=+$/, '');
+      if (t === 'RMK') break;
+      if (t) out.push(t);
+    }
+    return out;
+  }
+
+  // The first visibility group, in statute miles: 'P6SM' (6), 'M1/4SM' (just
+  // under 1/4), '3/4SM', mixed '1 1/2SM', a 4-digit metric group (metres;
+  // 9999 is 10 km or more), CAVOK (10 km or more). '////SM' is null.
+  function visibilitySm(tokens) {
+    for (var i = 0; i < tokens.length; i++) {
+      var t = tokens[i], m;
+      if (t === 'CAVOK') return 9999 / METRES_PER_SM;
+      if (/^\d{4}$/.test(t)) return Number(t) / METRES_PER_SM;
+      if (/^\/+SM$/.test(t)) return null;
+      m = /^([PM])?(?:(\d+)|(\d+)\/(\d+))SM$/.exec(t);
+      if (!m) continue;
+      if (m[4] !== undefined && Number(m[4]) === 0) return null;   // '1/0SM'
+      var v = m[2] !== undefined ? Number(m[2]) : Number(m[3]) / Number(m[4]);
+      if (m[2] === undefined && i > 0 && /^\d$/.test(tokens[i - 1])) v += Number(tokens[i - 1]);
+      return m[1] === 'M' ? v - 0.01 : v;
+    }
+    return null;
+  }
+
+  // The lowest BKN/OVC/VV height in ft; Infinity when there are sky groups
+  // (or CAVOK) but no ceiling; null when there is no sky group or a ceiling
+  // layer's height is '///'.
+  function ceilingFt(tokens) {
+    var sky = false, ceil = Infinity;
+    for (var i = 0; i < tokens.length; i++) {
+      var t = tokens[i];
+      if (/^(CLR|SKC|NSC|NCD|CAVOK)$/.test(t)) { sky = true; continue; }
+      var m = /^(FEW|SCT|BKN|OVC|VV)(\d{3}|\/\/\/)(CB|TCU|\/\/\/)?$/.exec(t);
+      if (!m) continue;
+      sky = true;
+      if (m[1] === 'FEW' || m[1] === 'SCT') continue;
+      if (m[2] === '///') return null;
+      ceil = Math.min(ceil, Number(m[2]) * 100);
+    }
+    return sky ? ceil : null;
+  }
+
+  function flightCategory(visSm, ceilFt) {
+    if (visSm === null || visSm === undefined || ceilFt === null || ceilFt === undefined) return 'unknown';
+    if (ceilFt < 500 || visSm < 1) return 'LIFR';
+    if (ceilFt < 1000 || visSm < 3) return 'IFR';
+    if (ceilFt <= 3000 || visSm <= 5) return 'MVFR';
+    return 'VFR';
+  }
+
+  // The first wind group (knots): dddssKT, dddssGggKT, VRBssKT, 00000KT.
+  function windGroup(tokens) {
+    for (var i = 0; i < tokens.length; i++) {
+      var m = /^(\d{3}|VRB)(\d{2,3})(?:G(\d{2,3}))?KT$/.exec(tokens[i]);
+      if (!m) continue;
+      var kt = Number(m[2]);
+      var variable = m[1] === 'VRB', calm = !variable && Number(m[1]) === 0 && kt === 0;
+      return {
+        dir: variable || calm ? null : Number(m[1]), kt: kt,
+        gust: m[3] !== undefined ? Number(m[3]) : null, calm: calm, variable: variable
+      };
+    }
+    return null;
+  }
+
+  function weatherSummary(station, groups) {
+    var vis = visibilitySm(groups), ceil = ceilingFt(groups);
+    return { station: station, category: flightCategory(vis, ceil), visSm: vis, ceilFt: ceil, wind: windGroup(groups) };
+  }
+
+  // A METAR or SPECI: its groups are searched only after the ddhhmmZ token
+  // and before any trend (BECMG, TEMPO, NOSIG; reportBody already stops at RMK).
+  var METAR_TREND = /^(BECMG|TEMPO|NOSIG)$/;
+  function parseMetar(text) {
+    var toks = reportBody(text);
+    if (toks[0] !== 'METAR' && toks[0] !== 'SPECI') return null;
+    var i = 1;
+    if (toks[i] === 'COR') i++;
+    var station = toks[i] || null;
+    var t = i + 1;
+    while (t < toks.length && !/^\d{6}Z$/.test(toks[t])) t++;
+    var groups = t < toks.length ? toks.slice(t + 1) : toks.slice(i + 1);
+    for (var g = 0; g < groups.length; g++) {
+      if (METAR_TREND.test(groups[g])) { groups = groups.slice(0, g); break; }
+    }
+    return weatherSummary(station, groups);
+  }
+
+  var TAF_HEAD = /^(TAF|TAF\.AMD|AMD|COR)$/;
+  var TAF_CHANGE = /^(FM\d{6}|TEMPO|BECMG|PROB\d\d)$/;
+  function tafStart(toks) {
+    var i = 0;
+    while (i < toks.length && TAF_HEAD.test(toks[i])) i++;
+    return i;
+  }
+
+  // A TAF's first group: the tokens after the valid period (dddd/dddd), up
+  // to the first change group.
+  function tafFirstGroup(text) {
+    var toks = reportBody(text);
+    var i = tafStart(toks) + 1;
+    if (i < toks.length && /^\d{6}Z$/.test(toks[i])) i++;
+    if (!(i < toks.length && /^\d{4}\/\d{4}$/.test(toks[i]))) return [];
+    var out = [];
+    for (i++; i < toks.length && !TAF_CHANGE.test(toks[i]); i++) out.push(toks[i]);
+    return out;
+  }
+
+  // A TAF's station and first-group summary; null for text that does not
+  // start with TAF, TAF.AMD, AMD or COR.
+  function parseTafFirst(text) {
+    var toks = reportBody(text);
+    var s = tafStart(toks);
+    if (s === 0) return null;
+    return weatherSummary(toks[s] || null, tafFirstGroup(text));
+  }
+
+  // The daemon's winds-aloft record: 'WINDS <stn> <ddhhmm>Z FT <level>...'
+  // then a line of values matched to the levels by order. Values: 'ddss',
+  // 'ddss+tt' / 'ddss-tt', or 'ddsstt' (sign implied negative); '9900' is
+  // light and variable; a direction code of 51..86 means speed >= 100 kt.
+  // Any other direction code (00, 37..50, 87..98, or 99 with a speed) makes
+  // the record null.
+  var WINDS_LEVELS_FT = [3000, 6000, 9000, 12000, 18000, 24000, 30000, 34000, 39000];
+  function parseWinds(text) {
+    var lines = String(text || '').split('\n');
+    var head = lines[0].trim().split(/\s+/);
+    var vals = lines.slice(1).join(' ').trim().split(/\s+/).filter(Boolean);
+    var tm = /^(\d{6})Z$/.exec(head[2] || '');
+    if (head[0] !== 'WINDS' || !head[1] || !tm || head[3] !== 'FT') return null;
+    var fts = head.slice(4);
+    if (!fts.length || fts.length !== vals.length) return null;
+    var levels = [];
+    for (var i = 0; i < fts.length; i++) {
+      var m = /^(\d{2})(\d{2})([+-]\d{2}|\d{2})?$/.exec(vals[i]);
+      if (!/^\d+$/.test(fts[i]) || !m) return null;
+      var d = Number(m[1]), s = Number(m[2]);
+      var temp = m[3] === undefined ? null : (/^[+-]/.test(m[3]) ? Number(m[3]) : -Number(m[3]));
+      var lv = d === 99 && s === 0;
+      if (!lv && !(d >= 1 && d <= 36) && !(d >= 51 && d <= 86)) return null;
+      if (!lv && d >= 51) { d -= 50; s += 100; }
+      levels.push({ ft: Number(fts[i]), dir: lv ? null : d * 10, kt: lv ? 0 : s, temp: temp, lv: lv });
+    }
+    return { station: head[1], valid: tm[1], levels: levels };
+  }
+
+  function windsLevel(parsed, ft) {
+    if (!parsed) return null;
+    for (var i = 0; i < parsed.levels.length; i++) if (parsed.levels[i].ft === ft) return parsed.levels[i];
+    return null;
+  }
+
+  // records [{period_h, valid (ISO)}]: the period_h whose valid time is
+  // nearest nowMs (the first on a tie).
+  function nearestWindsPeriod(records, nowMs) {
+    var best = null, bestD = Infinity;
+    (records || []).forEach(function (r) {
+      var d = Math.abs(Date.parse(r.valid) - nowMs);
+      if (d < bestD) { bestD = d; best = r.period_h; }
+    });
+    return best;
+  }
+
+  // The winds pickers' options: the period_h values present, and the levels
+  // (ft) of that period's parsed records, both sorted ascending. parse
+  // (optional) maps a record to its parseWinds result (the page's cache).
+  function windsPeriods(records) {
+    var seen = {};
+    (records || []).forEach(function (r) { if (typeof r.period_h === 'number') seen[r.period_h] = true; });
+    return Object.keys(seen).map(Number).sort(function (a, b) { return a - b; });
+  }
+  function windsLevelsFor(records, period, parse) {
+    var seen = {};
+    (records || []).forEach(function (r) {
+      if (r.period_h !== period) return;
+      var p = parse ? parse(r) : parseWinds(r.text);
+      if (p) p.levels.forEach(function (l) { seen[l.ft] = true; });
+    });
+    return Object.keys(seen).map(Number).sort(function (a, b) { return a - b; });
+  }
+
+  // A PIREP: its station, UUA (urgent) or UA, and the /OV group when it is a
+  // location id optionally followed by rrrddd (radial, nm); routes and
+  // free-text positions ('SJX-GRB', '4 W CVG') give ov null. The radial is
+  // magnetic as reported; pirepPosition applies it as a true bearing.
+  function parsePirep(text) {
+    var s = String(text || '');
+    var toks = s.split(/\s+/).filter(Boolean);
+    var station = (toks[0] === 'PIREP' ? toks[1] : toks[0]) || null;
+    var headToks = s.split('/')[0].split(/\s+/);
+    var ov = null;
+    var g = /\/OV([^/]*)/.exec(s);
+    var m = g && /^([A-Z0-9]{3,4})(?:\s?(\d{3})(\d{3}))?$/.exec(g[1].trim());
+    if (m) {
+      ov = { id: m[1], radial: m[2] !== undefined ? Number(m[2]) : null, nm: m[3] !== undefined ? Number(m[3]) : null };
+    }
+    return { station: station, urgent: headToks.indexOf('UUA') >= 0, ov: ov };
+  }
+
+  // Station resolution (spec §3.2), first hit wins: METAR/TAF ids verbatim;
+  // winds ids and 3-character PIREP /OV ids as K, P, C + id, then verbatim.
+  var WINDS_PREFIXES = ['K', 'P', 'C'];
+  function stationCandidates(kind, id) {
+    var prefixed = kind === 'winds' || (kind === 'pirep' && String(id).length === 3);
+    if (!prefixed) return [id];
+    return WINDS_PREFIXES.map(function (p) { return p + id; }).concat([id]);
+  }
+
+  function resolveStation(kind, id, index) {
+    var c = stationCandidates(kind, id);
+    for (var i = 0; i < c.length; i++) {
+      if (index && Object.prototype.hasOwnProperty.call(index, c[i])) return index[c[i]];
+    }
+    return null;
+  }
+
+  // The point nm along a great circle from lat/lon on the initial bearing,
+  // on the same sphere as rangeNm. The bearing is true (no magnetic variation).
+  function destinationPoint(lat, lon, brgDeg, nm) {
+    var d = nm * METRES_PER_NM / EARTH_RADIUS_M, b = brgDeg * DEG, p1 = lat * DEG, l1 = lon * DEG;
+    var sp2 = Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b);
+    var p2 = Math.asin(Math.max(-1, Math.min(1, sp2)));
+    var l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * sp2);
+    var lonOut = ((l2 / DEG + 540) % 360) - 180;
+    return [p2 / DEG, lonOut];
+  }
+
+  // A PIREP's position: its /OV id resolved, then moved rrr/ddd when given.
+  // Approximation: the magnetic radial is used as a true bearing (magnetic
+  // variation ignored), so the point can be off by about 1-2 nm at 30 nm.
+  function pirepPosition(parsed, index) {
+    if (!parsed || !parsed.ov) return null;
+    var pos = resolveStation('pirep', parsed.ov.id, index);
+    if (!pos) return null;
+    if (parsed.ov.radial === null || parsed.ov.nm === null) return pos;
+    return destinationPoint(pos[0], pos[1], parsed.ov.radial, parsed.ov.nm);
+  }
+
+  // A wind barb's parts: speed rounded to the nearest 5 kt, then 50 kt
+  // pennants, 10 kt full barbs and a 5 kt half barb; calm when it rounds to 0.
+  function barbParts(kt) {
+    var r = Math.round(kt / 5) * 5;
+    if (!(r > 0)) return { calm: true, pennants: 0, full: 0, half: 0 };
+    var pennants = Math.floor(r / 50), rem = r - pennants * 50;
+    return { calm: false, pennants: pennants, full: Math.floor(rem / 10), half: rem % 10 ? 1 : 0 };
+  }
+
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
@@ -570,6 +992,10 @@
     sortTracks: sortTracks, graticuleStep: graticuleStep, parentTile: parentTile,
     tileBounds: tileBounds, tileInsideRegions: tileInsideRegions,
     dropRemovesMarker: dropRemovesMarker,
+    CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
+    filterHistoryRows: filterHistoryRows,
+    CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText, confValue: confValue,
+    daemonModeText: daemonModeText, daemonLocationsText: daemonLocationsText,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,
@@ -584,7 +1010,16 @@
     INPUT_TYPES: INPUT_TYPES, validateInputDef: validateInputDef, inputFields: inputFields, inputDot: inputDot,
     inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, rejectedText: rejectedText,
     inputsSummary: inputsSummary,
-    gpsStatusText: gpsStatusText, receiverStatusText: receiverStatusText
+    gpsStatusText: gpsStatusText, receiverStatusText: receiverStatusText,
+    FLIGHT_CATEGORIES: FLIGHT_CATEGORIES, reportBody: reportBody, visibilitySm: visibilitySm,
+    ceilingFt: ceilingFt, flightCategory: flightCategory, windGroup: windGroup, parseMetar: parseMetar,
+    tafFirstGroup: tafFirstGroup, parseTafFirst: parseTafFirst,
+    WINDS_LEVELS_FT: WINDS_LEVELS_FT, parseWinds: parseWinds, windsLevel: windsLevel,
+    nearestWindsPeriod: nearestWindsPeriod, windsPeriods: windsPeriods, windsLevelsFor: windsLevelsFor,
+    RASTER_BAND_PRODUCTS: RASTER_BAND_PRODUCTS, rasterBandFt: rasterBandFt, rasterProducts: rasterProducts,
+    defaultBand: defaultBand, parsePirep: parsePirep,
+    WINDS_PREFIXES: WINDS_PREFIXES, stationCandidates: stationCandidates, resolveStation: resolveStation,
+    destinationPoint: destinationPoint, pirepPosition: pirepPosition, barbParts: barbParts
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -30,6 +30,23 @@ struct ForwarderConfig {
     size_t max_client_queue_bytes = 1 << 20; // a TCP client with more unsent bytes is disconnected
 };
 
+// "addr:port" for a numeric address, an IPv6 one in brackets ("[::1]:30500").
+std::string endpointText(const std::string& address, uint16_t port);
+
+// One open TCP connection, accepted or dialled (see Forwarder::tcpClients).
+struct CueTcpClient {
+    std::string endpoint;                                   // the peer "addr:port"
+    bool dialled = false;                                   // one of tcp_connect_targets, else accepted
+    std::chrono::system_clock::time_point connected_since;  // wall clock at accept/connect
+    uint64_t bytes_sent = 0;                                // bytes whose async_write completed
+};
+
+// One resolved UDP target (see Forwarder::udpTargets).
+struct CueUdpTarget {
+    std::string endpoint;         // "host:port" as configured
+    uint64_t datagrams_sent = 0;  // sends completed without error
+};
+
 // Threading: the Forwarder lives on the caller's io_context. Every method,
 // the constructor and the destructor are called from the thread running that
 // io_context (or while it is not running); there are no locks.
@@ -78,6 +95,8 @@ public:
 
     size_t tcpClientCount() const; // accepted and outbound connections
     size_t udpTargetCount() const; // UDP targets that resolved at start(); 0 before
+    std::vector<CueTcpClient> tcpClients() const; // open sessions, by session id
+    std::vector<CueUdpTarget> udpTargets() const; // resolved targets, config order
     // Frames handed to a destination: one per frame per TCP client or UDP target.
     uint64_t framesSent() const;
     // Port the TCP server listens on (useful with tcp_listen_ephemeral); 0

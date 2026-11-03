@@ -31,7 +31,11 @@ cmake --build build-skycue
 ctest --test-dir build-skycue -R ui_playwright --output-on-failure
 ```
 
-or directly: `bash run.sh <skycued> <fixtures dir> <build>/www-stage <skycue-pingsim>`.
+or directly: `bash run.sh <skycued> <fixtures dir> <build>/www-stage <skycue-pingsim> [playwright args]`
+with absolute paths (the reconnect case restarts skycued from the spec's
+directory); extra arguments go to `playwright test`, e.g. `--grep
+range_change --project desktop-1920`. Every daemon it started is stopped
+however it ends, including on SIGINT, SIGTERM or SIGHUP.
 
 `run.sh` writes a temporary `skycue.conf` with free `WEB_PORT` and
 `CUE_TCP_PORT`, starts skycued with `--replay ... --replay-speed 1

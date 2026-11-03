@@ -25,6 +25,7 @@ add_library(skycued_core STATIC
   src/fisb/fisb_json.cpp
   src/fisb/fisb_store.cpp
   src/fisb/global_block.cpp
+  src/fisb/location_index.cpp
   src/fisb/segment_assembler.cpp
   src/fisb/text_products.cpp
   src/fisb/twgo.cpp
@@ -66,6 +67,7 @@ add_library(skycued_core STATIC
   src/stats_report.cpp
   src/track_table.cpp
   src/web_api.cpp
+  src/web_config.cpp
   src/web_fisb.cpp
   src/web_inputs.cpp
   src/web_server.cpp)

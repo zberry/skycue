@@ -102,6 +102,8 @@
         <button type="button" role="tab" id="tab-track" aria-controls="pane-track" aria-selected="true">Track</button>
         <button type="button" role="tab" id="tab-weather" aria-controls="pane-weather" aria-selected="false">Weather</button>
         <button type="button" role="tab" id="tab-receiver" aria-controls="pane-receiver" aria-selected="false">Receiver</button>
+        <button type="button" role="tab" id="tab-cues" aria-controls="pane-cues" aria-selected="false">Cues</button>
+        <button type="button" role="tab" id="tab-config" aria-controls="pane-config" aria-selected="false">Config</button>
       </div>
       <button type="button" id="details-close" aria-label="Close (Esc)">×</button>
     </div>
@@ -124,6 +126,17 @@
       </div>
       <input id="wx-filter" type="search" placeholder="Station prefix (e.g. KSF)" aria-label="Filter by station prefix"
         autocomplete="off" spellcheck="false">
+      <div id="wx-reports">
+        <h3>Reports <span id="wx-positioned"></span></h3>
+        <span class="wx-tg"><label><input type="checkbox" id="wx-show-metar" checked> METAR</label> <span class="n" id="wx-n-metar"></span></span>
+        <span class="wx-tg"><label><input type="checkbox" id="wx-show-taf" checked> TAF</label> <span class="n" id="wx-n-taf"></span></span>
+        <span class="wx-tg"><label><input type="checkbox" id="wx-show-pirep" checked> PIREP</label> <span class="n" id="wx-n-pirep"></span></span>
+        <span class="wx-tg"><label><input type="checkbox" id="wx-show-winds" checked> Winds</label> <span class="n" id="wx-n-winds"></span></span>
+        <div id="wx-winds-pick">
+          <label>Winds forecast <select id="wx-winds-period"></select></label>
+          <label>at <select id="wx-winds-level"></select></label>
+        </div>
+      </div>
       <p id="wx-summary" class="msg" role="status"></p>
       <div id="wx-list"></div>
     </section>
@@ -188,6 +201,37 @@
       <ul id="stations-list" class="rx-list"></ul>
       <h2>Decoder health</h2>
       <table id="decoder-health" class="kv"><tbody></tbody></table>
+    </section>
+    <section id="pane-cues" role="tabpanel" aria-labelledby="tab-cues" hidden>
+      <h2>Counters</h2>
+      <table id="cues-counters" class="kv"><tbody></tbody></table>
+      <h2>Recent decisions</h2>
+      <label class="check cues-drops-only"><input type="checkbox" id="cues-drops-only"> Drops only</label>
+      <div class="cues-scroll">
+        <table id="cues-recent" class="cues-table">
+          <thead><tr><th>Time</th><th>Address</th><th>Callsign</th><th>Decision</th><th>Reason</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <h2>Filter changes</h2>
+      <ul id="cues-filters" class="rx-list"></ul>
+      <h2>Cue clients</h2>
+      <table id="cues-clients" class="cues-table">
+        <thead><tr><th>Endpoint</th><th>Direction</th><th>Since</th><th>Sent</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+    <section id="pane-config" role="tabpanel" aria-labelledby="tab-config" hidden>
+      <div class="config-actions">
+        <button type="button" id="config-refresh">Refresh</button>
+        <button type="button" id="config-copy" disabled>Copy as text</button>
+        <span id="config-copy-status" class="msg" role="status"></span>
+      </div>
+      <textarea id="config-copy-text" readonly hidden aria-label="Configuration as text"></textarea>
+      <p id="config-msg" class="msg" role="status"></p>
+      <h2>Daemon</h2>
+      <table id="config-daemon" class="kv"><tbody></tbody></table>
+      <div id="config-groups"></div>
     </section>
   </aside>
 </main>

@@ -22,7 +22,8 @@ get_filename_component(_skycue_example_conf
 add_executable(test_config test_config.cpp)
 target_link_libraries(test_config PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_config PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}")
+  SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}"
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_config)
 add_test(NAME config COMMAND test_config)
 
@@ -142,7 +143,7 @@ skycue_set_warnings(test_engine)
 add_test(NAME engine COMMAND test_engine)
 set_tests_properties(engine PROPERTIES TIMEOUT 120)
 
-foreach(_t engine_api recording_independence runtime_config)
+foreach(_t engine_api recording_independence runtime_config web_config)
   add_executable(test_${_t} test_${_t}.cpp)
   target_link_libraries(test_${_t} PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
   target_compile_definitions(test_${_t} PRIVATE BOOST_TEST_DYN_LINK
@@ -255,6 +256,13 @@ target_link_libraries(test_fisb_store PRIVATE skycued_core Boost::unit_test_fram
 target_compile_definitions(test_fisb_store PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_fisb_store)
 add_test(NAME fisb_store COMMAND test_fisb_store)
+
+# LocationIndex: learned report positions, persistence, operator CSV (design §3.2).
+add_executable(test_location_index test_location_index.cpp)
+target_link_libraries(test_location_index PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_location_index PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_location_index)
+add_test(NAME location_index COMMAND test_location_index)
 
 # FisbDecoder end to end, Engine/Recorder/replay integration.
 add_executable(test_fisb_decoder test_fisb_decoder.cpp)

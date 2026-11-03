@@ -64,6 +64,15 @@
 // writeFisb, "time" = the data clock) and one fisb_text / fisb_shape /
 // fisb_radar / fisb_raster / fisb_expired event (FisbNotice).
 //
+// Locations (design §3.2): every TWGO record with graphics is fed to a
+// fisb::LocationIndex; an id learned for the first time, or a learned
+// position now kLocationMoveDeg (1e-4 degrees) or more from the one last
+// announced (fisb::LocationAnnouncer), emits fisb_location (after the
+// record's own event). The learned set is saved (atomicWrite) to the
+// loadLocations file on the 1 s tick when it changed and
+// kLocationsSaveInterval has passed since the last attempt, and by stop();
+// a failed save logs one WARN per run of failures and is retried.
+//
 // Threading: lives on the caller's io_context; call everything (including
 // every method below) from its thread. The Forwarder and the recorders must
 // outlive the Engine.
@@ -80,18 +89,25 @@
 #include "change_detector.hpp"
 #include "fisb/fisb_decoder.hpp"
 #include "fisb/fisb_store.hpp"
+#include "fisb/location_index.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace skycued {
+
+constexpr std::chrono::seconds kLocationsSaveInterval{60};
 
 class Engine {
 public:
@@ -122,6 +138,7 @@ public:
 
     InputManager& inputs() { return *inputs_; }
     const InputManager& inputs() const { return *inputs_; }
+    const Forwarder& forwarder() const { return forwarder_; }
 
     // Every track in the table with its filter decision now, the filters and
     // the stats. Changes nothing.
@@ -138,6 +155,22 @@ public:
     // FisbStore::blocksCopied (a diagnostic for tests).
     uint64_t fisbBlocksCopied() const;
 
+    // Loads the learned file (missing: empty; malformed: one ERROR line, renamed "<path>.rejected", empty;
+    // unreadable: one ERROR line, renamed "<path>.unreadable-<UTC stamp>", empty; not a regular file, or the
+    // rename fails: one ERROR line, empty, and nothing is saved this run) and the
+    // operator CSV (empty path: none; unreadable: throws std::runtime_error naming it; rejected lines: one WARN with
+    // the count and the first line number). Call before start(). Remembers learned_path for saving ("": never saved).
+    void loadLocations(const std::string& learned_path, const std::string& operator_csv_path);
+    // Every known location id with its position, learned over operator (LocationIndex::merged()).
+    std::map<std::string, std::pair<double, double>> locationPositions() const;
+    // For GET /api/config: the learned file (fisb-locations.json; "" when it
+    // is not saved this run), the operator CSV ("" for none) and the index.
+    const std::string& learnedLocationsPath() const { return locations_path_; }
+    const std::string& operatorLocationsPath() const { return operator_locations_path_; }
+    const fisb::LocationIndex& locationIndex() const { return locations_; }
+    // The tick's save interval (kLocationsSaveInterval unless set; tests shorten it). 0: every tick while changed.
+    void setLocationsSaveInterval(std::chrono::seconds interval) { locations_save_interval_ = interval; }
+
     // Live changes (see the top of this file). `origin` names who made the
     // change in the record ("ui", say). Ignored after stop().
     // Throws std::invalid_argument, changing nothing, unless max_range_nm is
@@ -151,6 +184,11 @@ public:
     void removeListEntry(ListKind list, const std::string& entry, const std::string& origin);
     const IdList& allowList() const { return filters_.allow(); }
     const IdList& blockList() const { return filters_.block(); }
+    // The last filter changes, oldest first, at most kFilterHistoryMax: the
+    // startup state (pushed by start() unless a setFilterConfig before it
+    // already pushed one), then one per setFilterConfig, whether or not
+    // there is a sent recorder.
+    std::vector<FilterChange> filterHistory() const;
 
     // The one event sink (replaces any earlier one; empty to clear). It must
     // not call the live-change methods or stop().
@@ -170,24 +208,31 @@ private:
     bool dump978Off() const;
     void handleUplink(std::chrono::system_clock::time_point when, const std::string& hex);
     void handleFisbEvents(std::vector<fisb::FisbEvent>& events);
+    // Feeds a TWGO record to the location index; the fisb_location event to emit, if any.
+    std::optional<EngineEvent> learnLocation(const fisb::TwgoRecord& record);
+    // Writes the learned locations now (the caller checks dirty()).
+    void saveLocations();
     // `positioned`: the observation carried a position (an observed event follows).
     void process(TrackState& state, std::chrono::steady_clock::time_point now, bool positioned);
     void decide(TrackState& state, std::chrono::steady_clock::time_point now);
     void forward(TrackState& state, const FilterResult& result, std::chrono::steady_clock::time_point now);
-    void drop(TrackState& state, skycue::DropReason reason);
-    void countDrop(skycue::DropReason reason);
+    void drop(TrackState& state, skycue::DropReason reason, std::optional<Decision> decision = std::nullopt);
+    void countDrop(skycue::DropReason reason, std::optional<Decision> decision = std::nullopt);
     void applied(const std::string& note, EventKind kind);
     void reevaluate();
     TrackSnapshot trackSnapshot(const TrackState& state, const FilterResult& result) const;
     std::chrono::system_clock::time_point dataNow() const;
     void advanceDataClock(std::chrono::system_clock::time_point t);
     void emit(const EngineEvent& event);
-    void emitDrop(skycue::TrackId id, skycue::DropReason reason);
+    void emitDrop(const TrackState& state, skycue::DropReason reason, std::optional<Decision> decision);
+    // For a track already removed from the table (tick()'s expiry path).
+    void emitDrop(skycue::TrackId id, const std::optional<std::string>& callsign, skycue::DropReason reason);
     void dropAllForwarded(skycue::DropReason reason);
     void tick();
     void armTick();
     void armStats();
     std::string filterDescription() const;
+    void pushFilterChange(const std::string& origin);
 
     boost::asio::io_context& io_;
     Config config_;
@@ -201,8 +246,16 @@ private:
     std::unique_ptr<fisb::FisbDecoder> fisb_decoder_;  // null with FISB_ENABLE=no
     fisb::FisbStore fisb_store_;
     std::optional<std::chrono::system_clock::time_point> last_uplink_;
+    fisb::LocationIndex locations_;
+    fisb::LocationAnnouncer announced_;  // what the fisb_location items said
+    std::string locations_path_;  // fisb-locations.json; "" until loadLocations
+    std::string operator_locations_path_;  // LOCATIONS_FILE resolved; "" for none
+    std::chrono::steady_clock::time_point last_locations_save_{};  // the last save attempt (or start())
+    bool locations_save_failing_ = false;                           // the last save attempt failed
+    std::chrono::seconds locations_save_interval_ = kLocationsSaveInterval;
 
     FilterSet filters_;
+    std::deque<FilterChange> filter_history_;  // at most kFilterHistoryMax
     Thresholds thresholds_;
     std::chrono::seconds track_timeout_;
     TrackTable table_;
@@ -216,6 +269,7 @@ private:
     unsigned lost_gen_ = 0;
     uint64_t observations_ = 0, sent_updates_ = 0, sent_drops_ = 0;
     uint64_t drops_timeout_ = 0, drops_filtered_ = 0, drops_source_lost_ = 0;
+    uint64_t drops_blocked_ = 0, drops_out_of_range_ = 0, drops_below_elevation_ = 0, drops_no_position_ = 0;
     uint64_t uplink_duplicates_ = 0;
     uint32_t web_clients_ = 0;
     std::function<void(const EngineEvent&)> sink_;

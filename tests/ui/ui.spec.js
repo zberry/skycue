@@ -51,13 +51,6 @@ test.afterEach(async () => {
   expect(offOrigin, 'requests to other hosts').toEqual([]);
 });
 
-// The page asks for overlays/meta.json to learn whether there are overlays
-// (scripts/make-overlays.sh); most of these skycueds' www directories have
-// none, so the browser's console error for that one 404 is expected.
-function overlaysAbsent(m) {
-  return /\/overlays\/meta\.json$/.test(m.location().url || '') && /404/.test(m.text());
-}
-
 async function openPage(page) {
   await page.goto('/');
   await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
@@ -80,7 +73,7 @@ async function selectTarget(page) {
 
 test('page_loads_without_console_errors', async ({ page }) => {
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error' && !overlaysAbsent(m)) errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   await openPage(page);
   await expect(page.locator('#map.leaflet-container')).toBeVisible();
@@ -193,21 +186,30 @@ test('range_change_moves_ring_and_drops', async ({ page }) => {
   await expect(page.locator('#overlay-indicator')).toBeVisible();
   // Aircraft beyond 20 nm turn grey, and the page agrees with skycued
   // (tracks right at the ring may change between the two reads: skipped).
+  // The change drops every forwarded track beyond the ring at once, and each
+  // drop recolours its marker, so this holds whichever aircraft the replay
+  // happens to be observing (some go unobserved for many seconds).
   await expect.poll(async () => {
     const s = await state();
     const ms = await page.evaluate(() => window.skycueApp.markers());
-    let bad = 0, far = 0;
+    const bad = [];
+    let far = 0;
     for (const m of ms) {
       const t = s.tracks.find((x) => x.hex === m.hex);
       if (!t || t.range_nm === undefined || Math.abs(t.range_nm - 20) < 1.5) continue;
-      if (t.range_nm > 20) {
-        far++;
-        if (m.decision !== 'out_of_range') bad++;
-      }
-      if (COLOR[t.decision] !== m.decision) bad++;
+      if (t.range_nm > 20) far++;
+      if ((t.range_nm > 20 && m.decision !== 'out_of_range') || COLOR[t.decision] !== m.decision)
+        bad.push(`${m.hex}: page ${m.decision}, skycued ${t.decision}`);
     }
-    return far >= 5 && bad === 0;
-  }, { timeout: 5000 }).toBe(true);
+    return far >= 5 ? bad : [`only ${far} tracks beyond the ring`];
+  }, { timeout: 5000 }).toEqual([]);
+  // The same, driven explicitly: a filtered drop alone recolours a marker
+  // that sees no further observation.
+  await page.evaluate(() => {
+    window.skycueApp.injectTestMarker({ hex: 'fff001', addr_type: 'icao', lat: 39.9, lon: -77.0, decision: 'send', track_deg: 0 });
+    window.skycueApp.injectFisbItems([{ type: 'drop', hex: 'fff001', addr_type: 'icao', reason: 'filtered', decision: 'out_of_range' }]);
+  });
+  expect((await markerOf(page, 'fff001')).decision).toBe('out_of_range');
   // Back to the baseline value.
   const res = await api('/api/filters', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_range_nm: null }) });
@@ -391,6 +393,159 @@ test('screenshots', async ({ page }, testInfo) => {
   expect(nums).toEqual([...nums].sort((a, b) => b - a));
   await th.click();
   await page.screenshot({ path: testInfo.outputPath(`skycue-table-${testInfo.project.name}.png`), fullPage: true });
+  // Back to the map: the Cues tab (a block and its removal make TARGET's rows) and the Config tab.
+  await page.locator('#table-toggle').click();
+  await expect(page.locator('#table-view')).toBeHidden();
+  await page.locator('#tab-cues').click();
+  expect(await blockTarget(page, 'add')).toBe(200);
+  expect(await blockTarget(page, 'remove')).toBe(200);
+  await expect.poll(() => page.locator('#cues-recent tbody tr').count(), { timeout: 15000 }).toBeGreaterThan(1);
+  await expect(page.locator('#cues-filters li').first()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath(`skycue-cues-${testInfo.project.name}.png`), fullPage: true });
+  await page.locator('#tab-config').click();
+  await expect(page.locator('#pane-config tr[data-key="RECEIVER_LAT"] .cfg-value')).toHaveText('38.9');
+  await page.screenshot({ path: testInfo.outputPath(`skycue-config-${testInfo.project.name}.png`), fullPage: true });
+});
+
+// ---- Cues tab ------------------------------------------------------------------
+const net = require('net');
+const TARGET_KEY = `${TARGET}|icao`;
+// Adds TARGET to or removes it from the block list: a same-origin POST from the page.
+const blockTarget = (page, op) => page.evaluate(([o, hex]) => fetch('api/lists/block', { method: 'POST',
+  headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [o]: [hex] }) }).then((r) => r.status), [op, TARGET]);
+test('cues_tab_rows_counters_history_clients', async ({ page }) => {
+  const errors = watchErrors(page);
+  const sock = net.connect(Number(process.env.SKYCUE_CUE_PORT), '127.0.0.1');
+  await new Promise((ok) => sock.once('connect', ok));
+  try {
+    await openPage(page); await waitMarkers(page, 10);
+    await page.locator('#wx-toggle').click();
+    await page.locator('#tab-cues').click();
+    await expect(page.locator('#pane-cues')).toBeVisible();
+    // a block makes a filtered drop row with decision "blocked", its removal a send at once (this
+    // replay's own sends can be 40 s apart)
+    expect(await blockTarget(page, 'add')).toBe(200);
+    await expect(page.locator(`#cues-recent tbody tr[data-key="${TARGET_KEY}"]`, { hasText: 'blocked' }).first()).toBeVisible({ timeout: 10000 });
+    expect(await blockTarget(page, 'remove')).toBe(200);
+    await expect.poll(() => page.locator('#cues-recent tbody tr').count(), { timeout: 15000 }).toBeGreaterThan(1);
+    await expect(page.locator('#cues-recent tbody tr').first()).toContainText('sent');
+    // the rendered counters match the API within the 1 s stats cadence
+    const shown = async (k) => Number(await page.locator(`#cues-counters tr[data-counter="${k}"] td.v`).innerText());
+    const st = (await api('/api/stats')).body;
+    expect(Math.abs((await shown('sent_updates')) - st.sent_updates)).toBeLessThanOrEqual(st.sent_updates * 0.2 + 50);
+    expect(st.drops_blocked).toBeGreaterThan(0);
+    for (const k of ['drops_blocked', 'drops_out_of_range', 'drops_below_elevation', 'drops_no_position'])
+      await expect.poll(async () => (await shown(k)) === (await api('/api/stats')).body[k], { timeout: 3000 }).toBe(true);
+    expect(st.drops_filtered).toBe(st.drops_blocked + st.drops_out_of_range + st.drops_below_elevation + st.drops_no_position);
+    await expect(page.locator('#cues-filters li').last()).toContainText('startup');
+    // a range change from the page is the newest entry, origin "ui", old → new (a wider range drops nothing)
+    const r0 = (await api('/api/filters')).body.max_range_nm;
+    const putRange = (v) => page.evaluate((x) => fetch('api/filters', { method: 'PUT',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ max_range_nm: x }) }).then((r) => r.status), v);
+    expect(await putRange(r0 + 1)).toBe(200);
+    try {
+      await expect(page.locator('#cues-filters li').first()).toContainText(`ui: max range ${r0} → ${r0 + 1} nm`);
+    } finally { expect(await putRange(null)).toBe(200); }
+    // this test's own cue connection is listed
+    await expect(page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` })).toHaveCount(1, { timeout: 10000 });
+    await expect(page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` })).toContainText('accepted');
+  } finally { sock.destroy(); }
+  expect(errors).toEqual([]);
+});
+test('cues_row_click_selects_track', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.locator('#wx-toggle').click(); await page.locator('#tab-cues').click();
+  // TARGET's own sends can be 40 s apart in this replay, so a block and its removal make its row now
+  expect(await blockTarget(page, 'add')).toBe(200);
+  expect(await blockTarget(page, 'remove')).toBe(200);
+  const row = page.locator(`#cues-recent tbody tr[data-key="${TARGET_KEY}"]`).first();
+  await expect(row).toBeVisible({ timeout: 15000 });
+  await row.click();
+  await expect(page.locator('#tab-track')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#details [data-field="hex"]')).toHaveText(TARGET);
+});
+test('cues_recent_drops_only_kept_in_this_browser', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.locator('#wx-toggle').click(); await page.locator('#tab-cues').click();
+  const box = page.locator('#cues-drops-only');
+  await expect(box).not.toBeChecked();   // default off: updates and drops
+  expect(await blockTarget(page, 'add')).toBe(200);
+  expect(await blockTarget(page, 'remove')).toBe(200);
+  const rows = page.locator('#cues-recent tbody tr');
+  await expect(rows.filter({ hasText: 'sent' }).first()).toBeVisible({ timeout: 15000 });
+  await box.check();
+  // Drops only: TARGET's filtered drop is there, no update row is.
+  await expect(page.locator(`#cues-recent tbody tr[data-key="${TARGET_KEY}"]`, { hasText: 'filtered' }).first()).toBeVisible();
+  const reasons = await page.locator('#cues-recent tbody tr td:nth-child(5)').allTextContents();
+  expect(reasons.length).toBeGreaterThan(0);
+  expect(reasons.filter((r) => r === 'sent')).toEqual([]);
+  // Kept across a reload (localStorage), then cleared again.
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await page.locator('#wx-toggle').click(); await page.locator('#tab-cues').click();
+  await expect(page.locator('#cues-drops-only')).toBeChecked();
+  await page.locator('#cues-drops-only').uncheck();
+  expect(await page.evaluate(() => window.localStorage.getItem('skycue.cues.dropsOnly'))).toBe('0');
+});
+
+test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.locator('#wx-toggle').click();
+  // Five tabs on one row at 13 px in a 340 px panel (both viewports are >= 1280 px).
+  const tabs = await page.locator('.tabs [role="tab"]').evaluateAll((ts) => ts.map((t) =>
+    [Math.round(t.getBoundingClientRect().top), getComputedStyle(t).fontSize]));
+  expect(tabs).toHaveLength(5);
+  expect(new Set(tabs.map((t) => t[0])).size).toBe(1);
+  expect(new Set(tabs.map((t) => t[1]))).toEqual(new Set(['13px']));
+  expect(await page.locator('#details').evaluate((e) => e.getBoundingClientRect().width)).toBe(340);
+  // Recent decisions wraps rather than scrolling sideways.
+  await page.locator('#tab-cues').click();
+  expect(await blockTarget(page, 'add')).toBe(200);
+  expect(await blockTarget(page, 'remove')).toBe(200);
+  await expect.poll(() => page.locator('#cues-recent tbody tr').count(), { timeout: 15000 }).toBeGreaterThan(1);
+  const scroll = page.locator('#pane-cues .cues-scroll');
+  expect(await scroll.evaluate((e) => e.scrollWidth - e.clientWidth)).toBeLessThanOrEqual(0);
+});
+
+// ---- Config tab ----------------------------------------------------------------
+test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
+  const port = new URL(BASE).port;
+  await openPage(page);
+  await page.locator('#wx-toggle').click();
+  await page.locator('#tab-config').click();
+  const row = (k) => page.locator(`#pane-config tr[data-key="${k}"]`);
+  await expect(row('RECEIVER_LAT').locator('.cfg-value')).toHaveText('38.9');
+  await expect(row('RECEIVER_LAT').locator('.cfg-source')).toHaveText('conf');
+  await expect(row('WEB_PORT').locator('.cfg-value')).toHaveText(port);
+  await expect(row('WEB_PORT').locator('.cfg-restart')).toContainText('restart');
+  await expect(row('MIN_INTERVAL_S').locator('.cfg-source')).toHaveText('default');
+  await expect(row('MAX_RANGE_NM').locator('.cfg-restart')).not.toContainText('restart');
+  await expect(page.locator('#pane-config table[data-group="FIS-B"] tr[data-key="LOCATIONS_FILE"]')).toHaveCount(1);
+  await expect(page.locator('#config-daemon')).toContainText('skycued');
+  // run.sh's skycued replays the readsb fixture in real time, looped.
+  await expect(page.locator('#config-daemon tr', { hasText: 'Runs' })).toContainText(/replay of \S*readsb-sample\.jsonl \(speed 1, looped\)/);
+  await expect(page.locator('#config-daemon tr', { hasText: 'Learned locations' })).toContainText(/learned, kept in \S*fisb-locations\.json/);
+  await expect(page.locator('#config-daemon tr', { hasText: 'Operator locations' })).toContainText('no LOCATIONS_FILE');
+  const text = await page.evaluate(() => window.skycueApp.configText());
+  expect(text).toContain(`\n# WEB_PORT: conf, restart\nWEB_PORT=${port}\n`);
+  await page.locator('#config-copy').click();
+  await expect(page.locator('#config-copy-status')).toHaveText('Copied');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(text);
+  await page.locator('#config-refresh').click();
+  await expect(page.locator('#config-copy-status')).toHaveText('');
+  // A failed copy shows the text to copy by hand; Refresh clears both.
+  await page.evaluate(() => { navigator.clipboard.writeText = () => Promise.reject(new Error('denied')); });
+  await page.locator('#config-copy').click();
+  await expect(page.locator('#config-copy-status')).toHaveText('Copy failed');
+  await expect(page.locator('#config-copy-text')).toBeVisible();
+  await page.locator('#config-refresh').click();
+  await expect(page.locator('#config-copy-status')).toHaveText('');
+  await expect(page.locator('#config-copy-status')).not.toHaveClass(/\berror\b/);
+  await expect(page.locator('#config-copy-text')).toBeHidden();
+  await expect(row('RECEIVER_LAT').locator('.cfg-value')).toHaveText('38.9');
+  expect(errors).toEqual([]);
 });
 
 // ---- FIS-B ---------------------------------------------------------------------
@@ -400,7 +555,7 @@ async function apiAt(base, path) {
 }
 function watchErrors(page) {
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error' && !overlaysAbsent(m)) errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   return errors;
 }
@@ -517,8 +672,9 @@ test.describe('fisb radar (tg30)', () => {
     await openFisbPage(page);
     await layerToggle(page, 'Other rasters').check();
     const sel = page.locator('#raster-select');
-    await expect.poll(() => sel.locator('option').count()).toBeGreaterThanOrEqual(5);
-    await sel.selectOption('70-0');
+    await expect.poll(() => sel.locator('option').count()).toBeGreaterThanOrEqual(4);
+    await sel.selectOption('70');
+    await page.locator('#raster-band').selectOption('0');
     await expect(page.locator('img.leaflet-image-layer.fisb-raster')).toHaveCount(1);
     await expect(page.locator('#raster-legend')).toContainText('Icing');
     await expect(page.locator('#raster-legend')).toContainText('approximate');
@@ -526,6 +682,58 @@ test.describe('fisb radar (tg30)', () => {
     await expect(page.locator('#raster-legend')).toContainText(/lightning/i);
     await layerToggle(page, 'Other rasters').uncheck();
     await expect(page.locator('img.fisb-raster')).toHaveCount(0);
+  });
+  test('raster_band_select', async ({ page }) => {
+    await openFisbPage(page);
+    await layerToggle(page, 'Other rasters').check();
+    await page.locator('#raster-select').selectOption('70');
+    const band = page.locator('#raster-band');
+    await expect(band).toBeVisible();
+    const status = (await apiAt(RADAR_BASE, '/api/fisb/status')).body;
+    const codes = status.rasters.filter((h) => h.product === 70).map((h) => h.altitude_code).sort((a, b) => a - b);
+    await expect(band).toHaveValue(String(codes[0]));
+    await expect(page.locator('#raster-legend')).toContainText('≈ ' + (2000 + 2000 * codes[0]).toLocaleString('en-US') + ' ft');
+    await page.locator('#raster-select').selectOption('84');
+    await expect(band).toBeHidden();
+  });
+  test('winds_and_raster_picks_survive_items_and_reconnect', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    await layerToggle(page, 'Other rasters').check();
+    const status = (await apiAt(RADAR_BASE, '/api/fisb/status')).body;
+    const codes = status.rasters.filter((h) => h.product === 70).map((h) => h.altitude_code).sort((a, b) => a - b);
+    expect(codes.length).toBeGreaterThan(1);
+    const top = String(codes[codes.length - 1]);   // not the default (the lowest)
+    await page.locator('#raster-select').selectOption('70');
+    await page.locator('#raster-band').selectOption(top);
+    await expect.poll(() => page.evaluate(() => window.skycueApp.windsPickers().period)).toBe(6);
+    await page.locator('#wx-winds-period').selectOption('12');
+    await page.locator('#wx-winds-level').selectOption('39000');
+    const picks = async () => [await page.locator('#raster-select').inputValue(), await page.locator('#raster-band').inputValue(),
+      await page.evaluate(() => { const w = window.skycueApp.windsPickers(); return [w.period, w.level]; })];
+    const want = ['70', top, [12, 39000]];
+    expect(await picks()).toEqual(want);
+    // Unrelated items leave the picks alone.
+    const metar = (await apiAt(RADAR_BASE, '/api/fisb/text')).body.records.find((r) => r.kind === 'metar');
+    await page.evaluate((m) => window.skycueApp.injectFisbItems([{ type: 'fisb_location', id: 'K2G4', lat: 39.6, lon: -86.0 },
+      { type: 'fisb_text', record: m }]), metar);
+    await page.waitForTimeout(500);
+    expect(await picks()).toEqual(want);
+    // A reconnect empties the data set while it reloads (held here for a
+    // while): the picks outlive it.
+    let release;
+    const held = new Promise((ok) => { release = ok; });
+    await page.route('**/api/fisb/text*', async (route) => { await held; await route.continue(); });
+    const n = await page.evaluate(() => window.skycueApp.snapshots());
+    await page.evaluate(() => window.skycueApp.reconnect());
+    await expect.poll(() => page.evaluate(() => window.skycueApp.snapshots())).toBeGreaterThan(n);
+    await page.waitForTimeout(1500);
+    release();
+    await page.waitForFunction(() => window.skycueApp.fisbLoaded());
+    await expect.poll(picks).toEqual(want);
+    await page.unroute('**/api/fisb/text*');
+    expect(errors).toEqual([]);
   });
 
   test('fisb_screenshots_radar', async ({ page }, testInfo) => {
@@ -537,6 +745,157 @@ test.describe('fisb radar (tg30)', () => {
     await expect.poll(() => page.locator('#wx-list li.wx-row').count()).toBeGreaterThan(100);
     await page.waitForTimeout(500);
     await page.screenshot({ path: testInfo.outputPath(`fisb-radar-${testInfo.project.name}.png`), fullPage: true });
+    // The Weather tab with the report symbols on the map and one report card
+    // open (SIGMET off so no shape lies over the symbol clicked).
+    await layerToggle(page, 'SIGMET').uncheck();
+    await expect.poll(() => page.locator('.wx-sym.wx-metar').count()).toBeGreaterThan(0);
+    await expect.poll(() => page.locator('.wx-sym.wx-winds').count()).toBeGreaterThan(0);
+    await page.locator('.wx-sym.wx-metar[data-station="KCVG"]').click();
+    await expect(page.locator('#shape-title')).toHaveText('METAR KCVG');
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: testInfo.outputPath(`fisb-symbols-${testInfo.project.name}.png`), fullPage: true });
+  });
+
+  test('metar_taf_symbols_have_category_classes', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openFisbPage(page);
+    const sym = (k, st) => page.locator(`.wx-sym.wx-${k}[data-station="${st}"]`);
+    await expect(sym('metar', 'KCVG')).toHaveClass(/\bcat-mvfr\b/);     // OVC019
+    await expect(sym('taf', 'KCVG')).toHaveClass(/\bcat-mvfr\b/);       // first group OVC025
+    await expect(sym('metar', 'KPRG')).toHaveClass(/\bcat-vfr\b/);      // 10SM CLR, no wind group
+    await expect(sym('metar', 'KAID')).toHaveClass(/\bcat-mvfr\b/);     // OVC012
+    const s = await page.evaluate(() => window.skycueApp.wxSymbols());
+    expect(s.find((x) => x.key === 'metar:KPRG').barb).toBeNull();
+    expect(s.find((x) => x.key === 'metar:KCVG').barb).toEqual({ dir: 330, kt: 11 });
+    const pos = await page.evaluate(() => window.skycueApp.wxPositioned());
+    expect(pos.n).toBeGreaterThanOrEqual(40); expect(pos.n).toBeLessThan(pos.m);
+    await page.locator('#wx-toggle').click();
+    await expect(page.locator('#wx-positioned')).toHaveText(`${pos.n} of ${pos.m} positioned`);
+    await expect(page.locator('#wx-list li.wx-row[data-key="metar:KCVG"] .wx-show')).toHaveCount(1);
+    const unplotted = page.locator('#wx-list li.wx-row[data-key="metar:K2G4"]');   // no NOTAM point names K2G4 in tg30
+    await expect(unplotted.locator('.wx-nopos')).toHaveText('no position');
+    await expect(sym('metar', 'K2G4')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+  test('symbol_click_opens_report_card', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('.wx-sym.wx-metar[data-station="KCVG"]').click();
+    await expect(page.locator('#shape-details')).toBeVisible();
+    await expect(page.locator('#shape-title')).toHaveText('METAR KCVG');
+    await expect(page.locator('#shape-details .shape-text')).toContainText('METAR KCVG 300852Z');
+    await expect(page.locator('#shape-fields')).toContainText('MVFR');
+  });
+  test('reports_toggle_and_filter_apply_to_symbols', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    await page.locator('#wx-show-metar').uncheck();
+    await expect(page.locator('.wx-sym.wx-metar')).toHaveCount(0);
+    await expect(page.locator('#wx-list li.wx-row[data-kind="metar"]')).toHaveCount(0);
+    await expect(page.locator('.wx-sym.wx-taf').first()).toBeVisible();
+    await page.locator('#wx-show-metar').check();
+    await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(1);
+    await page.locator('#wx-filter').fill('KCV');
+    await expect.poll(() => page.locator('.wx-sym.wx-metar').count(), { timeout: 3000 }).toBe(1);
+    await page.locator('#wx-filter').fill('');
+    await expect.poll(() => page.locator('.wx-sym.wx-metar').count(), { timeout: 3000 }).toBeGreaterThanOrEqual(40);
+  });
+  test('late_location_adds_symbol', async ({ page }) => {
+    await openFisbPage(page);
+    // Inside the view (the receiver's 150 nm ring around central Indiana).
+    await page.evaluate(() => window.skycueApp.injectFisbItems([{ type: 'fisb_location', id: 'K2G4', lat: 39.6, lon: -86.0 }]));
+    await expect(page.locator('.wx-sym.wx-metar[data-station="K2G4"]')).toHaveClass(/\bcat-lifr\b/, { timeout: 3000 });
+    await page.locator('#wx-toggle').click();
+    await expect(page.locator('#wx-list li.wx-row[data-key="metar:K2G4"] .wx-nopos')).toHaveCount(0);
+  });
+  test('symbols_culled_to_the_view', async ({ page }) => {
+    await openFisbPage(page);
+    const n0 = (await page.evaluate(() => window.skycueApp.wxPositioned())).n;
+    // Far east of the view (off the New England coast): positioned, not drawn.
+    await page.evaluate(() => window.skycueApp.injectFisbItems([{ type: 'fisb_location', id: 'K2G4', lat: 39.0, lon: -72.0 }]));
+    await expect.poll(() => page.evaluate(() => window.skycueApp.wxPositioned().n)).toBe(n0 + 1);
+    await page.waitForTimeout(1500);   // past the 1 s redraw
+    const sym = page.locator('.wx-sym.wx-metar[data-station="K2G4"]');
+    await expect(sym).toHaveCount(0);
+    await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(1);
+    await page.evaluate(() => window.skycueApp.setView(39.0, -72.0, 8));
+    await expect(sym).toHaveClass(/\bcat-lifr\b/, { timeout: 3000 });
+    await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(0);
+  });
+  test('winds_without_a_symbol_say_no_barb', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    // CVG has 6 h and 12 h records: the 6 h one (3000 ft) is drawn, the 12 h one is not.
+    await expect(page.locator('#wx-list li.wx-row[data-key="winds:CVG:6"] .wx-show')).toHaveCount(1);
+    await expect(page.locator('#wx-list li.wx-row[data-key="winds:CVG:12"] .wx-nobarb')).toHaveText('no barb');
+    await expect(page.locator('#wx-list li.wx-row[data-key="winds:CVG:12"] .wx-show')).toHaveCount(0);
+    await expect(page.locator('.wx-sym.wx-winds[data-station="CVG"]')).toHaveCount(1);
+    const s = await page.evaluate(() => window.skycueApp.wxSymbols());
+    const pos = await page.evaluate(() => window.skycueApp.wxPositioned());
+    expect(pos.n).toBe(s.length);   // every positioned report is drawn (all are in view in tg30)
+  });
+  test('winds_pickers_change_barbs', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    const barbs = () => page.evaluate(() => window.skycueApp.wxSymbols().filter((s) => s.kind === 'winds')
+      .map((s) => [s.station, s.barb && s.barb.dir, s.barb && s.barb.kt]).sort());
+    await expect.poll(() => page.evaluate(() => window.skycueApp.windsPickers().period)).toBe(6);
+    await expect(page.locator('#wx-winds-level')).toHaveValue('3000');
+    await expect.poll(barbs).toEqual([['CVG', 350, 17], ['IND', 350, 16]]);   // KCVG, KIND learned; FWA has no 6 h record
+    await page.locator('#wx-winds-level').selectOption('39000');
+    await expect.poll(barbs).toEqual([['CVG', 290, 92], ['IND', 300, 99]]);
+    await page.locator('#wx-winds-period').selectOption('12');
+    await expect.poll(barbs).toEqual([['CVG', 280, 85], ['FWA', 300, 100], ['IND', 290, 83]]);
+    const levels = await page.locator('#wx-winds-level option').evaluateAll((os) => os.map((o) => Number(o.value)));
+    expect(levels).toEqual([3000, 6000, 9000, 12000, 18000, 24000, 30000, 34000, 39000]);
+  });
+  test('report_card_follows_its_own_record', async ({ page }) => {
+    await openFisbPage(page);
+    const rec = (await apiAt(RADAR_BASE, '/api/fisb/text')).body.records.find((r) => r.key === 'metar:KAID');
+    const card = page.locator('#shape-details');
+    const inject = (items) => page.evaluate((it) => window.skycueApp.injectFisbItems(it), items);
+    // A report, then an airspace shape: the report's expiry leaves the shape card alone.
+    await page.locator('.wx-sym.wx-metar[data-station="KCVG"]').click();
+    await expect(page.locator('#shape-title')).toHaveText('METAR KCVG');
+    await layerToggle(page, 'NOTAM / TFR').check();
+    await expect.poll(() => page.locator('path.fisb-tfr').count()).toBeGreaterThan(0);
+    const i = await clickableIndex(page, 'path.fisb-tfr');
+    expect(i).toBeGreaterThanOrEqual(0);
+    await page.locator('path.fisb-tfr').nth(i).click();
+    await expect(page.locator('#shape-title')).not.toHaveText('METAR KCVG');
+    const shapeTitle = await page.locator('#shape-title').textContent();
+    await inject([{ type: 'fisb_expired', kind: 'text', key: 'metar:KCVG' }]);
+    await page.waitForTimeout(300);
+    await expect(card).toBeVisible();
+    await expect(page.locator('#shape-title')).toHaveText(shapeTitle);
+    await layerToggle(page, 'NOTAM / TFR').uncheck();
+    // A report card is re-rendered when its record is updated, kept on another's
+    // expiry and closed on its own.
+    await page.locator('.wx-sym.wx-metar[data-station="KAID"]').click();
+    await expect(page.locator('#shape-title')).toHaveText('METAR KAID');
+    const text = rec.text.replace(/ OVC012 /, ' OVC003 ');
+    await inject([{ type: 'fisb_text', record: Object.assign({}, rec, { text }) }]);
+    await expect(card.locator('.shape-text')).toContainText('OVC003');
+    await expect(page.locator('#shape-fields [data-field="category"]')).toHaveText('LIFR');
+    await inject([{ type: 'fisb_expired', kind: 'text', key: 'metar:KPRG' }]);
+    await page.waitForTimeout(300);
+    await expect(card).toBeVisible();
+    await inject([{ type: 'fisb_expired', kind: 'text', key: 'metar:KAID' }]);
+    await expect(card).toBeHidden();
+  });
+  test('symbols_not_duplicated_after_reset', async ({ page }) => {
+    await openFisbPage(page);
+    await expect.poll(() => page.locator('.wx-sym.wx-metar[data-station="KCVG"]').count()).toBe(1);
+    const n0 = await page.evaluate(() => window.skycueApp.snapshots());
+    await page.evaluate(() => window.skycueApp.reconnect());
+    await page.waitForFunction((n) => window.skycueApp.snapshots() > n && window.skycueApp.fisbLoaded(), n0, { timeout: 15000 });
+    // One marker per symbol key and nothing left over from before the reset,
+    // whatever arrived or expired meanwhile.
+    await expect.poll(async () => {
+      const keys = await page.evaluate(() => window.skycueApp.wxSymbols().map((s) => s.key));
+      const dom = await page.locator('.wx-sym').count();
+      return keys.length > 0 && new Set(keys).size === keys.length && dom === keys.length;
+    }).toBe(true);
+    await expect(page.locator('.wx-sym.wx-metar[data-station="KCVG"]')).toHaveCount(1);
   });
 });
 
@@ -803,7 +1162,7 @@ test.describe('map tiles fallback', () => {
   test('missing_tile_shows_lower_zoom_fallback', async ({ page }) => {
     const pageErrors = [];
     page.on('pageerror', (e) => pageErrors.push(String(e)));
-    expect((await apiAt(TILES_BASE, '/api/tiles-available')).body).toEqual({ tiles: true, minZoom: 0, maxZoom: 6 });
+    expect((await apiAt(TILES_BASE, '/api/tiles-available')).body).toEqual({ tiles: true, minZoom: 0, maxZoom: 6, overlays: true });
     await openPage(page);
     await waitMarkers(page, 1);
     // The map fits the range ring (zoom > 6), so it shows zoom-6 tiles;
@@ -1264,4 +1623,12 @@ test.describe('receiver tab (FIS-B, 2015 sample)', () => {
     await expect(cell('last_uplink_time')).toHaveText('2015-01-24 04:23:43Z');
     await expect(cell('recorder_dropped')).toHaveText('0 / 0');
   });
+});
+
+test('no_overlay_meta_request_without_overlays', async ({ page }) => {
+  const asked = [];
+  page.on('request', (r) => { if (/\/overlays\/meta\.json$/.test(r.url())) asked.push(r.url()); });
+  expect((await api('/api/tiles-available')).body.overlays).toBe(false);
+  await openPage(page);
+  expect(asked).toEqual([]);
 });

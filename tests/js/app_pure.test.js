@@ -3,6 +3,7 @@
 // test framework. usage: node app_pure.test.js [path/to/app_pure.js]
 // The geometry values are the ones tests/test_geo.cpp checks geo.cpp with:
 // the page's copy of elevationDeg must agree with skycued's.
+const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
@@ -621,6 +622,309 @@ test('gpsStatusText and receiverStatusText: the ICD codes, else the number', () 
   assert.strictEqual(P.gpsStatusText(7), '7');
   assert.deepStrictEqual([0, 1, 2].map(P.receiverStatusText), ['normal', 'comm errors', 'not transmitting']);
   assert.strictEqual(P.receiverStatusText(5), '5');
+});
+
+const FIX = {
+ "metar:K2G4": "METAR K2G4 300855Z AUTO 35005KT 1/2SM OVC001 03/03 A2972 RMK AO1=",
+ "metar:K0A9": "METAR K0A9 300835Z AUTO VRB05G13KT 1 1/2SM BR FEW004 BKN011 OVC024 11/10\n     A2986 RMK AO2=",
+ "metar:KTVK": "METAR KTVK 300835Z AUTO 00000KT 10SM CLR M03/M03 A3022 RMK AO2=",
+ "metar:KPVE": "METAR KPVE 300835Z AUTO 33009KT 280V360 10SM OVC020 08/06 A3012 RMK\n     A01=",
+ "metar:KFKL": "SPECI KFKL 300814Z AUTO 02004KT 10SM OVC008 05/04 A2982 RMK AO2 CIG\n     007V011=",
+ "metar:K6L4": "METAR K6L4 300835Z AUTO 2SM BR BKN006 OVC010 08/08 A2986 RMK AO2=",
+ "metar:KCVG": "METAR KCVG 300852Z 33011KT 10SM OVC019 07/04 A3001 RMK AO2 SLP161\n     T00670039 51022=",
+ "metar:KDAY": "SPECI KDAY 300833Z 35009KT 10SM FEW009 BKN014 OVC020 06/06 A3000 RMK AO2\n     RAE23 CIG 010 RWY 6L P0001 T00610056 $=",
+ "metar:KCEY": "METAR KCEY 300835Z AUTO 29004KT 10SM 04/03 A3014 RMK AO1=",
+ "metar:KUKF": "METAR KUKF 300835Z AUTO 31012G19KT 10SM CLR 15/08 A2974 RMK AO2=",
+ "metar:KM08": "METAR KM08 300835Z AUTO VRB04KT 10SM OVC019 08/05 A3014 RMK A01=",
+ "metar:KPRG": "METAR KPRG 300815Z 10SM CLR 02/00 A3014 RMK AO2 T00201005=",
+ "taf:KCVG": "TAF.AMD KCVG 300857Z 3009/3112 33012KT P6SM OVC025\n      TEMPO 3009/3010 OVC019\n     FM301400 33011KT P6SM OVC035\n     FM310000 02004KT P6SM SCT250=",
+ "taf:KHOP": "TAF KHOP 300800Z 3008/3114 33006KT 9999 SCT020 510063 QNH3007INS\n     BECMG 3010/3011 32006KT 9000 BR BKN007 OVC014 QNH3015INS\n     BECMG 3015/3016 34009KT 9999 NSW SKC QNH3022INS TX10/3020Z\n     TN03/3011Z=",
+ "taf:KLOZ": "TAF KLOZ 300524Z 3006/3106 33008G15KT 6SM -DZ BR OVC008\n      TEMPO 3006/3010 P6SM NSW OVC015\n     FM301600 33007KT P6SM BKN015\n     FM302100 VRB04KT P6SM SCT030=",
+ "winds:TUL:12": "WINDS TUL 301800Z  FT 3000 6000      9000   12000       18000   24000   30000    34000  39000\n   2808 9900+08 3509+05 2818+02 2835-10 2746-22 274738 274548 275656",
+ "winds:ACK:6": "WINDS ACK 301200Z  FT 3000 6000      9000   12000       18000   24000   30000    34000  39000\n   0544 0817+00 2634+04 2535-01 2392-12 7327-21 724633 735141 735851",
+ "winds:FWA:12": "WINDS FWA 301800Z  FT 3000 6000      9000   12000       18000   24000   30000    34000  39000\n   3309 3224-07 3134-05 3041-11 3186-13 3094-24 309638 800348 800057",
+ "winds:GLD:6": "WINDS GLD 301200Z  FT      6000      9000   12000       18000   24000   30000    34000  39000\n        3107    3114+05 3117+00 2737-12 2648-25 275439 275547 274855",
+ "metar:KMER": "METAR KMER 240355Z AUTO 10005KT 1 3/4SM OVC002 08/08 A3031 RMK AO1=",
+ "taf:KBAB": "TAF KBAB 2403/2509 VRB06KT 9999 SKC QNH3022INS\n     BECMG 2405/2406 VRB06KT 4800 BR SCT010 QNH3018INS\n     BECMG 2410/2411 VRB06KT 0800 FG VV001 QNH3030INS\n     BECMG 2418/2419 VRB06KT 4800 BR SCT010 QNH3037INS\n     BECMG 2421/2422 33009KT 9999 NSW SKC QNH3028INS TX19/2421Z\n     TN06/2413Z=",
+ "taf:KSTS": "TAF KSTS 232339Z 2400/2424 00000KT P6SM SKC\n     FM240700 00000KT 1/4SM FG VV002\n     FM241700 35003KT P6SM FEW002=",
+ "winds:BCE:24": "WINDS BCE 250000Z  FT                       12000       18000   24000   30000    34000  39000\n                        3522+00 3631-13 0141-27 035046 046656 365258",
+ "winds:RKS:24": "WINDS RKS 250000Z  FT                9000   12000       18000   24000   30000    34000  39000\n                3233    3221-05 3349-15 3461-28 356446 018956 335960",
+ "metar:KJXN": "METAR KJXN 062056Z 24006KT 10SM CLR 30/19 A3009 RMK AO2 SLP182 6////\n    T03000189 58013="
+};
+
+const M = (k) => P.parseMetar(FIX[k]);
+test('metar_categories_from_fixture_text', () => {
+  const want = { 'metar:K2G4': 'LIFR', 'metar:K0A9': 'IFR', 'metar:KMER': 'LIFR', 'metar:KTVK': 'VFR', 'metar:KPVE': 'MVFR',
+    'metar:KFKL': 'IFR', 'metar:K6L4': 'IFR', 'metar:KCVG': 'MVFR', 'metar:KDAY': 'MVFR' };
+  for (const k of Object.keys(want)) assert.strictEqual(M(k).category, want[k], k);
+  assert.strictEqual(M('metar:K0A9').visSm, 1.5); assert.strictEqual(M('metar:K0A9').ceilFt, 1100);
+  assert.strictEqual(M('metar:KDAY').ceilFt, 1400);   // FEW009 is not a ceiling
+  assert.strictEqual(M('metar:K2G4').station, 'K2G4');
+});
+test('metar_no_sky_group_is_unknown', () => {
+  assert.strictEqual(M('metar:KCEY').ceilFt, null); assert.strictEqual(M('metar:KCEY').category, 'unknown');
+});
+test('metar_remarks_ignored', () => { assert.strictEqual(M('metar:KJXN').category, 'VFR'); });
+test('metar_wind_forms', () => {
+  assert.deepStrictEqual(M('metar:KTVK').wind, { dir: null, kt: 0, gust: null, calm: true, variable: false });
+  assert.deepStrictEqual(M('metar:KUKF').wind, { dir: 310, kt: 12, gust: 19, calm: false, variable: false });
+  assert.deepStrictEqual(M('metar:KM08').wind, { dir: null, kt: 4, gust: null, calm: false, variable: true });
+  assert.deepStrictEqual(M('metar:KCVG').wind, { dir: 330, kt: 11, gust: null, calm: false, variable: false });
+  assert.strictEqual(M('metar:KPRG').wind, null); assert.strictEqual(M('metar:KPRG').category, 'VFR');
+});
+test('flight_category_threshold_edges', () => {
+  const F = P.flightCategory;
+  assert.strictEqual(F(10, 499), 'LIFR'); assert.strictEqual(F(10, 500), 'IFR');
+  assert.strictEqual(F(10, 999), 'IFR');  assert.strictEqual(F(10, 1000), 'MVFR');
+  assert.strictEqual(F(10, 3000), 'MVFR'); assert.strictEqual(F(10, 3100), 'VFR');
+  assert.strictEqual(F(0.75, Infinity), 'LIFR'); assert.strictEqual(F(1, Infinity), 'IFR');
+  assert.strictEqual(F(2.75, Infinity), 'IFR'); assert.strictEqual(F(3, Infinity), 'MVFR');
+  assert.strictEqual(F(5, Infinity), 'MVFR'); assert.strictEqual(F(6, Infinity), 'VFR');
+  assert.strictEqual(F(6, 800), 'IFR');
+  assert.strictEqual(F(null, Infinity), 'unknown'); assert.strictEqual(F(10, null), 'unknown');
+});
+test('visibility_forms', () => {   // synthetic token lists
+  const V = (s) => P.visibilitySm(s.split(' '));
+  assert.strictEqual(V('P6SM'), 6); assert.ok(V('M1/4SM') < 0.25); assert.strictEqual(V('1 1/2SM'), 1.5);
+  assert.strictEqual(V('3/4SM'), 0.75); assert.ok(V('9999') > 5); assert.ok(Math.abs(V('4800') - 4800 / 1609.344) < 1e-9);
+  assert.ok(Math.abs(V('0800') - 800 / 1609.344) < 1e-9); assert.strictEqual(V('////SM'), null);
+  assert.strictEqual(P.ceilingFt(['CAVOK']), Infinity); assert.ok(P.visibilitySm(['CAVOK']) > 5);
+  assert.strictEqual(P.ceilingFt(['BKN///']), null); assert.strictEqual(P.ceilingFt(['VV002']), 200);
+});
+test('taf_first_group_categories', () => {
+  const T = (k) => P.parseTafFirst(FIX[k]);
+  assert.strictEqual(T('taf:KCVG').station, 'KCVG'); assert.strictEqual(T('taf:KCVG').category, 'MVFR');
+  assert.strictEqual(T('taf:KCVG').wind.dir, 330);
+  assert.strictEqual(T('taf:KBAB').station, 'KBAB'); assert.strictEqual(T('taf:KBAB').category, 'VFR');   // no issue time; 9999
+  assert.strictEqual(T('taf:KHOP').category, 'VFR');   // 9999 SCT020; later BECMG ignored
+  assert.strictEqual(T('taf:KSTS').category, 'VFR');   // FM240700 1/4SM VV002 not in the first group
+  assert.strictEqual(T('taf:KLOZ').category, 'IFR');   // OVC008
+  // synthetic first groups built from the KBAB BECMG groups (metric visibility)
+  assert.strictEqual(P.parseTafFirst('TAF KBAB 2405/2406 VRB06KT 4800 BR SCT010 QNH3018INS=').category, 'IFR');
+  assert.strictEqual(P.parseTafFirst('TAF KBAB 2410/2411 VRB06KT 0800 FG VV001 QNH3030INS=').category, 'LIFR');
+});
+const W = (k) => P.parseWinds(FIX[k]);
+test('winds_record_tul', () => {
+  const w = W('winds:TUL:12');
+  assert.strictEqual(w.station, 'TUL'); assert.strictEqual(w.valid, '301800');
+  assert.deepStrictEqual(w.levels.map((l) => l.ft), P.WINDS_LEVELS_FT);
+  assert.deepStrictEqual(P.windsLevel(w, 3000), { ft: 3000, dir: 280, kt: 8, temp: null, lv: false });
+  assert.deepStrictEqual(P.windsLevel(w, 6000), { ft: 6000, dir: null, kt: 0, temp: 8, lv: true });
+  assert.deepStrictEqual(P.windsLevel(w, 30000), { ft: 30000, dir: 270, kt: 47, temp: -38, lv: false });
+  assert.deepStrictEqual(P.windsLevel(w, 39000), { ft: 39000, dir: 270, kt: 56, temp: -56, lv: false });
+});
+test('winds_100kt_encodings', () => {
+  const ack = W('winds:ACK:6');
+  assert.deepStrictEqual(P.windsLevel(ack, 18000), { ft: 18000, dir: 230, kt: 92, temp: -12, lv: false });
+  assert.deepStrictEqual(P.windsLevel(ack, 24000), { ft: 24000, dir: 230, kt: 127, temp: -21, lv: false });
+  assert.deepStrictEqual(P.windsLevel(ack, 30000), { ft: 30000, dir: 220, kt: 146, temp: -33, lv: false });
+  assert.deepStrictEqual(P.windsLevel(W('winds:FWA:12'), 39000), { ft: 39000, dir: 300, kt: 100, temp: -57, lv: false });
+  const lv = P.parseWinds('WINDS XYZ 301800Z  FT 39000\n   990042');   // synthetic
+  assert.deepStrictEqual(P.windsLevel(lv, 39000), { ft: 39000, dir: null, kt: 0, temp: -42, lv: true });
+});
+test('winds_records_starting_above_3000', () => {
+  const gld = W('winds:GLD:6');
+  assert.strictEqual(gld.levels.length, 8); assert.strictEqual(P.windsLevel(gld, 3000), null);
+  assert.deepStrictEqual(P.windsLevel(gld, 6000), { ft: 6000, dir: 310, kt: 7, temp: null, lv: false });
+  const bce = W('winds:BCE:24');
+  assert.strictEqual(bce.levels[0].ft, 12000);
+  assert.deepStrictEqual(P.windsLevel(bce, 12000), { ft: 12000, dir: 350, kt: 22, temp: 0, lv: false });
+  assert.deepStrictEqual(P.windsLevel(bce, 39000), { ft: 39000, dir: 360, kt: 52, temp: -58, lv: false });
+  assert.deepStrictEqual(P.windsLevel(W('winds:RKS:24'), 9000), { ft: 9000, dir: 320, kt: 33, temp: null, lv: false });
+});
+test('winds_column_count_mismatch_is_null', () => {
+  assert.strictEqual(P.parseWinds(FIX['winds:TUL:12'].replace(' 275656', '')), null);
+  assert.strictEqual(P.parseWinds(FIX['winds:TUL:12'].replace('2808', '28X8')), null);
+});
+test('nearest_winds_period', () => {
+  const recs = [{ period_h: 6, valid: '2020-10-30T12:00:00.000Z' }, { period_h: 12, valid: '2020-10-30T18:00:00.000Z' },
+    { period_h: 24, valid: '2020-10-31T06:00:00.000Z' }];
+  assert.strictEqual(P.nearestWindsPeriod(recs, Date.parse('2020-10-30T09:00:17Z')), 6);
+  assert.strictEqual(P.nearestWindsPeriod(recs, Date.parse('2020-10-30T16:00:00Z')), 12);
+  assert.strictEqual(P.nearestWindsPeriod([], 0), null);
+});
+test('pirep_ov_forms_from_fixture', () => {
+  const lines = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'fisb', 'pireps.txt'), 'utf8')
+    .split('\n').filter((l) => l && l[0] !== '#');
+  assert.strictEqual(lines.length, 19);
+  const parsed = lines.map(P.parsePirep);
+  assert.ok(parsed.every((p) => p && p.urgent === false));
+  assert.strictEqual(parsed.filter((p) => p.ov).length, 17);
+  assert.deepStrictEqual(parsed[0], { station: 'ROD', urgent: false, ov: { id: 'ROD', radial: 40, nm: 30 } });
+  const by = (s) => P.parsePirep(lines.find((l) => l.indexOf(s) >= 0));
+  assert.deepStrictEqual(by('/OV DKK062005').ov, { id: 'DKK', radial: 62, nm: 5 });
+  assert.deepStrictEqual(by('/OV YXU 315020').ov, { id: 'YXU', radial: 315, nm: 20 });
+  assert.deepStrictEqual(by('/OV KCWA/').ov, { id: 'KCWA', radial: null, nm: null });
+  assert.strictEqual(by('/OV SJX-GRB').ov, null);
+  assert.strictEqual(by('/OV 4 W CVG').ov, null);
+  assert.strictEqual(P.parsePirep(lines[0].replace(' UA ', ' UUA ')).urgent, true);
+});
+test('station_resolution_rules', () => {   // synthetic index
+  const idx = { KIND: [39.717, -86.294], CYXU: [43.03, -81.15], '2XG': [30.3, -78.5], KMEM: [35.04, -89.98] };
+  assert.deepStrictEqual(P.stationCandidates('winds', 'IND'), ['KIND', 'PIND', 'CIND', 'IND']);
+  assert.deepStrictEqual(P.stationCandidates('metar', 'KIND'), ['KIND']);
+  assert.deepStrictEqual(P.resolveStation('winds', 'IND', idx), [39.717, -86.294]);
+  assert.deepStrictEqual(P.resolveStation('winds', 'ANC', Object.assign({ PANC: [61.174, -149.996] }, idx)), [61.174, -149.996]);
+  assert.deepStrictEqual(P.resolveStation('winds', 'YXU', idx), [43.03, -81.15]);
+  assert.deepStrictEqual(P.resolveStation('winds', '2XG', idx), [30.3, -78.5]);
+  assert.strictEqual(P.resolveStation('metar', 'IND', idx), null);
+  assert.strictEqual(P.resolveStation('taf', 'KXYZ', idx), null);
+  assert.deepStrictEqual(P.pirepPosition({ ov: { id: 'KMEM', radial: null, nm: null } }, idx), [35.04, -89.98]);
+  assert.strictEqual(P.pirepPosition({ ov: null }, idx), null);
+  const d = P.pirepPosition({ ov: { id: 'MEM', radial: 360, nm: 2 } }, idx);
+  between(P.rangeNm(35.04, -89.98, d[0], d[1]), 1.99, 2.01, 'distance'); assert.ok(d[0] > 35.04);
+});
+test('destination_point_geodesic', () => {
+  const p = P.destinationPoint(0, 0, 90, 60);
+  between(p[1], 0.999, 1.001, 'lon'); between(p[0], -1e-9, 1e-9, 'lat');
+  between(P.bearingDeg(39.7, -86.3, ...P.destinationPoint(39.7, -86.3, 40, 30)), 39.9, 40.1, 'bearing');
+});
+test('barb_parts', () => {
+  assert.deepStrictEqual(P.barbParts(0), { calm: true, pennants: 0, full: 0, half: 0 });
+  assert.deepStrictEqual(P.barbParts(2), { calm: true, pennants: 0, full: 0, half: 0 });
+  assert.deepStrictEqual(P.barbParts(16), { calm: false, pennants: 0, full: 1, half: 1 });
+  assert.deepStrictEqual(P.barbParts(65), { calm: false, pennants: 1, full: 1, half: 1 });
+  assert.deepStrictEqual(P.barbParts(127), { calm: false, pennants: 2, full: 2, half: 1 });
+});
+
+test('flight_category_just_above_edges', () => {
+  const F = P.flightCategory;
+  assert.strictEqual(F(10, 3001), 'VFR');
+  assert.strictEqual(F(0.99, Infinity), 'LIFR'); assert.strictEqual(F(2.99, Infinity), 'IFR');
+  assert.strictEqual(F(5.01, Infinity), 'VFR');
+});
+test('metar_trend_groups_ignored', () => {   // synthetic
+  const m = P.parseMetar('METAR KXXX 300855Z 9999 BKN010 TEMPO BKN003=');
+  assert.strictEqual(m.ceilFt, 1000); assert.strictEqual(m.category, 'MVFR');
+  assert.strictEqual(P.parseMetar('METAR KXXX 300855Z 10SM CLR BECMG 1200 OVC002=').category, 'VFR');
+  assert.strictEqual(P.parseMetar('METAR KXXX 300855Z 10SM CLR NOSIG=').category, 'VFR');
+});
+test('non_taf_text_and_zero_denominator', () => {
+  assert.strictEqual(P.parseTafFirst('garbage text'), null);
+  assert.strictEqual(P.parseTafFirst(FIX['metar:KCVG']), null);
+  assert.strictEqual(P.visibilitySm(['1/0SM']), null);
+});
+test('winds_direction_code_out_of_range_is_null', () => {   // synthetic
+  assert.strictEqual(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   9912'), null);
+  assert.strictEqual(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   4012'), null);
+  assert.strictEqual(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   8712'), null);
+  assert.strictEqual(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   0012'), null);
+  assert.deepStrictEqual(P.windsLevel(P.parseWinds('WINDS XYZ 301800Z  FT 3000\n   3612'), 3000),
+    { ft: 3000, dir: 360, kt: 12, temp: null, lv: false });
+  assert.deepStrictEqual(P.windsLevel(P.parseWinds('WINDS XYZ 301800Z  FT 39000\n   860560'), 39000),
+    { ft: 39000, dir: 360, kt: 105, temp: -60, lv: false });
+});
+test('raster_products_and_bands', () => {
+  const heads = [{ key: '70-0', product: 70, name: 'icing low', altitude_code: 0 }, { key: '70-3', product: 70, name: 'icing low', altitude_code: 3 },
+    { key: '84', product: 84, name: 'cloud tops' }, { key: '91-1', product: 91, name: 'turbulence high', altitude_code: 1 }];
+  const r = P.rasterProducts(heads);
+  assert.deepStrictEqual(r.map((e) => e.product), [70, 84, 91]);
+  assert.strictEqual(r[0].bands.length, 8); assert.strictEqual(r[0].bands[3].key, '70-3'); assert.strictEqual(r[0].bands[1].key, null);
+  assert.strictEqual(r[1].key, '84'); assert.deepStrictEqual(r[1].bands, []);
+  assert.strictEqual(P.defaultBand(r[2]), 1); assert.strictEqual(P.rasterBandFt(91, 1), 20000); assert.strictEqual(P.rasterBandFt(70, 0), 2000);
+});
+test('winds_periods_and_levels', () => {   // synthetic records
+  const rec = (st, p, levels) => ({ kind: 'winds', station: st, period_h: p, text: 'WINDS ' + st + ' 301200Z  FT ' + levels.join(' ') + '\n   ' + levels.map(() => '3516').join(' ') });
+  const rs = [rec('IND', 6, [3000, 6000]), rec('GLD', 6, [6000, 9000]), rec('IND', 12, [3000])];
+  assert.deepStrictEqual(P.windsPeriods(rs), [6, 12]);
+  assert.deepStrictEqual(P.windsLevelsFor(rs, 6), [3000, 6000, 9000]);
+  assert.deepStrictEqual(P.windsLevelsFor(rs, 24), []);
+});
+test('ring_and_decision_rows', () => {
+  const r = [];
+  for (let i = 0; i < 205; i++) P.pushRing(r, i, 200);
+  assert.strictEqual(r.length, 200); assert.strictEqual(r[0], 5);
+  assert.deepStrictEqual(P.decisionRow({ type: 'drop', hex: 'a1b2c3', addr_type: 'icao', reason: 'filtered', decision: 'blocked',
+    callsign: 'UAL1423', time: '2020-10-30T09:00:17.000Z' }),
+    { key: 'a1b2c3|icao', time: '2020-10-30T09:00:17.000Z', hex: 'a1b2c3', callsign: 'UAL1423', decision: 'blocked', reason: 'filtered' });
+  assert.strictEqual(P.decisionRow({ type: 'update', hex: 'a1b2c3', addr_type: 'icao', decision: 'send', last_seen: 'T' }).reason, 'sent');
+  assert.strictEqual(P.decisionRow({ type: 'drop', hex: 'a1b2c3', addr_type: 'icao', reason: 'timeout', time: 'T' }).decision, '');
+});
+test('filter_history_rows_diff_consecutive', () => {
+  const rows = P.filterHistoryRows([
+    { time: 'T0', origin: 'startup', filters: { max_range_nm: 150, min_elevation_deg: 0 } },
+    { time: 'T1', origin: 'ui', filters: { max_range_nm: 20, min_elevation_deg: 0 } },
+    { time: 'T2', origin: 'file:skycue.conf', filters: { max_range_nm: 20, min_elevation_deg: 2 } }]);
+  assert.deepStrictEqual(rows.map((r) => r.origin), ['file:skycue.conf', 'ui', 'startup']);
+  assert.deepStrictEqual(rows[0].diffs, [{ field: 'min_elevation_deg', from: 0, to: 2 }]);
+  assert.deepStrictEqual(rows[1].diffs, [{ field: 'max_range_nm', from: 150, to: 20 }]);
+  assert.deepStrictEqual(rows[2].diffs, [{ field: 'max_range_nm', from: null, to: 150 }, { field: 'min_elevation_deg', from: null, to: 0 }]);
+  assert.deepStrictEqual(P.filterHistoryRows([]), []);
+});
+const CFG = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
+  { key: 'RECEIVER_LAT', value: '38.9', source: 'conf', restart: true }, { key: 'WEB_BIND', value: '127.0.0.1', source: 'default', restart: true },
+  { key: 'CUE_UDP_TARGETS', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
+  { key: 'MAX_RANGE_NM', value: '20', source: 'overlay', restart: false }, { key: 'RECORD_DIR', value: '', source: 'default', restart: true },
+  { key: 'NEW_KEY', value: 'x', source: 'conf', restart: true }] };
+test('config_grouping', () => {
+  const g = P.groupConfig(CFG.keys);
+  assert.deepStrictEqual(g.map((x) => x.group), ['Receiver site', 'Cue outputs', 'Recording', 'Filters', 'Web', 'Other']);
+  assert.deepStrictEqual(g[5].rows.map((r) => r.key), ['NEW_KEY']);
+});
+test('config_text', () => {
+  const t = P.configText(CFG);
+  assert.ok(t.startsWith('# skycued 0.1.0, started 2026-01-01T00:00:00.000Z\n'));
+  assert.ok(t.includes('# Receiver site\n# RECEIVER_LAT: conf, restart\nRECEIVER_LAT=38.9\n'));
+  assert.ok(t.includes('# CUE_UDP_TARGETS: conf, restart\nCUE_UDP_TARGETS="127.0.0.1:30501 10.0.0.2:30502"\n'));
+  assert.ok(t.includes('# MAX_RANGE_NM: overlay\nMAX_RANGE_NM=20\n'));
+  assert.ok(t.includes('# RECORD_DIR: default, restart\nRECORD_DIR=\n'));
+});
+test('daemon_mode_and_locations_text', () => {
+  assert.strictEqual(P.daemonModeText({ mode: 'live', readsb: true, dump978: true }), 'live: readsb, dump978');
+  assert.strictEqual(P.daemonModeText({ mode: 'live', readsb: true, dump978: false }), 'live: readsb, no dump978 (--no-uat)');
+  assert.strictEqual(P.daemonModeText({ mode: 'live', readsb: false, dump978: true }), 'live: no readsb (--no-readsb), dump978');
+  assert.strictEqual(P.daemonModeText({ mode: 'replay', replay: { file: '/d/r.jsonl', speed: 0, loop: true } }),
+    'replay of /d/r.jsonl (unpaced, looped)');
+  assert.strictEqual(P.daemonModeText({ mode: 'replay', replay: { file: 'r.jsonl', speed: 2, loop: false } }), 'replay of r.jsonl (speed 2)');
+  assert.deepStrictEqual(P.daemonLocationsText({ locations: { learned_path: '/e/fisb-locations.json', learned: 42,
+    operator_path: '', operator: 0 } }), ['42 learned, kept in /e/fisb-locations.json', 'no LOCATIONS_FILE']);
+  assert.deepStrictEqual(P.daemonLocationsText({ locations: { learned_path: '', learned: 0, operator_path: '/e/l.csv',
+    operator: 2, operator_rejected: 1, operator_overflow: 3 } }),
+    ['0 learned, not saved this run', '2 from /e/l.csv, 1 lines rejected, 3 over the cap']);
+});
+test('conf_value_every_branch', () => {
+  assert.strictEqual(P.confValue('38.9'), '38.9');
+  assert.strictEqual(P.confValue(''), '');
+  assert.strictEqual(P.confValue('a b'), '"a b"');
+  assert.strictEqual(P.confValue("o'hare x"), '"o\'hare x"');
+  assert.strictEqual(P.confValue('say "hi" $1'), '\'say "hi" $1\'');
+  assert.strictEqual(P.confValue('it\'s $HOME'), null);
+  assert.strictEqual(P.confValue('a\nb'), null);
+});
+// Every line is a comment or KEY=value in the conf grammar (config.cpp
+// parseConfigText, skycue-start.sh load_config):
+// ^[A-Z][A-Z0-9_]*=  then  ^"[^"$`\\]*"$  or  ^'[^']*'$  or  ^[A-Za-z0-9_.,:/+@%=-]*$.
+function confGrammarValue(line) {
+  if (/^\s*(#|$)/.test(line)) return undefined;
+  const m = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
+  if (!m) throw new Error('malformed line: ' + line);
+  const v = m[2];
+  let q;
+  if ((q = /^"([^"$`\\]*)"$/.exec(v)) || (q = /^'([^']*)'$/.exec(v))) return [m[1], q[1]];
+  if (/^[A-Za-z0-9_.,:/+@%=-]*$/.test(v)) return [m[1], v];
+  throw new Error('malformed value: ' + line);
+}
+// The same keys and values test_config.cpp (config_copy_text_parses) checks.
+const CFG_COPY = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
+  { key: 'RECEIVER_LAT', value: '38.9', source: 'conf', restart: true },
+  { key: 'RECEIVER_LON', value: '-77.0', source: 'conf', restart: true },
+  { key: 'SDR_1090_SERIAL', value: '', source: 'default', restart: true },
+  { key: 'CUE_UDP_TARGETS', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
+  { key: 'RECORD_DIR', value: '/srv/sky cue/rec', source: 'conf', restart: true },
+  { key: 'MAX_RANGE_NM', value: '20', source: 'overlay', restart: false },
+  { key: 'ALLOW_LIST_FILE', value: 'allow "main" $1.txt', source: 'conf', restart: false },
+  { key: 'BLOCK_LIST_FILE', value: "it's $HOME.txt", source: 'conf', restart: false },
+  { key: 'LOCATIONS_FILE', value: "o'hare locations.csv", source: 'conf', restart: true }] };
+test('config_text_round_trips_through_the_conf_grammar', () => {
+  const t = P.configText(CFG_COPY);
+  // test_config.cpp parses this same fixture with parseConfigText.
+  assert.strictEqual(t, fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'config-copy.conf'), 'utf8'));
+  const got = {};
+  t.split('\n').forEach((l) => { const kv = confGrammarValue(l); if (kv) got[kv[0]] = kv[1]; });
+  const want = {};
+  CFG_COPY.keys.forEach((k) => { if (k.key !== 'BLOCK_LIST_FILE') want[k.key] = k.value; });
+  assert.deepStrictEqual(got, want);   // BLOCK_LIST_FILE cannot be held: left as a comment
+  assert.ok(t.includes('# BLOCK_LIST_FILE cannot be written in skycue.conf'));
 });
 
 console.log(passed + ' passed, ' + failed + ' failed');

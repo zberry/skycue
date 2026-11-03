@@ -733,6 +733,43 @@ BOOST_AUTO_TEST_CASE(two_inputs_same_aircraft_send_rate_bounded)
     BOOST_TEST(w.ev.updatesFor(id) <= 5u);  // the first plus about one a second
 }
 
+BOOST_AUTO_TEST_CASE(lagging_observation_times_still_resend_at_max_interval)
+{
+    // Observations stamped 0.5 s behind the data clock do not move it, but
+    // MAX_INTERVAL_S resends must still happen. Timing-tolerant (no clock
+    // can be injected into the engine cheaply): it waits up to 8 s for two
+    // resends, which the stalled clock never sends at all, and checks they
+    // are max-interval resends, not at the 100 ms observation rate.
+    Config cfg = baseConfig();
+    cfg.min_interval_s = 0.2;
+    cfg.max_interval_s = 1;
+    FakeSource* fake = nullptr;
+    EngineFx fx(cfg, fakeSource(fake));
+    Watch w(fx);
+    const TrackId id{0x666666, AddressType::icao};
+    fx.t.call([&] {
+        fake->connection(true);
+        fake->emit(nearbyObservation(id.address, 0));  // sets the data clock
+    });
+    BOOST_TEST(w.ev.waitFor([&] { return w.ev.updatesFor(id) == 1; }));
+    const auto end = steady::now() + 8s;
+    auto resends = [&] {
+        std::lock_guard<std::mutex> lk(w.ev.m);
+        return w.ev.updatesFor(id);
+    };
+    while (steady::now() < end && resends() < 3) {
+        TrackObservation o = nearbyObservation(id.address, 0);  // same state: only max_interval sends
+        o.received_time -= 500ms;
+        o.position_time = o.received_time;
+        fx.t.call([&] { fake->emit(o); });
+        std::this_thread::sleep_for(100ms);
+    }
+    std::lock_guard<std::mutex> lk(w.ev.m);
+    BOOST_REQUIRE(w.ev.updatesFor(id) >= 3u);  // the first plus two resends
+    for (size_t k = 1; k < w.ev.update_times.size(); ++k)  // only this track is sent
+        BOOST_TEST(std::chrono::duration<double>(w.ev.update_times[k] - w.ev.update_times[k - 1]).count() > 0.5);
+}
+
 BOOST_AUTO_TEST_CASE(stats_lists_inputs)
 {
     Config cfg = baseConfig();
@@ -803,4 +840,164 @@ BOOST_AUTO_TEST_CASE(builtin_enabled_again_restarts)
     });
     BOOST_TEST(fx.t.call([&] { return in["a"]->starts; }) == 2);
     BOOST_TEST(fx.t.call([&] { return fx.engine->inputs().anyTrackInputConnected(); }));
+}
+
+// ---- drop counters per filter decision, enriched drop events ----
+
+BOOST_AUTO_TEST_CASE(filtered_drops_counted_by_decision)
+{
+    Config cfg = baseConfig();  // max range 150 nm, min elevation 0
+    std::map<std::string, FakeInput*> in;
+    EngineFx fx(cfg, fakeInputs({fakeDef("a")}, in));
+    fx.t.call([&] {
+        in["a"]->connection(true);
+        in["a"]->emit(from("a", 0xa00001, 0));    // about 3 nm
+        in["a"]->emit(from("a", 0xa00002, 0.1));  // about 9 nm
+    });
+    BOOST_TEST(fx.stats().tracks_forwarded == 2u);
+
+    fx.t.call([&] { fx.engine->addListEntry(skycued::ListKind::block, "a00001", "test"); });
+    BOOST_TEST(fx.stats().drops_blocked == 1u);
+
+    fx.t.call([&] { fx.engine->setFilterConfig(skycued::FilterConfig{0.5, 0}, "test"); });
+    BOOST_TEST(fx.stats().drops_out_of_range == 1u);
+
+    fx.t.call([&] { fx.engine->setFilterConfig(skycued::FilterConfig{150, 0}, "test"); });
+    BOOST_TEST(fx.stats().tracks_forwarded == 1u);  // 0xa00002 again; 0xa00001 is still blocked
+    fx.t.call([&] { fx.engine->setFilterConfig(skycued::FilterConfig{150, 89}, "test"); });
+    BOOST_TEST(fx.stats().drops_below_elevation == 1u);
+
+    const auto s = fx.stats();
+    BOOST_TEST(s.drops_filtered == 3u);
+    BOOST_TEST(s.drops_filtered == s.drops_blocked + s.drops_out_of_range + s.drops_below_elevation + s.drops_no_position);
+    BOOST_TEST(s.drops_no_position == 0u);
+    BOOST_TEST(s.sent_drops == 3u);
+}
+
+BOOST_AUTO_TEST_CASE(drop_event_carries_decision_callsign_time)
+{
+    Config cfg = baseConfig();
+    cfg.track_timeout_s = 1;
+    std::mutex m;  // declared before fx: they outlive the engine's sink
+    std::condition_variable cv;
+    std::vector<skycued::EngineEvent> drops;
+    std::map<std::string, FakeInput*> in;
+    EngineFx fx(cfg, fakeInputs({fakeDef("a")}, in));
+    const TrackId one{0xa00001, AddressType::icao}, two{0xa00002, AddressType::icao};
+    std::chrono::system_clock::time_point observed_at{};
+    fx.t.call([&] {
+        fx.engine->onEvent([&](const skycued::EngineEvent& e) {
+            if (e.kind != skycued::EventKind::drop)
+                return;
+            std::lock_guard<std::mutex> lk(m);
+            drops.push_back(e);
+            cv.notify_all();
+        });
+        in["a"]->connection(true);
+        auto o1 = from("a", one.address, 0);
+        o1.callsign = std::string("TEST1");
+        observed_at = o1.received_time;
+        in["a"]->emit(o1);
+        auto o2 = from("a", two.address, 0.1);
+        o2.callsign = std::string("TEST2");
+        in["a"]->emit(o2);
+    });
+    BOOST_TEST(fx.stats().tracks_forwarded == 2u);
+
+    fx.t.call([&] { fx.engine->addListEntry(skycued::ListKind::block, "a00001", "test"); });
+    {
+        std::lock_guard<std::mutex> lk(m);
+        BOOST_REQUIRE(drops.size() == 1u);
+        const auto& d = drops[0];
+        BOOST_REQUIRE(d.id.has_value());
+        BOOST_TEST((*d.id == one));
+        BOOST_TEST((d.reason == DropReason::filtered));
+        BOOST_TEST((d.decision == skycued::Decision::blocked));
+        BOOST_TEST((d.callsign == std::string("TEST1")));
+        BOOST_REQUIRE(d.time.has_value());
+        BOOST_TEST((*d.time >= observed_at));
+    }
+
+    // No more observations for 0xa00002: tick()'s expiry path drops it.
+    std::unique_lock<std::mutex> lk(m);
+    BOOST_REQUIRE(cv.wait_for(lk, 3s, [&] { return drops.size() >= 2; }));
+    const auto& d = drops[1];
+    BOOST_REQUIRE(d.id.has_value());
+    BOOST_TEST((*d.id == two));
+    BOOST_TEST((d.reason == DropReason::timeout));
+    BOOST_TEST(!d.decision.has_value());
+    BOOST_TEST((d.callsign == std::string("TEST2")));
+    BOOST_TEST(d.time.has_value());
+    lk.unlock();
+    fx.t.call([&] { fx.engine->onEvent({}); });
+}
+
+BOOST_AUTO_TEST_CASE(filter_history_ring)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(baseConfig(), fakeSource(src));  // no record dir: no sent recorder
+    fx.t.call([&] {
+        auto h = fx.engine->filterHistory();
+        BOOST_REQUIRE(h.size() == 1u);
+        BOOST_TEST(h[0].origin == "startup");
+        BOOST_TEST(h[0].filters.max_range_nm == 150.0);
+        BOOST_TEST(h[0].filters.min_elevation_deg == 0.0);
+
+        for (int i = 0; i < 120; ++i)
+            fx.engine->setFilterConfig({10.0 + i, 0}, "ui");
+        h = fx.engine->filterHistory();
+        BOOST_REQUIRE(h.size() == skycued::kFilterHistoryMax);
+        BOOST_TEST(h.front().filters.max_range_nm == 30.0);  // i = 20
+        BOOST_TEST(h.back().filters.max_range_nm == 129.0);
+        for (size_t k = 0; k < h.size(); ++k) {
+            BOOST_TEST(h[k].origin == "ui");
+            if (k > 0)
+                BOOST_TEST((h[k - 1].time <= h[k].time));
+        }
+    });
+}
+
+BOOST_AUTO_TEST_CASE(filter_history_uses_the_wall_clock_during_a_replay)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(baseConfig(), fakeSource(src));
+    fx.t.call([&] {
+        TrackObservation o = nearbyObservation(0x777777, 0);
+        o.received_time = std::chrono::system_clock::from_time_t(1420070400);  // 2015: a replay's data clock
+        o.position_time = o.received_time;
+        src->connection(true);
+        src->emit(o);
+        BOOST_TEST((fx.engine->snapshot().now < std::chrono::system_clock::from_time_t(1500000000)));  // the data clock is in 2015
+        fx.engine->setFilterConfig({20, 0}, "ui");
+        const auto h = fx.engine->filterHistory();
+        BOOST_REQUIRE(h.size() == 2u);
+        const auto wall = std::chrono::system_clock::now();
+        for (const auto& c : h)
+            BOOST_TEST(std::chrono::duration<double>(wall - c.time).count() < 60.0);
+    });
+}
+
+BOOST_AUTO_TEST_CASE(filter_history_load_before_start)
+{
+    IoThread t;
+    std::unique_ptr<Forwarder> fwd;
+    std::unique_ptr<Engine> engine;
+    FakeSource* src = nullptr;
+    const auto make = fakeSource(src);
+    t.call([&] {
+        ForwarderConfig fc;
+        fc.tcp_listen_ephemeral = true;
+        fwd = std::make_unique<Forwarder>(t.io, fc);
+        engine = std::make_unique<Engine>(t.io, baseConfig(), sourceInputs(t.io, make(t.io)), *fwd, nullptr, nullptr);
+        engine->setFilterConfig({40, 1}, "startup");  // as RuntimeConfig::load() with an overlay
+        engine->start();
+        const auto h = engine->filterHistory();
+        BOOST_REQUIRE(h.size() == 1u);
+        BOOST_TEST(h[0].origin == "startup");
+        BOOST_TEST(h[0].filters.max_range_nm == 40.0);
+        BOOST_TEST(h[0].filters.min_elevation_deg == 1.0);
+        engine.reset();
+        fwd.reset();
+    });
+    t.join();
 }

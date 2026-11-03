@@ -594,8 +594,15 @@
       removeEntry(key);
       return;
     }
-    // filtered: no longer forwarded, still observed (recoloured by the next `observed`).
+    // filtered: no longer forwarded, still observed. Recoloured now by the
+    // drop's decision when it names a drawn one (a track not observed again
+    // soon would otherwise keep its old colour), else by the next `observed`.
     e.t = Object.assign({}, e.t, { forwarded: false });
+    var cls = typeof d.decision === 'string' ? P.decisionColor(d.decision) : null;
+    if (cls && cls !== 'unknown') {
+      e.t.decision = d.decision;
+      renderEntry(e, false);
+    }
     if (key === selectedKey) renderDetails();
     tableDirty = true;
   }
@@ -619,14 +626,17 @@
 
   // ---- selection panel ---------------------------------------------------------
   // The side panel: a Track tab (the selected aircraft), a Weather tab
-  // (FIS-B text reports and the clicked airspace shape) and a Receiver tab
-  // (inputs, ground stations, decoder health). The tabs are the panel's
+  // (FIS-B text reports and the clicked airspace shape), a Receiver tab
+  // (inputs, ground stations, decoder health) and a Cues tab (what was sent
+  // and dropped, filter changes, cue clients). The tabs are the panel's
   // [role=tab] buttons, tab-<name> showing pane-<name>; a header button with
   // data-opens-tab="<name>" toggles the panel on that tab. TAB_SHOWN[name]
   // draws a tab when it is shown. A new tab: its markup and one entry here.
   var TAB_SHOWN = {
     weather: function () { renderWx(true); },
-    receiver: function () { renderReceiver(); }
+    receiver: function () { renderReceiver(); },
+    cues: showCues,
+    config: showConfig
   };
   var activeTab = 'track';
   function eachEl(selector, fn) { Array.prototype.forEach.call(document.querySelectorAll(selector), fn); }
@@ -911,6 +921,7 @@
     setStat('stat-tracks-forwarded', String(s.tracks_forwarded));
     applyInputLines(s.inputs, now);
     rx.stats = s;
+    if (tabShown('cues')) renderCueCounters();
     setStat('stat-tcp', String(s.tcp_clients));
     setStat('stat-udp', String(s.udp_targets));
     setStat('stat-rec-drops', String((s.recorder_dropped_received || 0) + (s.recorder_dropped_sent || 0)));
@@ -998,8 +1009,17 @@
     shapeKey: null,                 // the shape shown in the panel
     rasterHeads: new Map(),         // raster layer key -> mosaic head
     rasterSel: null, raster: null,  // the chosen raster layer and its drawing
-    wxDirty: true, wxFilter: '', wxTimer: null, wxExpanded: {}
+    rasterPick: { product: null, band: null },   // the operator's choice (null: the default)
+    wxDirty: true, wxFilter: '', wxTimer: null, wxExpanded: {},
+    locations: {},                  // location id -> [lat, lon] (api/fisb/locations, fisb_location)
+    show: { metar: true, taf: true, pirep: true, winds: true },   // the Reports toggles
+    syms: new Map(),                // symbol key -> {marker, sig, s} (renderWxSymbols)
+    symDirty: true,
+    windsPick: { period: null, level: null },     // the operator's choice (null: the default)
+    winds: { period: null, level: null, periods: [], levels: [] },   // what the barbs use (syncWinds)
+    reportRec: null                 // the record key of the report shown in the card
   };
+  var wxGroup = null;               // the weather symbols, pane fisbWx
   var radar = {
     regional: { product: 63, label: 'Radar (regional)', head: null, drawn: null, fetching: false, again: false },
     conus: { product: 64, label: 'Radar (CONUS)', head: null, drawn: null, fetching: false, again: false }
@@ -1014,6 +1034,11 @@
     map.createPane('fisbRaster');
     map.getPane('fisbRaster').style.zIndex = 350;   // under the shapes (overlayPane, 400)
     map.getPane('fisbRaster').style.pointerEvents = 'none';
+    map.createPane('fisbWx');
+    map.getPane('fisbWx').style.zIndex = 500;       // over the shapes and city labels, under the aircraft (600)
+    wxGroup = L.layerGroup().addTo(map);
+    // Culled to the view: redrawn by the 1 s interval after a pan or zoom.
+    map.on('moveend zoomend', function () { fisb.symDirty = true; });
     var overlays = {};
     ['conus', 'regional'].forEach(function (w) {
       radarGroups[w] = L.layerGroup().addTo(map);    // radar: on by default
@@ -1042,7 +1067,8 @@
           '<div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span>: not yet in force · ' +
           '<span class="ln-cancelled">dashed</span>: cancelled</div>' +
           '<div id="raster-box" hidden>' +
-          '<label for="raster-select">Raster</label> <select id="raster-select"></select>' +
+          '<label for="raster-select">Raster</label> <select id="raster-select"></select> ' +
+          '<select id="raster-band" aria-label="Altitude band" hidden></select>' +
           '<div id="raster-legend"></div></div>';
         L.DomEvent.disableClickPropagation(div);
         L.DomEvent.disableScrollPropagation(div);
@@ -1052,7 +1078,13 @@
     new WxControl().addTo(map);
     $('radar-opacity').addEventListener('input', applyRadarOpacity);
     $('raster-select').addEventListener('change', function () {
-      fisb.rasterSel = $('raster-select').value || null;
+      fisb.rasterPick = { product: Number($('raster-select').value), band: null };   // its lowest band with data
+      renderRasterSelect();
+      loadRaster();
+    });
+    $('raster-band').addEventListener('change', function () {
+      fisb.rasterPick.band = Number($('raster-band').value);
+      renderRasterSelect();
       loadRaster();
     });
   }
@@ -1198,29 +1230,40 @@
       }).join('');
   }
 
-  function rasterLabel(h) {
-    var alt = '';
-    if (typeof h.altitude_code === 'number') {
-      var ft = (h.product === 71 || h.product === 91 ? 18000 : 2000) + h.altitude_code * 2000;
-      alt = ' · ≈ ' + P.thousands(ft) + ' ft';
-    }
-    return (h.name || 'product ' + h.product) + alt;
-  }
+  // The product select and, for icing and turbulence, the altitude band
+  // select; fisb.rasterSel follows them. A pick stays until its layer goes.
+  // Each select is rebuilt only when its options change.
   function renderRasterSelect() {
-    var sel = $('raster-select');
-    var heads = Array.from(fisb.rasterHeads.values()).sort(function (a, b) {
-      return a.product - b.product || (a.altitude_code || 0) - (b.altitude_code || 0);
-    });
-    var sig = heads.map(function (h) { return h.key; }).join(',');
-    if (!fisb.rasterSel || !fisb.rasterHeads.has(fisb.rasterSel)) fisb.rasterSel = heads.length ? heads[0].key : null;
+    var sel = $('raster-select'), bandSel = $('raster-band');
+    var products = P.rasterProducts(Array.from(fisb.rasterHeads.values()));
+    var pick = fisb.rasterPick;
+    var entry = products.filter(function (e) { return e.product === pick.product; })[0];
+    // With no rasters held (a reconnect reloading, say) the pick is kept for
+    // when they are back; otherwise a product no longer offered is replaced.
+    if (!entry) { entry = products[0] || null; if (entry) { pick.product = entry.product; pick.band = null; } }
+    var bands = entry ? entry.bands : [];
+    if (bands.length && (pick.band === null || !bands[pick.band] || !bands[pick.band].key)) pick.band = P.defaultBand(entry);
+    fisb.rasterSel = !entry ? null : bands.length ? (pick.band === null ? null : bands[pick.band].key) : entry.key;
+    var sig = products.map(function (e) { return e.product + '=' + e.name; }).join(',');
     if (sel.getAttribute('data-sig') !== sig) {
       sel.setAttribute('data-sig', sig);
-      sel.innerHTML = heads.map(function (h) {
-        return '<option value="' + esc(h.key) + '">' + esc(rasterLabel(h)) + '</option>';
-      }).join('');
+      sel.textContent = '';
+      products.forEach(function (e) { sel.appendChild(new Option(e.name, String(e.product))); });
     }
-    sel.disabled = !heads.length;
-    if (fisb.rasterSel) sel.value = fisb.rasterSel;
+    sel.disabled = !products.length;
+    if (entry) sel.value = String(entry.product);
+    var bsig = (entry ? entry.product : '') + ':' + bands.map(function (b) { return b.key ? 1 : 0; }).join('');
+    if (bandSel.getAttribute('data-sig') !== bsig) {
+      bandSel.setAttribute('data-sig', bsig);
+      bandSel.textContent = '';
+      bands.forEach(function (b) {
+        var o = new Option('≈ ' + P.thousands(b.ft) + ' ft' + (b.key ? '' : ' (no data)'), String(b.code));
+        o.disabled = !b.key;
+        bandSel.appendChild(o);
+      });
+    }
+    bandSel.hidden = !bands.length;
+    if (pick.band !== null && bands.length) bandSel.value = String(pick.band);
   }
   function loadRaster() {
     if (!map.hasLayer(rasterGroup)) return;
@@ -1333,6 +1376,7 @@
     if (!s) return;
     var p = s.props;
     fisb.shapeKey = key;
+    fisb.reportRec = null;
     var card = $('shape-details');
     card.setAttribute('data-key', key);
     $('shape-title').textContent = (p.name || 'product ' + p.product) + (p.label || p.location ? ' · ' + (p.label || p.location) : '');
@@ -1359,6 +1403,7 @@
   }
   function hideShape() {
     fisb.shapeKey = null;
+    fisb.reportRec = null;
     $('shape-details').hidden = true;
   }
 
@@ -1374,9 +1419,12 @@
     }
     fisb.text.set(rec.key, rec);
     fisb.wxDirty = true;
+    fisb.symDirty = true;
+    if (rec.key === fisb.reportRec) fillReport(rec);   // the card shows the new report
   }
   function dropText(key) {
-    if (fisb.text.delete(key)) fisb.wxDirty = true;
+    if (fisb.text.delete(key)) fisb.wxDirty = fisb.symDirty = true;
+    if (fisb.reportRec === key) hideShape();
   }
   function hhmm(iso) {
     var ms = Date.parse(iso);
@@ -1386,6 +1434,7 @@
 
   function renderWx(force) {
     if (!force && (!fisb.wxDirty || $('pane-weather').hidden || $('details').hidden)) return;
+    syncWinds();
     fisb.wxDirty = false;
     var now = dataNow(), prefix = fisb.wxFilter;
     var groups = {};
@@ -1397,7 +1446,10 @@
       if (P.stationMatches(r.station, prefix)) groups[r.kind].push(r);
     });
     var shown = 0;
-    $('wx-list').innerHTML = WX_KINDS.map(function (k) {
+    WX_REPORT_KINDS.forEach(function (k) { $('wx-n-' + k).textContent = String(groups[k].length); });
+    var pos = wxPositioned();
+    $('wx-positioned').textContent = pos.n + ' of ' + pos.m + ' positioned';
+    $('wx-list').innerHTML = WX_KINDS.filter(function (k) { return fisb.show[k[0]] !== false; }).map(function (k) {
       var list = groups[k[0]].sort(function (a, b) {
         return a.station < b.station ? -1 : a.station > b.station ? 1 : Date.parse(a.issued) - Date.parse(b.issued);
       });
@@ -1413,11 +1465,275 @@
           '<span class="wx-issued">' + hhmm(r.issued) + '</span>' +
           (r.valid ? '<span class="wx-valid">valid ' + hhmm(r.valid) + '</span>' : '') +
           '<span class="wx-age">' + (isNaN(t) ? '' : shortAge(t, now)) + '</span></button>' +
+          (r.kind === 'twgo' ? '' : wxPlotPos(r) ? '<a class="wx-show" href="#">show</a>' :
+            r.kind === 'winds' && wxPos(r) ? '<span class="wx-nobarb">no barb</span>' :
+            '<span class="wx-nopos">no position</span>') +
           '<pre class="wx-text"' + (open ? '' : ' hidden') + '>' + esc(r.text || '') + '</pre></li>';
       }).join('') + '</ul>' : '<p class="msg">None' + (prefix ? ' matching' : '') + '.</p>') + '</section>';
     }).join('');
     $('wx-summary').textContent = prefix ? shown + ' of ' + total + ' reports match "' + prefix.toUpperCase() + '"' :
       total + ' reports' + (fisb.loaded ? '' : ' (loading…)');
+  }
+
+  // ---- weather symbols (spec §3.3) ----
+  // One Leaflet marker per symbol in wxGroup, reused (setLatLng, setIcon on
+  // a change) and removed when its record goes. Colours come from the
+  // classes (style.css); the SVG uses currentColor.
+  var WX_REPORT_KINDS = ['metar', 'taf', 'pirep', 'winds'];
+  var MAX_WX_SYMBOLS = 300;         // on the map at once: METAR, TAF, PIREP, winds, each nearest the centre first
+  var WX_KIND_RANK = { metar: 0, taf: 1, pirep: 2, winds: 3 };
+  var WX_VIEW_PAD = 0.25;           // symbols drawn inside the view grown by this fraction per side
+  var parsedCache = new WeakMap();  // text record -> its parse (a new record object on every update)
+  function parsedOf(r) {
+    if (!parsedCache.has(r)) {
+      parsedCache.set(r, r.kind === 'metar' ? P.parseMetar(r.text) : r.kind === 'taf' ? P.parseTafFirst(r.text) :
+        r.kind === 'pirep' ? P.parsePirep(r.text) : r.kind === 'winds' ? P.parseWinds(r.text) : null);
+    }
+    return parsedCache.get(r);
+  }
+  // A report's [lat, lon] (spec §3.2), or null: listed, never plotted.
+  function wxPos(r) {
+    if (r.kind === 'pirep') return P.pirepPosition(parsedOf(r), fisb.locations);
+    return P.resolveStation(r.kind, r.station, fisb.locations);
+  }
+  // Where a report's symbol goes, or null: no position, or a winds record
+  // other than the picked period's (winds:<station>:<period>) or without the
+  // picked level.
+  function wxPlotPos(r) {
+    var w = fisb.winds;
+    if (r.kind === 'winds' && (r.period_h !== w.period || w.level === null || !P.windsLevel(parsedOf(r), w.level))) return null;
+    return wxPos(r);
+  }
+  // The winds pickers (spec §3.1): the periods present, defaulting to the
+  // one whose valid time is nearest the data clock, and the levels present
+  // in that period, defaulting to the lowest. An operator's pick stays until
+  // it is no longer offered. Sets fisb.winds; on a change the list and the
+  // symbols are redrawn. Each select is rebuilt only when its options change.
+  function syncWinds() {
+    var recs = [];
+    fisb.text.forEach(function (r) { if (r.kind === 'winds') recs.push(r); });
+    var pick = fisb.windsPick, periods = P.windsPeriods(recs);
+    // No winds held at all (a reconnect reloading, say): the pick is kept
+    // for when they are back, not judged against an empty set.
+    var empty = !recs.length;
+    if (!empty && periods.indexOf(pick.period) < 0) pick.period = null;
+    var period = pick.period !== null ? pick.period : P.nearestWindsPeriod(recs, dataNow());
+    if (period === null && periods.length) period = periods[0];
+    var levels = period === null ? [] : P.windsLevelsFor(recs, period, parsedOf);
+    if (!empty && levels.indexOf(pick.level) < 0) pick.level = null;
+    var level = pick.level !== null ? pick.level : levels.length ? levels[0] : null;
+    var old = fisb.winds;
+    fisb.winds = { period: period, level: level, periods: periods, levels: levels };
+    fillPicker($('wx-winds-period'), periods, period, function (h) { return h + ' h'; });
+    fillPicker($('wx-winds-level'), levels, level, function (ft) { return P.thousands(ft) + ' ft'; });
+    $('wx-winds-pick').hidden = !fisb.show.winds;
+    if (old.period === period && old.level === level) return;
+    fisb.wxDirty = fisb.symDirty = true;
+    var shown = fisb.reportRec && fisb.text.get(fisb.reportRec);
+    if (shown && shown.kind === 'winds') fillReport(shown);   // the card names the level
+  }
+  function fillPicker(sel, values, value, label) {
+    var sig = values.join(',');
+    if (sel.getAttribute('data-sig') !== sig) {
+      sel.setAttribute('data-sig', sig);
+      sel.textContent = '';
+      values.forEach(function (v) { sel.appendChild(new Option(label(v), String(v))); });
+    }
+    sel.disabled = !values.length;
+    if (value !== null) sel.value = String(value);
+  }
+  // "n of m positioned" over the reports the list shows (toggles, filter):
+  // n counts those with a symbol, on screen or not.
+  function wxPositioned() {
+    var n = 0, m = 0;
+    fisb.text.forEach(function (r) {
+      if (!fisb.show[r.kind] || !P.stationMatches(r.station, fisb.wxFilter)) return;
+      m++;
+      if (wxPlotPos(r)) n++;
+    });
+    return { n: n, m: m };
+  }
+
+  // A barb's SVG: the staff from r0 px out to r0 + 17 px toward `dir` (where
+  // the wind comes from), 50 kt pennants, 10 kt barbs and a 5 kt half barb
+  // from its far end (P.barbParts); drawn twice, a halo under the line.
+  function barbSvg(dir, kt, r0) {
+    var b = P.barbParts(kt), tip = -(r0 + 17), y = tip, i;
+    var staff = 'M0 ' + (-r0) + 'V' + tip, feathers = '', pens = '';
+    for (i = 0; i < b.pennants; i++, y += 5) pens += 'M0 ' + y + 'L8 ' + (y + 2) + 'L0 ' + (y + 4) + 'Z';
+    if (b.pennants) y += 1;
+    for (i = 0; i < b.full; i++, y += 3) feathers += 'M0 ' + y + 'l8 -4';
+    if (b.half) feathers += 'M0 ' + (y === tip ? y + 3 : y) + 'l4 -2';
+    return '<g class="barb" transform="rotate(' + Number(dir) + ')"><path class="halo" d="' + staff + feathers + pens +
+      '"/><path d="' + staff + feathers + '"/>' + (pens ? '<path class="pen" d="' + pens + '"/>' : '') + '</g>';
+  }
+  function svgBox(size, body) {
+    var h = size / 2;
+    return '<svg width="' + size + '" height="' + size + '" viewBox="' + -h + ' ' + -h + ' ' + size + ' ' + size +
+      '" aria-hidden="true">' + body + '</svg>';
+  }
+  // The symbol of one record at pos, or null (a winds record without the level).
+  function wxSymbolFor(r, pos, now) {
+    var p = parsedOf(r), cls = 'wx-sym wx-' + r.kind, barb = null, html, size = 48, anchor = [24, 24];
+    var key = r.kind === 'winds' ? 'winds:' + r.station : r.key;
+    if (r.kind === 'metar' || r.kind === 'taf') {
+      cls += ' cat-' + (p ? p.category : 'unknown').toLowerCase();
+      if (r.kind === 'metar') {
+        var w = p && p.wind;
+        if (w && !w.calm && !w.variable && w.dir !== null) barb = { dir: w.dir, kt: w.kt };
+        html = svgBox(48, (barb ? barbSvg(barb.dir, barb.kt, 5) : '') + (w && w.calm ? '<circle class="ring" r="8"/>' : '') +
+          '<circle class="wx-core" r="5"/>');
+      } else {
+        size = 10; anchor = [-7, 5];   // right of the METAR circle
+        html = svgBox(10, '<rect class="wx-core" x="-4" y="-4" width="8" height="8"/>');
+      }
+    } else if (r.kind === 'pirep') {
+      var urgent = !!(p && p.urgent);
+      cls += urgent ? ' pirep-uua' : ' pirep-ua';
+      size = 18; anchor = [9, 9];
+      html = svgBox(18, '<path class="wx-core" d="M0 -7L7 6H-7Z"/>' + (urgent ? '<text class="bang" y="4.5">!</text>' : ''));
+    } else {
+      var lv = fisb.winds.level === null ? null : P.windsLevel(p, fisb.winds.level);
+      if (!lv) return null;
+      if (!lv.lv) barb = { dir: lv.dir, kt: lv.kt };
+      anchor = [24, 8];    // 16 px below the station: clear of the METAR circle and its barb
+      html = svgBox(48, (barb ? barbSvg(barb.dir, barb.kt, 3) : '') + '<circle class="wx-core" r="3"/>' +
+        (lv.temp !== null ? '<text class="temp" x="5" y="13">' + Number(lv.temp) + '</text>' : ''));
+    }
+    return { key: key, kind: r.kind, station: r.station, cls: cls + ' age-' + P.ageClass(r.issued, now),
+      lat: pos[0], lon: pos[1], barb: barb, html: html, size: size, anchor: anchor, rec: r };
+  }
+  function wxIcon(s) {
+    return L.divIcon({ className: s.cls, html: s.html, iconSize: [s.size, s.size], iconAnchor: s.anchor });
+  }
+  function clearWxSymbols() {
+    fisb.syms.forEach(function (o) { wxGroup.removeLayer(o.marker); });
+    fisb.syms.clear();
+    fisb.symDirty = true;
+  }
+  function renderWxSymbols() {
+    syncWinds();
+    fisb.symDirty = false;
+    if (!map) return;
+    var now = dataNow(), want = [], view = map.getBounds().pad(WX_VIEW_PAD);
+    fisb.text.forEach(function (r) {
+      if (!fisb.show[r.kind] || !P.stationMatches(r.station, fisb.wxFilter)) return;
+      var pos = wxPlotPos(r);
+      if (!pos || !view.contains(pos)) return;
+      var s = wxSymbolFor(r, pos, now);
+      if (s) want.push(s);
+    });
+    if (want.length > MAX_WX_SYMBOLS) {
+      var c = map.getCenter();
+      want.forEach(function (s) { s.d = P.rangeNm(c.lat, c.lng, s.lat, s.lon); });
+      want.sort(function (a, b) { return WX_KIND_RANK[a.kind] - WX_KIND_RANK[b.kind] || a.d - b.d; });
+      want.length = MAX_WX_SYMBOLS;
+    }
+    var keep = {};
+    want.forEach(function (s) {
+      keep[s.key] = true;
+      var o = fisb.syms.get(s.key), sig = s.cls + s.html;
+      if (!o) {
+        var m = L.marker([s.lat, s.lon], { pane: 'fisbWx', icon: wxIcon(s), title: s.station, keyboard: false });
+        m.on('add', function () { m.getElement().setAttribute('data-station', s.station); });
+        m.on('click', function (ev) {
+          L.DomEvent.stopPropagation(ev);
+          showReport(s.key);
+        });
+        wxGroup.addLayer(m);
+        fisb.syms.set(s.key, { marker: m, sig: sig, s: s });
+        return;
+      }
+      var ll = o.marker.getLatLng();
+      if (ll.lat !== s.lat || ll.lng !== s.lon) o.marker.setLatLng([s.lat, s.lon]);
+      if (o.sig !== sig) o.marker.setIcon(wxIcon(s));   // the div is reused: data-station stays
+      o.sig = sig;
+      o.s = s;
+    });
+    fisb.syms.forEach(function (o, k) {
+      if (keep[k]) return;
+      wxGroup.removeLayer(o.marker);
+      fisb.syms.delete(k);
+    });
+  }
+
+  // The detail card for a report: its parsed summary and raw text. Every
+  // server string goes in through textContent.
+  function windText(w) {
+    if (!w) return 'not given';
+    if (w.calm) return 'calm';
+    var s = (w.variable || w.dir === null ? 'variable' : ('00' + w.dir).slice(-3) + '°') + ' ' + w.kt + ' kt';
+    return w.gust ? s + ', gusts ' + w.gust + ' kt' : s;
+  }
+  function visText(v) {
+    if (v === null || v === undefined) return 'unknown';
+    return Math.round(v * 100) / 100 + ' SM';
+  }
+  function ceilText(c) {
+    if (c === null || c === undefined) return 'unknown';
+    return c === Infinity ? 'none' : P.thousands(c) + ' ft';
+  }
+  // key: a symbol key (winds:<st>) or a record key.
+  function showReport(key) {
+    var o = fisb.syms.get(key), r = fisb.text.get(o ? o.s.rec.key : key);
+    if (!r) return;
+    var card = $('shape-details');
+    card.setAttribute('data-key', key);
+    fillReport(r);
+    openPanel('weather');
+    card.scrollIntoView({ block: 'nearest' });
+  }
+  // The card's rows, title and text for record r (also on an update of the shown record).
+  function fillReport(r) {
+    var p = parsedOf(r), rows = [];
+    if (r.kind === 'metar' || r.kind === 'taf') {
+      rows.push(['category', 'Category', p ? p.category : 'unknown']);
+      rows.push(['wind', 'Wind', windText(p && p.wind)]);
+      rows.push(['visibility', 'Visibility', visText(p && p.visSm)]);
+      rows.push(['ceiling', 'Ceiling', ceilText(p && p.ceilFt)]);
+    } else if (r.kind === 'pirep') {
+      rows.push(['type', 'Type', p && p.urgent ? 'UUA (urgent)' : 'UA']);
+      var ov = p && p.ov;
+      rows.push(['ov', '/OV', ov ? ov.id + (ov.radial !== null ? ' ' + ('00' + ov.radial).slice(-3) + '° ' + ov.nm + ' nm' : '') :
+        'not a location id']);
+    } else if (r.kind === 'winds') {
+      var ft = fisb.winds.level, lv = ft === null ? null : P.windsLevel(p, ft);
+      rows.push(['level', 'Level', (ft === null ? 'none' : P.thousands(ft) + ' ft') +
+        (r.period_h ? ' · ' + r.period_h + ' h forecast' : '')]);
+      rows.push(['wind', 'Wind', lv ? (lv.lv ? 'light and variable' : windText({ dir: lv.dir, kt: lv.kt })) : 'not given']);
+      rows.push(['temp', 'Temperature', lv && lv.temp !== null ? lv.temp + ' °C' : 'not given']);
+    }
+    var t = Date.parse(r.issued);
+    rows.push(['issued', 'Issued', r.issued ? fmtWhen(r.issued) : 'unknown']);
+    rows.push(['age', 'Age', isNaN(t) ? 'unknown' : shortAge(t, dataNow())]);
+    if (!wxPos(r)) rows.push(['position', 'Position', 'no position']);
+    fisb.shapeKey = null;
+    fisb.reportRec = r.key;
+    var card = $('shape-details');
+    $('shape-title').textContent = r.kind.toUpperCase() + ' ' + (r.station || '');
+    var body = $('shape-fields');
+    body.textContent = '';
+    rows.forEach(function (row) {
+      var tr = document.createElement('tr'), th = document.createElement('th'), td = document.createElement('td');
+      th.scope = 'row';
+      th.textContent = row[1];
+      td.setAttribute('data-field', row[0]);
+      td.textContent = row[2];
+      tr.appendChild(th);
+      tr.appendChild(td);
+      body.appendChild(tr);
+    });
+    var pre = card.querySelector('pre.shape-text');
+    pre.textContent = r.text || '';
+    pre.hidden = !r.text;
+    card.hidden = false;
+  }
+  // The list's "show": pans to the report's position (as the Receiver tab's).
+  function showWxPos(key) {
+    var r = fisb.text.get(key), ll = r && wxPlotPos(r);
+    if (!ll || !map) return;
+    if (map.getZoom() < SHOW_MIN_ZOOM && !map.getBounds().contains(ll)) map.setView(ll, SHOW_MIN_ZOOM);
+    else map.panTo(ll);
   }
 
   // ---- status strip ----
@@ -1484,6 +1800,8 @@
     fisb.gen++;
     var gen = fisb.gen;
     fisb.text.clear();
+    fisb.locations = {};
+    clearWxSymbols();
     Array.from(fisb.shapes.keys()).forEach(removeShapes);
     hideShape();
     Object.keys(radar).forEach(clearRadar);
@@ -1503,8 +1821,11 @@
     fisb.loading = true;
     applyFisbStatus(st);
     Promise.all([request('GET', 'api/fisb/text'), request('GET', 'api/fisb/shapes'),
-      request('GET', 'api/fisb/text?type=twgo')]).then(function (r) {
+      request('GET', 'api/fisb/text?type=twgo'),
+      request('GET', 'api/fisb/locations').catch(function () { return {}; })]).then(function (r) {
       if (gen !== fisb.gen) return;
+      var locs = r[3] || {};
+      Object.keys(locs).forEach(function (id) { if (Array.isArray(locs[id])) setLocation(id, locs[id][0], locs[id][1]); });
       (r[0].records || []).forEach(upsertText);
       (r[2].records || []).forEach(upsertText);
       var byKey = new Map();
@@ -1527,10 +1848,17 @@
     });
   }
 
+  function setLocation(id, lat, lon) {
+    if (typeof id !== 'string' || typeof lat !== 'number' || typeof lon !== 'number') return;
+    fisb.locations[id] = [lat, lon];
+    fisb.wxDirty = fisb.symDirty = true;
+  }
+
   function onFisbItem(it) {
     if (fisb.loading) { fisb.queue.push(it); return; }
     switch (it.type) {
       case 'fisb_text': upsertText(it.record); break;
+      case 'fisb_location': setLocation(it.id, it.lat, it.lon); break;
       case 'fisb_shape':
         dropText(it.key);   // a text-only TWGO record that now has graphics
         setShapes(it.key, it.features || []);
@@ -1842,6 +2170,220 @@
     });
   }
 
+  // ---- Cues tab ------------------------------------------------------------------
+  // docs/operating.md, Cues tab. The counters follow every stats item; every
+  // update and drop item goes into a ring of the last DECISIONS_RING whether
+  // the tab is shown or not; the filter changes (GET /api/filters/history)
+  // and the cue clients (GET /api/cues/clients) are fetched when the tab is
+  // shown and every CUES_POLL_MS while it is, the history also on every
+  // `filters` item. Server strings go in through textContent.
+  var CUES_POLL_MS = 5000;
+  var FILTER_TEXT = { max_range_nm: ['max range', ' nm'], min_elevation_deg: ['min elevation', '°'] };
+  // ring: the last updates and drops; dropRing: the last drops alone, so
+  // "Drops only" still has them when max-interval resends fill `ring`.
+  var CUES_DROPS_ONLY_KEY = 'skycue.cues.dropsOnly';   // a view option in localStorage
+  var cues = { ring: [], dropRing: [], dropsOnly: false, recentDirty: true, historySeq: 0, clientsSeq: 0 };
+
+  function onDecision(it) {
+    var row = P.decisionRow(it);
+    P.pushRing(cues.ring, row, P.DECISIONS_RING);
+    if (it.type === 'drop') P.pushRing(cues.dropRing, row, P.DECISIONS_RING);
+    cues.recentDirty = true;
+  }
+  function setCuesDropsOnly(on) {
+    cues.dropsOnly = !!on;
+    $('cues-drops-only').checked = cues.dropsOnly;
+    storeSet(CUES_DROPS_ONLY_KEY, cues.dropsOnly ? '1' : '0');
+    renderCueRecent();
+  }
+  function clockTime(iso) {
+    var ms = Date.parse(iso);
+    return isNaN(ms) ? '' : new Date(ms).toISOString().substr(11, 8) + 'Z';
+  }
+  function renderCueCounters() {
+    var body = $('cues-counters').tBodies[0], s = rx.stats || {};
+    if (!body.rows.length) {
+      P.CUE_COUNTERS.forEach(function (c) {
+        var tr = el('tr');
+        tr.setAttribute('data-counter', c[0]);
+        tr.appendChild(el('th', null, c[1]));
+        tr.appendChild(el('td', 'v'));
+        body.appendChild(tr);
+      });
+    }
+    P.CUE_COUNTERS.forEach(function (c, i) {
+      var td = body.rows[i].cells[1], text = String(s[c[0]] || 0);
+      if (td.textContent !== text) td.textContent = text;
+    });
+  }
+  function renderCueRecent() {
+    cues.recentDirty = false;
+    var body = $('cues-recent').tBodies[0], ring = cues.dropsOnly ? cues.dropRing : cues.ring;
+    body.textContent = '';
+    for (var i = ring.length - 1; i >= 0; i--) {
+      var r = ring[i], tr = el('tr');
+      tr.setAttribute('data-key', r.key);
+      tr.appendChild(el('td', null, clockTime(r.time)));
+      tr.appendChild(el('td', null, r.hex));
+      tr.appendChild(el('td', null, r.callsign));
+      var d = el('td', null, r.decision);
+      if (r.decision) d.className = 'decision-' + (P.decisionColor(r.decision) || 'unknown');
+      tr.appendChild(d);
+      tr.appendChild(el('td', null, r.reason));
+      body.appendChild(tr);
+    }
+  }
+  function filterDiffText(d) {
+    var f = FILTER_TEXT[d.field] || [d.field, ''];
+    var v = function (x) { return x === null || x === undefined ? '—' : String(x); };
+    return f[0] + ' ' + (d.from === null ? '' : v(d.from) + ' → ') + v(d.to) + f[1];
+  }
+  function renderCueFilters(changes) {
+    var ul = $('cues-filters'), rows = P.filterHistoryRows(changes);
+    ul.textContent = '';
+    if (!rows.length) ul.appendChild(el('li', 'empty', 'None.'));
+    rows.forEach(function (r) {
+      var li = el('li');
+      li.appendChild(el('span', 'cf-time', clockTime(r.time)));
+      li.appendChild(document.createTextNode(' ' + r.origin + ': ' +
+        (r.diffs.length ? r.diffs.map(filterDiffText).join(', ') : 'no change')));
+      ul.appendChild(li);
+    });
+  }
+  function clientRow(cls, cells) {
+    var tr = el('tr', cls);
+    cells.forEach(function (c) { tr.appendChild(el('td', null, c)); });
+    return tr;
+  }
+  function renderCueClients(c) {
+    var body = $('cues-clients').tBodies[0], tcp = c.tcp || [], udp = c.udp || [], now = Date.now();
+    body.textContent = '';
+    tcp.forEach(function (t) {
+      var ms = Date.parse(t.connected_since);
+      body.appendChild(clientRow('tcp', [t.endpoint, t.direction,
+        isNaN(ms) ? '' : clockTime(t.connected_since) + ' · ' + P.formatAge(ms, now), P.thousands(t.bytes_sent || 0) + ' B']));
+    });
+    udp.forEach(function (u) {
+      body.appendChild(clientRow('udp', [u.endpoint, 'udp', '', P.thousands(u.datagrams_sent || 0) + ' datagrams']));
+    });
+    if (!tcp.length && !udp.length) {
+      var td = el('td', 'empty', 'None.');
+      td.colSpan = 4;
+      body.appendChild(el('tr', 'empty')).appendChild(td);
+    }
+  }
+  // A response that an answer to a later request overtook is not shown.
+  function fetchCueHistory() {
+    var seq = ++cues.historySeq;
+    request('GET', 'api/filters/history').then(function (h) {
+      if (seq === cues.historySeq) renderCueFilters(h.changes || []);
+    }).catch(function () { /* the WebSocket watchdog reports a dead skycued */ });
+  }
+  function fetchCueClients() {
+    var seq = ++cues.clientsSeq;
+    request('GET', 'api/cues/clients').then(function (c) {
+      if (seq === cues.clientsSeq) renderCueClients(c);
+    }).catch(function () { /* as above */ });
+  }
+  function showCues() {
+    renderCueCounters();
+    renderCueRecent();
+    fetchCueHistory();
+    fetchCueClients();
+  }
+  function pollCues() {
+    if (!connected || !tabShown('cues')) return;
+    fetchCueHistory();
+    fetchCueClients();
+  }
+
+  // ---- Config tab ----------------------------------------------------------------
+  // docs/operating.md, Config tab. Read only: GET /api/config each time the
+  // tab is shown and on Refresh; one table per CONFIG_GROUPS group with each
+  // key's value, source and restart badge. "Copy as text" puts configText()
+  // on the clipboard, or, where the clipboard refuses, in a selected
+  // textarea to copy by hand. Server strings go in through textContent.
+  var config = { data: null, seq: 0 };
+
+  function renderConfigDaemon(d) {
+    var body = $('config-daemon').tBodies[0], started = Date.parse(d.started);
+    var rows = [
+      ['Version', d.version],
+      ['Started', isNaN(started) ? d.started : d.started + ' (' + P.formatAge(started, Date.now()) + ')'],
+      ['Config file', d.config_path],
+      ['Inputs file', d.inputs_path],
+      ['Overlay file', d.overlay_path + (d.overlay_active ? ' (unsaved changes)' : '')],
+      ['www directory', d.www_dir],
+      ['Recording to', d.record_dir || 'not recording'],
+      ['Recording files', (d.recording_files || []).join(', ') || 'none'],
+      ['Log level', d.log_level],
+      ['Runs', P.daemonModeText(d)],
+      ['Learned locations', P.daemonLocationsText(d)[0]],
+      ['Operator locations', P.daemonLocationsText(d)[1]]];
+    body.textContent = '';
+    rows.forEach(function (r) {
+      var tr = el('tr');
+      tr.appendChild(el('th', null, r[0]));
+      tr.appendChild(el('td', null, r[1] === undefined || r[1] === null ? '' : String(r[1])));
+      body.appendChild(tr);
+    });
+  }
+  function renderConfigGroups(keys) {
+    var box = $('config-groups');
+    box.textContent = '';
+    P.groupConfig(keys).forEach(function (g) {
+      box.appendChild(el('h2', null, g.group));
+      var table = el('table', 'cfg-table'), body = el('tbody');
+      table.setAttribute('data-group', g.group);
+      g.rows.forEach(function (r) {
+        var tr = el('tr'), restart = el('td', 'cfg-restart');
+        tr.setAttribute('data-key', r.key);
+        tr.appendChild(el('th', null, r.key));
+        tr.appendChild(el('td', 'cfg-value', String(r.value)));
+        tr.appendChild(el('td', 'cfg-source', r.source));
+        if (r.restart) restart.appendChild(el('span', 'badge', 'restart'));
+        tr.appendChild(restart);
+        body.appendChild(tr);
+      });
+      table.appendChild(body);
+      box.appendChild(table);
+    });
+  }
+  // A response that an answer to a later request overtook is not shown.
+  function showConfig() {
+    var seq = ++config.seq;
+    // A fresh load: the last copy's status and fallback text no longer apply.
+    showMsg($('config-copy-status'), '');
+    $('config-copy-text').hidden = true;
+    $('config-copy-text').value = '';
+    request('GET', 'api/config').then(function (c) {
+      if (seq !== config.seq) return;
+      config.data = c;
+      showMsg($('config-msg'), '');
+      renderConfigDaemon(c.daemon || {});
+      renderConfigGroups(c.keys || []);
+      $('config-copy').disabled = false;
+    }).catch(function (e) {
+      if (seq === config.seq) showMsg($('config-msg'), 'Could not load the configuration: ' + e.message, true);
+    });
+  }
+  function configText() { return config.data ? P.configText(config.data) : ''; }
+  function copyConfig() {
+    var text = configText(), status = $('config-copy-status'), area = $('config-copy-text');
+    var fallback = function () {
+      showMsg(status, 'Copy failed', true);
+      area.value = text;
+      area.hidden = false;
+      area.focus();
+      area.select();
+    };
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { fallback(); return; }
+    navigator.clipboard.writeText(text).then(function () {
+      area.hidden = true;
+      showMsg(status, 'Copied');
+    }, fallback);
+  }
+
   // ---- the add / edit form ----
   function formEl(name) { return $('input-form').elements[name]; }
   function formFields() { return P.inputFields(formEl('type').value, formEl('transport').value); }
@@ -1972,7 +2514,9 @@
     $('conn-banner').hidden = on;
   }
 
+  var snapshotCount = 0;            // snapshots applied (a test hook)
   function onSnapshot(s) {
+    snapshotCount++;
     clearAll();
     clockOffsetMs = Date.parse(s.now) - Date.now();
     if (isNaN(clockOffsetMs)) clockOffsetMs = 0;
@@ -2002,14 +2546,15 @@
         clockOffsetMs = P.nextClockOffset(clockOffsetMs, Date.parse(it.last_seen), Date.now());
         onTrack(it, true);
         break;
-      case 'update': flashSent(onTrack(it, false)); break;
-      case 'drop': onDrop(it); break;
+      case 'update': flashSent(onTrack(it, false)); onDecision(it); break;
+      case 'drop': onDrop(it); onDecision(it); break;
       case 'expired': removeEntry(P.trackKey(it)); break; // never forwarded, gone from skycued's table
       case 'stats': lastStatsWall = Date.now(); applyStats(it); break;
-      case 'filters': applyFilters(it); break;
+      case 'filters': applyFilters(it); if (tabShown('cues')) fetchCueHistory(); break;
       case 'lists': applyLists(it); break;
       case 'inputs': applyInputs(it.inputs); break;
       case 'fisb_text': case 'fisb_shape': case 'fisb_radar': case 'fisb_raster': case 'fisb_expired':
+      case 'fisb_location':
         onFisbItem(it);
         break;
       default: break;
@@ -2101,6 +2646,8 @@
     });
     $('save-baseline').addEventListener('click', saveBaseline);
     $('details-close').addEventListener('click', closePanel);
+    $('config-refresh').addEventListener('click', showConfig);
+    $('config-copy').addEventListener('click', copyConfig);
     eachEl('#details [role=tab]', function (b) {
       b.addEventListener('click', function () { setTab(b.id.replace(/^tab-/, '')); });
     });
@@ -2122,10 +2669,30 @@
       clearTimeout(fisb.wxTimer);
       fisb.wxTimer = setTimeout(function () {
         fisb.wxFilter = $('wx-filter').value.trim();
+        fisb.symDirty = true;
         renderWx(true);
       }, WX_DEBOUNCE_MS);
     });
+    WX_REPORT_KINDS.forEach(function (k) {
+      $('wx-show-' + k).addEventListener('change', function () {
+        fisb.show[k] = $('wx-show-' + k).checked;
+        fisb.symDirty = true;
+        renderWx(true);
+      });
+    });
+    ['period', 'level'].forEach(function (k) {
+      $('wx-winds-' + k).addEventListener('change', function () {
+        fisb.windsPick[k] = Number($('wx-winds-' + k).value);
+        renderWx(true);   // syncWinds: the symbols follow
+      });
+    });
     $('wx-list').addEventListener('click', function (ev) {
+      var show = ev.target.closest('.wx-show');
+      if (show) {
+        ev.preventDefault();
+        showWxPos(show.closest('.wx-row').getAttribute('data-key'));
+        return;
+      }
       var head = ev.target.closest('.wx-head');
       if (!head) return;
       var li = head.closest('.wx-row');
@@ -2146,6 +2713,12 @@
       var tr = ev.target.closest('tr');
       if (tr) select(tr.getAttribute('data-key'));
     });
+    $('cues-drops-only').addEventListener('change', function () { setCuesDropsOnly($('cues-drops-only').checked); });
+    setCuesDropsOnly(storeGet(CUES_DROPS_ONLY_KEY) === '1');
+    $('cues-recent').tBodies[0].addEventListener('click', function (ev) {
+      var tr = ev.target.closest('tr[data-key]');
+      if (tr) select(tr.getAttribute('data-key'));
+    });
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') closePanel();
     });
@@ -2153,6 +2726,7 @@
     setInterval(watchdog, 1000);
     setInterval(pollFisb, FISB_POLL_MS);
     setInterval(pollInputs, INPUTS_POLL_MS);
+    setInterval(pollCues, CUES_POLL_MS);
     var ticks = 0;
     setInterval(function () {
       if (selectedKey) renderDetails(); // ages
@@ -2160,8 +2734,10 @@
       if (tableDirty) renderTable();
       if (map) radarAgeTick();
       if (tabShown('receiver')) renderReceiver(); // ages, rates
-      if (++ticks % 15 === 0) fisb.wxDirty = true; // ages and age classes
+      if (tabShown('cues') && cues.recentDirty) renderCueRecent();
+      if (++ticks % 15 === 0) fisb.wxDirty = fisb.symDirty = true; // ages and age classes
       renderWx();
+      if (fisb.symDirty) renderWxSymbols();
     }, 1000);
   }
 
@@ -2189,6 +2765,8 @@
       return e ? e.t.hex : null;
     },
     connected: function () { return connected; },
+    // The Config tab's "copy as text" (empty before GET /api/config answers).
+    configText: configText,
     setHideFiltered: setHideFiltered,
     getHideFiltered: function () { return hideFiltered; },
     hiddenCount: updateHiddenCount,
@@ -2199,6 +2777,22 @@
     // the page's own handler; what the radar canvases hold.
     fisbLoaded: function () { return fisb.loaded; },
     injectFisbItems: function (items) { items.forEach(onItem); },
+    // Weather symbols: what is drawn; "n of m positioned".
+    wxSymbols: function () {
+      return Array.from(fisb.syms.values()).map(function (o) {
+        var s = o.s;
+        return { key: s.key, kind: s.kind, station: s.station, cls: s.cls, lat: s.lat, lon: s.lon, barb: s.barb };
+      });
+    },
+    wxPositioned: wxPositioned,
+    // The winds pickers: the period and level the barbs use, and those offered.
+    windsPickers: function () {
+      var w = fisb.winds;
+      return { period: w.period, level: w.level, periods: w.periods.slice(), levels: w.levels.slice() };
+    },
+    snapshots: function () { return snapshotCount; },
+    // Closes the WebSocket: the page reconnects and resets from the snapshot.
+    reconnect: function () { if (ws) ws.close(); },
     radarStats: function () {
       var out = { blocks: 0, painted: 0, products: {} };
       Object.keys(radar).forEach(function (w) {
@@ -2257,10 +2851,14 @@
     }, function () { return tiles; });
   });
   // The overlays (scripts/make-overlays.sh) are optional like the tiles:
-  // without overlays/meta.json (404) the page offers no overlay toggles.
-  var overlaysReady = fetchJson('overlays/meta.json').then(function (m) {
-    overlayMeta = m && typeof m === 'object' ? m : null;
-  }, function () { overlayMeta = null; });
+  // api/tiles-available says whether overlays/meta.json exists, so it is
+  // fetched only then (no request, no 404, without overlays).
+  var overlaysReady = tilesReady.then(function (tiles) {
+    if (!tiles || tiles.overlays !== true) { overlayMeta = null; return; }
+    return fetchJson('overlays/meta.json').then(function (m) {
+      overlayMeta = m && typeof m === 'object' ? m : null;
+    }, function () { overlayMeta = null; });
+  });
   Promise.all([tilesReady, overlaysReady]).then(function (r) {
     var tiles = r[0];
     initMap(tiles);

@@ -6,6 +6,7 @@
 #include "recorder.hpp"
 #include "runtime_config.hpp"
 #include "time_util.hpp"
+#include "web_config.hpp"
 #include "web_fisb.hpp"
 #include "web_inputs.hpp"
 
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <map>
 #include <cmath>
 #include <cstdint>
@@ -76,6 +78,10 @@ void putStats(JsonWriter& w, const EngineStats& s)
         .add("udp_targets", n(s.udp_targets))
         .add("drops_timeout", n(s.drops_timeout))
         .add("drops_filtered", n(s.drops_filtered))
+        .add("drops_blocked", n(s.drops_blocked))
+        .add("drops_out_of_range", n(s.drops_out_of_range))
+        .add("drops_below_elevation", n(s.drops_below_elevation))
+        .add("drops_no_position", n(s.drops_no_position))
         .add("drops_source_lost", n(s.drops_source_lost))
         .add("recorder_dropped_received", n(s.recorder_dropped_received))
         .add("recorder_dropped_sent", n(s.recorder_dropped_sent))
@@ -327,6 +333,40 @@ bool sameOrigin(const std::string& origin, const std::string& host)
     return normaliseAuthority(authority, scheme) == normaliseAuthority(host, scheme);
 }
 
+// {"changes":[{"time":"...","origin":"...","filters":{...}},...]}, oldest first.
+std::string filterHistoryJson(const Engine& engine)
+{
+    std::vector<std::string> changes;
+    for (const auto& c : engine.filterHistory())
+        changes.push_back(JsonWriter()
+                              .add("time", formatIso8601Ms(c.time))
+                              .add("origin", c.origin)
+                              .addRaw("filters", JsonWriter()
+                                                     .add("max_range_nm", c.filters.max_range_nm)
+                                                     .add("min_elevation_deg", c.filters.min_elevation_deg)
+                                                     .str())
+                              .str());
+    return JsonWriter().addRaw("changes", jsonArray(changes)).str();
+}
+
+std::string cueClientsJson(const Forwarder& forwarder)
+{
+    std::vector<std::string> tcp, udp;
+    for (const auto& c : forwarder.tcpClients())
+        tcp.push_back(JsonWriter()
+                          .add("endpoint", c.endpoint)
+                          .add("direction", c.dialled ? "dialled" : "accepted")
+                          .add("connected_since", formatIso8601Ms(c.connected_since))
+                          .add("bytes_sent", static_cast<int64_t>(c.bytes_sent))
+                          .str());
+    for (const auto& t : forwarder.udpTargets())
+        udp.push_back(JsonWriter()
+                          .add("endpoint", t.endpoint)
+                          .add("datagrams_sent", static_cast<int64_t>(t.datagrams_sent))
+                          .str());
+    return JsonWriter().addRaw("tcp", jsonArray(tcp)).addRaw("udp", jsonArray(udp)).str();
+}
+
 }  // namespace
 
 std::optional<ApiResponse> rejectUnsafe(const ApiRequest& req)
@@ -438,14 +478,22 @@ std::string trackJson(const TrackSnapshot& track, const char* type)
     return w.str();
 }
 
-std::string dropJson(skycue::TrackId id, skycue::DropReason reason)
+std::string dropJson(const EngineEvent& event)
 {
-    return JsonWriter()
-        .add("type", "drop")
-        .add("hex", hexAddress(id.address))
-        .add("addr_type", addressTypeName(id.type))
-        .add("reason", dropReasonName(reason))
-        .str();
+    if (!event.id || !event.reason)
+        return std::string();
+    JsonWriter w;
+    w.add("type", "drop")
+        .add("hex", hexAddress(event.id->address))
+        .add("addr_type", addressTypeName(event.id->type))
+        .add("reason", dropReasonName(*event.reason));
+    if (event.decision)
+        w.add("decision", decisionName(*event.decision));
+    if (event.callsign)
+        w.add("callsign", *event.callsign);
+    if (event.time)
+        w.add("time", formatIso8601Ms(*event.time));
+    return w.str();
 }
 
 std::string expiredJson(skycue::TrackId id)
@@ -465,7 +513,7 @@ std::string eventJson(const EngineEvent& event)
     case EventKind::observed:
         return event.track ? trackJson(*event.track, "observed") : std::string();
     case EventKind::drop:
-        return event.id && event.reason ? dropJson(*event.id, *event.reason) : std::string();
+        return dropJson(event);
     case EventKind::expired:
         return event.id ? expiredJson(*event.id) : std::string();
     case EventKind::stats:
@@ -479,6 +527,7 @@ std::string eventJson(const EngineEvent& event)
     case EventKind::fisb_radar:
     case EventKind::fisb_raster:
     case EventKind::fisb_expired:
+    case EventKind::fisb_location:
         return fisbEventJson(event);
     }
     return std::string();
@@ -486,6 +535,10 @@ std::string eventJson(const EngineEvent& event)
 
 std::string tilesAvailableJson(const std::string& www_dir)
 {
+    // "overlays": whether overlays/meta.json (scripts/make-overlays.sh) is a usable JSON object.
+    bool overlays = false;
+    if (const auto text = readSmallFile(www_dir + "/overlays/meta.json", 64 * 1024))
+        overlays = JsonObject::parse(*text).has_value();
     const std::string tiles = www_dir + "/tiles";
     if (const auto text = readSmallFile(tiles + "/meta.json", 64 * 1024)) {
         if (const auto meta = JsonObject::parse(*text)) {
@@ -494,6 +547,7 @@ std::string tilesAvailableJson(const std::string& www_dir)
             for (const char* k : {"minZoom", "maxZoom"})
                 if (const auto z = meta->getInt(k))
                     w.add(k, *z);
+            w.add("overlays", overlays);
             return w.str();
         }
     }
@@ -514,11 +568,12 @@ std::string tilesAvailableJson(const std::string& www_dir)
         ::closedir(d);
     }
     if (min_z < 0)
-        return JsonWriter().add("tiles", false).str();
+        return JsonWriter().add("tiles", false).add("overlays", overlays).str();
     return JsonWriter()
         .add("tiles", true)
         .add("minZoom", static_cast<int64_t>(min_z))
         .add("maxZoom", static_cast<int64_t>(max_z))
+        .add("overlays", overlays)
         .str();
 }
 
@@ -549,6 +604,8 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
                 return *rejected;
             return putFiltersRoute(body, runtime);
         }
+        if (path == "/api/filters/history")
+            return get ? json(200, filterHistoryJson(engine)) : notAllowed("GET");
         if (path == "/api/filters/save-baseline") {
             if (method != "POST")
                 return notAllowed("POST");
@@ -571,6 +628,22 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return postListRoute(path == "/api/lists/allow" ? ListKind::allow : ListKind::block, body, engine,
                                  runtime);
         }
+        if (path == "/api/config") {
+            if (!get)
+                return notAllowed("GET");
+            if (!context.daemon)
+                return error(500, "no daemon info");
+            LocationFacts loc;
+            loc.learned_path = engine.learnedLocationsPath();
+            loc.operator_path = engine.operatorLocationsPath();
+            loc.learned = engine.locationIndex().learnedCount();
+            loc.operator_rows = engine.locationIndex().operatorCount();
+            loc.operator_rejected = engine.locationIndex().operatorRejected();
+            loc.operator_overflow = engine.locationIndex().operatorOverflow();
+            return json(200, configJson(*context.daemon, runtime, loc, std::chrono::system_clock::now()));
+        }
+        if (path == "/api/cues/clients")
+            return get ? json(200, cueClientsJson(engine.forwarder())) : notAllowed("GET");
         if (isInputsPath(path))
             return handleInputsApi(request, engine);
         if (isFisbPath(path))

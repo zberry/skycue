@@ -18,6 +18,7 @@
 #include "replay_source.hpp"
 #include "retention.hpp"
 #include "runtime_config.hpp"
+#include "web_config.hpp"
 #include "web_server.hpp"
 
 #include <boost/asio/io_context.hpp>
@@ -82,6 +83,7 @@ std::string defaultWwwDir()
 
 int main(int argc, char** argv)
 {
+    const auto started = std::chrono::system_clock::now();
     std::string config_path, replay_path, readsb_host, dump978_host, log_level, www_dir, web_bind, inputs_file;
     double replay_speed = 1.0;
     unsigned cue_tcp_port = 0, web_port = 0;
@@ -199,6 +201,7 @@ int main(int argc, char** argv)
     // unless replaying, the user inputs of the inputs file.
     InputManagerConfig mc;
     mc.inputs_file = vm.count("inputs-file") ? inputs_file : resolveInputsFile(config_path, config.inputs_file);
+    const std::string inputs_path = mc.inputs_file;
     mc.record_dir = config.record_dir;
     mc.record_raw = config.record_raw;
     mc.record_max_bytes = gigabytesToBytes(config.record_max_gb);
@@ -244,6 +247,15 @@ int main(int argc, char** argv)
         std::cerr << "skycued: " << config_path << ": " << e.what() << "\n";
         return 2;
     }
+    // The learned FIS-B report locations (fisb-locations.json next to the
+    // config) and LOCATIONS_FILE under them.
+    try {
+        engine->loadLocations(resolveConfigRelative(config_path, "fisb-locations.json"),
+                              resolveConfigRelative(config_path, config.locations_file));
+    } catch (const std::exception& e) {
+        std::cerr << "skycued: " << e.what() << "\n";
+        return 2;
+    }
     // The runtime overlay (skycue.runtime.json) on top of skycue.conf, and
     // hot reload of both and of the list files.
     std::unique_ptr<RuntimeConfig> runtime;
@@ -254,6 +266,30 @@ int main(int argc, char** argv)
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
     }
+    // What GET /api/config reports besides the configuration.
+    DaemonInfo daemon;
+    daemon.version = kVersion;
+    daemon.started = started;
+    daemon.config_path = config_path;
+    daemon.www_dir = www_dir;
+    daemon.log_level = log_level;
+    daemon.inputs_path = inputs_path;
+    if (vm.count("cue-tcp-port"))
+        daemon.cli_overrides["CUE_TCP_PORT"] = std::to_string(cue_tcp_port);
+    if (vm.count("web-port"))
+        daemon.cli_overrides["WEB_PORT"] = std::to_string(web_port);
+    if (vm.count("web-bind"))
+        daemon.cli_overrides["WEB_BIND"] = web_bind;
+    if (vm.count("inputs-file"))
+        daemon.cli_overrides["INPUTS_FILE"] = inputs_file;
+    daemon.recorders = {{"received", received.get()}, {"sent", sent.get()}, {"fisb", fisb.get()}};
+    if (replaying) {
+        daemon.replay_file = replay_path;
+        daemon.replay_speed = replay_speed;
+        daemon.replay_loop = vm.count("replay-loop") > 0;
+    }
+    daemon.readsb = !replaying && !vm.count("no-readsb");
+    daemon.dump978 = !replaying && !vm.count("no-uat");
     // The web UI (WEB_BIND:WEB_PORT); WEB_PORT=0: none.
     std::unique_ptr<WebServer> web;
     if (config.web_port == 0) {
@@ -263,6 +299,7 @@ int main(int argc, char** argv)
         wc.bind = config.web_bind;
         wc.port = config.web_port;
         wc.www_dir = www_dir;
+        wc.daemon = &daemon;
         web = std::make_unique<WebServer>(io, *engine, *runtime, wc);
         try {
             web->start();

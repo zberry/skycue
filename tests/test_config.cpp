@@ -403,6 +403,19 @@ BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_the_config)
     BOOST_TEST(resolveInputsFile("/skycue.conf", "") == "/skycue.inputs.json");
 }
 
+BOOST_AUTO_TEST_CASE(locations_file_parsed)
+{
+    BOOST_TEST(parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\nLOCATIONS_FILE=/x/loc.csv\n", "t").locations_file ==
+               "/x/loc.csv");
+    BOOST_TEST(parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\n", "t").locations_file.empty());
+    using skycued::resolveConfigRelative;
+    BOOST_TEST(resolveConfigRelative("/etc/skycue/skycue.conf", "") == "");
+    BOOST_TEST(resolveConfigRelative("/etc/skycue/skycue.conf", "loc.csv") == "/etc/skycue/loc.csv");
+    BOOST_TEST(resolveConfigRelative("/etc/skycue/skycue.conf", "/x/loc.csv") == "/x/loc.csv");
+    BOOST_TEST(resolveConfigRelative("skycue.conf", "loc.csv") == "loc.csv");
+    BOOST_TEST(resolveConfigRelative("/skycue.conf", "fisb-locations.json") == "/fisb-locations.json");
+}
+
 BOOST_AUTO_TEST_CASE(known_keys_match_example)
 {
     std::string text = readExample();
@@ -456,4 +469,54 @@ BOOST_AUTO_TEST_CASE(crlf_line_rejected_with_line_number)
     // comment ending in CR is still a blank/comment line.
     Config c = parseConfigText("# comment\r\n\r\nRECEIVER_LAT=1\nRECEIVER_LON=2\n", "t");
     BOOST_TEST(c.receiver_lat == 1.0);
+}
+
+BOOST_AUTO_TEST_CASE(file_keys_recorded)
+{
+    const auto c = parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\nWEB_PORT=9090\n", "t");
+    BOOST_TEST((c.file_keys == std::set<std::string>{"RECEIVER_LAT", "RECEIVER_LON", "WEB_PORT"}));
+}
+
+BOOST_AUTO_TEST_CASE(every_known_key_has_value_text)
+{
+    using skycued::configValueText;
+    Config c;
+    c.receiver_lat = 38.9;
+    c.receiver_lon = -77.0;
+    for (const auto& k : skycued::knownConfigKeys())
+        BOOST_CHECK_NO_THROW(configValueText(c, k));
+    BOOST_TEST(configValueText(c, "WEB_PORT") == "8080");
+    BOOST_TEST(configValueText(c, "RECEIVER_LAT") == "38.9");
+    BOOST_TEST(configValueText(c, "FISB_ENABLE") == "yes");
+    BOOST_TEST(configValueText(c, "RECORD_RAW") == "no");
+    BOOST_TEST(configValueText(c, "RECORD_FORMATS") == "csv jsonl");
+    BOOST_TEST(configValueText(c, "CUE_UDP_TARGETS") == "");
+    c.cue_udp_targets = {{"127.0.0.1", 30501}, {"10.0.0.2", 30502}};
+    BOOST_TEST(configValueText(c, "CUE_UDP_TARGETS") == "127.0.0.1:30501 10.0.0.2:30502");
+    BOOST_CHECK_THROW(configValueText(c, "NOPE"), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(config_copy_text_parses)
+{
+    // fixtures/config-copy.conf is exactly what the Config tab's "Copy as
+    // text" (app_pure.js configText) writes for these values; the node test
+    // config_text_round_trips_through_the_conf_grammar checks that. Every
+    // quoting branch reads back as the value it was written from.
+    std::ifstream in(SKYCUE_FIXTURE_DIR "/config-copy.conf", std::ios::binary);
+    BOOST_REQUIRE(in);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const Config c = parseConfigText(ss.str(), "config-copy.conf");
+    using skycued::configValueText;
+    BOOST_TEST(c.receiver_lat == 38.9);
+    BOOST_TEST(c.receiver_lon == -77.0);
+    BOOST_TEST(c.sdr_1090_serial == "");                                          // bare, empty
+    BOOST_TEST(configValueText(c, "CUE_UDP_TARGETS") == "127.0.0.1:30501 10.0.0.2:30502");  // "..."
+    BOOST_TEST(c.record_dir == "/srv/sky cue/rec");                               // "..."
+    BOOST_TEST(c.max_range_nm == 20.0);                                           // bare
+    BOOST_TEST(c.allow_list_file == "allow \"main\" $1.txt");                     // '...'
+    BOOST_TEST(c.block_list_file == "");          // could not be written: left as a comment
+    BOOST_TEST(c.locations_file == "o'hare locations.csv");                       // "..." holding '
+    BOOST_TEST((c.file_keys == std::set<std::string>{"RECEIVER_LAT", "RECEIVER_LON", "SDR_1090_SERIAL", "CUE_UDP_TARGETS",
+                                                     "RECORD_DIR", "MAX_RANGE_NM", "ALLOW_LIST_FILE", "LOCATIONS_FILE"}));
 }

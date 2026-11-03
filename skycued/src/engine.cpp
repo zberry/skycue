@@ -1,16 +1,25 @@
 #include "engine.hpp"
 
+#include "file_util.hpp"
 #include "inputs/dump978_input.hpp"
 #include "log.hpp"
 
 #include <cctype>
+#include <cerrno>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace skycued {
 
@@ -58,7 +67,56 @@ const char* listName(ListKind list) { return list == ListKind::allow ? "allow" :
 
 EngineEvent kindEvent(EventKind kind)
 {
-    return EngineEvent{kind, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt};
+    EngineEvent ev;
+    ev.kind = kind;
+    return ev;
+}
+
+// The whole regular file; nullopt with errno set when it cannot be opened
+// or read, or is not a regular file (EISDIR for a directory, EINVAL for
+// anything else: a FIFO is opened non-blocking, never read).
+std::optional<std::string> readWholeFile(const std::string& path)
+{
+    const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
+        return std::nullopt;
+    struct ::stat st{};
+    std::optional<std::string> text;
+    int err = 0;
+    if (::fstat(fd, &st) != 0) {
+        err = errno;
+    } else if (!S_ISREG(st.st_mode)) {
+        err = S_ISDIR(st.st_mode) ? EISDIR : EINVAL;
+    } else {
+        text.emplace();
+        char buf[65536];
+        for (;;) {
+            const ssize_t n = ::read(fd, buf, sizeof buf);
+            if (n > 0) {
+                text->append(buf, static_cast<std::size_t>(n));
+            } else if (n == 0) {
+                break;
+            } else if (errno != EINTR) {
+                err = errno;
+                text.reset();
+                break;
+            }
+        }
+    }
+    ::close(fd);
+    errno = err;
+    return text;
+}
+
+// "20261103T120000Z": a UTC stamp for a file name.
+std::string fileStamp()
+{
+    const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm{};
+    ::gmtime_r(&now, &tm);
+    char buf[32];
+    std::strftime(buf, sizeof buf, "%Y%m%dT%H%M%SZ", &tm);
+    return buf;
 }
 
 }  // namespace
@@ -140,7 +198,10 @@ void Engine::start()
     LOG_INFO("filters " << description);
     if (sent_)
         sent_->writeFilterChange(description);
+    if (filter_history_.empty())  // RuntimeConfig::load() may have pushed the startup state already
+        pushFilterChange("startup");
     inputs_->start();
+    last_locations_save_ = steady::now();
     armTick();
     armStats();
 }
@@ -178,6 +239,8 @@ void Engine::stop()
         sent_->flush();
     if (fisb_rec_)
         fisb_rec_->flush();
+    if (!locations_path_.empty() && locations_.dirty())
+        saveLocations();
     LOG_INFO("stopping: " << shutdown_drops << " shutdown drops; " << statsLine());
 }
 
@@ -189,7 +252,10 @@ void Engine::handleObservation(const TrackObservation& obs)
     advanceDataClock(obs.received_time);
     if (received_)
         received_->writeObservation(obs);
-    process(table_.apply(obs), last_obs_steady_, obs.lat.has_value());
+    // The send decision runs on the steady clock at arrival, not on the data
+    // clock's anchor: an observation stamped behind the data clock leaves the
+    // anchor where it is, and MAX_INTERVAL_S resends must not stall with it.
+    process(table_.apply(obs), steady::now(), obs.lat.has_value());
 }
 
 void Engine::handleUplink(std::chrono::system_clock::time_point when, const std::string& hex)
@@ -215,6 +281,9 @@ void Engine::handleFisbEvents(std::vector<fisb::FisbEvent>& events)
     for (const auto& e : events) {
         if (fisb_rec_)
             fisb_rec_->writeFisb(e, now);
+        std::optional<EngineEvent> location;
+        if (e.kind == fisb::FisbEvent::Kind::twgo && e.twgo && e.twgo->has_graphics)
+            location = learnLocation(*e.twgo);
         if (!sink_)
             continue;
         FisbNotice n;
@@ -251,6 +320,93 @@ void Engine::handleFisbEvents(std::vector<fisb::FisbEvent>& events)
         EngineEvent ev = kindEvent(kind);
         ev.fisb = std::move(n);
         emit(ev);
+        if (location && sink_)
+            emit(*location);
+    }
+}
+
+std::optional<EngineEvent> Engine::learnLocation(const fisb::TwgoRecord& record)
+{
+    if (!fisb::airportStyleId(record.location))
+        return std::nullopt;  // never learned; keeps announced_ to learnable ids
+    const auto before = locations_.find(record.location);
+    const bool is_new = locations_.learn(record);
+    const auto after = locations_.find(record.location);
+    if (!after || !announced_.update(record.location, before, *after, is_new))
+        return std::nullopt;
+    FisbNotice n;
+    n.key = record.location;
+    n.position = after;
+    EngineEvent ev = kindEvent(EventKind::fisb_location);
+    ev.fisb = std::move(n);
+    return ev;
+}
+
+void Engine::loadLocations(const std::string& learned_path, const std::string& operator_csv_path)
+{
+    locations_path_ = learned_path;
+    operator_locations_path_ = operator_csv_path;
+    if (!learned_path.empty()) {
+        const auto text = readWholeFile(learned_path);
+        if (text) {
+            try {
+                locations_.loadLearned(*text);
+                LOG_INFO(learned_path << ": " << locations_.learnedCount() << " learned locations");
+            } catch (const std::exception& e) {
+                const std::string rejected = learned_path + ".rejected";
+                const bool renamed = std::rename(learned_path.c_str(), rejected.c_str()) == 0;
+                LOG_ERROR(learned_path << ": " << e.what() << "; "
+                                       << (renamed ? "renamed " + rejected
+                                                   : "could not rename it to " + rejected + ": " +
+                                                         std::strerror(errno))
+                                       << "; starting with no learned locations");
+            }
+        } else if (errno == EISDIR || errno == EINVAL) {
+            // Not a file we could replace: leave it, and save nothing this run.
+            LOG_ERROR(learned_path << ": not a regular file; learned locations are not loaded or saved this run");
+            locations_path_.clear();
+        } else if (errno != ENOENT) {
+            // Unreadable (permissions, say): set it aside so the first save cannot overwrite it.
+            const std::string why = std::strerror(errno);
+            const std::string aside = learned_path + ".unreadable-" + fileStamp();
+            if (std::rename(learned_path.c_str(), aside.c_str()) == 0) {
+                LOG_ERROR(learned_path << ": cannot read: " << why << "; renamed " << aside
+                                       << "; starting with no learned locations");
+            } else {
+                LOG_ERROR(learned_path << ": cannot read: " << why << "; could not rename it to " << aside << ": "
+                                       << std::strerror(errno) << "; learned locations are not saved this run");
+                locations_path_.clear();
+            }
+        }
+    }
+    if (!operator_csv_path.empty()) {
+        const auto text = readWholeFile(operator_csv_path);
+        if (!text)
+            throw std::runtime_error(operator_csv_path + ": cannot read: " + std::strerror(errno));
+        const std::size_t n = locations_.loadOperatorCsv(*text);
+        if (locations_.operatorRejected() > 0)
+            LOG_WARN(operator_csv_path << ": " << locations_.operatorRejected() << " lines rejected (first: line "
+                                       << locations_.operatorRejectedFirstLine() << ")");
+        LOG_INFO(operator_csv_path << ": " << n << " operator locations");
+    }
+}
+
+std::map<std::string, std::pair<double, double>> Engine::locationPositions() const { return locations_.merged(); }
+
+void Engine::saveLocations()
+{
+    last_locations_save_ = steady::now();
+    try {
+        atomicWrite(locations_path_, locations_.learnedJson());
+        locations_.markSaved();
+        if (locations_save_failing_)
+            LOG_INFO(locations_path_ << ": saved again");
+        locations_save_failing_ = false;
+    } catch (const std::exception& e) {
+        if (!locations_save_failing_)
+            LOG_WARN("fisb locations not saved: " << e.what() << "; retrying every " << locations_save_interval_.count()
+                                                  << " s");
+        locations_save_failing_ = true;
     }
 }
 
@@ -285,7 +441,7 @@ void Engine::decide(TrackState& state, steady::time_point now)
             return;  // still eligible; nothing worth sending yet
         forward(state, result, now);
     } else if (state.currently_forwarded) {
-        drop(state, skycue::DropReason::filtered);
+        drop(state, skycue::DropReason::filtered, result.decision);
     }
 }
 
@@ -305,27 +461,42 @@ void Engine::forward(TrackState& state, const FilterResult& result, steady::time
     }
 }
 
-void Engine::drop(TrackState& state, skycue::DropReason reason)
+void Engine::drop(TrackState& state, skycue::DropReason reason, std::optional<Decision> decision)
 {
     forwarder_.sendDrop(state.id, reason);
     state.currently_forwarded = false;
-    countDrop(reason);
+    countDrop(reason, decision);
     if (sent_)
         sent_->writeDrop(state.id, reason);
-    emitDrop(state.id, reason);
+    emitDrop(state, reason, decision);
 }
 
-void Engine::emitDrop(skycue::TrackId id, skycue::DropReason reason)
+void Engine::emitDrop(const TrackState& state, skycue::DropReason reason, std::optional<Decision> decision)
+{
+    if (!sink_)
+        return;
+    EngineEvent ev = kindEvent(EventKind::drop);
+    ev.id = state.id;
+    ev.reason = reason;
+    ev.decision = decision;
+    ev.callsign = state.latest.callsign;
+    ev.time = dataNow();
+    emit(ev);
+}
+
+void Engine::emitDrop(skycue::TrackId id, const std::optional<std::string>& callsign, skycue::DropReason reason)
 {
     if (!sink_)
         return;
     EngineEvent ev = kindEvent(EventKind::drop);
     ev.id = id;
     ev.reason = reason;
+    ev.callsign = callsign;
+    ev.time = dataNow();
     emit(ev);
 }
 
-void Engine::countDrop(skycue::DropReason reason)
+void Engine::countDrop(skycue::DropReason reason, std::optional<Decision> decision)
 {
     ++sent_drops_;
     switch (reason) {
@@ -333,6 +504,15 @@ void Engine::countDrop(skycue::DropReason reason)
     case skycue::DropReason::filtered: ++drops_filtered_; break;
     case skycue::DropReason::source_lost: ++drops_source_lost_; break;
     default: break;
+    }
+    if (reason != skycue::DropReason::filtered || !decision)
+        return;
+    switch (*decision) {
+    case Decision::blocked: ++drops_blocked_; break;
+    case Decision::out_of_range: ++drops_out_of_range_; break;
+    case Decision::below_elevation: ++drops_below_elevation_; break;
+    case Decision::no_position: ++drops_no_position_; break;
+    default: break;  // send, allow_listed: never a drop
     }
 }
 
@@ -366,7 +546,7 @@ void Engine::reevaluate()
         const FilterResult r = filters_.evaluate(s);
         if (s.currently_forwarded) {
             if (!isSend(r.decision))
-                drop(s, skycue::DropReason::filtered);
+                drop(s, skycue::DropReason::filtered, r.decision);
         } else if (isSend(r.decision)) {  // implies a position
             forward(s, r, now);
         }
@@ -382,9 +562,24 @@ void Engine::setFilterConfig(FilterConfig config, const std::string& origin)
     if (!(config.min_elevation_deg >= -90 && config.min_elevation_deg <= 90))
         throw std::invalid_argument("min_elevation_deg must be in [-90,90]");
     filters_.setConfig(config);
+    pushFilterChange(origin);
     std::ostringstream ss;
     ss << origin << ": max_range_nm=" << config.max_range_nm << " min_elevation_deg=" << config.min_elevation_deg;
     applied(ss.str(), EventKind::filters_changed);
+}
+
+void Engine::pushFilterChange(const std::string& origin)
+{
+    // The wall clock, always: an operator audit log, so during a replay the
+    // startup entry and later changes do not mix the two clocks.
+    filter_history_.push_back(FilterChange{std::chrono::system_clock::now(), origin, filters_.config()});
+    if (filter_history_.size() > kFilterHistoryMax)
+        filter_history_.pop_front();
+}
+
+std::vector<FilterChange> Engine::filterHistory() const
+{
+    return std::vector<FilterChange>(filter_history_.begin(), filter_history_.end());
 }
 
 void Engine::setLists(IdList allow, IdList block, const std::string& origin)
@@ -459,15 +654,17 @@ void Engine::tick()
 {
     if (have_data_clock_) {
         const auto now = dataNow();
-        std::unordered_set<skycue::TrackId> forwarded;
+        // Forwarded ids with their callsigns, taken before expire() removes them.
+        std::unordered_map<skycue::TrackId, std::optional<std::string>> forwarded;
         table_.forEach([&](TrackState& s) {
             if (s.currently_forwarded)
-                forwarded.insert(s.id);
+                forwarded.emplace(s.id, s.latest.callsign);
         });
         // A track that ages out while the inputs are lost went because of it.
         const auto reason = track_connected_ ? skycue::DropReason::timeout : skycue::DropReason::source_lost;
         for (const auto& id : table_.expire(now, track_timeout_)) {
-            if (!forwarded.count(id)) {
+            const auto f = forwarded.find(id);
+            if (f == forwarded.end()) {
                 if (sink_) {
                     EngineEvent ev = kindEvent(EventKind::expired);
                     ev.id = id;
@@ -479,7 +676,7 @@ void Engine::tick()
             countDrop(reason);
             if (sent_)
                 sent_->writeDrop(id, reason);
-            emitDrop(id, reason);
+            emitDrop(id, f->second, reason);
         }
     }
     if (fisb_decoder_ && have_data_clock_) {
@@ -488,6 +685,8 @@ void Engine::tick()
         auto events = fisb_store_.sweep(now);
         handleFisbEvents(events);
     }
+    if (!locations_path_.empty() && locations_.dirty() && steady::now() - last_locations_save_ >= locations_save_interval_)
+        saveLocations();
     if (received_)
         received_->flush();
     if (sent_)
@@ -570,6 +769,10 @@ EngineStats Engine::stats() const
     s.drops_timeout = drops_timeout_;
     s.drops_filtered = drops_filtered_;
     s.drops_source_lost = drops_source_lost_;
+    s.drops_blocked = drops_blocked_;
+    s.drops_out_of_range = drops_out_of_range_;
+    s.drops_below_elevation = drops_below_elevation_;
+    s.drops_no_position = drops_no_position_;
     s.recorder_dropped_received = received_ ? received_->droppedRecords() : 0;
     s.recorder_dropped_sent = sent_ ? sent_->droppedRecords() : 0;
     s.web_clients = web_clients_;

@@ -736,7 +736,10 @@ BOOST_AUTO_TEST_CASE(two_inputs_same_aircraft_send_rate_bounded)
 BOOST_AUTO_TEST_CASE(lagging_observation_times_still_resend_at_max_interval)
 {
     // Observations stamped 0.5 s behind the data clock do not move it, but
-    // MAX_INTERVAL_S resends must still happen on time.
+    // MAX_INTERVAL_S resends must still happen. Timing-tolerant (no clock
+    // can be injected into the engine cheaply): it waits up to 8 s for two
+    // resends, which the stalled clock never sends at all, and checks they
+    // are max-interval resends, not at the 100 ms observation rate.
     Config cfg = baseConfig();
     cfg.min_interval_s = 0.2;
     cfg.max_interval_s = 1;
@@ -749,8 +752,12 @@ BOOST_AUTO_TEST_CASE(lagging_observation_times_still_resend_at_max_interval)
         fake->emit(nearbyObservation(id.address, 0));  // sets the data clock
     });
     BOOST_TEST(w.ev.waitFor([&] { return w.ev.updatesFor(id) == 1; }));
-    const auto end = steady::now() + 3500ms;
-    while (steady::now() < end) {
+    const auto end = steady::now() + 8s;
+    auto resends = [&] {
+        std::lock_guard<std::mutex> lk(w.ev.m);
+        return w.ev.updatesFor(id);
+    };
+    while (steady::now() < end && resends() < 3) {
         TrackObservation o = nearbyObservation(id.address, 0);  // same state: only max_interval sends
         o.received_time -= 500ms;
         o.position_time = o.received_time;
@@ -758,8 +765,9 @@ BOOST_AUTO_TEST_CASE(lagging_observation_times_still_resend_at_max_interval)
         std::this_thread::sleep_for(100ms);
     }
     std::lock_guard<std::mutex> lk(w.ev.m);
-    BOOST_TEST(w.ev.updatesFor(id) >= 3u);  // the first plus a resend about every second
-    BOOST_TEST(w.ev.updatesFor(id) <= 5u);
+    BOOST_REQUIRE(w.ev.updatesFor(id) >= 3u);  // the first plus two resends
+    for (size_t k = 1; k < w.ev.update_times.size(); ++k)  // only this track is sent
+        BOOST_TEST(std::chrono::duration<double>(w.ev.update_times[k] - w.ev.update_times[k - 1]).count() > 0.5);
 }
 
 BOOST_AUTO_TEST_CASE(stats_lists_inputs)

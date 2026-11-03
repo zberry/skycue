@@ -1,0 +1,6 @@
+0POST /api/lists/allow HTTP/1.1
+Host: 127.0.0.1:8080
+Content-Type: application/json
+Content-Length: 39
+
+{"add":["a1b2c3"],"remove":["~000001"]}

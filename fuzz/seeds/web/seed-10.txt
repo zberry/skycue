@@ -1,0 +1,6 @@
+0POST /api/inputs HTTP/1.1
+Host: 127.0.0.1:8080
+Content-Type: application/json
+Content-Length: 59
+
+{"id":"ps-a","type":"ping_json","transport":"udp","port":0}

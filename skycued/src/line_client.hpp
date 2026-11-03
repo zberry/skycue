@@ -38,6 +38,8 @@ public:
     void stop();   // idempotent; no callback is invoked afterwards (not even onConnection(false))
     bool connected() const;
     uint64_t linesRejected() const;  // oversize lines discarded
+    uint64_t bytesRead() const;      // bytes received over every connection
+    uint64_t connects() const;       // successful connects
 
 private:
     struct Impl;

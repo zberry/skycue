@@ -291,3 +291,12 @@ target_link_libraries(test_input_def PRIVATE skycued_core Boost::unit_test_frame
 target_compile_definitions(test_input_def PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_input_def)
 add_test(NAME input_def COMMAND test_input_def)
+
+# pingStation transports: UDP listener, TCP connect client, TCP listener.
+add_executable(test_transports test_transports.cpp)
+target_link_libraries(test_transports PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_transports PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_transports)
+add_test(NAME transports COMMAND test_transports)
+set_tests_properties(transports PROPERTIES TIMEOUT 60)

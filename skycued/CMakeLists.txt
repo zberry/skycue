@@ -34,6 +34,10 @@ add_library(skycued_core STATIC
   src/inputs/input_def.cpp
   src/inputs/inputs_file.cpp
   src/inputs/ping_json.cpp
+  src/inputs/tcp_connect_client.cpp
+  src/inputs/tcp_listener.cpp
+  src/inputs/transport.cpp
+  src/inputs/udp_listener.cpp
   src/json_lite.cpp
   src/line_client.cpp
   src/log.cpp

@@ -490,17 +490,20 @@ test('cues_recent_drops_only_kept_in_this_browser', async ({ page }) => {
 
 // The header strip (stats, Weather, Table) on one row at 1280 px, with
 // live numbers in it (here and, with the FIS-B stats filled, in the 2015
-// sample's describe).
-// headerRowOffsets: how far the middles of Weather and Table sit from the
-// brand's (a wrapped button is a whole row, about 20 px, off), once no stat
-// is cut short (the strip lets them give way before the buttons wrap).
+// sample's describe). A plain stat too long for its share is cut with an
+// ellipsis by design (style.css), so a cut is not checked here; see
+// header_long_stat_is_ellipsised_on_one_row for that.
+// headerRowOffsets: how far the vertical middles of Weather, Table and every
+// shown stat sit from the brand's (a wrapped control is a whole row, about
+// 20 px, off).
 async function headerRowOffsets(page) {
-  const cut = await page.locator('#stats > .stat').evaluateAll((ss) =>
-    ss.filter((e) => !e.hidden && e.scrollWidth > e.clientWidth).map((e) => e.textContent.trim()));
-  expect(cut, 'stats cut short').toEqual([]);
-  const y = async (sel) => { const b = await page.locator(sel).boundingBox(); return b.y + b.height / 2; };
-  const brand = await y('#stats .brand');
-  return [Math.abs((await y('#wx-toggle')) - brand), Math.abs((await y('#table-toggle')) - brand)];
+  return page.evaluate(() => {
+    const mid = (e) => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
+    const brand = mid(document.querySelector('#stats .brand'));
+    const els = [document.getElementById('wx-toggle'), document.getElementById('table-toggle')]
+      .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
+    return els.map((e) => Math.abs(mid(e) - brand));
+  });
 }
 test('header_fits_one_row_at_1280', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -512,6 +515,31 @@ test('header_fits_one_row_at_1280', async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     for (const d of await headerRowOffsets(page)) expect(d, `at ${width} px`).toBeLessThan(4);
   }
+});
+
+// A stat value too long for the strip at 1280 px is cut with an ellipsis and
+// the header stays on one row. The long text is set and measured in one
+// synchronous evaluate, so no live update can land in between.
+test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openPage(page);
+  const r = await page.evaluate(() => {
+    const b = document.getElementById('stat-rec-drops');
+    b.textContent = '1234567890 1234567890 1234567890 1234567890 1234567890 1234567890';
+    const stat = b.closest('.stat');
+    const mid = (e) => { const q = e.getBoundingClientRect(); return q.top + q.height / 2; };
+    const brand = mid(document.querySelector('#stats .brand'));
+    const els = [document.getElementById('wx-toggle'), document.getElementById('table-toggle')]
+      .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
+    return {
+      cut: stat.scrollWidth > stat.clientWidth,
+      overflow: getComputedStyle(stat).textOverflow,
+      offsets: els.map((e) => Math.abs(mid(e) - brand))
+    };
+  });
+  expect(r.cut, 'the long stat is cut').toBe(true);
+  expect(r.overflow).toBe('ellipsis');
+  for (const d of r.offsets) expect(d).toBeLessThan(4);
 });
 
 test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {

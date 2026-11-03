@@ -998,11 +998,14 @@
     shapeKey: null,                 // the shape shown in the panel
     rasterHeads: new Map(),         // raster layer key -> mosaic head
     rasterSel: null, raster: null,  // the chosen raster layer and its drawing
+    rasterPick: { product: null, band: null },   // the operator's choice (null: the default)
     wxDirty: true, wxFilter: '', wxTimer: null, wxExpanded: {},
     locations: {},                  // location id -> [lat, lon] (api/fisb/locations, fisb_location)
     show: { metar: true, taf: true, pirep: true, winds: true },   // the Reports toggles
     syms: new Map(),                // symbol key -> {marker, sig, s} (renderWxSymbols)
     symDirty: true,
+    windsPick: { period: null, level: null },     // the operator's choice (null: the default)
+    winds: { period: null, level: null, periods: [], levels: [] },   // what the barbs use (syncWinds)
     reportRec: null                 // the record key of the report shown in the card
   };
   var wxGroup = null;               // the weather symbols, pane fisbWx
@@ -1053,7 +1056,8 @@
           '<div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span>: not yet in force · ' +
           '<span class="ln-cancelled">dashed</span>: cancelled</div>' +
           '<div id="raster-box" hidden>' +
-          '<label for="raster-select">Raster</label> <select id="raster-select"></select>' +
+          '<label for="raster-select">Raster</label> <select id="raster-select"></select> ' +
+          '<select id="raster-band" aria-label="Altitude band" hidden></select>' +
           '<div id="raster-legend"></div></div>';
         L.DomEvent.disableClickPropagation(div);
         L.DomEvent.disableScrollPropagation(div);
@@ -1063,7 +1067,13 @@
     new WxControl().addTo(map);
     $('radar-opacity').addEventListener('input', applyRadarOpacity);
     $('raster-select').addEventListener('change', function () {
-      fisb.rasterSel = $('raster-select').value || null;
+      fisb.rasterPick = { product: Number($('raster-select').value), band: null };   // its lowest band with data
+      renderRasterSelect();
+      loadRaster();
+    });
+    $('raster-band').addEventListener('change', function () {
+      fisb.rasterPick.band = Number($('raster-band').value);
+      renderRasterSelect();
       loadRaster();
     });
   }
@@ -1209,29 +1219,38 @@
       }).join('');
   }
 
-  function rasterLabel(h) {
-    var alt = '';
-    if (typeof h.altitude_code === 'number') {
-      var ft = (h.product === 71 || h.product === 91 ? 18000 : 2000) + h.altitude_code * 2000;
-      alt = ' · ≈ ' + P.thousands(ft) + ' ft';
-    }
-    return (h.name || 'product ' + h.product) + alt;
-  }
+  // The product select and, for icing and turbulence, the altitude band
+  // select; fisb.rasterSel follows them. A pick stays until its layer goes.
+  // Each select is rebuilt only when its options change.
   function renderRasterSelect() {
-    var sel = $('raster-select');
-    var heads = Array.from(fisb.rasterHeads.values()).sort(function (a, b) {
-      return a.product - b.product || (a.altitude_code || 0) - (b.altitude_code || 0);
-    });
-    var sig = heads.map(function (h) { return h.key; }).join(',');
-    if (!fisb.rasterSel || !fisb.rasterHeads.has(fisb.rasterSel)) fisb.rasterSel = heads.length ? heads[0].key : null;
+    var sel = $('raster-select'), bandSel = $('raster-band');
+    var products = P.rasterProducts(Array.from(fisb.rasterHeads.values()));
+    var pick = fisb.rasterPick;
+    var entry = products.filter(function (e) { return e.product === pick.product; })[0];
+    if (!entry) { entry = products[0] || null; pick.product = entry ? entry.product : null; pick.band = null; }
+    var bands = entry ? entry.bands : [];
+    if (bands.length && (pick.band === null || !bands[pick.band] || !bands[pick.band].key)) pick.band = P.defaultBand(entry);
+    fisb.rasterSel = !entry ? null : bands.length ? (pick.band === null ? null : bands[pick.band].key) : entry.key;
+    var sig = products.map(function (e) { return e.product + '=' + e.name; }).join(',');
     if (sel.getAttribute('data-sig') !== sig) {
       sel.setAttribute('data-sig', sig);
-      sel.innerHTML = heads.map(function (h) {
-        return '<option value="' + esc(h.key) + '">' + esc(rasterLabel(h)) + '</option>';
-      }).join('');
+      sel.textContent = '';
+      products.forEach(function (e) { sel.appendChild(new Option(e.name, String(e.product))); });
     }
-    sel.disabled = !heads.length;
-    if (fisb.rasterSel) sel.value = fisb.rasterSel;
+    sel.disabled = !products.length;
+    if (entry) sel.value = String(entry.product);
+    var bsig = (entry ? entry.product : '') + ':' + bands.map(function (b) { return b.key ? 1 : 0; }).join('');
+    if (bandSel.getAttribute('data-sig') !== bsig) {
+      bandSel.setAttribute('data-sig', bsig);
+      bandSel.textContent = '';
+      bands.forEach(function (b) {
+        var o = new Option('≈ ' + P.thousands(b.ft) + ' ft' + (b.key ? '' : ' (no data)'), String(b.code));
+        o.disabled = !b.key;
+        bandSel.appendChild(o);
+      });
+    }
+    bandSel.hidden = !bands.length;
+    if (pick.band !== null && bands.length) bandSel.value = String(pick.band);
   }
   function loadRaster() {
     if (!map.hasLayer(rasterGroup)) return;
@@ -1402,6 +1421,7 @@
 
   function renderWx(force) {
     if (!force && (!fisb.wxDirty || $('pane-weather').hidden || $('details').hidden)) return;
+    syncWinds();
     fisb.wxDirty = false;
     var now = dataNow(), prefix = fisb.wxFilter;
     var groups = {};
@@ -1450,7 +1470,6 @@
   var MAX_WX_SYMBOLS = 300;         // on the map at once: METAR, TAF, PIREP, winds, each nearest the centre first
   var WX_KIND_RANK = { metar: 0, taf: 1, pirep: 2, winds: 3 };
   var WX_VIEW_PAD = 0.25;           // symbols drawn inside the view grown by this fraction per side
-  var WINDS_PERIOD_H = 6, WINDS_LEVEL_FT = 3000;   // the record and level the winds barbs come from
   var parsedCache = new WeakMap();  // text record -> its parse (a new record object on every update)
   function parsedOf(r) {
     if (!parsedCache.has(r)) {
@@ -1465,10 +1484,47 @@
     return P.resolveStation(r.kind, r.station, fisb.locations);
   }
   // Where a report's symbol goes, or null: no position, or a winds record
-  // other than the one drawn (WINDS_PERIOD_H) or without WINDS_LEVEL_FT.
+  // other than the picked period's (winds:<station>:<period>) or without the
+  // picked level.
   function wxPlotPos(r) {
-    if (r.kind === 'winds' && (r.period_h !== WINDS_PERIOD_H || !P.windsLevel(parsedOf(r), WINDS_LEVEL_FT))) return null;
+    var w = fisb.winds;
+    if (r.kind === 'winds' && (r.period_h !== w.period || w.level === null || !P.windsLevel(parsedOf(r), w.level))) return null;
     return wxPos(r);
+  }
+  // The winds pickers (spec §3.1): the periods present, defaulting to the
+  // one whose valid time is nearest the data clock, and the levels present
+  // in that period, defaulting to the lowest. An operator's pick stays until
+  // it is no longer offered. Sets fisb.winds; on a change the list and the
+  // symbols are redrawn. Each select is rebuilt only when its options change.
+  function syncWinds() {
+    var recs = [];
+    fisb.text.forEach(function (r) { if (r.kind === 'winds') recs.push(r); });
+    var pick = fisb.windsPick, periods = P.windsPeriods(recs);
+    if (periods.indexOf(pick.period) < 0) pick.period = null;
+    var period = pick.period !== null ? pick.period : P.nearestWindsPeriod(recs, dataNow());
+    if (period === null && periods.length) period = periods[0];
+    var levels = period === null ? [] : P.windsLevelsFor(recs, period, parsedOf);
+    if (levels.indexOf(pick.level) < 0) pick.level = null;
+    var level = pick.level !== null ? pick.level : levels.length ? levels[0] : null;
+    var old = fisb.winds;
+    fisb.winds = { period: period, level: level, periods: periods, levels: levels };
+    fillPicker($('wx-winds-period'), periods, period, function (h) { return h + ' h'; });
+    fillPicker($('wx-winds-level'), levels, level, function (ft) { return P.thousands(ft) + ' ft'; });
+    $('wx-winds-pick').hidden = !fisb.show.winds;
+    if (old.period === period && old.level === level) return;
+    fisb.wxDirty = fisb.symDirty = true;
+    var shown = fisb.reportRec && fisb.text.get(fisb.reportRec);
+    if (shown && shown.kind === 'winds') fillReport(shown);   // the card names the level
+  }
+  function fillPicker(sel, values, value, label) {
+    var sig = values.join(',');
+    if (sel.getAttribute('data-sig') !== sig) {
+      sel.setAttribute('data-sig', sig);
+      sel.textContent = '';
+      values.forEach(function (v) { sel.appendChild(new Option(label(v), String(v))); });
+    }
+    sel.disabled = !values.length;
+    if (value !== null) sel.value = String(value);
   }
   // "n of m positioned" over the reports the list shows (toggles, filter):
   // n counts those with a symbol, on screen or not.
@@ -1521,7 +1577,7 @@
       size = 18; anchor = [9, 9];
       html = svgBox(18, '<path class="wx-core" d="M0 -7L7 6H-7Z"/>' + (urgent ? '<text class="bang" y="4.5">!</text>' : ''));
     } else {
-      var lv = P.windsLevel(p, WINDS_LEVEL_FT);
+      var lv = fisb.winds.level === null ? null : P.windsLevel(p, fisb.winds.level);
       if (!lv) return null;
       if (!lv.lv) barb = { dir: lv.dir, kt: lv.kt };
       anchor = [24, 8];    // 16 px below the station: clear of the METAR circle and its barb
@@ -1540,6 +1596,7 @@
     fisb.symDirty = true;
   }
   function renderWxSymbols() {
+    syncWinds();
     fisb.symDirty = false;
     if (!map) return;
     var now = dataNow(), want = [], view = map.getBounds().pad(WX_VIEW_PAD);
@@ -1624,8 +1681,9 @@
       rows.push(['ov', '/OV', ov ? ov.id + (ov.radial !== null ? ' ' + ('00' + ov.radial).slice(-3) + '° ' + ov.nm + ' nm' : '') :
         'not a location id']);
     } else if (r.kind === 'winds') {
-      var lv = P.windsLevel(p, WINDS_LEVEL_FT);
-      rows.push(['level', 'Level', P.thousands(WINDS_LEVEL_FT) + ' ft' + (r.period_h ? ' · ' + r.period_h + ' h forecast' : '')]);
+      var ft = fisb.winds.level, lv = ft === null ? null : P.windsLevel(p, ft);
+      rows.push(['level', 'Level', (ft === null ? 'none' : P.thousands(ft) + ' ft') +
+        (r.period_h ? ' · ' + r.period_h + ' h forecast' : '')]);
       rows.push(['wind', 'Wind', lv ? (lv.lv ? 'light and variable' : windText({ dir: lv.dir, kt: lv.kt })) : 'not given']);
       rows.push(['temp', 'Temperature', lv && lv.temp !== null ? lv.temp + ' °C' : 'not given']);
     }
@@ -2390,6 +2448,12 @@
         renderWx(true);
       });
     });
+    ['period', 'level'].forEach(function (k) {
+      $('wx-winds-' + k).addEventListener('change', function () {
+        fisb.windsPick[k] = Number($('wx-winds-' + k).value);
+        renderWx(true);   // syncWinds: the symbols follow
+      });
+    });
     $('wx-list').addEventListener('click', function (ev) {
       var show = ev.target.closest('.wx-show');
       if (show) {
@@ -2479,6 +2543,11 @@
       });
     },
     wxPositioned: wxPositioned,
+    // The winds pickers: the period and level the barbs use, and those offered.
+    windsPickers: function () {
+      var w = fisb.winds;
+      return { period: w.period, level: w.level, periods: w.periods.slice(), levels: w.levels.slice() };
+    },
     snapshots: function () { return snapshotCount; },
     // Closes the WebSocket: the page reconnects and resets from the snapshot.
     reconnect: function () { if (ws) ws.close(); },

@@ -814,6 +814,22 @@ test('winds_direction_code_out_of_range_is_null', () => {   // synthetic
   assert.deepStrictEqual(P.windsLevel(P.parseWinds('WINDS XYZ 301800Z  FT 39000\n   860560'), 39000),
     { ft: 39000, dir: 360, kt: 105, temp: -60, lv: false });
 });
+test('raster_products_and_bands', () => {
+  const heads = [{ key: '70-0', product: 70, name: 'icing low', altitude_code: 0 }, { key: '70-3', product: 70, name: 'icing low', altitude_code: 3 },
+    { key: '84', product: 84, name: 'cloud tops' }, { key: '91-1', product: 91, name: 'turbulence high', altitude_code: 1 }];
+  const r = P.rasterProducts(heads);
+  assert.deepStrictEqual(r.map((e) => e.product), [70, 84, 91]);
+  assert.strictEqual(r[0].bands.length, 8); assert.strictEqual(r[0].bands[3].key, '70-3'); assert.strictEqual(r[0].bands[1].key, null);
+  assert.strictEqual(r[1].key, '84'); assert.deepStrictEqual(r[1].bands, []);
+  assert.strictEqual(P.defaultBand(r[2]), 1); assert.strictEqual(P.rasterBandFt(91, 1), 20000); assert.strictEqual(P.rasterBandFt(70, 0), 2000);
+});
+test('winds_periods_and_levels', () => {   // synthetic records
+  const rec = (st, p, levels) => ({ kind: 'winds', station: st, period_h: p, text: 'WINDS ' + st + ' 301200Z  FT ' + levels.join(' ') + '\n   ' + levels.map(() => '3516').join(' ') });
+  const rs = [rec('IND', 6, [3000, 6000]), rec('GLD', 6, [6000, 9000]), rec('IND', 12, [3000])];
+  assert.deepStrictEqual(P.windsPeriods(rs), [6, 12]);
+  assert.deepStrictEqual(P.windsLevelsFor(rs, 6), [3000, 6000, 9000]);
+  assert.deepStrictEqual(P.windsLevelsFor(rs, 24), []);
+});
 
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

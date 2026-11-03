@@ -334,6 +334,35 @@
     return !drawnHead || drawnHead.published !== head.published;
   }
 
+  // Raster layers by product. Icing and turbulence (70/71/90/91) come per
+  // 3-bit altitude code; a band's altitude is approximate (docs/web-api.md).
+  var RASTER_BAND_PRODUCTS = [70, 71, 90, 91];
+  function rasterBandFt(product, code) {
+    return (product === 71 || product === 91 ? 18000 : 2000) + 2000 * code;
+  }
+  // heads (status.rasters[]) -> one entry per product id, sorted: a band
+  // product lists codes 0..7 (key null: no layer at that code), any other
+  // has its head's key and no bands.
+  function rasterProducts(heads) {
+    var by = {};
+    (heads || []).forEach(function (h) {
+      var e = by[h.product];
+      if (!e) {
+        var band = RASTER_BAND_PRODUCTS.indexOf(h.product) >= 0, bands = [];
+        for (var c = 0; band && c < 8; c++) bands.push({ code: c, ft: rasterBandFt(h.product, c), key: null });
+        e = by[h.product] = { product: h.product, name: h.name || 'product ' + h.product, key: null, bands: bands };
+      }
+      if (!e.bands.length) e.key = h.key;
+      else if (typeof h.altitude_code === 'number' && e.bands[h.altitude_code]) e.bands[h.altitude_code].key = h.key;
+    });
+    return Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) { return a.product - b.product; });
+  }
+  function defaultBand(entry) {
+    var bands = (entry && entry.bands) || [];
+    for (var i = 0; i < bands.length; i++) if (bands[i].key) return bands[i].code;
+    return null;
+  }
+
   // Age colouring of a text report: fresh < 30 min, aging < 90 min, else old
   // (and old when the time is missing or unreadable).
   var AGE_FRESH_MS = 30 * 60000, AGE_AGING_MS = 90 * 60000;
@@ -740,6 +769,24 @@
     return best;
   }
 
+  // The winds pickers' options: the period_h values present, and the levels
+  // (ft) of that period's parsed records, both sorted ascending. parse
+  // (optional) maps a record to its parseWinds result (the page's cache).
+  function windsPeriods(records) {
+    var seen = {};
+    (records || []).forEach(function (r) { if (typeof r.period_h === 'number') seen[r.period_h] = true; });
+    return Object.keys(seen).map(Number).sort(function (a, b) { return a - b; });
+  }
+  function windsLevelsFor(records, period, parse) {
+    var seen = {};
+    (records || []).forEach(function (r) {
+      if (r.period_h !== period) return;
+      var p = parse ? parse(r) : parseWinds(r.text);
+      if (p) p.levels.forEach(function (l) { seen[l.ft] = true; });
+    });
+    return Object.keys(seen).map(Number).sort(function (a, b) { return a - b; });
+  }
+
   // A PIREP: its station, UUA (urgent) or UA, and the /OV group when it is a
   // location id optionally followed by rrrddd (radial, nm); routes and
   // free-text positions ('SJX-GRB', '4 W CVG') give ov null. The radial is
@@ -833,7 +880,9 @@
     ceilingFt: ceilingFt, flightCategory: flightCategory, windGroup: windGroup, parseMetar: parseMetar,
     tafFirstGroup: tafFirstGroup, parseTafFirst: parseTafFirst,
     WINDS_LEVELS_FT: WINDS_LEVELS_FT, parseWinds: parseWinds, windsLevel: windsLevel,
-    nearestWindsPeriod: nearestWindsPeriod, parsePirep: parsePirep,
+    nearestWindsPeriod: nearestWindsPeriod, windsPeriods: windsPeriods, windsLevelsFor: windsLevelsFor,
+    RASTER_BAND_PRODUCTS: RASTER_BAND_PRODUCTS, rasterBandFt: rasterBandFt, rasterProducts: rasterProducts,
+    defaultBand: defaultBand, parsePirep: parsePirep,
     WINDS_PREFIXES: WINDS_PREFIXES, stationCandidates: stationCandidates, resolveStation: resolveStation,
     destinationPoint: destinationPoint, pirepPosition: pirepPosition, barbParts: barbParts
   };

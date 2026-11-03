@@ -517,8 +517,9 @@ test.describe('fisb radar (tg30)', () => {
     await openFisbPage(page);
     await layerToggle(page, 'Other rasters').check();
     const sel = page.locator('#raster-select');
-    await expect.poll(() => sel.locator('option').count()).toBeGreaterThanOrEqual(5);
-    await sel.selectOption('70-0');
+    await expect.poll(() => sel.locator('option').count()).toBeGreaterThanOrEqual(4);
+    await sel.selectOption('70');
+    await page.locator('#raster-band').selectOption('0');
     await expect(page.locator('img.leaflet-image-layer.fisb-raster')).toHaveCount(1);
     await expect(page.locator('#raster-legend')).toContainText('Icing');
     await expect(page.locator('#raster-legend')).toContainText('approximate');
@@ -526,6 +527,19 @@ test.describe('fisb radar (tg30)', () => {
     await expect(page.locator('#raster-legend')).toContainText(/lightning/i);
     await layerToggle(page, 'Other rasters').uncheck();
     await expect(page.locator('img.fisb-raster')).toHaveCount(0);
+  });
+  test('raster_band_select', async ({ page }) => {
+    await openFisbPage(page);
+    await layerToggle(page, 'Other rasters').check();
+    await page.locator('#raster-select').selectOption('70');
+    const band = page.locator('#raster-band');
+    await expect(band).toBeVisible();
+    const status = (await apiAt(RADAR_BASE, '/api/fisb/status')).body;
+    const codes = status.rasters.filter((h) => h.product === 70).map((h) => h.altitude_code).sort((a, b) => a - b);
+    await expect(band).toHaveValue(String(codes[0]));
+    await expect(page.locator('#raster-legend')).toContainText('≈ ' + (2000 + 2000 * codes[0]).toLocaleString('en-US') + ' ft');
+    await page.locator('#raster-select').selectOption('84');
+    await expect(band).toBeHidden();
   });
 
   test('fisb_screenshots_radar', async ({ page }, testInfo) => {
@@ -615,6 +629,21 @@ test.describe('fisb radar (tg30)', () => {
     const s = await page.evaluate(() => window.skycueApp.wxSymbols());
     const pos = await page.evaluate(() => window.skycueApp.wxPositioned());
     expect(pos.n).toBe(s.length);   // every positioned report is drawn (all are in view in tg30)
+  });
+  test('winds_pickers_change_barbs', async ({ page }) => {
+    await openFisbPage(page);
+    await page.locator('#wx-toggle').click();
+    const barbs = () => page.evaluate(() => window.skycueApp.wxSymbols().filter((s) => s.kind === 'winds')
+      .map((s) => [s.station, s.barb && s.barb.dir, s.barb && s.barb.kt]).sort());
+    await expect.poll(() => page.evaluate(() => window.skycueApp.windsPickers().period)).toBe(6);
+    await expect(page.locator('#wx-winds-level')).toHaveValue('3000');
+    await expect.poll(barbs).toEqual([['CVG', 350, 17], ['IND', 350, 16]]);   // KCVG, KIND learned; FWA has no 6 h record
+    await page.locator('#wx-winds-level').selectOption('39000');
+    await expect.poll(barbs).toEqual([['CVG', 290, 92], ['IND', 300, 99]]);
+    await page.locator('#wx-winds-period').selectOption('12');
+    await expect.poll(barbs).toEqual([['CVG', 280, 85], ['FWA', 300, 100], ['IND', 290, 83]]);
+    const levels = await page.locator('#wx-winds-level option').evaluateAll((os) => os.map((o) => Number(o.value)));
+    expect(levels).toEqual([3000, 6000, 9000, 12000, 18000, 24000, 30000, 34000, 39000]);
   });
   test('report_card_follows_its_own_record', async ({ page }) => {
     await openFisbPage(page);

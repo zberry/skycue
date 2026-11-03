@@ -49,7 +49,10 @@ From the `fisb` status in the snapshot the page GETs `/api/fisb/text`,
 WebSocket items (docs/web-api.md, FIS-B). Map layers (the layer control,
 top right): "Radar (regional)" and "Radar (CONUS)" (on by default), "Other
 rasters" (lightning, icing, turbulence, cloud tops: one at a time from a
-dropdown, legend marked approximate) and one layer per shape family (NOTAM / TFR,
+product dropdown, legend marked approximate; icing and turbulence also get
+an altitude band dropdown, `≈ 4,000 ft` per 3-bit code, bands without data
+disabled, defaulting to the lowest band with data, the legend title naming
+the band; `rasterProducts`, `defaultBand`) and one layer per shape family (NOTAM / TFR,
 SIGMET, AIRMET/G-AIRMET, CWA, SUA; off by default). A mosaic's blocks are
 expanded from their RLE and painted on one canvas over their box (rows
 spaced in Web Mercator, at most 4096 x 4096), shown as an image overlay;
@@ -68,9 +71,13 @@ category (VFR green, MVFR blue, IFR red, LIFR magenta, grey when visibility
 or ceiling cannot be parsed) with a wind barb (a ring when calm, no barb
 when variable); a TAF an outlined square right of it, coloured by its first
 group; a PIREP a triangle (filled UA, outlined with "!" for UUA); winds aloft
-a barb with the temperature, drawn just below the station, from the 6 h
-record at 3000 ft (other winds rows, and stations whose table has no 3000 ft
-level, say "no barb" and have no symbol). Symbols fade
+a barb with the temperature, drawn just below the station, from the record
+of the picked forecast period at the picked level. The period picker (shown
+with the Winds toggle) offers the periods present (6, 12, 24 h), defaulting
+to the one whose valid time is nearest the data clock; the level picker the
+levels present in that period, defaulting to the lowest; a pick stays until
+it is no longer offered (`windsPeriods`, `windsLevelsFor`). Other winds rows,
+and stations whose table lacks the level, say "no barb" and have no symbol. Symbols fade
 with the list's age classes and go when their record expires; hover shows
 the station, a click the parsed report and raw text. The Reports toggles
 (METAR, TAF, PIREP, Winds, each with its count) and the station filter apply

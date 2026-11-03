@@ -195,6 +195,10 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 #wx-positioned { text-transform: none; letter-spacing: 0; font-weight: normal; margin-left: 6px; }
 #wx-reports .wx-tg { white-space: nowrap; margin-right: 10px; }
 #wx-reports .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+#wx-winds-pick { margin-top: 4px; color: var(--muted); }
+#wx-winds-pick label { margin-right: 10px; white-space: nowrap; }
+#wx-winds-pick select { font-size: 12px; padding: 2px 4px; }
+#wx-winds-pick select:disabled { opacity: .6; }
 .wx-row { display: flex; flex-wrap: wrap; align-items: baseline; }
 .wx-row .wx-head { width: auto; flex: 1 1 0; min-width: 0; }
 .wx-row .wx-text { flex-basis: 100%; }

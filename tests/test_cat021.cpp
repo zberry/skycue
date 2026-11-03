@@ -951,3 +951,19 @@ BOOST_AUTO_TEST_CASE(framer_other_category_len_limit) {
     BOOST_CHECK(f.inSync());
   }
 }
+
+// Endless garbage that always looks like the start of a CAT 21 block of the
+// largest LEN: the framer holds at most one block's bytes, never the stream.
+BOOST_AUTO_TEST_CASE(framer_buffer_bounded_on_garbage) {
+  for (bool other : {false, true}) {
+    Cat021StreamFramer f(Edition::e2_6, other);
+    std::vector<Bytes> out;
+    Bytes junk(4096);
+    for (std::size_t i = 0; i < junk.size(); ++i)
+      junk[i] = static_cast<uint8_t>(i % 3 == 0 ? 0x15 : 0xff);  // CAT 21, LEN 0xffff, again and again
+    for (int round = 0; round < 256; ++round) {  // 1 MiB
+      f.feed(junk.data(), junk.size(), out);
+      BOOST_TEST(f.buffered() <= 65535u);
+    }
+  }
+}

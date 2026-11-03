@@ -51,6 +51,9 @@ class Cat021StreamFramer {
   // Bytes skipped as other-category blocks (headers included).
   uint64_t skippedBytes() const { return skipped_bytes_; }
   bool inSync() const { return in_sync_; }
+  // Bytes held waiting for the rest of a block (under 65535: at most one
+  // block, whose LEN is 16 bits).
+  std::size_t buffered() const { return buf_.size(); }
 
  private:
   void dropByte(std::size_t& pos);

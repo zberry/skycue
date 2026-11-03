@@ -46,6 +46,8 @@ public:
     // Lines or records that did not parse (counted in the input's messages
     // and rejected). Most sources have none.
     virtual uint64_t rejected() const { return 0; }
+    // Bytes received (the input's `bytes` counter). 0 when not counted.
+    virtual uint64_t bytesRead() const { return 0; }
 };
 
 }  // namespace skycued

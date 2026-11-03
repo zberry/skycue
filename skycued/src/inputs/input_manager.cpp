@@ -220,6 +220,8 @@ InputEntry InputManager::replace(const std::string& id, const InputDef& def)
     const InputDef d = normalized(def);
     if (d.id != id)
         throw InputDefError("id must stay '" + id + "'");
+    if (d == s->def)
+        return entry(*s);  // unchanged: no write, no restart
     auto user = userDefs();
     for (auto& u : user)
         if (u.id == id)
@@ -452,9 +454,12 @@ void InputManager::dispose(std::unique_ptr<Input> input)
 
 void InputManager::schedule()
 {
-    timer_.expires_after(std::chrono::seconds(1));
-    timer_.async_wait([this](const boost::system::error_code& ec) {
-        if (ec || !started_)
+    timer_.expires_after(config_.poll_interval);
+    // A wait that completed before stop() or the destructor cancelled it still
+    // runs: the weak token tells it whether the manager is still there.
+    std::weak_ptr<bool> alive = alive_;
+    timer_.async_wait([this, alive](const boost::system::error_code& ec) {
+        if (ec || !alive.lock() || !started_)
             return;
         onTimer();
         if (started_)

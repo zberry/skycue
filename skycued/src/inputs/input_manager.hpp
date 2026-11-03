@@ -14,8 +14,8 @@
 //   std::runtime_error and changes nothing), then applies the change.
 //   Built-ins accept only setEnabled. With `replaying` every write throws
 //   InputConflict.
-// - start() starts the enabled inputs and a 1 s timer that ticks them and
-//   polls the file (no poll when replaying). A hand edit that settles is
+// - start() starts the enabled inputs and a timer (poll_interval, 1 s by
+//   default) that ticks them and polls the file (no poll when replaying). A hand edit that settles is
 //   applied by id when valid; when invalid it is renamed <file>.rejected and
 //   logged at ERROR, and the running set stays. A missing file is not a
 //   change: the poll keeps watching the path and loads a file that appears.
@@ -55,6 +55,8 @@ struct InputManagerConfig {
     bool record_raw = false;
     uint64_t record_max_bytes = 0;
     bool replaying = false;
+    // How often the inputs are ticked and the file is polled (tests shorten it).
+    std::chrono::milliseconds poll_interval{1000};
 };
 
 struct InputEntry {
@@ -105,6 +107,7 @@ public:
 
     // Throw InputDefError (400), InputConflict (409), InputNotFound (404),
     // InputForbidden (403) or std::runtime_error (the file write failed).
+    // replace with the definition the input already has changes nothing.
     InputEntry create(const InputDef& def);
     InputEntry replace(const std::string& id, const InputDef& def);
     InputEntry setEnabled(const std::string& id, bool enabled);
@@ -165,6 +168,7 @@ private:
     std::function<void(const std::string&, std::chrono::system_clock::time_point, const std::string&)> on_uplink_;
     std::function<void()> on_changed_;
     int dispatching_ = 0;  // input callbacks running
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);  // the timer handler's weak token
     bool started_ = false;
 };
 

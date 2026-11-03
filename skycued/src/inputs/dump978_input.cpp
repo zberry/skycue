@@ -21,6 +21,7 @@ InputState Dump978Input::state() const
     InputState s = Input::state();
     s.counters.uplinks = uplinkFrames();
     s.counters.messages = downlinkFrames() + uplinkFrames();
+    s.counters.bytes = bytes_before_ + (source_ ? source_->bytesRead() : 0);
     return s;
 }
 
@@ -32,6 +33,7 @@ void Dump978Input::start()
     if (source_) {
         downlink_before_ += source_->downlinkFrames();
         uplink_before_ += source_->uplinkFrames();
+        bytes_before_ += source_->bytesRead();
     }
     source_ = std::make_unique<Dump978RawSource>(io_, def().host, def().port);
     source_->onUplink([this](std::chrono::system_clock::time_point t, const std::string& hex) {

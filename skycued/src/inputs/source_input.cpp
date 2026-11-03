@@ -34,6 +34,7 @@ InputState SourceInput::state() const
     InputState s = Input::state();
     s.counters.rejected = rejected_before_ + (source_ ? source_->rejected() : 0);
     s.counters.messages = s.counters.observations + s.counters.rejected;
+    s.counters.bytes = bytes_before_ + (source_ ? source_->bytesRead() : 0);
     return s;
 }
 
@@ -46,8 +47,10 @@ void SourceInput::start()
         LOG_WARN("input " << def().id << ": cannot restart (its source runs once)");
         return;
     }
-    if (source_)
+    if (source_) {
         rejected_before_ += source_->rejected();
+        bytes_before_ += source_->bytesRead();
+    }
     source_ = std::move(next);
     running_ = true;
     source_->onObservation([this](const TrackObservation& obs) {

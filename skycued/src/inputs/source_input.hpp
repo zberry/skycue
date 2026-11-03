@@ -2,7 +2,8 @@
 
 // SourceInput: an Input over an ObservationSource (readsb's JSON port through
 // ReadsbJsonSource, a replay, tests). messages = observations +
-// source->rejected(). Connects are counted on each onConnection(true).
+// source->rejected(), bytes = source->bytesRead(). Connects are counted on
+// each onConnection(true).
 
 #include "inputs/input.hpp"
 #include "observation.hpp"
@@ -31,7 +32,7 @@ private:
     SourceFactory make_;
     std::unique_ptr<ObservationSource> source_;  // kept after stop() until the next start()
     bool running_ = false;
-    uint64_t rejected_before_ = 0;  // of earlier sources
+    uint64_t rejected_before_ = 0, bytes_before_ = 0;  // of earlier sources
 };
 
 }  // namespace skycued

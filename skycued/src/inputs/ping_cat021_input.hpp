@@ -30,6 +30,9 @@ public:
     PingCat021Input(boost::asio::io_context& io, InputDef def);
     ~PingCat021Input() override;
 
+    // Framers held, one per open TCP stream (for tests).
+    std::size_t framerCount() const { return framers_.size(); }
+
 protected:
     void handleData(const TransportData& data) override;
     void handleStreamClosed(uint64_t stream) override;

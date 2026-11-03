@@ -4,6 +4,7 @@
 #include "asterix/cat021.hpp"
 #include "asterix/cat021_encode.hpp"
 #include "engine_test_support.hpp"
+#include "file_util.hpp"
 #include "inputs/dump978_input.hpp"
 #include "inputs/input.hpp"
 #include "inputs/input_def.hpp"
@@ -55,6 +56,23 @@ template <class F> bool eventuallyWithin(std::chrono::milliseconds limit, F pred
     return pred();
 }
 template <class F> bool eventually(F pred) { return eventuallyWithin(kWait, pred); }
+
+// Waits until count() reaches `target` or stops growing for 50 ms (a
+// datagram the kernel dropped never arrives), at most kWait.
+template <class F> void settle(F count, uint64_t target)
+{
+    const auto until = steady::now() + kWait;
+    uint64_t last = count();
+    auto changed = steady::now();
+    while (last < target && steady::now() < until && steady::now() - changed < 50ms) {
+        std::this_thread::sleep_for(2ms);
+        const uint64_t now = count();
+        if (now != last) {
+            last = now;
+            changed = steady::now();
+        }
+    }
+}
 
 bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
 // Names in `dir` other than . and ..
@@ -342,10 +360,13 @@ struct Mgr {
     }
 };
 
+constexpr std::chrono::milliseconds kPoll{50};
+
 InputManagerConfig fileConfig(const TempDir& tmp)
 {
     InputManagerConfig cfg;
     cfg.inputs_file = tmp.path + "/skycue.inputs.json";
+    cfg.poll_interval = kPoll;
     return cfg;
 }
 
@@ -527,29 +548,42 @@ BOOST_AUTO_TEST_CASE(ping_cat021_counters_per_spec)
     BOOST_TEST(p.seen.all()[0].id.address == 0xABC004u);
 }
 
+// Each connection has its own framer, dropped when the connection closes: the
+// second half of a block on a new connection is garbage, not the rest of the
+// half block from the old one.
 BOOST_AUTO_TEST_CASE(tcp_connect_reconnect_resets_framer)
 {
     IoThread t;
     asio::io_context cio;
     tcp::acceptor acc(cio, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
     const uint16_t port = acc.local_endpoint().port();
-    Probe p(t, std::make_unique<PingCat021Input>(t.io, cat021("cc", "tcp_connect", port)));
+    auto input = std::make_unique<PingCat021Input>(t.io, cat021("cc", "tcp_connect", port));
+    PingCat021Input* cat = input.get();
+    Probe p(t, std::move(input));
+    auto framers = [&] { return t.call([&] { return cat->framerCount(); }); };
     const Bytes blk = block({0xABC001});
-    const std::size_t half = blk.size() / 2;
+    const auto half = static_cast<std::ptrdiff_t>(blk.size() / 2);
+    const Bytes first(blk.begin(), blk.begin() + half), second(blk.begin() + half, blk.end());
     {
         tcp::socket s1 = acc.accept();
-        writeAll(s1, Bytes(blk.begin(), blk.begin() + static_cast<std::ptrdiff_t>(half)));
-        BOOST_REQUIRE(eventually([&] { return p.state().counters.bytes == half; }));
-    }  // closed: the input reconnects
+        writeAll(s1, first);
+        BOOST_REQUIRE(eventually([&] { return p.state().counters.bytes == first.size(); }));
+        BOOST_TEST(framers() == 1u);
+    }  // closed: the framer goes and the input reconnects
+    BOOST_REQUIRE(eventually([&] { return framers() == 0; }));
     tcp::socket s2 = acc.accept();
-    writeAll(s2, blk);
+    Bytes stream = second;
+    stream.insert(stream.end(), blk.begin(), blk.end());
+    writeAll(s2, stream);
+    BOOST_REQUIRE(eventually([&] { return p.state().counters.bytes == first.size() + stream.size(); }));
     BOOST_REQUIRE(eventually([&] { return p.seen.count() == 1; }));
-    BOOST_REQUIRE(eventually([&] { return p.state().counters.bytes == half + blk.size(); }));
     const InputState s = p.state();
     BOOST_TEST(p.seen.count() == 1u);
+    BOOST_TEST(p.seen.all()[0].id.address == 0xABC001u);
     BOOST_TEST(s.counters.messages == 1u);
-    BOOST_TEST(s.counters.rejected == 0u);
+    BOOST_TEST(s.counters.rejected == 1u);  // the stray second half
     BOOST_TEST(s.counters.connects == 2u);
+    BOOST_TEST(framers() == 1u);
 }
 
 BOOST_AUTO_TEST_CASE(malformed_flood_counted_and_log_rate_limited)
@@ -567,9 +601,8 @@ BOOST_AUTO_TEST_CASE(malformed_flood_counted_and_log_rate_limited)
     for (int sent = 0; sent < 1000;) {
         for (int i = 0; i < 50; ++i, ++sent)
             tx.send(uport, kJunk);
-        eventuallyWithin(1s, [&] { return u.state().counters.rejected >= static_cast<uint64_t>(sent); });
+        settle([&] { return u.state().counters.rejected; }, static_cast<uint64_t>(sent));
     }
-    eventuallyWithin(1s, [&] { return u.state().counters.rejected >= 1000; });
     InputState s = u.state();
     BOOST_TEST(s.counters.rejected >= 900u);
     BOOST_TEST(s.counters.rejected <= 1000u);
@@ -986,6 +1019,80 @@ BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded)
     BOOST_TEST(s.counters.messages == 1u);
 }
 
+BOOST_AUTO_TEST_CASE(inputs_file_deleted_while_running_keeps_set)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    const uint16_t a = freeUdpPort();
+    m.on([&](InputManager& im) { return im.create(psJson("a", a)); });
+    BOOST_REQUIRE(eventually([&] { return m.state("a").connected; }));
+    UdpSender tx;
+    tx.send(a, fixture("icd-traffic-1090.json"));
+    BOOST_REQUIRE(eventually([&] { return m.state("a").counters.messages == 1; }));
+
+    BOOST_REQUIRE(::unlink(cfg.inputs_file.c_str()) == 0);
+    std::this_thread::sleep_for(kPoll * 4);  // the removal settles and is seen
+    BOOST_TEST(m.ids() == std::vector<std::string>{"a"});
+    InputState s = m.state("a");
+    BOOST_TEST(s.connected);
+    BOOST_TEST(s.counters.connects == 1u);
+    BOOST_TEST(s.counters.messages == 1u);
+
+    const uint16_t b = freeUdpPort();
+    handWrite(cfg.inputs_file, fileOf({psJson("a", a), psJson("b", b)}));
+    BOOST_REQUIRE(eventually([&] {
+        const auto e = m.find("b");
+        return e && e->state.connected;
+    }));
+    s = m.state("a");
+    BOOST_TEST(s.counters.connects == 1u);
+    BOOST_TEST(s.counters.messages == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(replace_with_same_definition_changes_nothing)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    const uint16_t port = freeUdpPort();
+    const InputDef d = psJson("ps", port, R"(,"name":"North")");
+    m.on([&](InputManager& im) { return im.create(d); });
+    BOOST_REQUIRE(eventually([&] { return m.state("ps").connected; }));
+    const auto stamp = skycued::FileStamp::of(cfg.inputs_file);
+    const int changes = m.on([&](InputManager&) { return m.seen.changes; });
+    const InputEntry e = m.on([&](InputManager& im) { return im.replace("ps", d); });
+    BOOST_TEST(e.state.connected);
+    BOOST_TEST(e.state.counters.connects == 1u);
+    BOOST_TEST((skycued::FileStamp::of(cfg.inputs_file) == stamp));
+    BOOST_TEST(m.on([&](InputManager&) { return m.seen.changes; }) == changes);
+}
+
+// A timer wait that completed before the manager was destroyed still runs;
+// it must not touch the manager. Each round lets a 1 ms wait expire while the
+// io thread is busy, then destroys the manager from the next handler, so the
+// completed wait is often already queued behind it.
+BOOST_AUTO_TEST_CASE(destroyed_with_pending_timer)
+{
+    IoThread t;
+    TempDir tmp;
+    auto cfg = fileConfig(tmp);
+    cfg.poll_interval = 1ms;
+    for (int round = 0; round < 20; ++round) {
+        auto m = std::make_shared<std::unique_ptr<InputManager>>(std::make_unique<InputManager>(t.io, cfg));
+        t.call([&] {
+            (*m)->load();
+            (*m)->start();
+        });
+        asio::post(t.io, [] { std::this_thread::sleep_for(3ms); });
+        asio::post(t.io, [m] { m->reset(); });
+        BOOST_TEST(t.call([m] { return !*m; }));
+    }
+    BOOST_TEST(t.call([] { return 42; }) == 42);  // the io thread ran the queued handlers and goes on
+}
+
 BOOST_AUTO_TEST_CASE(empty_inputs_file_path_is_in_memory)
 {
     IoThread t;
@@ -1040,6 +1147,7 @@ BOOST_AUTO_TEST_CASE(write_failure_changes_nothing)
     BOOST_REQUIRE(::mkdir(dir.c_str(), 0755) == 0);
     InputManagerConfig cfg;
     cfg.inputs_file = dir + "/skycue.inputs.json";
+    cfg.poll_interval = kPoll;
     Mgr m(t, cfg);
     const uint16_t a = freeUdpPort();
     m.on([&](InputManager& im) { return im.create(psJson("a", a)); });
@@ -1112,4 +1220,5 @@ BOOST_AUTO_TEST_CASE(any_track_input_connected_ignores_dump978_and_disabled)
     asio::write(server, asio::buffer(std::string("+0123;\n-4567;\n")));
     BOOST_REQUIRE(eventually([&] { return m.state("dump978").counters.messages == 2; }));
     BOOST_TEST(m.state("dump978").counters.uplinks == 1u);
+    BOOST_TEST(m.state("dump978").counters.bytes == 14u);
 }

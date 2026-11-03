@@ -277,6 +277,18 @@ BOOST_AUTO_TEST_CASE(capture_line_rejects_bad_hex_and_missing_keys)
         BOOST_TEST(!skycued::parseCaptureLine(bad), bad);
 }
 
+BOOST_AUTO_TEST_CASE(capture_line_deep_nesting_refused_without_parsing)
+{
+    // Deep enough to overflow the stack in read_json if it got there.
+    const std::size_t depth = 200000;
+    const std::string line = R"({"t":"2026-11-02T10:15:00.123Z","input":"ps","transport":"udp","hex":"15ab","x":)" +
+                             std::string(depth, '[') + std::string(depth, ']') + "}";
+    BOOST_TEST(!skycued::parseCaptureLine(line));
+    // Brackets inside a string do not count.
+    BOOST_TEST(!skycued::parseCaptureLine(R"({"t":"2026-11-02T10:15:00.123Z","input":"ps","transport":"udp","hex":")" +
+                                          std::string(depth, '[') + R"("})"));  // refused for its hex, not a crash
+}
+
 // ---------------------------------------------------------------- capture from inputs
 
 BOOST_AUTO_TEST_CASE(capture_input_writes_datagrams)

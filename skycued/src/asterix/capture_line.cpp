@@ -1,5 +1,6 @@
 #include "asterix/capture_line.hpp"
 
+#include "json_nesting.hpp"
 #include "time_util.hpp"
 
 #include <boost/property_tree/json_parser.hpp>
@@ -11,6 +12,8 @@
 namespace skycued {
 
 namespace {
+
+constexpr int kMaxCaptureLineDepth = 32;
 
 // Ids and transports are plain ASCII by their own rules; escape anyway so a
 // line is always valid JSON.
@@ -77,6 +80,10 @@ std::string captureLineJson(const CaptureLine& line)
 
 std::optional<CaptureLine> parseCaptureLine(const std::string& text)
 {
+    // A line holds no nesting at all; refuse deep input before read_json
+    // recurses into it (the same guard and limit as JsonObject::parse).
+    if (!nestingWithin(text, kMaxCaptureLineDepth))
+        return std::nullopt;
     boost::property_tree::ptree tree;
     try {
         std::istringstream in(text);

@@ -90,6 +90,57 @@
     return n;
   }
 
+  // Map style (a view option kept in localStorage): 'light' shows the tiles
+  // as baked, 'dark' puts this CSS filter on the tile pane only (markers,
+  // shapes, radar canvases and labels sit in other panes and keep their
+  // colours). Inverting and turning the hue back keeps sea blue-ish and land
+  // brown-grey, darker and duller.
+  var MAP_STYLES = ['light', 'dark'];
+  var DARK_TILE_FILTER = 'invert(1) hue-rotate(180deg) brightness(.8) contrast(.85) saturate(.55)';
+  function mapStyle(stored) { return stored === 'dark' ? 'dark' : 'light'; }
+  function tileFilter(style) { return mapStyle(style) === 'dark' ? DARK_TILE_FILTER : ''; }
+
+  // Overlays (scripts/make-overlays.sh). Borders: admin0 (countries) at
+  // every zoom, admin1 (states, provinces) from zoom 5. Style per map style:
+  // dark lines on the light tiles, light ones on the dark.
+  var ADMIN1_MIN_ZOOM = 5;
+  function borderVisible(kind, zoom) { return kind === 'admin1' ? zoom >= ADMIN1_MIN_ZOOM : kind === 'admin0'; }
+  function borderStyle(kind, style, zoom) {
+    var dark = mapStyle(style) === 'dark';
+    var a1 = kind === 'admin1';
+    return {
+      color: dark ? (a1 ? '#a9b4c2' : '#dfe6ee') : (a1 ? '#5b5266' : '#3b3340'),
+      weight: a1 ? 0.8 : 1.2,
+      opacity: borderVisible(kind, zoom) ? (a1 ? 0.6 : 0.8) : 0,
+      dashArray: a1 ? '4 3' : null,
+      fill: false,
+      interactive: false
+    };
+  }
+  // Cities: the largest scalerank shown at a zoom (0 is the most important).
+  function cityRankLimit(zoom) { return zoom < 5 ? 2 : zoom < 7 ? 4 : Infinity; }
+  var MAX_CITY_LABELS = 300;
+  // The cities to label: rank within the zoom's limit, inside `bounds`
+  // ({south, west, north, east}, degrees; west > east crosses 180°), most
+  // important first (rank, then population), at most `max` (default
+  // MAX_CITY_LABELS). `cities` is an array of {name, rank, pop, lat, lon}.
+  function cullCities(cities, bounds, zoom, max) {
+    var limit = cityRankLimit(zoom);
+    var cap = typeof max === 'number' ? max : MAX_CITY_LABELS;
+    var wrap = bounds.west > bounds.east;
+    var out = cities.filter(function (c) {
+      if (!(c.rank <= limit) || !(c.lat >= bounds.south && c.lat <= bounds.north)) return false;
+      return wrap ? (c.lon >= bounds.west || c.lon <= bounds.east) : (c.lon >= bounds.west && c.lon <= bounds.east);
+    });
+    out.sort(function (a, b) { return a.rank - b.rank || (b.pop || 0) - (a.pop || 0); });
+    return out.length > cap ? out.slice(0, cap) : out;
+  }
+  // overlays/meta.json -> which toggles to offer: {borders, cities}.
+  function overlayOffer(meta) {
+    var f = meta && typeof meta === 'object' && meta.files && typeof meta.files === 'object' ? meta.files : {};
+    return { borders: !!(f.admin0 || f.admin1), cities: !!f.cities };
+  }
+
   function thousands(n) {
     return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
@@ -347,7 +398,11 @@
     RADAR_FADE_MS: RADAR_FADE_MS, radarFaded: radarFaded, radarOpacity: radarOpacity,
     CLOCK_SKEW_WARN_S: CLOCK_SKEW_WARN_S, skewWarning: skewWarning, radarNeedsFetch: radarNeedsFetch,
     mercY: mercY, mosaicCanvasSize: mosaicCanvasSize, stationMatches: stationMatches,
-    trackVisible: trackVisible, hiddenCount: hiddenCount
+    trackVisible: trackVisible, hiddenCount: hiddenCount,
+    MAP_STYLES: MAP_STYLES, DARK_TILE_FILTER: DARK_TILE_FILTER, mapStyle: mapStyle, tileFilter: tileFilter,
+    ADMIN1_MIN_ZOOM: ADMIN1_MIN_ZOOM, borderVisible: borderVisible, borderStyle: borderStyle,
+    cityRankLimit: cityRankLimit, MAX_CITY_LABELS: MAX_CITY_LABELS, cullCities: cullCities,
+    overlayOffer: overlayOffer
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -206,6 +206,175 @@
     L.control.scale({ position: 'bottomleft' }).addTo(map);
     map.on('click', function () { deselect(); });
     initFisbLayers();
+    initMapView();
+  }
+
+  // ---- map style and overlays ------------------------------------------------
+  // View options kept in localStorage (never sent to skycued): the map style
+  // (Light: the tiles as baked; Dark: P.tileFilter on the tile pane only)
+  // and two overlays from scripts/make-overlays.sh, Borders and Cities,
+  // offered only when overlays/meta.json lists their files. Without tiles
+  // the background is dark, so the overlays use the dark style.
+  var VIEW_KEYS = { style: 'skycue.mapStyle', borders: 'skycue.overlay.borders', cities: 'skycue.overlay.cities' };
+  var CITY_REDRAW_MS = 150;
+  var view = { style: 'light', borders: false, cities: false };
+  var overlayMeta = null;           // overlays/meta.json, or null when there is none
+  var bordersLayer = null, bordersLoading = null;
+  var citiesLayer = null, citiesData = null, citiesLoading = null, citiesFailed = false, cityTimer = null, cityShown = [];
+  function storeGet(k) { try { return window.localStorage.getItem(k); } catch (err) { return null; } }
+  function storeSet(k, v) { try { window.localStorage.setItem(k, v); } catch (err) { /* private window */ } }
+  function overlayStyle() { return haveTiles ? view.style : 'dark'; }
+  function overlayFile(name) {
+    var f = overlayMeta && overlayMeta.files && overlayMeta.files[name];
+    var file = f && typeof f.file === 'string' && /^[A-Za-z0-9_.-]+$/.test(f.file) ? f.file : name + '.json';
+    return 'overlays/' + file;
+  }
+
+  function initMapView() {
+    map.createPane('borders');
+    map.getPane('borders').style.zIndex = 360;      // over the radar (350), under the shapes (400)
+    map.getPane('borders').style.pointerEvents = 'none';
+    map.createPane('cityLabels');
+    map.getPane('cityLabels').style.zIndex = 450;   // over the shapes, under the aircraft (markerPane, 600)
+    map.getPane('cityLabels').style.pointerEvents = 'none';
+    var offer = P.overlayOffer(overlayMeta);
+    var ViewControl = L.Control.extend({
+      options: { position: 'topleft' },
+      onAdd: function () {
+        // The style only changes tiles: without them it is left out, and
+        // the box too when there are no overlays either.
+        var div = L.DomUtil.create('div', 'view-control');
+        div.hidden = !haveTiles && !offer.borders && !offer.cities;
+        div.innerHTML =
+          '<div id="map-style-row"' + (haveTiles ? '' : ' hidden') + '>' +
+          '<label for="map-style">Map</label> <select id="map-style">' +
+          '<option value="light">Light</option><option value="dark">Dark</option></select></div>' +
+          '<label class="check" for="ov-borders"' + (offer.borders ? '' : ' hidden') + '>' +
+          '<input id="ov-borders" type="checkbox"> Borders</label>' +
+          '<label class="check" for="ov-cities"' + (offer.cities ? '' : ' hidden') + '>' +
+          '<input id="ov-cities" type="checkbox"> Cities</label>';
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+        return div;
+      }
+    });
+    new ViewControl().addTo(map);
+    $('map-style').addEventListener('change', function () { setMapStyle($('map-style').value); });
+    $('ov-borders').addEventListener('change', function () { setOverlay('borders', $('ov-borders').checked); });
+    $('ov-cities').addEventListener('change', function () { setOverlay('cities', $('ov-cities').checked); });
+    map.on('zoomend', function () { if (bordersLayer && map.hasLayer(bordersLayer)) restyleBorders(); });
+    map.on('zoomend moveend', scheduleCities);
+    setMapStyle(storeGet(VIEW_KEYS.style), true);
+    setOverlay('borders', offer.borders && storeGet(VIEW_KEYS.borders) === '1', true);
+    setOverlay('cities', offer.cities && storeGet(VIEW_KEYS.cities) === '1', true);
+  }
+
+  function setMapStyle(style, initial) {
+    view.style = P.mapStyle(style);
+    $('map-style').value = view.style;
+    if (!initial) storeSet(VIEW_KEYS.style, view.style);
+    var pane = map.getPane('tilePane');
+    pane.style.filter = P.tileFilter(view.style);
+    pane.classList.toggle('tiles-dark', view.style === 'dark');
+    map.getContainer().classList.toggle('overlays-dark', overlayStyle() === 'dark');
+    if (bordersLayer) restyleBorders();
+  }
+
+  function setOverlay(name, on, initial) {
+    view[name] = !!on;
+    $('ov-' + name).checked = view[name];
+    if (!initial) storeSet(VIEW_KEYS[name], view[name] ? '1' : '0');
+    if (name === 'borders') showBorders();
+    else { if (!initial) citiesFailed = false; drawCities(); }
+  }
+
+  function fetchJson(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error(url + ': HTTP ' + r.status);
+      return r.json();
+    });
+  }
+
+  // Borders: one GeoJSON layer of admin0 and admin1 lines, each feature
+  // tagged with its kind; admin1 is drawn transparent below zoom 5.
+  function showBorders() {
+    if (!view.borders) {
+      if (bordersLayer) map.removeLayer(bordersLayer);
+      return;
+    }
+    if (bordersLayer) { bordersLayer.addTo(map); restyleBorders(); return; }
+    if (bordersLoading) return;
+    var files = overlayMeta && overlayMeta.files ? overlayMeta.files : {};
+    var kinds = ['admin0', 'admin1'].filter(function (k) { return files[k]; });
+    bordersLoading = Promise.all(kinds.map(function (k) {
+      return fetchJson(overlayFile(k)).then(function (g) {
+        var feats = g && Array.isArray(g.features) ? g.features : [];
+        feats.forEach(function (f) { f.properties = { kind: k }; });
+        return feats;
+      });
+    })).then(function (lists) {
+      bordersLayer = L.geoJSON({ type: 'FeatureCollection', features: [].concat.apply([], lists) }, {
+        pane: 'borders', interactive: false,
+        style: function (f) { return P.borderStyle(f.properties.kind, overlayStyle(), map.getZoom()); }
+      });
+      showBorders();
+    }).catch(function (err) {
+      console.warn('borders overlay: ' + err.message);
+    }).then(function () { bordersLoading = null; });
+  }
+  function restyleBorders() {
+    var style = overlayStyle(), z = map.getZoom();
+    bordersLayer.setStyle(function (f) { return P.borderStyle(f.properties.kind, style, z); });
+  }
+
+  // Cities: labels for P.cullCities' choice in the view, redrawn (debounced)
+  // after the map moves or zooms.
+  function scheduleCities() {
+    if (!view.cities) return;
+    clearTimeout(cityTimer);
+    cityTimer = setTimeout(drawCities, CITY_REDRAW_MS);
+  }
+  function viewBounds() {
+    var b = map.getBounds().pad(0.1);
+    var w = b.getWest(), e = b.getEast();
+    if (e - w >= 360) { w = -180; e = 180; } else {
+      w = ((w + 180) % 360 + 360) % 360 - 180;
+      e = ((e + 180) % 360 + 360) % 360 - 180;
+    }
+    return { south: b.getSouth(), west: w, north: b.getNorth(), east: e };
+  }
+  function drawCities() {
+    clearTimeout(cityTimer);
+    if (!view.cities) {
+      if (citiesLayer) citiesLayer.clearLayers();
+      cityShown = [];
+      return;
+    }
+    if (!citiesData) {
+      if (citiesLoading || citiesFailed) return;   // a failed load is retried when the box is ticked again
+      citiesLoading = fetchJson(overlayFile('cities')).then(function (g) {
+        citiesData = (g && Array.isArray(g.features) ? g.features : []).map(function (f) {
+          var p = f.properties || {}, c = f.geometry && f.geometry.coordinates;
+          return { name: String(p.name || ''), rank: Number(p.rank), pop: Number(p.pop) || 0,
+            lat: c ? Number(c[1]) : NaN, lon: c ? Number(c[0]) : NaN };
+        }).filter(function (c) { return c.name && isFinite(c.lat) && isFinite(c.lon) && isFinite(c.rank); });
+        drawCities();
+      }).catch(function (err) {
+        citiesFailed = true;
+        console.warn('cities overlay: ' + err.message);
+      }).then(function () { citiesLoading = null; });
+      return;
+    }
+    if (!citiesLayer) citiesLayer = L.layerGroup().addTo(map);
+    citiesLayer.clearLayers();
+    cityShown = P.cullCities(citiesData, viewBounds(), map.getZoom());
+    cityShown.forEach(function (c) {
+      citiesLayer.addLayer(L.marker([c.lat, c.lon], {
+        pane: 'cityLabels', interactive: false, keyboard: false,
+        icon: L.divIcon({ className: 'city-label', iconSize: null,
+          html: '<i class="city-dot"></i><span class="city-name">' + esc(c.name) + '</span>' })
+      }));
+    });
   }
 
   // Plain-background fallback: a lat/lon grid every 5° (zoomed out) or 1°.
@@ -1617,6 +1786,14 @@
       out.label = $('radar-age').textContent;
       return out;
     },
+    // Map style and overlays: move the map; what is shown.
+    setView: function (lat, lon, zoom) { map.setView([lat, lon], zoom, { animate: false }); },
+    zoom: function () { return map.getZoom(); },
+    mapView: function () {
+      return { style: view.style, borders: view.borders, cities: view.cities,
+        bordersLoaded: !!bordersLayer, citiesLoaded: !!citiesData };
+    },
+    cityLabels: function () { return cityShown.map(function (c) { return c.name; }); },
     shapeLayers: function (key) {
       var s = fisb.shapes.get(key);
       return s ? s.layers.map(function (l) {
@@ -1626,14 +1803,21 @@
   };
 
   wire();
-  request('GET', 'api/tiles-available').catch(function () { return { tiles: false }; }).then(function (tiles) {
+  var tilesReady = request('GET', 'api/tiles-available').catch(function () { return { tiles: false }; }).then(function (tiles) {
     if (!tiles.tiles) return tiles;
     // The regions (scripts/make-tiles.sh), for the tiles on their edges.
     return request('GET', 'tiles/meta.json').then(function (m) {
       tiles.regions = m && Array.isArray(m.regions) ? m.regions : null;
       return tiles;
     }, function () { return tiles; });
-  }).then(function (tiles) {
+  });
+  // The overlays (scripts/make-overlays.sh) are optional like the tiles:
+  // without overlays/meta.json (404) the page offers no overlay toggles.
+  var overlaysReady = fetchJson('overlays/meta.json').then(function (m) {
+    overlayMeta = m && typeof m === 'object' ? m : null;
+  }, function () { overlayMeta = null; });
+  Promise.all([tilesReady, overlaysReady]).then(function (r) {
+    var tiles = r[0];
     initMap(tiles);
     connect();
   });

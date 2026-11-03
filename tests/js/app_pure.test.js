@@ -405,5 +405,79 @@ test('hiddenCount counts drawn-but-filtered tracks only when on', () => {
   assert.strictEqual(P.hiddenCount(ts.slice(0, 2), true), 0);
 });
 
+test('mapStyle and tileFilter: dark filters, anything else is light', () => {
+  assert.deepStrictEqual(P.MAP_STYLES, ['light', 'dark']);
+  assert.strictEqual(P.mapStyle('dark'), 'dark');
+  [null, undefined, '', 'light', 'DARK', 'sepia', 1].forEach((s) => assert.strictEqual(P.mapStyle(s), 'light', String(s)));
+  assert.strictEqual(P.tileFilter('light'), '');
+  assert.strictEqual(P.tileFilter(null), '');
+  const f = P.tileFilter('dark');
+  assert.strictEqual(f, P.DARK_TILE_FILTER);
+  assert.ok(/^invert\(1\) hue-rotate\(180deg\)/.test(f), f);
+});
+
+test('borders: admin0 always, admin1 from zoom 5; styled per map style', () => {
+  [0, 2, 4, 5, 9, 14].forEach((z) => assert.strictEqual(P.borderVisible('admin0', z), true));
+  assert.strictEqual(P.borderVisible('admin1', 4), false);
+  assert.strictEqual(P.borderVisible('admin1', 4.9), false);
+  assert.strictEqual(P.borderVisible('admin1', 5), true);
+  assert.strictEqual(P.borderVisible('other', 9), false);
+  assert.strictEqual(P.borderStyle('admin1', 'light', 4).opacity, 0);
+  assert.ok(P.borderStyle('admin1', 'light', 6).opacity > 0);
+  assert.ok(P.borderStyle('admin0', 'dark', 2).opacity > 0);
+  const lum = (hex) => [1, 3, 5].reduce((s, i) => s + parseInt(hex.slice(i, i + 2), 16), 0);
+  ['admin0', 'admin1'].forEach((k) => {
+    const light = P.borderStyle(k, 'light', 8), dark = P.borderStyle(k, 'dark', 8);
+    assert.ok(lum(light.color) < 3 * 128, k + ' light style draws dark lines');
+    assert.ok(lum(dark.color) > 3 * 128, k + ' dark style draws light lines');
+    assert.strictEqual(light.interactive, false);
+    assert.strictEqual(light.fill, false);
+  });
+  assert.ok(P.borderStyle('admin1', 'light', 8).weight < P.borderStyle('admin0', 'light', 8).weight);
+});
+
+test('cityRankLimit: 2 to zoom 4, 4 at 5-6, everything from 7', () => {
+  assert.strictEqual(P.cityRankLimit(0), 2);
+  assert.strictEqual(P.cityRankLimit(4), 2);
+  assert.strictEqual(P.cityRankLimit(5), 4);
+  assert.strictEqual(P.cityRankLimit(6), 4);
+  assert.strictEqual(P.cityRankLimit(7), Infinity);
+  assert.strictEqual(P.cityRankLimit(12), Infinity);
+});
+
+test('cullCities: rank by zoom, viewport, order, cap', () => {
+  const cities = [
+    { name: 'A', rank: 0, pop: 100, lat: 40, lon: -75 },
+    { name: 'B', rank: 3, pop: 900, lat: 41, lon: -74 },
+    { name: 'C', rank: 7, pop: 50, lat: 39, lon: -76 },
+    { name: 'D', rank: 0, pop: 500, lat: 41, lon: -73 },
+    { name: 'Far', rank: 0, pop: 1e7, lat: 10, lon: 100 },
+    { name: 'Bad', rank: 0, pop: 1 }
+  ];
+  const b = { south: 35, west: -80, north: 45, east: -70 };
+  assert.deepStrictEqual(P.cullCities(cities, b, 3).map((c) => c.name), ['D', 'A']);
+  assert.deepStrictEqual(P.cullCities(cities, b, 5).map((c) => c.name), ['D', 'A', 'B']);
+  assert.deepStrictEqual(P.cullCities(cities, b, 8).map((c) => c.name), ['D', 'A', 'B', 'C']);
+  assert.deepStrictEqual(P.cullCities(cities, b, 8, 2).map((c) => c.name), ['D', 'A']);
+  // Crossing 180°: west > east.
+  const pac = [{ name: 'E', rank: 1, pop: 1, lat: 0, lon: 179 }, { name: 'W', rank: 1, pop: 2, lat: 0, lon: -179 },
+    { name: 'Mid', rank: 1, pop: 3, lat: 0, lon: 0 }];
+  assert.deepStrictEqual(P.cullCities(pac, { south: -10, west: 170, north: 10, east: -170 }, 3).map((c) => c.name), ['W', 'E']);
+  const many = [];
+  for (let i = 0; i < 1000; i++) many.push({ name: 'n' + i, rank: i % 3, pop: i, lat: 40, lon: -75 });
+  const out = P.cullCities(many, b, 9);
+  assert.strictEqual(out.length, P.MAX_CITY_LABELS);
+  assert.ok(out.every((c) => c.rank === 0), 'the most important kept');
+  assert.strictEqual(out[0].name, 'n999');
+});
+
+test('overlayOffer: toggles from overlays/meta.json', () => {
+  assert.deepStrictEqual(P.overlayOffer(null), { borders: false, cities: false });
+  assert.deepStrictEqual(P.overlayOffer({}), { borders: false, cities: false });
+  assert.deepStrictEqual(P.overlayOffer({ files: { admin0: { file: 'admin0.json' } } }), { borders: true, cities: false });
+  assert.deepStrictEqual(P.overlayOffer({ files: { admin1: {}, cities: {} } }), { borders: true, cities: true });
+  assert.deepStrictEqual(P.overlayOffer({ files: 'x' }), { borders: false, cities: false });
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

@@ -13,7 +13,9 @@ namespace skycued {
 std::string formatIso8601Ms(std::chrono::system_clock::time_point when);
 
 // Inverse of formatIso8601Ms. Accepts exactly "YYYY-MM-DDTHH:MM:SS[.fff]Z"
-// with 1 to 3 fraction digits (or none); anything else -> nullopt.
+// with 1 to 3 fraction digits (or none), from 1677-09-21T00:12:43.146Z to
+// 2262-04-11T23:47:16.854Z (system_clock's int64 nanosecond range); anything
+// else -> nullopt.
 // Locale-independent; never throws.
 std::optional<std::chrono::system_clock::time_point> parseIso8601Ms(const std::string& text);
 

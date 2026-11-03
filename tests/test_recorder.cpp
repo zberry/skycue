@@ -195,6 +195,32 @@ BOOST_AUTO_TEST_CASE(time_and_hex_helpers)
     BOOST_TEST(!skycued::parseHexAddress("a1b2cg").has_value());
 }
 
+// Found by fuzz_recording (mode 1, a capture line with year 1013):
+// parseIso8601Ms took any 4-digit year, but system_clock counts int64
+// nanoseconds, which cover 1677-09-21 to 2262-04-11 only; the milliseconds
+// to nanoseconds conversion overflowed (undefined behaviour) for years
+// outside that range.
+BOOST_AUTO_TEST_CASE(fuzz_recording_iso8601_out_of_range)
+{
+    using skycued::parseIso8601Ms;
+    for (const char* bad : {"1013-11-02T10:15:00.123Z", "0000-01-01T00:00:00Z", "9999-12-31T23:59:59.999Z",
+                            "2262-04-11T23:47:16.855Z", "1677-09-21T00:12:43.145Z"})
+        BOOST_TEST(!parseIso8601Ms(bad).has_value(), "accepted: " << bad);
+    // The ends of the range still parse, exactly.
+    const auto last = parseIso8601Ms("2262-04-11T23:47:16.854Z");
+    BOOST_REQUIRE(last);
+    BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(last->time_since_epoch()).count() ==
+               9223372036854LL);
+    const auto first = parseIso8601Ms("1677-09-21T00:12:43.146Z");
+    BOOST_REQUIRE(first);
+    BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(first->time_since_epoch()).count() ==
+               -9223372036854LL);
+    // A recording line with such a time is not a record.
+    skycued::RecordingRecord rec;
+    BOOST_TEST((skycued::parseRecordingLine(R"({"time":"9999-12-31T23:59:59.999Z","type":"uat_uplink","uplink_hex":"00"})",
+                                            rec) == skycued::LineKind::ignore));
+}
+
 BOOST_AUTO_TEST_CASE(jsonl_and_csv_written_with_headers)
 {
     TempDir tmp;

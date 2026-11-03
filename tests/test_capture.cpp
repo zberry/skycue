@@ -277,6 +277,17 @@ BOOST_AUTO_TEST_CASE(capture_line_rejects_bad_hex_and_missing_keys)
         BOOST_TEST(!skycued::parseCaptureLine(bad), bad);
 }
 
+// Found by fuzz_recording (mode 1): a time outside system_clock's int64
+// nanosecond range (1677 to 2262) overflowed in parseIso8601Ms (undefined
+// behaviour); such a line is now malformed.
+BOOST_AUTO_TEST_CASE(fuzz_recording_capture_time_out_of_range)
+{
+    BOOST_TEST(!skycued::parseCaptureLine(
+        R"({"t":"1013-11-02T10:15:00.123Z","input":"ps","transport":"udp","hex":"15ab"})"));
+    BOOST_TEST(!skycued::parseCaptureLine(
+        R"({"t":"9999-11-02T10:15:00.123Z","input":"ps","transport":"udp","hex":"15ab"})"));
+}
+
 BOOST_AUTO_TEST_CASE(capture_line_deep_nesting_refused_without_parsing)
 {
     // Deep enough to overflow the stack in read_json if it got there.

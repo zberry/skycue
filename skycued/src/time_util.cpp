@@ -96,8 +96,14 @@ std::optional<system_clock::time_point> parseIso8601Ms(const std::string& s)
     // timegm normalises out-of-range days (Feb 31 -> Mar 3); reject those.
     if (tm.tm_mday != day || tm.tm_mon != month - 1)
         return std::nullopt;
-    return system_clock::time_point(
-        std::chrono::duration_cast<system_clock::duration>(milliseconds(static_cast<int64_t>(t) * 1000 + frac_ms)));
+    // system_clock counts int64 nanoseconds (1677-09-21 to 2262-04-11); a
+    // time outside would overflow the conversion. 4 digits of year keep the
+    // milliseconds themselves far inside int64_t.
+    constexpr int64_t kMaxMs = std::chrono::duration_cast<milliseconds>(system_clock::duration::max()).count();
+    const int64_t ms = static_cast<int64_t>(t) * 1000 + frac_ms;
+    if (ms > kMaxMs || ms < -kMaxMs)
+        return std::nullopt;
+    return system_clock::time_point(std::chrono::duration_cast<system_clock::duration>(milliseconds(ms)));
 }
 
 std::string formatCompactUtc(system_clock::time_point when)

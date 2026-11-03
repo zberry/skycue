@@ -137,9 +137,22 @@ tiles_www="$tmp/www-tiles"
 mkdir -p "$tiles_www/tiles/2/1" "$tiles_www/tiles/6/18" || fail "tiles www dir"
 for f in "$www"/* "$www"/.[!.]*; do
   [ -e "$f" ] || continue
-  [ "$(basename "$f")" = tiles ] && continue
+  case $(basename "$f") in tiles|overlays) continue ;; esac
   cp -r "$f" "$tiles_www/" || fail "tiles www copy"
 done
+# Overlays (scripts/make-overlays.sh) for the map-style cases: one border
+# line and three cities around the receiver (38.9 N, 77.0 W) of ranks 1, 4
+# and 7, shown from zoom 0, 5 and 7.
+mkdir -p "$tiles_www/overlays" || fail "overlays www dir"
+printf '%s\n' '{"files":{"admin0":{"file":"admin0.json"},"cities":{"file":"cities.json"}},"source":"test fixture"}' \
+  > "$tiles_www/overlays/meta.json"
+printf '%s\n' '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[-78,38],[-77.5,39],[-76,39.5]]}}]}' \
+  > "$tiles_www/overlays/admin0.json"
+printf '%s\n' '{"type":"FeatureCollection","features":[' \
+  '{"type":"Feature","properties":{"name":"Alphaville","rank":1,"pop":900000},"geometry":{"type":"Point","coordinates":[-77.05,38.95]}},' \
+  '{"type":"Feature","properties":{"name":"Bravoton","rank":4,"pop":120000},"geometry":{"type":"Point","coordinates":[-76.8,38.75]}},' \
+  '{"type":"Feature","properties":{"name":"Charlie Falls","rank":7,"pop":20000},"geometry":{"type":"Point","coordinates":[-77.2,39.05]}}]}' \
+  > "$tiles_www/overlays/cities.json"
 python3 -I - "$tiles_www/tiles" <<'EOP' || fail "tiles fixture PNGs"
 import os, struct, sys, zlib
 def chunk(kind, data):

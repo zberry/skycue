@@ -51,6 +51,13 @@ test.afterEach(async () => {
   expect(offOrigin, 'requests to other hosts').toEqual([]);
 });
 
+// The page asks for overlays/meta.json to learn whether there are overlays
+// (scripts/make-overlays.sh); most of these skycueds' www directories have
+// none, so the browser's console error for that one 404 is expected.
+function overlaysAbsent(m) {
+  return /\/overlays\/meta\.json$/.test(m.location().url || '') && /404/.test(m.text());
+}
+
 async function openPage(page) {
   await page.goto('/');
   await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
@@ -73,10 +80,14 @@ async function selectTarget(page) {
 
 test('page_loads_without_console_errors', async ({ page }) => {
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !overlaysAbsent(m)) errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   await openPage(page);
   await expect(page.locator('#map.leaflet-container')).toBeVisible();
+  // No overlays here: the style select is offered, the overlay toggles not.
+  await expect(page.locator('#map-style')).toBeVisible();
+  await expect(page.locator('#ov-borders')).toBeHidden();
+  await expect(page.locator('#ov-cities')).toBeHidden();
   const tiles = (await api('/api/tiles-available')).body;
   if (!tiles.tiles) {
     await expect.poll(() => page.locator('path.graticule').count()).toBeGreaterThan(0);
@@ -388,7 +399,7 @@ async function apiAt(base, path) {
 }
 function watchErrors(page) {
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !overlaysAbsent(m)) errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   return errors;
 }
@@ -839,6 +850,79 @@ test.describe('map tiles fallback', () => {
     expect(offsets.size).toBe(fallbacks); // each at its own place in the parent
     const counts = await page.evaluate(() => window.skycueApp.tileCounts());
     expect(counts.underlay).toBeGreaterThanOrEqual(1);
+    expect(pageErrors).toEqual([]);
+  });
+
+  // Map style and overlays: the same skycued's www has a fixture
+  // overlays/ (run.sh): a border line and three cities around the receiver,
+  // Alphaville (rank 1), Bravoton (rank 4), Charlie Falls (rank 7).
+  test('dark_style_filters_tile_pane_only', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (e) => pageErrors.push(String(e)));
+    await openPage(page);
+    await waitMarkers(page, 1);
+    const panes = () => page.evaluate(() => {
+      const f = (sel) => getComputedStyle(document.querySelector(sel)).filter;
+      return { tileClass: document.querySelector('.leaflet-tile-pane').classList.contains('tiles-dark'),
+        tile: f('.leaflet-tile-pane'), marker: f('.leaflet-marker-pane'), overlay: f('.leaflet-overlay-pane'),
+        labels: f('.leaflet-cityLabels-pane'), raster: f('.leaflet-fisbRaster-pane') };
+    });
+    expect(await page.locator('#map-style').inputValue()).toBe('light');
+    expect(await panes()).toEqual({ tileClass: false, tile: 'none', marker: 'none', overlay: 'none', labels: 'none', raster: 'none' });
+    await page.locator('#map-style').selectOption('dark');
+    const dark = await panes();
+    expect(dark.tileClass).toBe(true);
+    expect(dark.tile).toContain('invert(1)');
+    expect(dark).toMatchObject({ marker: 'none', overlay: 'none', labels: 'none', raster: 'none' });
+    // Kept across a reload (localStorage).
+    await page.reload();
+    await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+    expect(await page.locator('#map-style').inputValue()).toBe('dark');
+    expect((await panes()).tileClass).toBe(true);
+    await page.locator('#map-style').selectOption('light');
+    expect((await panes()).tile).toBe('none');
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('cities_labels_follow_zoom_and_borders_draw', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (e) => pageErrors.push(String(e)));
+    await openPage(page);
+    await waitMarkers(page, 1);   // the map has fitted the range ring: setView below is not undone
+    await expect(page.locator('#ov-cities')).toBeVisible();
+    await expect(page.locator('#ov-borders')).toBeVisible();
+    expect(await page.locator('#ov-cities').isChecked()).toBe(false);
+    expect(await page.locator('.city-label').count()).toBe(0);
+    await page.locator('#ov-cities').check();
+    const labelsAt = async (z) => {
+      await page.evaluate((zoom) => window.skycueApp.setView(38.9, -77.0, zoom), z);
+      await expect.poll(() => page.evaluate(() => window.skycueApp.zoom())).toBe(z);
+      return page.locator('.leaflet-cityLabels-pane .city-name');
+    };
+    let names = await labelsAt(4);
+    await expect(names).toHaveText(['Alphaville']);
+    names = await labelsAt(6);
+    await expect(names).toHaveText(['Alphaville', 'Bravoton']);
+    await expect(page.locator('.city-name', { hasText: 'Charlie Falls' })).toHaveCount(0);
+    names = await labelsAt(7);
+    await expect(names).toHaveText(['Alphaville', 'Bravoton', 'Charlie Falls']);
+    await expect(page.locator('.city-name', { hasText: 'Charlie Falls' })).toBeVisible();
+    names = await labelsAt(4);
+    await expect(names).toHaveText(['Alphaville']);
+
+    // Borders: the fixture line in its own pane; off again removes it.
+    await page.locator('#ov-borders').check();
+    await expect.poll(() => page.locator('.leaflet-borders-pane path').count()).toBeGreaterThan(0);
+    // Both toggles are kept across a reload.
+    await page.reload();
+    await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+    expect(await page.locator('#ov-cities').isChecked()).toBe(true);
+    expect(await page.locator('#ov-borders').isChecked()).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.skycueApp.mapView().citiesLoaded)).toBe(true);
+    await page.locator('#ov-borders').uncheck();
+    await expect(page.locator('.leaflet-borders-pane path')).toHaveCount(0);
+    await page.locator('#ov-cities').uncheck();
+    await expect(page.locator('.city-label')).toHaveCount(0);
     expect(pageErrors).toEqual([]);
   });
 });

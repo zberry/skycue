@@ -209,6 +209,9 @@
     map.on('click', function () { deselect(); });
     initFisbLayers();
     initMapView();
+    // Markers for what arrived before the map existed.
+    updateDeviceMarkers();
+    if (fisb.status) updateStationMarkers(fisb.status.stations || []);
   }
 
   // ---- map style and overlays ------------------------------------------------
@@ -1568,6 +1571,7 @@
   // and `connected` with every stats item. Everything an input's definition
   // or the device says is shown with textContent, never as markup.
   var INPUTS_POLL_MS = 5000;
+  var SHOW_MIN_ZOOM = 6;            // "Show" zooms in to this from further out
   var NUMERIC_FIELDS = { port: true, sac: true, sic: true, status_interval_s: true };
   var DOT_TITLES = { green: 'connected, receiving', amber: 'connected, no data for 30 s',
     red: 'disconnected, or the status poll failed 3 times', grey: 'disabled' };
@@ -1593,7 +1597,8 @@
     cards: new Map(),               // id -> card element
     devices: new Map(),             // id -> device marker
     stations: new Map(),            // site_id -> station marker
-    editing: null                   // the id of the input the form edits; null: it adds one
+    editing: null,                  // the id of the input the form edits; null: it adds one
+    enabledTouched: false           // the form's Enabled box was changed while editing
   };
 
   function el(tag, cls, text) {
@@ -1614,6 +1619,15 @@
   function applyInputs(list) {
     rx.inputs = Array.isArray(list) ? list : [];
     rx.wall = Date.now();
+    // An id that went may come back as a new input: forget its client state.
+    var ids = {};
+    rx.inputs.forEach(function (i) { ids[i.id] = true; });
+    [rx.dataWall, rx.rates].forEach(function (byId) {
+      Object.keys(byId).forEach(function (id) { if (!ids[id]) delete byId[id]; });
+    });
+    if (rx.prevLines) rx.prevLines = rx.prevLines.filter(function (l) { return ids[l.id]; });
+    var edited = rx.editing !== null && inputById(rx.editing);
+    if (edited && !rx.enabledTouched) formEl('enabled').checked = !!edited.enabled;
     updateInputsHeader();
     updateDeviceMarkers();
     if (tabShown('receiver')) renderInputs();
@@ -1676,8 +1690,8 @@
     var ds = inp.state && inp.state.device_status;
     if (!ds) return { text: 'no device status yet', stale: false };
     var parts = [];
-    if (ds.gps_status !== undefined) parts.push('GPS ' + ds.gps_status);
-    if (ds.receiver_status !== undefined) parts.push('receiver ' + ds.receiver_status);
+    if (ds.gps_status !== undefined) parts.push('GPS ' + P.gpsStatusText(ds.gps_status));
+    if (ds.receiver_status !== undefined) parts.push('receiver ' + P.receiverStatusText(ds.receiver_status));
     if (ds.version) parts.push('firmware ' + ds.version);
     var stale = P.statusStale(ds, inp.status_interval_s || 30, now);
     var at = Date.parse(ds.received_at);
@@ -1867,6 +1881,7 @@
     var form = $('input-form');
     form.reset();
     rx.editing = null;
+    rx.enabledTouched = false;
     formEl('id').readOnly = false;
     formEl('type').disabled = false;
     $('input-form-title').textContent = 'Add input';
@@ -1899,6 +1914,10 @@
   function submitInput(ev) {
     ev.preventDefault();
     var def = formDef(), id = rx.editing;
+    // Editing: Enabled as the input is now (its card's toggle may have
+    // changed it since Edit), unless the box itself was changed.
+    var current = id !== null && inputById(id);
+    if (current && !rx.enabledTouched) def.enabled = current.enabled;
     var check = P.validateInputDef(def);
     showFieldErrors(check.errors);
     showFormError('');
@@ -1916,6 +1935,7 @@
   }
   function onFormInput(ev) {
     var name = ev.target.name;
+    if (name === 'enabled') rx.enabledTouched = true;
     if (name === 'type' || name === 'transport') syncFormFields();
     // Once marked, the marks follow the typing.
     if ($('input-form').querySelector('.invalid')) showFieldErrors(P.validateInputDef(formDef()).errors);
@@ -1937,8 +1957,12 @@
       if (rx.editing === inp.id) resetForm();
       request('DELETE', path).then(done).catch(failed);
     } else if (act === 'show') {
+      // Pans, keeping the zoom; from a zoom below SHOW_MIN_ZOOM with the
+      // device out of view it zooms in to SHOW_MIN_ZOOM.
       var ll = devicePos(inp);
-      if (ll && map) map.setView(ll, Math.max(map.getZoom(), 9));
+      if (!ll || !map) return;
+      if (map.getZoom() < SHOW_MIN_ZOOM && !map.getBounds().contains(ll)) map.setView(ll, SHOW_MIN_ZOOM);
+      else map.panTo(ll);
     }
   }
 

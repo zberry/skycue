@@ -997,11 +997,20 @@ async function rxApi(method, path, body) {
   return { status: r.status, body: text ? JSON.parse(text) : null };
 }
 const rxInputs = async () => (await rxApi('GET', '/api/inputs')).body.inputs;
+// ps-sim's definition as run.sh wrote it (a case may remove and re-add it).
+let psSimDef = null;
+function definition(input) {
+  const def = Object.assign({}, input);
+  delete def.state;
+  delete def.builtin;
+  return def;
+}
 async function rxRestore() {
   for (const i of await rxInputs()) {
     if (i.id !== 'ps-sim') await rxApi('DELETE', '/api/inputs/' + i.id);
-    else if (!i.enabled) await rxApi('POST', '/api/inputs/ps-sim/enable', {});
+    else if (JSON.stringify(definition(i)) !== JSON.stringify(psSimDef)) await rxApi('PUT', '/api/inputs/ps-sim', psSimDef);
   }
+  if (!(await rxInputs()).some((i) => i.id === 'ps-sim')) await rxApi('POST', '/api/inputs', psSimDef);
 }
 // A UDP port nothing listens on now.
 function freeUdpPort() {
@@ -1024,6 +1033,9 @@ const isPost = (r) => r.method() === 'POST' && /\/api\/inputs$/.test(r.url());
 
 test.describe('receiver tab (pingsim)', () => {
   test.use({ baseURL: RX_BASE });
+  test.beforeAll(async () => {
+    if (!psSimDef) psSimDef = definition((await rxInputs()).find((i) => i.id === 'ps-sim'));
+  });
   test.afterEach(rxRestore);
 
   test('inputs_header_opens_receiver_tab', async ({ page }) => {
@@ -1058,7 +1070,7 @@ test.describe('receiver tab (pingsim)', () => {
     await expect(card.locator('.input-rejected')).toHaveText('rejected 0');
     await expect(card.locator('.input-age')).toHaveText(/^data \d+ s ago$/);
     const device = card.locator('.input-device');
-    await expect(device).toContainText('GPS 3');
+    await expect(device).toContainText('GPS 3D fix · receiver normal');
     await expect(device).toContainText('firmware 1.0.0');
     await expect(device).not.toHaveClass(/\bstale\b/);
     // Not a built-in: every button.
@@ -1066,9 +1078,16 @@ test.describe('receiver tab (pingsim)', () => {
     // The device's position is a marker of its own, which "show" pans to.
     await expect(page.locator('.device-marker')).toHaveCount(1);
     await expect(page.locator('.rx-marker')).toHaveCount(1);
-    await page.evaluate(() => window.skycueApp.setView(30, -100, 6));
+    // Show pans and keeps the zoom; from far out (below zoom 6, the device
+    // out of view) it zooms in to 6.
+    await page.evaluate(() => window.skycueApp.setView(30, -100, 7));
     await card.locator('[data-act=show]').click();
     await expect.poll(() => page.evaluate(() => window.skycueApp.center())).toEqual({ lat: 38.9, lon: -77 });
+    expect(await page.evaluate(() => window.skycueApp.zoom())).toBe(7);
+    await page.evaluate(() => window.skycueApp.setView(-30, 100, 3));
+    await card.locator('[data-act=show]').click();
+    await expect.poll(() => page.evaluate(() => window.skycueApp.center())).toEqual({ lat: 38.9, lon: -77 });
+    expect(await page.evaluate(() => window.skycueApp.zoom())).toBe(6);
     expect(errors).toEqual([]);
   });
 
@@ -1143,9 +1162,18 @@ test.describe('receiver tab (pingsim)', () => {
     two = (await rxInputs()).find((i) => i.id === 'ps-two');
     expect(two).toMatchObject({ name: 'Second mast', transport: 'udp', port });
 
+    // Disabled from its card while the form edits it: Save keeps it disabled.
+    await card.locator('[data-act=edit]').click();
+    await expect(form.locator('[name=enabled]')).toBeChecked();
     await card.locator('[data-act=toggle]').click();
     await expect(card.locator('.dot')).toHaveClass(/\bdot-grey\b/);
     expect((await rxInputs()).find((i) => i.id === 'ps-two').enabled).toBe(false);
+    await expect(form.locator('[name=enabled]')).not.toBeChecked();
+    await form.locator('[name=name]').fill('Second mast, off');
+    await form.locator('button[type=submit]').click();
+    await expect(card.locator('.input-name')).toHaveText('Second mast, off');
+    expect((await rxInputs()).find((i) => i.id === 'ps-two')).toMatchObject({ name: 'Second mast, off', enabled: false });
+    await expect(card.locator('.dot')).toHaveClass(/\bdot-grey\b/);
     await expect(page.locator('#stat-inputs')).toHaveText('1/1');
 
     // Remove asks first: dismissed, nothing happens.
@@ -1159,6 +1187,25 @@ test.describe('receiver tab (pingsim)', () => {
     await expect(card).toHaveCount(0);
     expect(asked).toBe('confirm');
     expect((await rxInputs()).map((i) => i.id)).toEqual(['ps-sim']);
+  });
+
+  // Removed and added again under the same id (on a port pingsim does not
+  // send to): a new input, with none of the old one's data age or rates.
+  test('removed_id_added_again_starts_fresh', async ({ page }) => {
+    await openReceiverTab(page);
+    const card = inputCard(page, 'ps-sim');
+    await expect(card.locator('.input-age')).toHaveText(/^data \d+ s ago$/, { timeout: 10000 });
+    await expect.poll(async () => Number(await card.locator('.input-rates').getAttribute('data-obs-s')),
+      { timeout: 10000 }).toBeGreaterThan(0);
+    expect((await rxApi('DELETE', '/api/inputs/ps-sim')).status).toBe(204);
+    await expect(card).toHaveCount(0);
+    const port = await freeUdpPort();
+    expect((await rxApi('POST', '/api/inputs', Object.assign({}, psSimDef, { port }))).status).toBe(201);
+    await expect(card).toHaveCount(1);
+    await expect(card.locator('.input-age')).toHaveText('no data yet');
+    await page.waitForTimeout(2500); // stats items and a poll go by
+    await expect(card.locator('.input-age')).toHaveText('no data yet');
+    await expect(card.locator('.input-rates')).toHaveText(/^obs\/s (—|0\.0) · msg\/s (—|0\.0)$/);
   });
 
   test('input_name_is_text_not_html', async ({ page }) => {

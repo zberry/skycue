@@ -136,22 +136,26 @@ fed by skycue-pingsim), each case removing what it added:
 20. `inputs_header_opens_receiver_tab`: `#stat-inputs` reads `1/1`; a click
     opens the Receiver tab, the tabs switch, and a second click closes it.
 21. `receiver_tab_lists_inputs_with_live_counts`: the ps-sim card turns
-    green, shows its endpoint, obs/s above 0 and the device line (GPS 3,
-    firmware 1.0.0); its `.device-marker` is on the map and Show pans to it.
+    green, shows its endpoint, obs/s above 0 and the device line (GPS 3D
+    fix, receiver normal, firmware 1.0.0); its `.device-marker` is on the
+    map; Show pans to it keeping zoom 7, and from zoom 3 far away zooms to 6.
 22. `add_input_form_validates_and_shows_server_error`: id `PS` and port 0
     are marked inline without a request; ps-sim's port is sent and the
     form shows skycued's 400 message word for word.
 23. `add_edit_disable_remove_input`: add a CAT021 udp input through the
-    form, rename it, disable it (grey dot), and remove it (a dismissed
-    confirm keeps it); `/api/inputs` agrees at each step.
-24. `input_name_is_text_not_html`: a name and a server error made of an
+    form, rename it, disable it from its card while the form edits it (Save
+    keeps it disabled, grey dot), and remove it (a dismissed confirm keeps
+    it); `/api/inputs` agrees at each step.
+24. `removed_id_added_again_starts_fresh`: ps-sim removed and added again
+    on a silent port shows "no data yet", not the old input's data age.
+25. `input_name_is_text_not_html`: a name and a server error made of an
     `<img onerror>` tag show as text; no `img` element, no script ran.
 
 Receiver tab, against the 2015 FIS-B skycued:
 
-25. `ground_stations_listed`: one station row (id, position, products) and
+26. `ground_stations_listed`: one station row (id, position, products) and
     one `.station-marker`.
-26. `decoder_health_table`: the decoder counters as in `/api/fisb/status`,
+27. `decoder_health_table`: the decoder counters as in `/api/fisb/status`,
     `uplink_duplicates` 0, the last uplink time and recorder drops.
 
 Every test also fails if the page requested anything from another host

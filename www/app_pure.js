@@ -531,6 +531,13 @@
     return 'tcp → ' + def.host + ':' + def.port;
   }
 
+  // A pingStation's gpsStatus and receiverStatus codes as the ICD names
+  // them; a code it does not list stays the number.
+  var GPS_STATUS = ['no GPS', 'no lock', '2D fix', '3D fix', 'DGPS'];
+  var RECEIVER_STATUS = ['normal', 'comm errors', 'not transmitting'];
+  function gpsStatusText(code) { return GPS_STATUS[code] || String(code); }
+  function receiverStatusText(code) { return RECEIVER_STATUS[code] || String(code); }
+
   // The header's `inputs n/m`: enabled inputs connected / enabled inputs.
   function inputsSummary(inputs) {
     var out = { connected: 0, enabled: 0 };
@@ -562,7 +569,8 @@
     cityRankLimit: cityRankLimit, MAX_CITY_LABELS: MAX_CITY_LABELS, cullCities: cullCities,
     overlayOffer: overlayOffer,
     INPUT_TYPES: INPUT_TYPES, validateInputDef: validateInputDef, inputFields: inputFields, inputDot: inputDot,
-    inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, inputsSummary: inputsSummary
+    inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, inputsSummary: inputsSummary,
+    gpsStatusText: gpsStatusText, receiverStatusText: receiverStatusText
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

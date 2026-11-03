@@ -370,7 +370,7 @@ int main(int argc, char** argv)
     try {
         return run(argc, argv);
     } catch (const std::exception& e) {
-        std::cerr << "skycued: " << e.what() << "\n";
+        LOG_ERROR("fatal: " << e.what());
         return 1;
     }
 }

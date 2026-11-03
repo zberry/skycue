@@ -948,5 +948,20 @@ test('nearestInsideAncestor skips region-edge ancestors', () => {
   assert.strictEqual(P.nearestInsideAncestor(6, 18, 24, 5, 9, regions), 5);
   assert.strictEqual(P.nearestInsideAncestor(1, 0, 0, 2, 4, regions), null);
 });
+test('capSymbols keeps the shown report', () => {
+  const s = [];
+  for (let i = 0; i < 400; i++) s.push({ key: 'metar:' + i, rank: 0, lat: 38 + i / 100, lon: -77 });
+  s.push({ key: 'winds:FAR:06', rank: 3, lat: 45, lon: -100 });
+  const out = P.capSymbols(s, { lat: 38, lng: -77 }, 300, 'winds:FAR:06');
+  assert.strictEqual(out.length, 300);
+  assert.strictEqual(out[0].key, 'winds:FAR:06');
+  assert.strictEqual(out[1].key, 'metar:0');
+  assert.strictEqual(P.capSymbols(s, { lat: 38, lng: -77 }, 300, null).some((x) => x.rank === 3), false);
+  // Under the cap nothing is dropped; the input is not changed.
+  assert.strictEqual(P.capSymbols(s.slice(0, 10), { lat: 38, lng: -77 }, 300, 'metar:9')[0].key, 'metar:9');
+  assert.strictEqual(P.capSymbols(s.slice(0, 10), { lat: 38, lng: -77 }, 300, null).length, 10);
+  assert.strictEqual(s.length, 401);
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

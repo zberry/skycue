@@ -1026,7 +1026,8 @@
     symDirty: true,
     windsPick: { period: null, level: null },     // the operator's choice (null: the default)
     winds: { period: null, level: null, periods: [], levels: [] },   // what the barbs use (syncWinds)
-    reportRec: null                 // the record key of the report shown in the card
+    reportRec: null,                // the record key of the report shown in the card
+    showKey: null                   // the report last shown from the list (kept through the symbol cap)
   };
   var wxGroup = null;               // the weather symbols, pane fisbWx
   var radar = {
@@ -1630,14 +1631,11 @@
       var pos = wxPlotPos(r);
       if (!pos || !view.contains(pos)) return;
       var s = wxSymbolFor(r, pos, now);
-      if (s) want.push(s);
+      if (s) { s.rank = WX_KIND_RANK[s.kind]; want.push(s); }
     });
-    if (want.length > MAX_WX_SYMBOLS) {
-      var c = map.getCenter();
-      want.forEach(function (s) { s.d = P.rangeNm(c.lat, c.lng, s.lat, s.lon); });
-      want.sort(function (a, b) { return WX_KIND_RANK[a.kind] - WX_KIND_RANK[b.kind] || a.d - b.d; });
-      want.length = MAX_WX_SYMBOLS;
-    }
+    // Over the cap: the report last shown from the list first, then by kind
+    // and distance from the centre.
+    if (want.length > MAX_WX_SYMBOLS) want = P.capSymbols(want, map.getCenter(), MAX_WX_SYMBOLS, fisb.showKey);
     var keep = {};
     want.forEach(function (s) {
       keep[s.key] = true;
@@ -1741,6 +1739,9 @@
   function showWxPos(key) {
     var r = fisb.text.get(key), ll = r && wxPlotPos(r);
     if (!ll || !map) return;
+    // Kept on the map through MAX_WX_SYMBOLS, by its symbol key (wxSymbolFor).
+    fisb.showKey = r.kind === 'winds' ? 'winds:' + r.station : key;
+    fisb.symDirty = true;
     if (map.getZoom() < SHOW_MIN_ZOOM && !map.getBounds().contains(ll)) map.setView(ll, SHOW_MIN_ZOOM);
     else map.panTo(ll);
   }

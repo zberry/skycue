@@ -71,8 +71,9 @@ struct CsvMessage {
     int64_t epoch_ns = 0;
     std::string hex;  // uppercase
 };
-// nullopt for blank, comment, malformed lines and HEX that is not 4, 14 or
-// 28 hex digits. Never throws.
+// nullopt for blank, comment, malformed lines, seconds past 9223372035 (the
+// int64_t nanosecond range) and HEX that is not 4, 14 or 28 hex digits.
+// Never throws.
 std::optional<CsvMessage> parseCsvMessage(const std::string& line);
 // "@TTTTTTTTTTTTHEX;" (no newline): TT... = (epoch_ns * 12 MHz) mod 2^48 as
 // 12 uppercase hex digits, the AVR-with-timestamp form readsb's raw input reads.

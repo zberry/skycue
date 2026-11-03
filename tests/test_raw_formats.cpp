@@ -283,6 +283,25 @@ BOOST_AUTO_TEST_CASE(csv_lines)
         BOOST_TEST(!parseCsvMessage(bad).has_value(), "accepted: " << bad);
 }
 
+// Found by fuzz_raw_formats (mode 2): parseCsvMessage multiplied every
+// integer digit into an int64_t before checking for more than 10 of them, so
+// 21 digits overflowed (undefined behaviour); and 10 digits passed the check
+// but secs * 1e9 overflowed past 9223372036 s (the year 2262), giving a
+// garbage, even negative, epoch_ns.
+BOOST_AUTO_TEST_CASE(fuzz_raw_formats_csv_seconds_overflow)
+{
+    const std::string payload("178396343000000005369,5F406A03\r\0\0\0\0\0\0\0r099.005369,5F006A936F50F0", 64);
+    BOOST_TEST(payload.size() == 64u);
+    BOOST_TEST(!parseCsvMessage(payload).has_value());
+    BOOST_TEST(!parseCsvMessage("178396343000000005369,5F406A936F50F0").has_value());
+    for (const char* bad : {"9999999999.5,5F406A936F50F0", "9223372036,5F406A936F50F0"})
+        BOOST_TEST(!parseCsvMessage(bad).has_value(), "accepted: " << bad);
+    // The largest accepted epoch is still exact.
+    const auto m = parseCsvMessage("9223372035.999999999,5F406A936F50F0");
+    BOOST_REQUIRE(m.has_value());
+    BOOST_TEST(m->epoch_ns == 9223372035999999999LL);
+}
+
 BOOST_AUTO_TEST_CASE(avr_lines)
 {
     // 1 s = 12e6 ticks = 0xB71B00

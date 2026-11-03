@@ -164,12 +164,17 @@ std::optional<CsvMessage> parseCsvMessage(const std::string& raw)
     const std::size_t comma = line.find(',');
     if (comma == std::string::npos || comma == 0)
         return std::nullopt;
-    // seconds[.fraction], at most 10 integer digits (epochs until 2286)
+    // seconds[.fraction], at most 10 integer digits and at most kMaxSecs, so
+    // secs * 1e9 + fraction stays inside int64_t (epochs until 2262).
+    constexpr int64_t kMaxSecs = 9223372035;
     int64_t secs = 0, frac_ns = 0;
     std::size_t i = 0, int_digits = 0;
-    for (; i < comma && isDigit(line[i]); ++i, ++int_digits)
+    for (; i < comma && isDigit(line[i]); ++i, ++int_digits) {
+        if (int_digits == 10)
+            return std::nullopt;  // checked before the multiply, which would overflow
         secs = secs * 10 + (line[i] - '0');
-    if (int_digits == 0 || int_digits > 10)
+    }
+    if (int_digits == 0 || secs > kMaxSecs)
         return std::nullopt;
     if (i < comma) {
         if (line[i] != '.')

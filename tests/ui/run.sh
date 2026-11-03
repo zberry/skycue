@@ -34,6 +34,13 @@ tmp=$(mktemp -d)
 pidfile="$tmp/skycued.pid"
 cleanup() {
   local f p i
+  # Playwright first, as a whole process group (npx, the runner, Chromium):
+  # whether npx passes a signal on depends on the npm version.
+  if p=$(cat "$tmp/playwright.pgid" 2>/dev/null) && [ -n "$p" ]; then
+    kill -TERM -- "-$p" 2>/dev/null
+    for (( i=0; i<30; i++ )); do kill -0 -- "-$p" 2>/dev/null || break; sleep 0.1; done
+    kill -KILL -- "-$p" 2>/dev/null
+  fi
   for f in "$tmp"/*.pid; do
     p=$(cat "$f" 2>/dev/null)
     [ -n "$p" ] || continue
@@ -245,13 +252,18 @@ export SKYCUE_RECEIVERS_URL="$rx_base"
 export SKYCUE_CUE_PORT="$cue_port"
 export SKYCUE_UI_OUT="$out_dir"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-# In the background with its PID kept, so a signal is acted on at once
-# (bash defers its traps while a foreground child runs) and cleanup stops it.
+# In the background, so a signal is acted on at once (bash defers its traps
+# while a foreground child runs), and in its own process group (job control
+# on for this one start: the group id is its PID) so cleanup stops npx, the
+# Playwright runner and Chromium together.
+set -m
 (cd "$here" && exec npx --no-install playwright test "$@") &
-echo $! > "$tmp/playwright.pid"
-wait $!
+pw=$!
+set +m
+echo "$pw" > "$tmp/playwright.pgid"
+wait "$pw"
 rc=$?
-rm -f "$tmp/playwright.pid"
+rm -f "$tmp/playwright.pgid"
 
 # copy_shots PATTERN DIR
 copy_shots() {

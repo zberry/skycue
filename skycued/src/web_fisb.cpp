@@ -568,6 +568,7 @@ std::string fisbStatusJson(const Snapshot& snap)
     w.add("bad_frames", num(st.fisb_bad_frames));
     w.add("segments_open", num(st.fisb_segments_open));
     w.add("mosaic_blocks", num(st.fisb_mosaic_blocks));
+    w.add("uplink_duplicates", num(st.fisb_uplink_duplicates));
     if (st.fisb_last_uplink)
         w.add("last_uplink_time", iso(*st.fisb_last_uplink));
     w.add("now", iso(snap.now));

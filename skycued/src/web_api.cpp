@@ -7,6 +7,7 @@
 #include "runtime_config.hpp"
 #include "time_util.hpp"
 #include "web_fisb.hpp"
+#include "web_inputs.hpp"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -79,6 +80,18 @@ void putStats(JsonWriter& w, const EngineStats& s)
         .add("recorder_dropped_received", n(s.recorder_dropped_received))
         .add("recorder_dropped_sent", n(s.recorder_dropped_sent))
         .add("web_clients", static_cast<int64_t>(s.web_clients));
+    std::vector<std::string> inputs;
+    inputs.reserve(s.inputs.size());
+    for (const auto& in : s.inputs)
+        inputs.push_back(JsonWriter()
+                             .add("id", in.id)
+                             .add("connected", in.connected)
+                             .add("messages", n(in.messages))
+                             .add("observations", n(in.observations))
+                             .add("uplinks", n(in.uplinks))
+                             .add("rejected", n(in.rejected))
+                             .str());
+    w.addRaw("inputs", jsonArray(inputs));
 }
 
 void putFilters(JsonWriter& w, const RuntimeConfig& rc)
@@ -314,19 +327,20 @@ bool sameOrigin(const std::string& origin, const std::string& host)
     return normaliseAuthority(authority, scheme) == normaliseAuthority(host, scheme);
 }
 
-// The checks on a state-changing request (PUT, POST): an error, or nullopt.
+}  // namespace
+
 std::optional<ApiResponse> rejectUnsafe(const ApiRequest& req)
 {
-    const std::string type = lower(header(req, "content-type"));
-    if (type.compare(0, 16, "application/json") != 0)
-        return error(415, "content-type must be application/json");
+    if (req.method != "DELETE") {
+        const std::string type = lower(header(req, "content-type"));
+        if (type.compare(0, 16, "application/json") != 0)
+            return error(415, "content-type must be application/json");
+    }
     const auto origin = req.headers.find("origin");
     if (origin != req.headers.end() && !sameOrigin(origin->second, header(req, "host")))
         return error(403, "cross-origin request rejected");
     return std::nullopt;
 }
-
-}  // namespace
 
 std::map<std::string, std::string> queryParams(const std::string& query)
 {
@@ -388,6 +402,11 @@ std::string stateJson(const Engine& engine, const RuntimeConfig& runtime, const 
     tracks += ']';
     w.addRaw("tracks", tracks);
     w.addRaw("fisb", fisbStatusJson(snap));
+    std::vector<std::string> inputs;
+    const auto wall = std::chrono::system_clock::now();
+    for (const auto& e : engine.inputs().list())
+        inputs.push_back(inputJson(e, wall));
+    w.addRaw("inputs", jsonArray(inputs));
     return w.str();
 }
 
@@ -552,6 +571,8 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return postListRoute(path == "/api/lists/allow" ? ListKind::allow : ListKind::block, body, engine,
                                  runtime);
         }
+        if (isInputsPath(path))
+            return handleInputsApi(request, engine);
         if (isFisbPath(path))
             return handleFisbApi(request, engine);
         if (path == "/api/tiles-available")

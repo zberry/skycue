@@ -4,9 +4,13 @@
 #include "engine_events.hpp"
 #include "engine_test_support.hpp"
 #include "filters.hpp"
+#include "json_lite.hpp"
+#include "runtime_config.hpp"
+#include "web_api.hpp"
 
 #include <cmath>
 #include <map>
+#include <tuple>
 
 using namespace enginetest;
 using skycued::Decision;
@@ -487,4 +491,408 @@ BOOST_AUTO_TEST_CASE(expired_event_for_unforwarded_track)
         BOOST_TEST(fx.engine->snapshot().tracks.size() == 1u);
         BOOST_TEST(fx.engine->stats().sent_drops == 1u);
     });
+}
+
+// ---------------------------------------------------------------- /api/inputs
+
+BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<bool>)
+BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<std::string>)
+BOOST_TEST_DONT_PRINT_LOG_VALUE(std::optional<int64_t>)
+
+namespace {
+
+using skycued::JsonObject;
+using skycued::webapi::ApiRequest;
+using skycued::webapi::ApiResponse;
+using Headers = std::map<std::string, std::string>;
+
+uint16_t freeUdpPort()
+{
+    asio::io_context io;
+    asio::ip::udp::socket s(io, asio::ip::udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    return s.local_endpoint().port();
+}
+
+std::string psJson(const std::string& id, uint16_t port, const std::string& extra = "")
+{
+    std::string body = "{";
+    if (!id.empty())
+        body += R"("id":")" + id + R"(",)";
+    return body + R"("type":"pingstation_json","bind":"127.0.0.1","port":)" + std::to_string(port) + extra + "}";
+}
+
+JsonObject parsed(const std::string& text)
+{
+    auto o = JsonObject::parse(text);
+    if (!o)
+        throw std::runtime_error("not a JSON object: " + text);
+    return *o;
+}
+
+// The /api/inputs list's entry with this id; nullopt when there is none.
+std::optional<JsonObject> listed(const std::string& body, const std::string& id)
+{
+    const auto list = parsed(body).getObjectArray("inputs");
+    if (!list)
+        throw std::runtime_error("no inputs array: " + body);
+    for (const auto& in : *list)
+        if (in.getString("id") == id)
+            return in;
+    return std::nullopt;
+}
+
+// An Engine over a FakeSource built-in "readsb", its InputManager backed by
+// <tmp>/skycue.inputs.json, and a RuntimeConfig, all on the io thread;
+// call() answers one request through handleApi there.
+struct ApiFx {
+    TempDir tmp;
+    std::string conf, inputs_file;
+    FakeSource* src = nullptr;
+    std::unique_ptr<EngineFx> fx;
+    std::unique_ptr<skycued::RuntimeConfig> rc;
+
+    ApiFx()
+    {
+        conf = tmp.path + "/skycue.conf";
+        inputs_file = tmp.path + "/skycue.inputs.json";
+        std::ofstream(conf) << "RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\nTRACK_TIMEOUT_S=5\n";
+        std::function<std::unique_ptr<InputManager>(asio::io_context&)> make = [this](asio::io_context& io) {
+            auto s = std::make_unique<FakeSource>();
+            src = s.get();
+            return sourceInputs(io, std::move(s), "readsb", inputs_file);
+        };
+        fx = std::make_unique<EngineFx>(skycued::parseConfigFile(conf), make);
+        fx->t.call([&] {
+            rc = std::make_unique<skycued::RuntimeConfig>(fx->t.io, conf, *fx->engine);
+            rc->load();
+        });
+    }
+    ~ApiFx()
+    {
+        try {
+            fx->t.call([&] { rc.reset(); });
+        } catch (...) {
+        }
+    }
+
+    ApiResponse call(const std::string& method, const std::string& path, const std::string& body, Headers headers)
+    {
+        ApiRequest req;
+        req.method = method;
+        req.path = path;
+        req.headers = std::move(headers);
+        req.body = body;
+        return fx->t.call([&] {
+            skycued::webapi::ApiContext ctx{*fx->engine, *rc, tmp.path};
+            return skycued::webapi::handleApi(req, ctx);
+        });
+    }
+    // With Host, and the JSON content type on PUT and POST.
+    ApiResponse call(const std::string& method, const std::string& path, const std::string& body = "")
+    {
+        Headers h{{"host", "127.0.0.1:8080"}};
+        if (method == "PUT" || method == "POST")
+            h["content-type"] = "application/json";
+        return call(method, path, body, h);
+    }
+    ApiResponse get(const std::string& path) { return call("GET", path); }
+};
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(inputs_get_lists_builtins)
+{
+    ApiFx a;
+    a.fx->t.call([&] { a.src->connection(true); });
+    const auto r = a.get("/api/inputs");
+    BOOST_TEST(r.status == 200u);
+    const auto readsb = listed(r.body, "readsb");
+    BOOST_REQUIRE_MESSAGE(readsb, r.body);
+    BOOST_TEST(readsb->getBool("builtin") == std::optional<bool>(true));
+    BOOST_TEST(readsb->getString("type") == std::optional<std::string>("readsb"));
+    const auto state = readsb->getObject("state");
+    BOOST_REQUIRE_MESSAGE(state, r.body);
+    BOOST_TEST(state->getBool("connected") == std::optional<bool>(true));
+    BOOST_TEST(state->getBool("receiving").has_value());
+    for (const char* k : {"peers", "status_fail_streak", "connects", "bytes", "messages", "observations", "uplinks",
+                          "rejected", "records_skipped", "sac_sic_mismatch", "nogo_records", "clock_rejects",
+                          "rejected_peer", "raw_unknown_len", "status_ok", "status_fail", "capture_dropped"})
+        BOOST_TEST(state->getInt(k).has_value(), k);
+    BOOST_TEST(state->getString("last_error") == std::optional<std::string>(""));
+    BOOST_TEST(!state->has("device_status"));
+    BOOST_TEST(!state->has("last_data_age_s"));  // nothing arrived yet
+    a.fx->t.call([&] { a.src->emit(nearbyObservation(0xABC001, 0)); });
+    const auto after = listed(a.get("/api/inputs").body, "readsb");
+    BOOST_TEST(after->getObject("state")->getInt("observations") == std::optional<int64_t>(1));
+}
+
+BOOST_AUTO_TEST_CASE(inputs_post_creates_201)
+{
+    ApiFx a;
+    const uint16_t port = freeUdpPort();
+    const auto r = a.call("POST", "/api/inputs", psJson("ps-a", port, R"(,"name":"North")"));
+    BOOST_TEST(r.status == 201u, r.body);
+    const auto in = parsed(r.body);
+    BOOST_TEST(in.getString("id") == std::optional<std::string>("ps-a"));
+    BOOST_TEST(in.getString("name") == std::optional<std::string>("North"));
+    BOOST_TEST(in.getInt("port") == std::optional<int64_t>(port));
+    BOOST_TEST(in.getBool("builtin") == std::optional<bool>(false));
+    BOOST_TEST(in.getObject("state").has_value());
+    const auto list = a.get("/api/inputs").body;
+    BOOST_TEST(listed(list, "ps-a").has_value());
+    BOOST_TEST(has(readAll(a.inputs_file), "\"ps-a\""));
+}
+
+BOOST_AUTO_TEST_CASE(inputs_post_missing_id_400)
+{
+    ApiFx a;
+    const auto r = a.call("POST", "/api/inputs", psJson("", freeUdpPort()));
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"id is required"})");
+    BOOST_TEST(a.call("POST", "/api/inputs", "not json").status == 400u);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_post_unknown_key_400_names_key)
+{
+    ApiFx a;
+    const uint16_t port = freeUdpPort();
+    const auto r = a.call("POST", "/api/inputs", psJson("ps-a", port, R"(,"colour":"red")"));
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(has(r.body, "'colour'"), r.body);
+    // builtin and state are output-only.
+    for (const char* extra : {R"(,"builtin":true)", R"(,"state":{})"}) {
+        const auto o = a.call("POST", "/api/inputs", psJson("ps-a", port, extra));
+        BOOST_TEST(o.status == 400u, o.body);
+    }
+    BOOST_TEST(!listed(a.get("/api/inputs").body, "ps-a"));
+}
+
+BOOST_AUTO_TEST_CASE(inputs_post_duplicate_409)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    const auto r = a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort()));
+    BOOST_TEST(r.status == 409u, r.body);
+    // A built-in's id is reserved: a user input cannot take it.
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("readsb", freeUdpPort())).status == 400u);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_post_port_clash_400)
+{
+    ApiFx a;
+    const uint16_t port = freeUdpPort();
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", port)).status == 201u);
+    const auto r = a.call("POST", "/api/inputs", psJson("ps-b", port));
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(has(r.body, "ps-a"), r.body);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_put_replaces)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    const uint16_t port2 = freeUdpPort();
+    // Without an id the path's applies; with one it must be the same.
+    auto r = a.call("PUT", "/api/inputs/ps-a", psJson("", port2, R"(,"name":"South")"));
+    BOOST_TEST(r.status == 200u, r.body);
+    BOOST_TEST(parsed(r.body).getString("name") == std::optional<std::string>("South"));
+    BOOST_TEST(parsed(r.body).getInt("port") == std::optional<int64_t>(port2));
+    r = a.call("PUT", "/api/inputs/ps-a", psJson("ps-a", port2, R"(,"name":"East")"));
+    BOOST_TEST(r.status == 200u, r.body);
+    const auto in = listed(a.get("/api/inputs").body, "ps-a");
+    BOOST_TEST(in->getString("name") == std::optional<std::string>("East"));
+    BOOST_TEST(has(readAll(a.inputs_file), "East"));
+    // A bad definition is a 400 with the parser's message.
+    r = a.call("PUT", "/api/inputs/ps-a", psJson("", 0));
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(has(r.body, "port"), r.body);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_put_id_mismatch_400)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    const auto r = a.call("PUT", "/api/inputs/ps-a", psJson("ps-b", freeUdpPort()));
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(has(r.body, "ps-b"), r.body);
+    BOOST_TEST(listed(a.get("/api/inputs").body, "ps-a").has_value());
+}
+
+BOOST_AUTO_TEST_CASE(inputs_put_unknown_404)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("PUT", "/api/inputs/nope", psJson("", freeUdpPort())).status == 404u);
+    BOOST_TEST(a.call("PUT", "/api/inputs/nope", psJson("nope", freeUdpPort())).status == 404u);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_put_builtin_only_enabled)
+{
+    ApiFx a;
+    auto r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":false})");
+    BOOST_TEST(r.status == 200u, r.body);
+    BOOST_TEST(parsed(r.body).getBool("enabled") == std::optional<bool>(false));
+    BOOST_TEST(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled") == std::optional<bool>(false));
+    r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":false,"port":1})");
+    BOOST_TEST(r.status == 403u, r.body);
+    r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":"maybe"})");
+    BOOST_TEST(r.status == 400u, r.body);
+    r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":true})");
+    BOOST_TEST(r.status == 200u, r.body);
+    BOOST_TEST(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled") == std::optional<bool>(true));
+}
+
+BOOST_AUTO_TEST_CASE(inputs_delete_204_then_404)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    auto r = a.call("DELETE", "/api/inputs/ps-a");
+    BOOST_TEST(r.status == 204u);
+    BOOST_TEST(r.body.empty());
+    BOOST_TEST(!listed(a.get("/api/inputs").body, "ps-a"));
+    BOOST_TEST(!has(readAll(a.inputs_file), "ps-a"));
+    r = a.call("DELETE", "/api/inputs/ps-a");
+    BOOST_TEST(r.status == 404u);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_delete_builtin_403)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("DELETE", "/api/inputs/readsb").status == 403u);
+    BOOST_TEST(listed(a.get("/api/inputs").body, "readsb").has_value());
+}
+
+BOOST_AUTO_TEST_CASE(inputs_delete_cross_origin_403)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    const auto r =
+        a.call("DELETE", "/api/inputs/ps-a", "", Headers{{"host", "127.0.0.1:8080"}, {"origin", "http://evil.example"}});
+    BOOST_TEST(r.status == 403u, r.body);
+    BOOST_TEST(listed(a.get("/api/inputs").body, "ps-a").has_value());
+}
+
+BOOST_AUTO_TEST_CASE(inputs_delete_without_content_type_ok)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    const auto r =
+        a.call("DELETE", "/api/inputs/ps-a", "", Headers{{"host", "127.0.0.1:8080"}, {"origin", "http://127.0.0.1:8080"}});
+    BOOST_TEST(r.status == 204u, r.body);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_enable_disable)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    auto r = a.call("POST", "/api/inputs/ps-a/disable", "{}");
+    BOOST_TEST(r.status == 200u, r.body);
+    BOOST_TEST(parsed(r.body).getBool("enabled") == std::optional<bool>(false));
+    BOOST_TEST(parsed(r.body).getObject("state")->getBool("connected") == std::optional<bool>(false));
+    r = a.call("POST", "/api/inputs/ps-a/enable", "{}");
+    BOOST_TEST(r.status == 200u, r.body);
+    BOOST_TEST(parsed(r.body).getBool("enabled") == std::optional<bool>(true));
+    // Built-ins too; the body must be an empty object.
+    BOOST_TEST(a.call("POST", "/api/inputs/readsb/disable", "{}").status == 200u);
+    BOOST_TEST(listed(a.get("/api/inputs").body, "readsb")->getBool("enabled") == std::optional<bool>(false));
+    BOOST_TEST(a.call("POST", "/api/inputs/readsb/enable", R"({"x":1})").status == 400u);
+    BOOST_TEST(a.call("POST", "/api/inputs/nope/enable", "{}").status == 404u);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_status_route)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort(), R"(,"status_interval_s":60)")).status ==
+               201u);
+    const auto r = a.get("/api/inputs/ps-a/status");
+    BOOST_TEST(r.status == 200u, r.body);
+    const auto s = parsed(r.body);
+    BOOST_TEST(s.getString("id") == std::optional<std::string>("ps-a"));
+    BOOST_TEST(s.getString("status_url") == std::optional<std::string>(""));
+    BOOST_TEST(s.getInt("status_interval_s") == std::optional<int64_t>(60));
+    BOOST_TEST(s.getInt("status_ok") == std::optional<int64_t>(0));
+    BOOST_TEST(s.getInt("status_fail") == std::optional<int64_t>(0));
+    BOOST_TEST(s.getInt("status_fail_streak") == std::optional<int64_t>(0));
+    BOOST_TEST(!s.has("device_status"));
+    BOOST_TEST(!s.has("state"));
+    BOOST_TEST(a.get("/api/inputs/nope/status").status == 404u);
+}
+
+BOOST_AUTO_TEST_CASE(inputs_post_wrong_content_type_415)
+{
+    ApiFx a;
+    const auto body = psJson("ps-a", freeUdpPort());
+    auto r = a.call("POST", "/api/inputs", body, Headers{{"host", "127.0.0.1:8080"}, {"content-type", "text/plain"}});
+    BOOST_TEST(r.status == 415u);
+    r = a.call("PUT", "/api/inputs/readsb", R"({"enabled":false})", Headers{{"host", "127.0.0.1:8080"}});
+    BOOST_TEST(r.status == 415u);
+    r = a.call("POST", "/api/inputs", body,
+               Headers{{"host", "127.0.0.1:8080"}, {"content-type", "application/json"}, {"origin", "null"}});
+    BOOST_TEST(r.status == 403u);
+    BOOST_TEST(!listed(a.get("/api/inputs").body, "ps-a"));
+}
+
+BOOST_AUTO_TEST_CASE(inputs_methods_405)
+{
+    ApiFx a;
+    const std::vector<std::tuple<std::string, std::string, std::string>> cases{
+        {"DELETE", "/api/inputs", "GET, POST"},
+        {"PUT", "/api/inputs", "GET, POST"},
+        {"GET", "/api/inputs/readsb", "PUT, DELETE"},
+        {"POST", "/api/inputs/readsb", "PUT, DELETE"},
+        {"GET", "/api/inputs/readsb/enable", "POST"},
+        {"PUT", "/api/inputs/readsb/disable", "POST"},
+        {"POST", "/api/inputs/readsb/status", "GET"},
+    };
+    for (const auto& c : cases) {
+        const auto r = a.call(std::get<0>(c), std::get<1>(c), "{}");
+        BOOST_TEST(r.status == 405u, std::get<0>(c) << " " << std::get<1>(c));
+        BOOST_TEST(r.allow == std::get<2>(c), std::get<0>(c) << " " << std::get<1>(c));
+    }
+    BOOST_TEST(a.get("/api/inputs/readsb/bogus").status == 404u);
+    BOOST_TEST(a.get("/api/inputs/").status == 404u);
+}
+
+BOOST_AUTO_TEST_CASE(stats_carry_inputs)
+{
+    ApiFx a;
+    a.fx->t.call([&] {
+        a.src->connection(true);
+        a.src->emit(nearbyObservation(0xABC001, 0));
+    });
+    const auto r = a.get("/api/stats");
+    BOOST_TEST(r.status == 200u);
+    const auto inputs = parsed(r.body).getObjectArray("inputs");
+    BOOST_REQUIRE_MESSAGE(inputs, r.body);
+    BOOST_REQUIRE_EQUAL(inputs->size(), 1u);
+    const auto& in = (*inputs)[0];
+    BOOST_TEST(in.getString("id") == std::optional<std::string>("readsb"));
+    BOOST_TEST(in.getBool("connected") == std::optional<bool>(true));
+    BOOST_TEST(in.getInt("observations") == std::optional<int64_t>(1));
+    for (const char* k : {"messages", "uplinks", "rejected"})
+        BOOST_TEST(in.getInt(k).has_value(), k);
+    BOOST_TEST(in.keys().size() == 6u, r.body);
+    // The derived built-in flags stay for one release.
+    BOOST_TEST(parsed(r.body).getBool("readsb_connected") == std::optional<bool>(true));
+}
+
+BOOST_AUTO_TEST_CASE(state_carries_inputs)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    const auto r = a.get("/api/state");
+    BOOST_TEST(r.status == 200u);
+    const auto inputs = parsed(r.body).getObjectArray("inputs");
+    BOOST_REQUIRE_MESSAGE(inputs, r.body);
+    BOOST_REQUIRE_EQUAL(inputs->size(), 2u);
+    BOOST_TEST((*inputs)[0].getString("id") == std::optional<std::string>("readsb"));
+    BOOST_TEST((*inputs)[1].getString("id") == std::optional<std::string>("ps-a"));
+    BOOST_TEST((*inputs)[1].getObject("state").has_value());
+}
+
+BOOST_AUTO_TEST_CASE(fisb_status_has_uplink_duplicates)
+{
+    ApiFx a;
+    const auto r = a.get("/api/fisb/status");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(parsed(r.body).getInt("uplink_duplicates") == std::optional<int64_t>(0), r.body);
 }

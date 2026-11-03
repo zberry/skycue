@@ -126,7 +126,7 @@ BOOST_AUTO_TEST_CASE(iso_fraction_forms)
 // "4044-12-13T21:11:32Z"): parseDeviceTime took any 4-digit year, and the
 // seconds to nanoseconds conversion overflowed int64_t (undefined behaviour)
 // outside system_clock's range, 1677-09-21 to 2262-04-11. Years 1678 to 2261
-// are accepted, which also leaves room for the GPS offset and the skew check.
+// are accepted (the clock check is fuzz_pingstation_clock_check_far_apart).
 BOOST_AUTO_TEST_CASE(fuzz_pingstation_device_time_out_of_range)
 {
     for (const char* bad : {"4044-12-13T21:11:32Z", "9999-12-31T23:59:59.999999999Z", "0000-01-01T00:00:00Z",
@@ -145,6 +145,44 @@ BOOST_AUTO_TEST_CASE(fuzz_pingstation_device_time_out_of_range)
     BOOST_REQUIRE(r.observations.size() == 1u);
     BOOST_TEST(r.clock_rejects == 0u);
     BOOST_TEST(!r.clock_offset_s.has_value());
+}
+
+// Found in review of the fix above: a device time of 1678-1733 is inside the
+// clock's range, but its offset from a present-day arrival is not, and
+// checkDeviceTime's `t - arrival` overflowed int64 nanoseconds (undefined
+// behaviour; UBSan reports it in a sanitizer build). Such an offset is now
+// rejected, computed in double.
+BOOST_AUTO_TEST_CASE(fuzz_pingstation_clock_check_far_apart)
+{
+    const TP arrival = utc(2026, 11, 2, 10, 15, 0);
+    const TP old = parseDeviceTime("1700-01-01T00:00:00Z").value();
+    for (TimeMode mode : {TimeMode::utc, TimeMode::gps}) {
+        const ClockCheck c = checkDeviceTime(old, arrival, mode);
+        BOOST_TEST(c.rejected);
+        BOOST_TEST(epochNs(c.used) == epochNs(arrival));
+        BOOST_REQUIRE(c.offset_s.has_value());
+        BOOST_TEST(*c.offset_s < -1.0e10);  // about -326.8 years
+        BOOST_TEST(*c.offset_s > -1.1e10);
+    }
+    // The other way round, and at the clock's ends.
+    BOOST_TEST(checkDeviceTime(arrival, old, TimeMode::utc).rejected);
+    BOOST_TEST(checkDeviceTime(TP::max(), TP::min(), TimeMode::gps).rejected);
+    BOOST_TEST(checkDeviceTime(TP::min(), TP::max(), TimeMode::gps).rejected);
+    // Near the arrival the result is exact, as before.
+    const ClockCheck near = checkDeviceTime(arrival + std::chrono::seconds(5), arrival, TimeMode::utc);
+    BOOST_TEST(!near.rejected);
+    BOOST_TEST(epochNs(near.used) == epochNs(arrival) + 5000000000LL);
+    BOOST_TEST(near.offset_s.value_or(0) == 5.0);
+
+    PingContext ctx;
+    ctx.arrival = arrival;
+    const PingResult r = parsePingDatagram(
+        R"({"icaoAddress":"C00586","latDD":42.1,"lonDD":-93.0,"timeStamp":"1700-01-01T00:00:00Z"})", ctx);
+    BOOST_REQUIRE(r.observations.size() == 1u);
+    BOOST_TEST(r.clock_rejects == 1u);
+    BOOST_TEST(r.clock_offset_s.value_or(0) < -1.0e10);
+    BOOST_REQUIRE(r.observations[0].position_time.has_value());
+    BOOST_TEST(epochNs(*r.observations[0].position_time) == epochNs(arrival));
 }
 
 BOOST_AUTO_TEST_CASE(clock_check_window)

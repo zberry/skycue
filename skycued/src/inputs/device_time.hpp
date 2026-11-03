@@ -33,7 +33,10 @@ struct ClockCheck {
 
 // With no device time: arrival, no offset, not rejected. Otherwise subtracts
 // kGpsUtcOffset for TimeMode::gps, measures the offset against arrival and
-// uses the device time only when |offset| <= kMaxDeviceSkew.
+// uses the device time only when |offset| <= kMaxDeviceSkew. Any two times
+// in system_clock's range are accepted: an offset past the int64 range of
+// ticks (a 1700 device time against a 2026 arrival) is rejected, with
+// offset_s computed in double.
 ClockCheck checkDeviceTime(std::optional<std::chrono::system_clock::time_point> device,
                            std::chrono::system_clock::time_point arrival, TimeMode mode);
 

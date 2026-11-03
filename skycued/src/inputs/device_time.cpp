@@ -64,8 +64,8 @@ std::optional<system_clock::time_point> parseDeviceTime(const std::string& s)
     if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo) || h > 23 || mi > 59 || sec > 59)
         return std::nullopt;
     // system_clock counts int64 nanoseconds (1677-09-21 to 2262-04-11), so
-    // the conversion below would overflow outside; whole years inside keep
-    // room for the GPS offset and the skew check against arrival.
+    // the conversion below would overflow outside. (An offset from arrival
+    // can still exceed the range; checkDeviceTime handles that.)
     if (y < kMinYear || y > kMaxYear)
         return std::nullopt;
 
@@ -98,15 +98,28 @@ ClockCheck checkDeviceTime(std::optional<system_clock::time_point> device, syste
     ClockCheck out{arrival, std::nullopt, false};
     if (!device)
         return out;
-    system_clock::time_point t = *device;
-    if (mode == TimeMode::gps)
-        t -= kGpsUtcOffset;
-    const auto offset = t - arrival;
-    out.offset_s = std::chrono::duration<double>(offset).count();
-    if (offset > kMaxDeviceSkew || offset < -kMaxDeviceSkew)
+    // In clock ticks with overflow checks: a device time and an arrival may
+    // each be anywhere in system_clock's int64 nanosecond range, but their
+    // difference need not be (a 1700 device time against a 2026 arrival).
+    // An overflow means an offset far past kMaxDeviceSkew: rejected, with
+    // the offset computed in double.
+    using Rep = system_clock::duration::rep;
+    const double tick_s = std::chrono::duration<double>(system_clock::duration(1)).count();
+    const Rep gps = mode == TimeMode::gps ? system_clock::duration(kGpsUtcOffset).count() : 0;
+    const Rep d = device->time_since_epoch().count();
+    const Rep a = arrival.time_since_epoch().count();
+    Rep t = 0, offset = 0;
+    if (__builtin_sub_overflow(d, gps, &t) || __builtin_sub_overflow(t, a, &offset)) {
+        out.offset_s = (static_cast<double>(d) - static_cast<double>(gps) - static_cast<double>(a)) * tick_s;
+        out.rejected = true;
+        return out;
+    }
+    out.offset_s = std::chrono::duration<double>(system_clock::duration(offset)).count();
+    const system_clock::duration skew = kMaxDeviceSkew;
+    if (offset > skew.count() || offset < -skew.count())
         out.rejected = true;
     else
-        out.used = t;
+        out.used = system_clock::time_point(system_clock::duration(t));
     return out;
 }
 

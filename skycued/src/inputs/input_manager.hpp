@@ -21,8 +21,9 @@
 //   change: the poll keeps watching the path and loads a file that appears.
 // - Counters in `state` are lifetime: the counters of an instance destroyed
 //   by a replace are kept per id and added; remove forgets them.
-// - onChanged fires after any definition, enabled, connection or device
-//   status change.
+// - onChanged fires after any definition, enabled or connection change. A
+//   device status (datagram or HTTP poll) is not a change: it updates
+//   device_status in state() only.
 //
 // Threading: lives on the io_context; call everything from its thread.
 // Register callbacks before start(). An input destroyed while one of its

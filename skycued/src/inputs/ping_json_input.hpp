@@ -5,6 +5,7 @@
 // on, a status updates device_status and fires onStatus, a datagram or
 // aircraft that does not parse is counted in rejected and noted in
 // last_error. A squawk that is not a display code is logged once per input.
+// A status_url is polled over HTTP by TransportInput (spec §5.3).
 
 #include "inputs/input.hpp"
 

@@ -445,10 +445,9 @@ void InputManager::attach(Input& input)
         Dispatch d(dispatching_);
         changed();
     });
-    input.onStatus([this]() {
-        Dispatch d(dispatching_);
-        changed();
-    });
+    // No onStatus: a device status changes device_status only, read through
+    // state(); firing onChanged for it would resend the inputs list on every
+    // status datagram or poll.
 }
 
 void InputManager::retire(Slot& s, bool keep_counters)

@@ -40,6 +40,7 @@ add_library(skycued_core STATIC
   src/inputs/ping_json.cpp
   src/inputs/ping_json_input.cpp
   src/inputs/source_input.cpp
+  src/inputs/status_poller.cpp
   src/inputs/tcp_connect_client.cpp
   src/inputs/tcp_listener.cpp
   src/inputs/transport.cpp

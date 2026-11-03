@@ -1093,6 +1093,23 @@ BOOST_AUTO_TEST_CASE(destroyed_with_pending_timer)
     BOOST_TEST(t.call([] { return 42; }) == 42);  // the io thread ran the queued handlers and goes on
 }
 
+// A device status changes device_status only: no onChanged (inputs_changed),
+// so a status every second does not resend the inputs list.
+BOOST_AUTO_TEST_CASE(device_status_does_not_fire_changed)
+{
+    IoThread t;
+    TempDir tmp;
+    Mgr m(t, fileConfig(tmp));
+    const uint16_t port = freeUdpPort();
+    m.on([&](InputManager& im) { return im.create(psJson("ps", port)); });
+    BOOST_REQUIRE(eventually([&] { return m.state("ps").connected; }));
+    const int changes = m.on([&](InputManager&) { return m.seen.changes; });
+    UdpSender tx;
+    tx.send(port, fixture("icd-status.json"));
+    BOOST_REQUIRE(eventually([&] { return m.state("ps").device_status.has_value(); }));
+    BOOST_TEST(m.on([&](InputManager&) { return m.seen.changes; }) == changes);
+}
+
 BOOST_AUTO_TEST_CASE(empty_inputs_file_path_is_in_memory)
 {
     IoThread t;

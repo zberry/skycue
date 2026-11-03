@@ -310,3 +310,12 @@ target_compile_definitions(test_inputs PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_inputs)
 add_test(NAME inputs COMMAND test_inputs)
 set_tests_properties(inputs PROPERTIES TIMEOUT 120)
+
+# The pingStation status poll over HTTP against an in-test server.
+add_executable(test_status_poller test_status_poller.cpp)
+target_link_libraries(test_status_poller PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_status_poller PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_status_poller)
+add_test(NAME status_poller COMMAND test_status_poller)
+set_tests_properties(status_poller PROPERTIES TIMEOUT 60)

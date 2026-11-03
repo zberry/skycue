@@ -1,5 +1,6 @@
 #include "inputs/input.hpp"
 
+#include "inputs/ping_json.hpp"
 #include "log.hpp"
 
 #include <utility>
@@ -95,7 +96,15 @@ void Input::noteClockOffset(std::optional<double> offset_s)
         clock_offset_s_ = offset_s;
 }
 
-TransportInput::TransportInput(boost::asio::io_context& io, InputDef def) : Input(std::move(def)), io_(io) {}
+TransportInput::TransportInput(boost::asio::io_context& io, InputDef def) : Input(std::move(def)), io_(io)
+{
+    if (const auto url = parseHttpUrl(this->def().status_url)) {
+        status_poller_ =
+            std::make_unique<StatusPoller>(io_, *url, std::chrono::seconds(this->def().status_interval_s));
+        status_poller_->onResult(
+            [this](const std::string* body, const std::string& error) { handleStatusResult(body, error); });
+    }
+}
 
 TransportInput::~TransportInput() = default;
 
@@ -105,6 +114,7 @@ InputState TransportInput::state() const
     s.counters.connects = connects_before_ + (transport_ ? transport_->connects() : 0);
     s.counters.rejected_peer = rejected_peer_before_ + (transport_ ? transport_->rejectedPeer() : 0);
     s.peers = transport_ && transport_->connected() ? transport_->peers() : 0;
+    s.status_fail_streak = status_fail_streak_;
     return s;
 }
 
@@ -129,6 +139,8 @@ void TransportInput::start()
         setConnected(up);
     });
     transport_->start();
+    if (status_poller_ && running_)
+        status_poller_->start();
 }
 
 void TransportInput::stop()
@@ -136,6 +148,8 @@ void TransportInput::stop()
     if (!running_)
         return;
     running_ = false;
+    if (status_poller_)
+        status_poller_->stop();
     transport_->stop();
     syncError();
     markStopped();
@@ -156,6 +170,26 @@ void TransportInput::syncError()
     copied_error_ = e;
     if (!e.empty())
         noteError(e);
+}
+
+void TransportInput::handleStatusResult(const std::string* body, const std::string& error)
+{
+    std::optional<DeviceStatus> status;
+    std::string reason = error;
+    if (body) {
+        status = parsePingStatusDocument(*body, std::chrono::system_clock::now());
+        if (!status)
+            reason = "not a pingStation status document";
+    }
+    if (!status) {
+        ++counters_.status_fail;
+        ++status_fail_streak_;
+        noteError("status: " + reason);
+        return;
+    }
+    ++counters_.status_ok;
+    status_fail_streak_ = 0;
+    noteStatus(std::move(*status));
 }
 
 }  // namespace skycued

@@ -11,6 +11,7 @@
 
 #include "inputs/input_def.hpp"
 #include "inputs/input_types.hpp"
+#include "inputs/status_poller.hpp"
 #include "inputs/transport.hpp"
 #include "observation.hpp"
 
@@ -100,6 +101,11 @@ private:
 // The shared half of the pingStation inputs: a transport from makeTransport,
 // built on every start(). Counts bytes, connects, rejected_peer and peers,
 // and copies the transport's lastError() into last_error whenever it changes.
+// With a status_url it also runs a StatusPoller (spec §5.3) while started:
+// a 200 with a status document counts status_ok, clears status_fail_streak
+// and updates device_status (onStatus fires); any other result counts
+// status_fail, bumps status_fail_streak and notes "status: <reason>" in
+// last_error. The streak survives stop()/start().
 class TransportInput : public Input {
 public:
     TransportInput(boost::asio::io_context& io, InputDef def);
@@ -121,8 +127,11 @@ protected:
 
 private:
     void syncError();
+    void handleStatusResult(const std::string* body, const std::string& error);
 
     boost::asio::io_context& io_;
+    std::unique_ptr<StatusPoller> status_poller_;  // null without a status_url
+    uint32_t status_fail_streak_ = 0;
     std::unique_ptr<Transport> transport_;  // kept after stop() until the next start()
     bool running_ = false;
     uint64_t connects_before_ = 0, rejected_peer_before_ = 0;  // of earlier transports

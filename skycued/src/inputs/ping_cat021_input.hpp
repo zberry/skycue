@@ -11,7 +11,8 @@
 // datagram, a block of another category. records_skipped = SIM/TST/RAB
 // records, records without 080, and blocks cut short by a length error (an
 // unknown item length loses the rest of the block). Rejections and block
-// errors are noted in last_error.
+// errors are noted in last_error. A status_url is polled over HTTP by
+// TransportInput (spec §5.3).
 
 #include "asterix/cat021.hpp"
 #include "asterix/cat021_framer.hpp"

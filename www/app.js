@@ -594,8 +594,15 @@
       removeEntry(key);
       return;
     }
-    // filtered: no longer forwarded, still observed (recoloured by the next `observed`).
+    // filtered: no longer forwarded, still observed. Recoloured now by the
+    // drop's decision when it names a drawn one (a track not observed again
+    // soon would otherwise keep its old colour), else by the next `observed`.
     e.t = Object.assign({}, e.t, { forwarded: false });
+    var cls = typeof d.decision === 'string' ? P.decisionColor(d.decision) : null;
+    if (cls && cls !== 'unknown') {
+      e.t.decision = d.decision;
+      renderEntry(e, false);
+    }
     if (key === selectedKey) renderDetails();
     tableDirty = true;
   }

@@ -186,21 +186,30 @@ test('range_change_moves_ring_and_drops', async ({ page }) => {
   await expect(page.locator('#overlay-indicator')).toBeVisible();
   // Aircraft beyond 20 nm turn grey, and the page agrees with skycued
   // (tracks right at the ring may change between the two reads: skipped).
+  // The change drops every forwarded track beyond the ring at once, and each
+  // drop recolours its marker, so this holds whichever aircraft the replay
+  // happens to be observing (some go unobserved for many seconds).
   await expect.poll(async () => {
     const s = await state();
     const ms = await page.evaluate(() => window.skycueApp.markers());
-    let bad = 0, far = 0;
+    const bad = [];
+    let far = 0;
     for (const m of ms) {
       const t = s.tracks.find((x) => x.hex === m.hex);
       if (!t || t.range_nm === undefined || Math.abs(t.range_nm - 20) < 1.5) continue;
-      if (t.range_nm > 20) {
-        far++;
-        if (m.decision !== 'out_of_range') bad++;
-      }
-      if (COLOR[t.decision] !== m.decision) bad++;
+      if (t.range_nm > 20) far++;
+      if ((t.range_nm > 20 && m.decision !== 'out_of_range') || COLOR[t.decision] !== m.decision)
+        bad.push(`${m.hex}: page ${m.decision}, skycued ${t.decision}`);
     }
-    return far >= 5 && bad === 0;
-  }, { timeout: 5000 }).toBe(true);
+    return far >= 5 ? bad : [`only ${far} tracks beyond the ring`];
+  }, { timeout: 5000 }).toEqual([]);
+  // The same, driven explicitly: a filtered drop alone recolours a marker
+  // that sees no further observation.
+  await page.evaluate(() => {
+    window.skycueApp.injectTestMarker({ hex: 'fff001', addr_type: 'icao', lat: 39.9, lon: -77.0, decision: 'send', track_deg: 0 });
+    window.skycueApp.injectFisbItems([{ type: 'drop', hex: 'fff001', addr_type: 'icao', reason: 'filtered', decision: 'out_of_range' }]);
+  });
+  expect((await markerOf(page, 'fff001')).decision).toBe('out_of_range');
   // Back to the baseline value.
   const res = await api('/api/filters', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_range_nm: null }) });

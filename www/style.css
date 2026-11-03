@@ -332,6 +332,7 @@ table.cues-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.cues-table th { position: sticky; top: 0; background: var(--panel); text-align: left; color: var(--muted); font-weight: normal; padding: 2px 4px 2px 0; }
 table.cues-table td { padding: 2px 4px 2px 0; border-top: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
 table.cues-table td.empty { color: var(--muted); border: none; }
+label.check.cues-drops-only { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
 #cues-recent tbody tr { cursor: pointer; }
 #cues-recent tbody tr:hover { background: var(--panel-2); }
 #cues-recent td:nth-child(4), #cues-recent td:nth-child(5) { white-space: normal; overflow-wrap: anywhere; }

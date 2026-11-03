@@ -118,7 +118,9 @@ The Cues tab (`showCues`) shows skycued's output side. `#cues-counters` has
 one row per `CUE_COUNTERS` entry, from every `stats` item. Every `update`
 and `drop` WebSocket item becomes a `decisionRow` pushed into a ring of the
 last `DECISIONS_RING` (200) with `pushRing`, whether the tab is shown or
-not; `#cues-recent` lists it newest first and a row click selects the track
+not; `#cues-recent` lists it newest first (with `#cues-drops-only`, a
+localStorage view option `skycue.cues.dropsOnly`, a second ring of drops
+alone) and a row click selects the track
 (`data-key` is `trackKey`). `#cues-filters` is `GET /api/filters/history`
 through `filterHistoryRows`, which diffs consecutive entries (newest first;
 the startup entry has every field, from `null`), and `#cues-clients` is

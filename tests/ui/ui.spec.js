@@ -464,6 +464,29 @@ test('cues_row_click_selects_track', async ({ page }) => {
   await expect(page.locator('#tab-track')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#details [data-field="hex"]')).toHaveText(TARGET);
 });
+test('cues_recent_drops_only_kept_in_this_browser', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.locator('#wx-toggle').click(); await page.locator('#tab-cues').click();
+  const box = page.locator('#cues-drops-only');
+  await expect(box).not.toBeChecked();   // default off: updates and drops
+  expect(await blockTarget(page, 'add')).toBe(200);
+  expect(await blockTarget(page, 'remove')).toBe(200);
+  const rows = page.locator('#cues-recent tbody tr');
+  await expect(rows.filter({ hasText: 'sent' }).first()).toBeVisible({ timeout: 15000 });
+  await box.check();
+  // Drops only: TARGET's filtered drop is there, no update row is.
+  await expect(page.locator(`#cues-recent tbody tr[data-key="${TARGET_KEY}"]`, { hasText: 'filtered' }).first()).toBeVisible();
+  const reasons = await page.locator('#cues-recent tbody tr td:nth-child(5)').allTextContents();
+  expect(reasons.length).toBeGreaterThan(0);
+  expect(reasons.filter((r) => r === 'sent')).toEqual([]);
+  // Kept across a reload (localStorage), then cleared again.
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await page.locator('#wx-toggle').click(); await page.locator('#tab-cues').click();
+  await expect(page.locator('#cues-drops-only')).toBeChecked();
+  await page.locator('#cues-drops-only').uncheck();
+  expect(await page.evaluate(() => window.localStorage.getItem('skycue.cues.dropsOnly'))).toBe('0');
+});
 
 test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {
   await openPage(page); await waitMarkers(page, 10);

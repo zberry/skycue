@@ -2179,11 +2179,22 @@
   // `filters` item. Server strings go in through textContent.
   var CUES_POLL_MS = 5000;
   var FILTER_TEXT = { max_range_nm: ['max range', ' nm'], min_elevation_deg: ['min elevation', '°'] };
-  var cues = { ring: [], recentDirty: true, historySeq: 0, clientsSeq: 0 };
+  // ring: the last updates and drops; dropRing: the last drops alone, so
+  // "Drops only" still has them when max-interval resends fill `ring`.
+  var CUES_DROPS_ONLY_KEY = 'skycue.cues.dropsOnly';   // a view option in localStorage
+  var cues = { ring: [], dropRing: [], dropsOnly: false, recentDirty: true, historySeq: 0, clientsSeq: 0 };
 
   function onDecision(it) {
-    P.pushRing(cues.ring, P.decisionRow(it), P.DECISIONS_RING);
+    var row = P.decisionRow(it);
+    P.pushRing(cues.ring, row, P.DECISIONS_RING);
+    if (it.type === 'drop') P.pushRing(cues.dropRing, row, P.DECISIONS_RING);
     cues.recentDirty = true;
+  }
+  function setCuesDropsOnly(on) {
+    cues.dropsOnly = !!on;
+    $('cues-drops-only').checked = cues.dropsOnly;
+    storeSet(CUES_DROPS_ONLY_KEY, cues.dropsOnly ? '1' : '0');
+    renderCueRecent();
   }
   function clockTime(iso) {
     var ms = Date.parse(iso);
@@ -2207,10 +2218,10 @@
   }
   function renderCueRecent() {
     cues.recentDirty = false;
-    var body = $('cues-recent').tBodies[0];
+    var body = $('cues-recent').tBodies[0], ring = cues.dropsOnly ? cues.dropRing : cues.ring;
     body.textContent = '';
-    for (var i = cues.ring.length - 1; i >= 0; i--) {
-      var r = cues.ring[i], tr = el('tr');
+    for (var i = ring.length - 1; i >= 0; i--) {
+      var r = ring[i], tr = el('tr');
       tr.setAttribute('data-key', r.key);
       tr.appendChild(el('td', null, clockTime(r.time)));
       tr.appendChild(el('td', null, r.hex));
@@ -2699,6 +2710,8 @@
       var tr = ev.target.closest('tr');
       if (tr) select(tr.getAttribute('data-key'));
     });
+    $('cues-drops-only').addEventListener('change', function () { setCuesDropsOnly($('cues-drops-only').checked); });
+    setCuesDropsOnly(storeGet(CUES_DROPS_ONLY_KEY) === '1');
     $('cues-recent').tBodies[0].addEventListener('click', function (ev) {
       var tr = ev.target.closest('tr[data-key]');
       if (tr) select(tr.getAttribute('data-key'));

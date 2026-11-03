@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <regex>
 
@@ -368,6 +369,28 @@ int waitExit(pid_t pid, std::chrono::milliseconds timeout)
     return -1;
 }
 
+// The probe runs in a forked child (forked before any WebFx thread exists), so a server stuck in
+// open() on its io thread can never hang this binary: the parent waits at most `limit`, then
+// SIGKILLs the child. Returns the child's exit code, or -1 on timeout (H8). The parent never
+// builds a WebFx itself, so its teardown can never block.
+int inChild(const std::function<int()>& body, std::chrono::milliseconds limit)
+{
+    std::fflush(nullptr);
+    const pid_t pid = ::fork();
+    if (pid < 0)
+        throw std::runtime_error("fork failed");
+    if (pid == 0) {
+        int rc = 3;
+        try {
+            rc = body();
+        } catch (...) {
+            rc = 3;
+        }
+        ::_exit(rc);
+    }
+    return waitExit(pid, limit);
+}
+
 uint16_t freePort()
 {
     asio::io_context io;
@@ -470,6 +493,39 @@ BOOST_AUTO_TEST_CASE(tiles_available_overlays_flag)
     BOOST_TEST(ends(",\"overlays\":false}"));
     ::remove((f.www + "/overlays/meta.json").c_str());
     BOOST_TEST(ends(",\"overlays\":false}"));
+}
+
+BOOST_AUTO_TEST_CASE(tiles_meta_fifo_is_ignored)
+{
+    const int rc = inChild([] {
+        WebFx f;
+        ::mkdir((f.www + "/tiles").c_str(), 0755);
+        ::mkdir((f.www + "/overlays").c_str(), 0755);
+        if (::mkfifo((f.www + "/tiles/meta.json").c_str(), 0644) != 0 ||
+            ::mkfifo((f.www + "/overlays/meta.json").c_str(), 0644) != 0)
+            return 2;
+        const Reply r = get(f.port, "/api/tiles-available");  // get() sets a receive timeout
+        return r.status == 200u && r.body == "{\"tiles\":false,\"overlays\":false}" ? 0 : 1;
+    }, slow(3s));
+    BOOST_TEST(rc == 0);  // -1: the server blocked on the FIFO
+}
+
+BOOST_AUTO_TEST_CASE(static_fifo_is_404)
+{
+    const int rc = inChild([] {
+        WebFx f;
+        if (::mkfifo((f.www + "/pipe.js").c_str(), 0644) != 0)
+            return 2;
+        return get(f.port, "/pipe.js").status == 404u ? 0 : 1;
+    }, slow(3s));
+    BOOST_TEST(rc == 0);  // -1: the server blocked on the FIFO
+}
+
+BOOST_AUTO_TEST_CASE(tiles_meta_is_not_cached)
+{
+    BOOST_TEST(std::string(skycued::webapi::cacheControl("/tiles/meta.json")) == "no-cache");
+    BOOST_TEST(std::string(skycued::webapi::cacheControl("/overlays/meta.json")) == "no-cache");
+    BOOST_TEST(std::string(skycued::webapi::cacheControl("/tiles/6/18/24.png")) == "max-age=86400");
 }
 
 BOOST_AUTO_TEST_CASE(static_file_over_8mib_500)

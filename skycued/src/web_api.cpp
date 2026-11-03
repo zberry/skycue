@@ -265,12 +265,22 @@ bool isDirectory(const std::string& path)
     return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-// A small file's text; nullopt when it cannot be read or is larger.
+// A small regular file's text; nullopt when it cannot be read, is not a
+// regular file or is larger. O_NONBLOCK keeps open() from waiting for a
+// writer when the path is a FIFO (that would stall the io thread); it is
+// cleared once the file is known to be regular.
 std::optional<std::string> readSmallFile(const std::string& path, size_t max_bytes)
 {
-    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
     if (fd < 0)
         return std::nullopt;
+    struct stat st{};
+    const int flags = ::fcntl(fd, F_GETFL);
+    if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || flags < 0 ||
+        ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0) {
+        ::close(fd);
+        return std::nullopt;
+    }
     std::string text;
     char buf[4096];
     for (;;) {
@@ -750,6 +760,10 @@ const char* contentType(const std::string& path)
 
 const char* cacheControl(const std::string& path)
 {
+    // A meta.json (tiles/, overlays/) describes a set that a rebuild replaces in place.
+    static const std::string kMeta = "/meta.json";
+    if (path.size() >= kMeta.size() && path.compare(path.size() - kMeta.size(), kMeta.size(), kMeta) == 0)
+        return "no-cache";
     if (path.compare(0, 7, "/tiles/") == 0 || path.compare(0, 8, "/vendor/") == 0)
         return "max-age=86400";
     return "no-cache";

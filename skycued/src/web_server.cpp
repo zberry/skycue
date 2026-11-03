@@ -62,11 +62,15 @@ enum class FileRead { ok, missing, too_large, error };
 
 // A regular file's content into `text`. missing: no such file, or not a
 // regular file; too_large: over kStaticFileLimit; error: unreadable.
+// O_NONBLOCK keeps open() from waiting for a writer when the path is a FIFO
+// (that would stall the io thread); it is cleared once the file is known to
+// be regular.
 FileRead readRegularFile(const std::string& path, std::string& text)
 {
-    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
     if (fd < 0)
-        return errno == ENOENT || errno == ENOTDIR || errno == EISDIR ? FileRead::missing : FileRead::error;
+        return errno == ENOENT || errno == ENOTDIR || errno == EISDIR || errno == ENXIO ? FileRead::missing
+                                                                                        : FileRead::error;
     struct stat st{};
     FileRead result = FileRead::ok;
     if (::fstat(fd, &st) != 0)
@@ -75,6 +79,8 @@ FileRead readRegularFile(const std::string& path, std::string& text)
         result = FileRead::missing;
     else if (static_cast<std::size_t>(st.st_size) > kStaticFileLimit)
         result = FileRead::too_large;
+    else if (const int flags = ::fcntl(fd, F_GETFL); flags < 0 || ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0)
+        result = FileRead::error;
     if (result != FileRead::ok) {
         ::close(fd);
         return result;

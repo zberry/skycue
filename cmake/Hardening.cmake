@@ -28,8 +28,10 @@ else()
   set(_skycue_slow_factor 1)
 endif()
 
-# Where scripts/run-sanitizers.sh points the sanitizers' log_path.
-set(SKYCUE_SANITIZER_LOG_DIR "${PROJECT_BINARY_DIR}/sanitizer-logs")
+# Where scripts/run-sanitizers.sh points the sanitizers' log_path; cached so
+# the script reads it from CMakeCache.txt.
+set(SKYCUE_SANITIZER_LOG_DIR "${PROJECT_BINARY_DIR}/sanitizer-logs"
+  CACHE INTERNAL "sanitizer log_path directory (scripts/run-sanitizers.sh)")
 
 if(_skycue_sanitize)
   # Line tables only: enough for symbolized stacks, a fraction of the disk

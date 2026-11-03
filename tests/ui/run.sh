@@ -10,9 +10,13 @@
 # "receivers" skycued, runs no built-in decoder inputs and one
 # pingstation_json input, ps-sim, that skycue-pingsim feeds the readsb
 # fixture to (with a device status every 2 s), for the Receiver tab cases.
-# usage: run.sh SKYCUED FIXTURE_DIR WWW_STAGE PINGSIM
+# usage: run.sh SKYCUED FIXTURE_DIR WWW_STAGE PINGSIM [PLAYWRIGHT ARGS...]
+# (extra arguments go to `playwright test`, e.g. --grep NAME).
+# Every process it starts is stopped on every way out: normal end, a
+# failure, or SIGINT/SIGTERM/SIGHUP (a ctest timeout, Ctrl-C).
 set -u
 skycued=$1 fixtures=$2 www=$3 pingsim=$4
+shift 4
 here=$(cd "$(dirname "$0")" && pwd)
 shots_dir=${SKYCUE_UI_SCREENSHOTS:-"$here/../../../.superpowers/sdd/2026-11-01-skycue-ui/screenshots"}
 fisb_shots_dir=${SKYCUE_FISB_SCREENSHOTS:-"$here/../../../.superpowers/sdd/2026-11-02-skycue-fisb/screenshots"}
@@ -34,6 +38,7 @@ cleanup() {
     p=$(cat "$f" 2>/dev/null)
     [ -n "$p" ] || continue
     kill "$p" 2>/dev/null
+    kill -CONT "$p" 2>/dev/null   # the stalled-server case may have left it stopped
     for (( i=0; i<30; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
     kill -9 "$p" 2>/dev/null
   done
@@ -41,6 +46,10 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT
+# A signal ends the script through exit, so the EXIT trap runs for it too.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 fail() {
   echo "FAIL: $*"
   local log
@@ -236,8 +245,13 @@ export SKYCUE_RECEIVERS_URL="$rx_base"
 export SKYCUE_CUE_PORT="$cue_port"
 export SKYCUE_UI_OUT="$out_dir"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-(cd "$here" && npx --no-install playwright test)
+# In the background with its PID kept, so a signal is acted on at once
+# (bash defers its traps while a foreground child runs) and cleanup stops it.
+(cd "$here" && exec npx --no-install playwright test "$@") &
+echo $! > "$tmp/playwright.pid"
+wait $!
 rc=$?
+rm -f "$tmp/playwright.pid"
 
 # copy_shots PATTERN DIR
 copy_shots() {

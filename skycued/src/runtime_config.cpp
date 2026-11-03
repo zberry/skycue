@@ -177,45 +177,6 @@ std::string rewriteList(const std::string& text, const std::vector<std::string>&
     return out;
 }
 
-// The keys whose change needs a restart (everything but the filter keys).
-std::vector<std::string> restartKeysChanged(const Config& a, const Config& b)
-{
-    std::vector<std::string> out;
-    auto check = [&](bool differs, const char* key) {
-        if (differs)
-            out.push_back(key);
-    };
-    check(a.receiver_lat != b.receiver_lat, "RECEIVER_LAT");
-    check(a.receiver_lon != b.receiver_lon, "RECEIVER_LON");
-    check(a.receiver_alt_m != b.receiver_alt_m, "RECEIVER_ALT_M");
-    check(a.antenna_height_m != b.antenna_height_m, "ANTENNA_HEIGHT_M");
-    check(a.sdr_1090_serial != b.sdr_1090_serial, "SDR_1090_SERIAL");
-    check(a.sdr_978_serial != b.sdr_978_serial, "SDR_978_SERIAL");
-    check(a.gain_1090 != b.gain_1090, "GAIN_1090");
-    check(a.gain_978 != b.gain_978, "GAIN_978");
-    check(a.dump978_raw_port != b.dump978_raw_port, "DUMP978_RAW_PORT");
-    check(a.dump978_json_port != b.dump978_json_port, "DUMP978_JSON_PORT");
-    check(a.readsb_json_port != b.readsb_json_port, "READSB_JSON_PORT");
-    check(a.web_port != b.web_port, "WEB_PORT");
-    check(a.web_bind != b.web_bind, "WEB_BIND");
-    check(a.cue_tcp_port != b.cue_tcp_port, "CUE_TCP_PORT");
-    check(a.cue_tcp_connect_targets != b.cue_tcp_connect_targets, "CUE_TCP_CONNECT");
-    check(a.cue_udp_targets != b.cue_udp_targets, "CUE_UDP_TARGETS");
-    check(a.record_dir != b.record_dir, "RECORD_DIR");
-    check(a.record_formats != b.record_formats, "RECORD_FORMATS");
-    check(a.record_raw != b.record_raw, "RECORD_RAW");
-    check(a.record_max_gb != b.record_max_gb, "RECORD_MAX_GB");
-    check(a.min_interval_s != b.min_interval_s, "MIN_INTERVAL_S");
-    check(a.max_interval_s != b.max_interval_s, "MAX_INTERVAL_S");
-    check(a.track_timeout_s != b.track_timeout_s, "TRACK_TIMEOUT_S");
-    check(a.keyframe_interval_s != b.keyframe_interval_s, "KEYFRAME_INTERVAL_S");
-    check(a.trail_seconds != b.trail_seconds, "TRAIL_SECONDS");
-    check(a.inputs_file != b.inputs_file, "INPUTS_FILE");
-    check(a.fisb_enable != b.fisb_enable, "FISB_ENABLE");
-    check(a.fisb_experimental != b.fisb_experimental, "FISB_EXPERIMENTAL");
-    return out;
-}
-
 // have -> want as entry additions and removals, ignoring case and order.
 void listDiff(const IdList& have, const IdList& want, std::vector<std::string>& add, std::vector<std::string>& remove)
 {
@@ -239,6 +200,75 @@ void appendArray(std::string& out, const std::vector<std::string>& v)
 }
 
 }  // namespace
+
+// ---- the restart keys ---------------------------------------------------------------
+
+namespace {
+
+struct RestartKey {
+    const char* key;
+    bool (*differs)(const Config& a, const Config& b);
+};
+
+#define SKYCUED_RESTART_KEY(KEY, field) {KEY, [](const Config& a, const Config& b) { return a.field != b.field; }}
+
+// Every skycue.conf key but the four the Engine applies live (MAX_RANGE_NM,
+// MIN_ELEVATION_DEG, ALLOW_LIST_FILE, BLOCK_LIST_FILE), in knownConfigKeys() order.
+const RestartKey kRestartKeys[] = {
+    SKYCUED_RESTART_KEY("RECEIVER_LAT", receiver_lat),
+    SKYCUED_RESTART_KEY("RECEIVER_LON", receiver_lon),
+    SKYCUED_RESTART_KEY("RECEIVER_ALT_M", receiver_alt_m),
+    SKYCUED_RESTART_KEY("ANTENNA_HEIGHT_M", antenna_height_m),
+    SKYCUED_RESTART_KEY("SDR_1090_SERIAL", sdr_1090_serial),
+    SKYCUED_RESTART_KEY("SDR_978_SERIAL", sdr_978_serial),
+    SKYCUED_RESTART_KEY("GAIN_1090", gain_1090),
+    SKYCUED_RESTART_KEY("GAIN_978", gain_978),
+    SKYCUED_RESTART_KEY("DUMP978_RAW_PORT", dump978_raw_port),
+    SKYCUED_RESTART_KEY("DUMP978_JSON_PORT", dump978_json_port),
+    SKYCUED_RESTART_KEY("READSB_JSON_PORT", readsb_json_port),
+    SKYCUED_RESTART_KEY("WEB_PORT", web_port),
+    SKYCUED_RESTART_KEY("CUE_TCP_PORT", cue_tcp_port),
+    SKYCUED_RESTART_KEY("CUE_TCP_CONNECT", cue_tcp_connect_targets),
+    SKYCUED_RESTART_KEY("CUE_UDP_TARGETS", cue_udp_targets),
+    SKYCUED_RESTART_KEY("RECORD_DIR", record_dir),
+    SKYCUED_RESTART_KEY("RECORD_FORMATS", record_formats),
+    SKYCUED_RESTART_KEY("MIN_INTERVAL_S", min_interval_s),
+    SKYCUED_RESTART_KEY("MAX_INTERVAL_S", max_interval_s),
+    SKYCUED_RESTART_KEY("TRACK_TIMEOUT_S", track_timeout_s),
+    SKYCUED_RESTART_KEY("KEYFRAME_INTERVAL_S", keyframe_interval_s),
+    SKYCUED_RESTART_KEY("RECORD_RAW", record_raw),
+    SKYCUED_RESTART_KEY("WEB_BIND", web_bind),
+    SKYCUED_RESTART_KEY("RECORD_MAX_GB", record_max_gb),
+    SKYCUED_RESTART_KEY("TRAIL_SECONDS", trail_seconds),
+    SKYCUED_RESTART_KEY("FISB_ENABLE", fisb_enable),
+    SKYCUED_RESTART_KEY("FISB_EXPERIMENTAL", fisb_experimental),
+    SKYCUED_RESTART_KEY("INPUTS_FILE", inputs_file),
+    SKYCUED_RESTART_KEY("LOCATIONS_FILE", locations_file),
+};
+
+#undef SKYCUED_RESTART_KEY
+
+}  // namespace
+
+const std::vector<std::string>& restartConfigKeys()
+{
+    static const std::vector<std::string> keys = [] {
+        std::vector<std::string> out;
+        for (const auto& k : kRestartKeys)
+            out.emplace_back(k.key);
+        return out;
+    }();
+    return keys;
+}
+
+std::vector<std::string> restartKeysChanged(const Config& a, const Config& b)
+{
+    std::vector<std::string> out;
+    for (const auto& k : kRestartKeys)
+        if (k.differs(a, b))
+            out.emplace_back(k.key);
+    return out;
+}
 
 // ---- Overlay ----------------------------------------------------------------------
 
@@ -696,6 +726,13 @@ void RuntimeConfig::reloadConf()
     running_.min_elevation_deg = c.min_elevation_deg;
     running_.allow_list_file = c.allow_list_file;
     running_.block_list_file = c.block_list_file;
+    // Whether the file sets a live key follows the file, like its value.
+    for (const char* key : {"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}) {
+        if (c.file_keys.count(key))
+            running_.file_keys.insert(key);
+        else
+            running_.file_keys.erase(key);
+    }
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         const bool allow = kind == ListKind::allow;
         if ((allow ? old.allow_list_file : old.block_list_file) == listPath(kind))

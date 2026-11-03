@@ -73,6 +73,14 @@ Overlay parseOverlay(const std::string& text, std::vector<std::string>* warnings
 // The overlay as skycue.runtime.json text (indented, ending in a newline).
 std::string overlayJson(const Overlay& overlay);
 
+// The skycue.conf keys that take effect only on a restart: every key but
+// the four applied live (MAX_RANGE_NM, MIN_ELEVATION_DEG, ALLOW_LIST_FILE,
+// BLOCK_LIST_FILE). The one list: the watcher's warning and GET /api/config
+// both use it.
+const std::vector<std::string>& restartConfigKeys();
+// The keys of restartConfigKeys() whose values differ between `a` and `b`, in that order.
+std::vector<std::string> restartKeysChanged(const Config& a, const Config& b);
+
 class RuntimeConfig {
 public:
     // `conf_path` is skycue.conf; the overlay is skycue.runtime.json in the

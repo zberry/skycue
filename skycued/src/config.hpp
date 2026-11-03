@@ -35,6 +35,7 @@ struct Config {
     std::string locations_file;          // LOCATIONS_FILE as written (operator CSV id,lat,lon; empty: none)
     // Accepted (they are skycue-start.sh's), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";
+    std::set<std::string> file_keys;  // the keys the file assigns (parseConfigText fills it)
 };
 
 // what() is "<file>:<line>: <message>", or "<file>: <message>" when line is 0
@@ -47,6 +48,12 @@ struct ConfigError : std::runtime_error {
 Config parseConfigFile(const std::string& path);  // throws ConfigError
 Config parseConfigText(const std::string& text, const std::string& name_for_errors);
 const std::vector<std::string>& knownConfigKeys();  // exactly the keys of etc/skycue.conf.example
+
+// `key`'s value in `c` as skycue.conf would spell it: numbers in their
+// shortest exact form ("38.9", "8080"), yes/no, endpoints as
+// "host:port host:port", RECORD_FORMATS space-separated, "" for an unset
+// string. Throws std::invalid_argument for a key not in knownConfigKeys().
+std::string configValueText(const Config& c, const std::string& key);
 
 // The inputs file for INPUTS_FILE `value` of the config at `conf_path`:
 // skycue.inputs.json next to the config when empty, `value` resolved against

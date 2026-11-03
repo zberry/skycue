@@ -470,3 +470,28 @@ BOOST_AUTO_TEST_CASE(crlf_line_rejected_with_line_number)
     Config c = parseConfigText("# comment\r\n\r\nRECEIVER_LAT=1\nRECEIVER_LON=2\n", "t");
     BOOST_TEST(c.receiver_lat == 1.0);
 }
+
+BOOST_AUTO_TEST_CASE(file_keys_recorded)
+{
+    const auto c = parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\nWEB_PORT=9090\n", "t");
+    BOOST_TEST((c.file_keys == std::set<std::string>{"RECEIVER_LAT", "RECEIVER_LON", "WEB_PORT"}));
+}
+
+BOOST_AUTO_TEST_CASE(every_known_key_has_value_text)
+{
+    using skycued::configValueText;
+    Config c;
+    c.receiver_lat = 38.9;
+    c.receiver_lon = -77.0;
+    for (const auto& k : skycued::knownConfigKeys())
+        BOOST_CHECK_NO_THROW(configValueText(c, k));
+    BOOST_TEST(configValueText(c, "WEB_PORT") == "8080");
+    BOOST_TEST(configValueText(c, "RECEIVER_LAT") == "38.9");
+    BOOST_TEST(configValueText(c, "FISB_ENABLE") == "yes");
+    BOOST_TEST(configValueText(c, "RECORD_RAW") == "no");
+    BOOST_TEST(configValueText(c, "RECORD_FORMATS") == "csv jsonl");
+    BOOST_TEST(configValueText(c, "CUE_UDP_TARGETS") == "");
+    c.cue_udp_targets = {{"127.0.0.1", 30501}, {"10.0.0.2", 30502}};
+    BOOST_TEST(configValueText(c, "CUE_UDP_TARGETS") == "127.0.0.1:30501 10.0.0.2:30502");
+    BOOST_CHECK_THROW(configValueText(c, "NOPE"), std::invalid_argument);
+}

@@ -142,7 +142,7 @@ skycue_set_warnings(test_engine)
 add_test(NAME engine COMMAND test_engine)
 set_tests_properties(engine PROPERTIES TIMEOUT 120)
 
-foreach(_t engine_api recording_independence runtime_config)
+foreach(_t engine_api recording_independence runtime_config web_config)
   add_executable(test_${_t} test_${_t}.cpp)
   target_link_libraries(test_${_t} PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
   target_compile_definitions(test_${_t} PRIVATE BOOST_TEST_DYN_LINK

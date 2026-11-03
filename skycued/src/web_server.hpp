@@ -42,11 +42,13 @@ namespace skycued {
 
 class Engine;
 class RuntimeConfig;
+struct DaemonInfo;
 
 struct WebConfig {
     std::string bind = "127.0.0.1";  // numeric address to listen on
     uint16_t port = 8080;            // 0: a port the OS picks (see localPort)
     std::string www_dir;             // static files
+    const DaemonInfo* daemon = nullptr;  // for GET /api/config; must outlive the server
     size_t max_ws_queue_bytes = 2u << 20;
     std::chrono::milliseconds ping_interval{15000};
     std::chrono::milliseconds idle_timeout{30000};  // HTTP keep-alive connections

@@ -6,6 +6,7 @@
 #include "recorder.hpp"
 #include "runtime_config.hpp"
 #include "time_util.hpp"
+#include "web_config.hpp"
 #include "web_fisb.hpp"
 #include "web_inputs.hpp"
 
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <map>
 #include <cmath>
 #include <cstdint>
@@ -619,6 +621,13 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
                 return *rejected;
             return postListRoute(path == "/api/lists/allow" ? ListKind::allow : ListKind::block, body, engine,
                                  runtime);
+        }
+        if (path == "/api/config") {
+            if (!get)
+                return notAllowed("GET");
+            if (!context.daemon)
+                return error(500, "no daemon info");
+            return json(200, configJson(*context.daemon, runtime, std::chrono::system_clock::now()));
         }
         if (path == "/api/cues/clients")
             return get ? json(200, cueClientsJson(engine.forwarder())) : notAllowed("GET");

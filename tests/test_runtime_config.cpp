@@ -620,3 +620,65 @@ BOOST_AUTO_TEST_CASE(atomic_write_keeps_mode)
     BOOST_TEST(has(readAll(f.conf), "MIN_ELEVATION_DEG=4\n"));
     // The owner is kept too (fchown, best effort); that needs root to test: manual.
 }
+
+BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
+{
+    const auto& restart = skycued::restartConfigKeys();
+    const std::set<std::string> restart_set(restart.begin(), restart.end());
+    BOOST_TEST(restart_set.size() == restart.size());  // no duplicates
+    const std::set<std::string> live{"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE", "BLOCK_LIST_FILE"};
+    for (const auto& k : live)
+        BOOST_TEST(restart_set.count(k) == 0u, k);
+    std::set<std::string> all = restart_set;
+    all.insert(live.begin(), live.end());
+    const auto& known = skycued::knownConfigKeys();
+    BOOST_TEST((all == std::set<std::string>(known.begin(), known.end())));
+    BOOST_TEST(restart_set.count("INPUTS_FILE") == 1u);
+    BOOST_TEST(restart_set.count("LOCATIONS_FILE") == 1u);
+
+    // b differs from a in every field but the live four.
+    skycued::Config a;
+    a.receiver_lat = 38.9;  // not NaN: NaN never equals itself
+    a.receiver_lon = -77.0;
+    skycued::Config b = a;
+    b.receiver_lat = 1;
+    b.receiver_lon = 2;
+    b.receiver_alt_m = 3;
+    b.antenna_height_m = 4;
+    b.dump978_raw_port = 1;
+    b.dump978_json_port = 2;
+    b.readsb_json_port = 3;
+    b.web_port = 4;
+    b.cue_tcp_port = 5;
+    b.cue_tcp_connect_targets = {{"h", 1}};
+    b.cue_udp_targets = {{"h", 2}};
+    b.record_dir = "r";
+    b.record_formats = {"csv"};
+    b.record_raw = true;
+    b.min_interval_s = 2;
+    b.max_interval_s = 20;
+    b.track_timeout_s = 30;
+    b.keyframe_interval_s = 5;
+    b.web_bind = "0.0.0.0";
+    b.record_max_gb = 1;
+    b.trail_seconds = 60;
+    b.fisb_enable = false;
+    b.fisb_experimental = true;
+    b.inputs_file = "i.json";
+    b.locations_file = "l.csv";
+    b.sdr_1090_serial = "s1";
+    b.sdr_978_serial = "s2";
+    b.gain_1090 = "40";
+    b.gain_978 = "41";
+    const auto changed = skycued::restartKeysChanged(a, b);
+    BOOST_TEST((std::set<std::string>(changed.begin(), changed.end()) == restart_set));
+    BOOST_TEST(changed.size() == restart.size());
+
+    // The live four alone need no restart.
+    skycued::Config c = a;
+    c.max_range_nm = 10;
+    c.min_elevation_deg = 5;
+    c.allow_list_file = "a.txt";
+    c.block_list_file = "b.txt";
+    BOOST_TEST(skycued::restartKeysChanged(a, c).empty());
+}

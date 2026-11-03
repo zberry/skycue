@@ -19,6 +19,7 @@ namespace skycued {
 
 class Engine;
 class RuntimeConfig;
+struct DaemonInfo;
 
 namespace webapi {
 
@@ -63,6 +64,7 @@ struct ApiContext {
     Engine& engine;
     RuntimeConfig& runtime;
     std::string www_dir;
+    const DaemonInfo* daemon = nullptr;  // GET /api/config (web_config.hpp); nullptr: that is a 500
 };
 
 // True for "/api" and every path under "/api/".

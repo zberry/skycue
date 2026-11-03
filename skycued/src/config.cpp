@@ -1,10 +1,13 @@
 #include "config.hpp"
 
+#include "json_lite.hpp"
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <sstream>
 
@@ -227,6 +230,8 @@ Config parseConfigText(const std::string& text, const std::string& name)
     }
 
     Config c;
+    for (const auto& e : entries)
+        c.file_keys.insert(e.first);
     conv.num("RECEIVER_LAT", c.receiver_lat, -90, 90);
     conv.num("RECEIVER_LON", c.receiver_lon, -180, 180);
     conv.num("RECEIVER_ALT_M", c.receiver_alt_m);
@@ -305,6 +310,64 @@ Config parseConfigText(const std::string& text, const std::string& name)
         conv.fail(conv.find("RECORD_FORMATS") ? "RECORD_FORMATS" : "RECORD_DIR",
                   "RECORD_FORMATS must name at least one of jsonl, csv when RECORD_DIR is set");
     return c;
+}
+
+std::string configValueText(const Config& c, const std::string& key)
+{
+    // Static: the table below (built once) calls them without capturing.
+    static const auto num = [](double v) { return formatRoundTrip(v); };
+    static const auto yesNo = [](bool v) { return std::string(v ? "yes" : "no"); };
+    static const auto endpoints = [](const std::vector<std::pair<std::string, uint16_t>>& v) {
+        std::string out;
+        for (const auto& e : v)
+            out += (out.empty() ? "" : " ") + e.first + ":" + std::to_string(e.second);
+        return out;
+    };
+    static const std::map<std::string, std::function<std::string(const Config&)>> text{
+        {"RECEIVER_LAT", [](const Config& x) { return num(x.receiver_lat); }},
+        {"RECEIVER_LON", [](const Config& x) { return num(x.receiver_lon); }},
+        {"RECEIVER_ALT_M", [](const Config& x) { return num(x.receiver_alt_m); }},
+        {"ANTENNA_HEIGHT_M", [](const Config& x) { return num(x.antenna_height_m); }},
+        {"SDR_1090_SERIAL", [](const Config& x) { return x.sdr_1090_serial; }},
+        {"SDR_978_SERIAL", [](const Config& x) { return x.sdr_978_serial; }},
+        {"GAIN_1090", [](const Config& x) { return x.gain_1090; }},
+        {"GAIN_978", [](const Config& x) { return x.gain_978; }},
+        {"DUMP978_RAW_PORT", [](const Config& x) { return std::to_string(x.dump978_raw_port); }},
+        {"DUMP978_JSON_PORT", [](const Config& x) { return std::to_string(x.dump978_json_port); }},
+        {"READSB_JSON_PORT", [](const Config& x) { return std::to_string(x.readsb_json_port); }},
+        {"WEB_PORT", [](const Config& x) { return std::to_string(x.web_port); }},
+        {"CUE_TCP_PORT", [](const Config& x) { return std::to_string(x.cue_tcp_port); }},
+        {"CUE_TCP_CONNECT", [](const Config& x) { return endpoints(x.cue_tcp_connect_targets); }},
+        {"CUE_UDP_TARGETS", [](const Config& x) { return endpoints(x.cue_udp_targets); }},
+        {"RECORD_DIR", [](const Config& x) { return x.record_dir; }},
+        {"RECORD_FORMATS",
+         [](const Config& x) {
+             std::string out;
+             for (const auto& f : x.record_formats)
+                 out += (out.empty() ? "" : " ") + f;
+             return out;
+         }},
+        {"MAX_RANGE_NM", [](const Config& x) { return num(x.max_range_nm); }},
+        {"MIN_ELEVATION_DEG", [](const Config& x) { return num(x.min_elevation_deg); }},
+        {"ALLOW_LIST_FILE", [](const Config& x) { return x.allow_list_file; }},
+        {"BLOCK_LIST_FILE", [](const Config& x) { return x.block_list_file; }},
+        {"MIN_INTERVAL_S", [](const Config& x) { return num(x.min_interval_s); }},
+        {"MAX_INTERVAL_S", [](const Config& x) { return num(x.max_interval_s); }},
+        {"TRACK_TIMEOUT_S", [](const Config& x) { return num(x.track_timeout_s); }},
+        {"KEYFRAME_INTERVAL_S", [](const Config& x) { return num(x.keyframe_interval_s); }},
+        {"RECORD_RAW", [](const Config& x) { return yesNo(x.record_raw); }},
+        {"WEB_BIND", [](const Config& x) { return x.web_bind; }},
+        {"RECORD_MAX_GB", [](const Config& x) { return num(x.record_max_gb); }},
+        {"TRAIL_SECONDS", [](const Config& x) { return std::to_string(x.trail_seconds); }},
+        {"FISB_ENABLE", [](const Config& x) { return yesNo(x.fisb_enable); }},
+        {"FISB_EXPERIMENTAL", [](const Config& x) { return yesNo(x.fisb_experimental); }},
+        {"INPUTS_FILE", [](const Config& x) { return x.inputs_file; }},
+        {"LOCATIONS_FILE", [](const Config& x) { return x.locations_file; }},
+    };
+    const auto it = text.find(key);
+    if (it == text.end())
+        throw std::invalid_argument("unknown config key " + key);
+    return it->second(c);
 }
 
 std::string resolveInputsFile(const std::string& conf_path, const std::string& value)

@@ -284,3 +284,10 @@ target_compile_definitions(test_pingstation PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_pingstation)
 add_test(NAME pingstation COMMAND test_pingstation)
+
+# Input definitions, their validation, the inputs file and the settled-file watcher.
+add_executable(test_input_def test_input_def.cpp)
+target_link_libraries(test_input_def PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_input_def PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_input_def)
+add_test(NAME input_def COMMAND test_input_def)

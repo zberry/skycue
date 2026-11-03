@@ -25,11 +25,14 @@ add_library(skycued_core STATIC
   src/fisb/text_products.cpp
   src/fisb/twgo.cpp
   src/fisb/uplink_frame.cpp
+  src/file_util.cpp
   src/filters.cpp
   src/forwarder.cpp
   src/geo.cpp
   src/inputs/cat021_map.cpp
   src/inputs/device_time.cpp
+  src/inputs/input_def.cpp
+  src/inputs/inputs_file.cpp
   src/inputs/ping_json.cpp
   src/json_lite.cpp
   src/line_client.cpp

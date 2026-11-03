@@ -5,8 +5,6 @@
 #include "json_lite.hpp"
 #include "log.hpp"
 
-#include <fcntl.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -14,6 +12,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -130,58 +129,10 @@ std::string readFile(const std::string& path)
 
 IdList loadList(const std::string& path) { return path.empty() ? IdList() : IdList::loadFile(path); }
 
-// Writes `text` to <file>.tmp and renames it over <file>, where <file> is
-// `path` with symlinks resolved (so a symlink stays a symlink and the file it
-// points to gets the text), keeping the mode and, best effort, the owner of
-// the file it replaces. Throws std::runtime_error.
-void atomicWrite(const std::string& path, const std::string& text)
+std::string overlayPathFor(const std::string& conf_path)
 {
-    std::string target = path;
-    if (char* real = ::realpath(path.c_str(), nullptr)) {  // fails for a file not created yet
-        target = real;
-        std::free(real);
-    }
-    const std::string tmp = target + ".tmp";  // same directory: rename stays atomic
-    struct stat st{};
-    const bool existed = ::stat(target.c_str(), &st) == 0;
-    const mode_t mode = existed ? (st.st_mode & 07777) : 0644;
-    const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode);
-    if (fd < 0)
-        throw std::runtime_error(tmp + ": cannot create: " + std::strerror(errno));
-    auto fail = [&](const std::string& what) {
-        const int err = errno;
-        ::close(fd);
-        ::unlink(tmp.c_str());
-        throw std::runtime_error(tmp + ": " + what + ": " + std::strerror(err));
-    };
-    if (existed && ::fchmod(fd, mode) != 0)
-        fail("cannot set the mode");
-    // Keep the owner (when skycued runs as root, an operator's file stays
-    // theirs). Without the privilege this fails with EPERM: ignored.
-    if (existed && (st.st_uid != ::geteuid() || st.st_gid != ::getegid()) &&
-        ::fchown(fd, st.st_uid, st.st_gid) != 0 && errno != EPERM)
-        fail("cannot set the owner");
-    for (size_t done = 0; done < text.size();) {
-        const ssize_t n = ::write(fd, text.data() + done, text.size() - done);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            fail("write error");
-        }
-        done += static_cast<size_t>(n);
-    }
-    if (::fsync(fd) != 0)
-        fail("fsync failed");
-    if (::close(fd) != 0) {
-        const int err = errno;
-        ::unlink(tmp.c_str());
-        throw std::runtime_error(tmp + ": close failed: " + std::strerror(err));
-    }
-    if (::rename(tmp.c_str(), target.c_str()) != 0) {
-        const int err = errno;
-        ::unlink(tmp.c_str());
-        throw std::runtime_error(target + ": cannot replace: " + std::strerror(err));
-    }
+    const std::string dir = dirOf(conf_path);
+    return (dir == "/" ? dir : dir + "/") + kOverlayName;
 }
 
 // The list file text with `remove` entries commented out and `add` entries
@@ -402,32 +353,14 @@ std::string overlayJson(const Overlay& o)
 
 // ---- RuntimeConfig -----------------------------------------------------------------
 
-bool RuntimeConfig::Stamp::operator==(const Stamp& o) const
-{
-    if (exists != o.exists)
-        return false;
-    return !exists || (dev == o.dev && ino == o.ino && size == o.size && mtime_ns == o.mtime_ns);
-}
-
-RuntimeConfig::Stamp RuntimeConfig::stampOf(const std::string& path)
-{
-    Stamp s;
-    struct stat st{};
-    if (path.empty() || ::stat(path.c_str(), &st) != 0)
-        return s;
-    s.exists = true;
-    s.dev = st.st_dev;
-    s.ino = st.st_ino;
-    s.size = st.st_size;
-    s.mtime_ns = static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL + st.st_mtim.tv_nsec;
-    return s;
-}
-
 RuntimeConfig::RuntimeConfig(boost::asio::io_context& io, std::string conf_path, Engine& engine)
-    : conf_path_(std::move(conf_path)), engine_(engine), timer_(io)
+    : conf_path_(std::move(conf_path)),
+      overlay_path_(overlayPathFor(conf_path_)),
+      engine_(engine),
+      conf_watch_(conf_path_),
+      overlay_watch_(overlay_path_),
+      timer_(io)
 {
-    const std::string dir = dirOf(conf_path_);
-    overlay_path_ = (dir == "/" ? dir : dir + "/") + kOverlayName;
 }
 
 RuntimeConfig::~RuntimeConfig()
@@ -444,16 +377,17 @@ const std::string& RuntimeConfig::listPath(ListKind kind) const
 void RuntimeConfig::load()
 {
     // Stamps before reading: an edit in between is then seen again, never missed.
-    conf_stamp_ = stampOf(conf_path_);
+    conf_watch_.accept();
     file_conf_ = parseConfigFile(conf_path_);
     running_ = file_conf_;
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
-        listStamp(kind) = stampOf(listPath(kind));
+        listWatch(kind) = SettledFile(listPath(kind));
+        listWatch(kind).accept();
         fileList(kind) = loadList(listPath(kind));
     }
-    overlay_stamp_ = stampOf(overlay_path_);
+    overlay_watch_.accept();
     overlay_ = Overlay();
-    if (overlay_stamp_.exists) {
+    if (overlay_watch_.stamp().exists) {
         try {
             std::vector<std::string> warnings;
             overlay_ = parseOverlay(readFile(overlay_path_), &warnings);
@@ -468,7 +402,7 @@ void RuntimeConfig::load()
             else
                 LOG_ERROR(overlay_path_ << ": " << e.what() << "; ignoring it (the baseline applies); cannot move it to "
                                         << rejected << ": " << std::strerror(errno));
-            overlay_stamp_ = stampOf(overlay_path_);
+            overlay_watch_.accept();
         }
     }
     applyEffective("startup");
@@ -539,10 +473,10 @@ bool RuntimeConfig::applyEffective(const std::string& origin)
     return true;
 }
 
-void RuntimeConfig::writeFile(const std::string& path, const std::string& text, Stamp& stamp)
+void RuntimeConfig::writeFile(SettledFile& file, const std::string& text)
 {
-    atomicWrite(path, text);
-    stamp = stampOf(path);
+    atomicWrite(file.path(), text);
+    file.accept();
 }
 
 void RuntimeConfig::writeOverlay(const Overlay& overlay)
@@ -550,10 +484,10 @@ void RuntimeConfig::writeOverlay(const Overlay& overlay)
     if (overlay.empty()) {
         if (::unlink(overlay_path_.c_str()) != 0 && errno != ENOENT)
             throw std::runtime_error(overlay_path_ + ": cannot delete: " + std::strerror(errno));
-        overlay_stamp_ = stampOf(overlay_path_);
+        overlay_watch_.accept();
         return;
     }
-    writeFile(overlay_path_, overlayJson(overlay), overlay_stamp_);
+    writeFile(overlay_watch_, overlayJson(overlay));
 }
 
 void RuntimeConfig::applyUi(const Overlay& delta, const std::string& origin)
@@ -616,7 +550,7 @@ std::string RuntimeConfig::promoteToBaseline()
             const std::string out = conf_rewrite::rewriteKeys(text, values);
             parseConfigText(out, conf_path_);  // never write a file skycued would refuse
             if (out != text) {
-                writeFile(conf_path_, out, conf_stamp_);
+                writeFile(conf_watch_, out);
                 conf_written = true;
             }
             next.max_range_nm.reset();
@@ -641,10 +575,10 @@ std::string RuntimeConfig::promoteToBaseline()
             continue;
         }
         try {
-            const std::string text = stampOf(path).exists ? readFile(path) : std::string();
+            const std::string text = FileStamp::of(path).exists ? readFile(path) : std::string();
             const std::string out = rewriteList(text, add, remove);
             IdList::parse(out, path);  // never write a file skycued would refuse
-            writeFile(path, out, listStamp(kind));
+            writeFile(listWatch(kind), out);
             list_written[allow ? 0 : 1] = true;
             add.clear();
             remove.clear();
@@ -701,38 +635,21 @@ void RuntimeConfig::arm()
     });
 }
 
-bool RuntimeConfig::settled(const std::string& path, Stamp& known, std::optional<Stamp>& pending)
-{
-    const Stamp now = stampOf(path);
-    if (now == known) {
-        pending.reset();
-        return false;
-    }
-    if (!pending || *pending != now) {  // changed since the last poll: maybe still being written
-        pending = now;
-        return false;
-    }
-    known = now;
-    pending.reset();
-    LOG_INFO(path << ": changed on disk; reloading");
-    return true;
-}
-
 void RuntimeConfig::poll()
 {
     bool quiet_change = false;  // a file reloaded without an Engine change
-    if (settled(conf_path_, conf_stamp_, conf_pending_)) {
+    if (conf_watch_.poll()) {
         reloadConf();
         quiet_change |= !applyEffective("file:" + baseName(conf_path_));
     }
-    if (settled(overlay_path_, overlay_stamp_, overlay_pending_)) {
+    if (overlay_watch_.poll()) {
         reloadOverlay();
         quiet_change |= !applyEffective(std::string("file:") + kOverlayName);
     }
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         if (listPath(kind).empty())
             continue;
-        if (settled(listPath(kind), listStamp(kind), kind == ListKind::allow ? allow_pending_ : block_pending_)) {
+        if (listWatch(kind).poll()) {
             reloadList(kind);
             quiet_change |= !applyEffective("file:" + baseName(listPath(kind)));
         }
@@ -781,14 +698,15 @@ void RuntimeConfig::reloadConf()
             continue;
         // A new list file: read it now and watch it from here on. If it
         // cannot be read the previous entries stay until it can.
-        listStamp(kind) = stampOf(listPath(kind));
+        listWatch(kind) = SettledFile(listPath(kind));
+        listWatch(kind).accept();
         reloadList(kind);
     }
 }
 
 void RuntimeConfig::reloadOverlay()
 {
-    if (!overlay_stamp_.exists) {
+    if (!overlay_watch_.stamp().exists) {
         overlay_ = Overlay();
         return;
     }

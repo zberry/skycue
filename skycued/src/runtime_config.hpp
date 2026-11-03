@@ -35,12 +35,11 @@
 // thread. The Engine must outlive it.
 
 #include "config.hpp"
+#include "file_util.hpp"
 #include "filters.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
-
-#include <sys/types.h>
 
 #include <functional>
 #include <memory>
@@ -133,21 +132,10 @@ public:
     std::string overlayPath() const { return overlay_path_; }
 
 private:
-    struct Stamp {
-        bool exists = false;
-        dev_t dev = 0;
-        ino_t ino = 0;
-        off_t size = 0;
-        long long mtime_ns = 0;
-        bool operator==(const Stamp& o) const;
-        bool operator!=(const Stamp& o) const { return !(*this == o); }
-    };
-    static Stamp stampOf(const std::string& path);
-
     const std::string& listPath(ListKind kind) const;
     IdList& fileList(ListKind kind) { return kind == ListKind::allow ? allow_file_ : block_file_; }
     const IdList& fileList(ListKind kind) const { return kind == ListKind::allow ? allow_file_ : block_file_; }
-    Stamp& listStamp(ListKind kind) { return kind == ListKind::allow ? allow_stamp_ : block_stamp_; }
+    SettledFile& listWatch(ListKind kind) { return kind == ListKind::allow ? allow_watch_ : block_watch_; }
     IdList effectiveList(ListKind kind) const;
     FilterConfig effectiveFilters() const;
 
@@ -155,16 +143,12 @@ private:
     bool applyEffective(const std::string& origin);
     void changed();  // on_change_, if set
     void writeOverlay(const Overlay& overlay);  // throws std::runtime_error
-    void writeFile(const std::string& path, const std::string& text, Stamp& stamp);  // throws
+    void writeFile(SettledFile& file, const std::string& text);  // throws; accepts our write
 
     // Watcher reloads: each logs its errors and keeps the previous values.
     void reloadConf();
     void reloadOverlay();
     void reloadList(ListKind kind);
-    // True when `path` changed since `known` and has kept the same stamp for
-    // two polls in a row (so a file still being written is not read half
-    // done); then `known` is updated.
-    bool settled(const std::string& path, Stamp& known, std::optional<Stamp>& pending);
     void arm();
     void poll();
 
@@ -174,8 +158,9 @@ private:
     Config running_;    // as at load(), with the baseline filter keys of file_conf_
     Overlay overlay_;
     IdList allow_file_, block_file_;
-    Stamp conf_stamp_, overlay_stamp_, allow_stamp_, block_stamp_;
-    std::optional<Stamp> conf_pending_, overlay_pending_, allow_pending_, block_pending_;
+    // The watched files; a list's path is "" until load() and follows
+    // *_LIST_FILE.
+    SettledFile conf_watch_, overlay_watch_, allow_watch_{""}, block_watch_{""};
     boost::asio::steady_timer timer_;
     bool watching_ = false;
     std::function<void()> on_change_;

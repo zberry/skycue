@@ -54,6 +54,12 @@ uint32_t toMs32(std::chrono::milliseconds ms)
 Buf share(std::vector<uint8_t> v) { return std::make_shared<const std::vector<uint8_t>>(std::move(v)); }
 } // namespace
 
+std::string endpointText(const std::string& address, uint16_t port)
+{
+    const bool v6 = address.find(':') != std::string::npos;
+    return (v6 ? "[" + address + "]" : address) + ":" + std::to_string(port);
+}
+
 struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
     Impl(asio::io_context& io_, ForwarderConfig c)
         : io(io_), cfg(std::move(c)), keyframe_interval(clampInterval(cfg.keyframe_interval)),
@@ -261,7 +267,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         }
         error_code pec;
         const auto remote = s->sock.remote_endpoint(pec);
-        s->peer = pec ? std::string("?") : remote.address().to_string() + ":" + std::to_string(remote.port());
+        s->peer = pec ? std::string("?") : endpointText(remote.address().to_string(), remote.port());
         addSession(s);
         accept();
     }

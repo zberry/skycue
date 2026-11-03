@@ -817,6 +817,12 @@ BOOST_AUTO_TEST_CASE(tcp_client_bookkeeping)
     BOOST_REQUIRE(waitUntil([&] { return fx.tcpClients().empty(); }));
 }
 
+BOOST_AUTO_TEST_CASE(endpoint_text_brackets_ipv6)
+{
+    BOOST_TEST(skycued::endpointText("127.0.0.1", 30500) == "127.0.0.1:30500");
+    BOOST_TEST(skycued::endpointText("::1", 30500) == "[::1]:30500");
+}
+
 BOOST_AUTO_TEST_CASE(udp_target_datagram_count)
 {
     RawUdp raw;

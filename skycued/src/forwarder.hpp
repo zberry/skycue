@@ -30,6 +30,9 @@ struct ForwarderConfig {
     size_t max_client_queue_bytes = 1 << 20; // a TCP client with more unsent bytes is disconnected
 };
 
+// "addr:port" for a numeric address, an IPv6 one in brackets ("[::1]:30500").
+std::string endpointText(const std::string& address, uint16_t port);
+
 // One open TCP connection, accepted or dialled (see Forwarder::tcpClients).
 struct CueTcpClient {
     std::string endpoint;                                   // the peer "addr:port"

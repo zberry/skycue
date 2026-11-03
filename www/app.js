@@ -2819,10 +2819,14 @@
     }, function () { return tiles; });
   });
   // The overlays (scripts/make-overlays.sh) are optional like the tiles:
-  // without overlays/meta.json (404) the page offers no overlay toggles.
-  var overlaysReady = fetchJson('overlays/meta.json').then(function (m) {
-    overlayMeta = m && typeof m === 'object' ? m : null;
-  }, function () { overlayMeta = null; });
+  // api/tiles-available says whether overlays/meta.json exists, so it is
+  // fetched only then (no request, no 404, without overlays).
+  var overlaysReady = tilesReady.then(function (tiles) {
+    if (!tiles || tiles.overlays !== true) { overlayMeta = null; return; }
+    return fetchJson('overlays/meta.json').then(function (m) {
+      overlayMeta = m && typeof m === 'object' ? m : null;
+    }, function () { overlayMeta = null; });
+  });
   Promise.all([tilesReady, overlaysReady]).then(function (r) {
     var tiles = r[0];
     initMap(tiles);

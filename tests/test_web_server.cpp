@@ -419,22 +419,40 @@ BOOST_AUTO_TEST_CASE(static_index_served)
     // Tiles: none, then a meta.json, then zoom directories only.
     r = get(f.port, "/api/tiles-available");
     BOOST_TEST(r.status == 200u);
-    BOOST_TEST(r.body == "{\"tiles\":false}");
+    BOOST_TEST(r.body == "{\"tiles\":false,\"overlays\":false}");
     ::mkdir((f.www + "/tiles").c_str(), 0755);
     // As scripts/make-tiles.sh writes it: the bbox array and strings are ignored.
     writeFile(f.www + "/tiles/meta.json", "{\"minZoom\":5,\"maxZoom\":9,\"bbox\":[-10.5,35,30,60],"
                                           "\"source\":\"Natural Earth 1:10m\",\"generated\":\"2026-11-01T00:00:00Z\"}");
-    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":5,\"maxZoom\":9}");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":5,\"maxZoom\":9,\"overlays\":false}");
     ::remove((f.www + "/tiles/meta.json").c_str());
     for (const char* z : {"/tiles/4", "/tiles/7", "/tiles/6"})
         ::mkdir((f.www + z).c_str(), 0755);
     ::mkdir((f.www + "/tiles/7/37").c_str(), 0755);
     writeFile(f.www + "/tiles/7/37/49.png", "PNG");
-    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":4,\"maxZoom\":7}");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":4,\"maxZoom\":7,\"overlays\":false}");
     r = get(f.port, "/tiles/7/37/49.png");
     BOOST_TEST(r.status == 200u);
     BOOST_TEST(r.content_type == "image/png");
     BOOST_TEST(r.cache_control == "max-age=86400");
+}
+
+BOOST_AUTO_TEST_CASE(tiles_available_overlays_flag)
+{
+    WebFx f;
+    const auto ends = [&](const char* tail) {
+        const std::string b = get(f.port, "/api/tiles-available").body;
+        const std::string t = tail;
+        return b.size() >= t.size() && b.compare(b.size() - t.size(), t.size(), t) == 0;
+    };
+    BOOST_TEST(ends(",\"overlays\":false}"));
+    ::mkdir((f.www + "/overlays").c_str(), 0755);
+    writeFile(f.www + "/overlays/meta.json", "{\"files\":{}}");
+    BOOST_TEST(ends(",\"overlays\":true}"));
+    writeFile(f.www + "/overlays/meta.json", "{");
+    BOOST_TEST(ends(",\"overlays\":false}"));
+    ::remove((f.www + "/overlays/meta.json").c_str());
+    BOOST_TEST(ends(",\"overlays\":false}"));
 }
 
 BOOST_AUTO_TEST_CASE(static_file_over_8mib_500)
@@ -459,7 +477,7 @@ BOOST_AUTO_TEST_CASE(missing_www_dir_api_still_works)
     WebFx f(o);
     BOOST_TEST(get(f.port, "/").status == 404u);
     BOOST_TEST(get(f.port, "/api/state").status == 200u);
-    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false}");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
 }
 
 BOOST_AUTO_TEST_CASE(path_traversal_rejected)

@@ -535,6 +535,10 @@ std::string eventJson(const EngineEvent& event)
 
 std::string tilesAvailableJson(const std::string& www_dir)
 {
+    // "overlays": whether overlays/meta.json (scripts/make-overlays.sh) is a usable JSON object.
+    bool overlays = false;
+    if (const auto text = readSmallFile(www_dir + "/overlays/meta.json", 64 * 1024))
+        overlays = JsonObject::parse(*text).has_value();
     const std::string tiles = www_dir + "/tiles";
     if (const auto text = readSmallFile(tiles + "/meta.json", 64 * 1024)) {
         if (const auto meta = JsonObject::parse(*text)) {
@@ -543,6 +547,7 @@ std::string tilesAvailableJson(const std::string& www_dir)
             for (const char* k : {"minZoom", "maxZoom"})
                 if (const auto z = meta->getInt(k))
                     w.add(k, *z);
+            w.add("overlays", overlays);
             return w.str();
         }
     }
@@ -563,11 +568,12 @@ std::string tilesAvailableJson(const std::string& www_dir)
         ::closedir(d);
     }
     if (min_z < 0)
-        return JsonWriter().add("tiles", false).str();
+        return JsonWriter().add("tiles", false).add("overlays", overlays).str();
     return JsonWriter()
         .add("tiles", true)
         .add("minZoom", static_cast<int64_t>(min_z))
         .add("maxZoom", static_cast<int64_t>(max_z))
+        .add("overlays", overlays)
         .str();
 }
 

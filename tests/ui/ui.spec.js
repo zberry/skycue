@@ -51,13 +51,6 @@ test.afterEach(async () => {
   expect(offOrigin, 'requests to other hosts').toEqual([]);
 });
 
-// The page asks for overlays/meta.json to learn whether there are overlays
-// (scripts/make-overlays.sh); most of these skycueds' www directories have
-// none, so the browser's console error for that one 404 is expected.
-function overlaysAbsent(m) {
-  return /\/overlays\/meta\.json$/.test(m.location().url || '') && /404/.test(m.text());
-}
-
 async function openPage(page) {
   await page.goto('/');
   await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
@@ -80,7 +73,7 @@ async function selectTarget(page) {
 
 test('page_loads_without_console_errors', async ({ page }) => {
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error' && !overlaysAbsent(m)) errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   await openPage(page);
   await expect(page.locator('#map.leaflet-container')).toBeVisible();
@@ -483,7 +476,7 @@ async function apiAt(base, path) {
 }
 function watchErrors(page) {
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error' && !overlaysAbsent(m)) errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   return errors;
 }
@@ -1042,7 +1035,7 @@ test.describe('map tiles fallback', () => {
   test('missing_tile_shows_lower_zoom_fallback', async ({ page }) => {
     const pageErrors = [];
     page.on('pageerror', (e) => pageErrors.push(String(e)));
-    expect((await apiAt(TILES_BASE, '/api/tiles-available')).body).toEqual({ tiles: true, minZoom: 0, maxZoom: 6 });
+    expect((await apiAt(TILES_BASE, '/api/tiles-available')).body).toEqual({ tiles: true, minZoom: 0, maxZoom: 6, overlays: true });
     await openPage(page);
     await waitMarkers(page, 1);
     // The map fits the range ring (zoom > 6), so it shows zoom-6 tiles;
@@ -1503,4 +1496,12 @@ test.describe('receiver tab (FIS-B, 2015 sample)', () => {
     await expect(cell('last_uplink_time')).toHaveText('2015-01-24 04:23:43Z');
     await expect(cell('recorder_dropped')).toHaveText('0 / 0');
   });
+});
+
+test('no_overlay_meta_request_without_overlays', async ({ page }) => {
+  const asked = [];
+  page.on('request', (r) => { if (/\/overlays\/meta\.json$/.test(r.url())) asked.push(r.url()); });
+  expect((await api('/api/tiles-available')).body.overlays).toBe(false);
+  await openPage(page);
+  expect(asked).toEqual([]);
 });

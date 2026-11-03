@@ -256,6 +256,13 @@ target_compile_definitions(test_fisb_store PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_fisb_store)
 add_test(NAME fisb_store COMMAND test_fisb_store)
 
+# LocationIndex: learned report positions, persistence, operator CSV (design §3.2).
+add_executable(test_location_index test_location_index.cpp)
+target_link_libraries(test_location_index PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_location_index PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_location_index)
+add_test(NAME location_index COMMAND test_location_index)
+
 # FisbDecoder end to end, Engine/Recorder/replay integration.
 add_executable(test_fisb_decoder test_fisb_decoder.cpp)
 target_link_libraries(test_fisb_decoder PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB

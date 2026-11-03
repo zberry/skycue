@@ -560,7 +560,9 @@ void InputManager::applyFile(const std::vector<InputDef>& user, const std::map<s
 
     // Stop everything that goes or changes first, so a port moved from one
     // input to another is free before the new one binds.
-    for (auto& [id, s] : old) {
+    for (auto& kv : old) {
+        const std::string& id = kv.first;  // not a structured binding: C++17 lambdas cannot capture one
+        Slot& s = kv.second;
         const auto next = std::find_if(user.begin(), user.end(), [&](const InputDef& d) { return d.id == id; });
         if (next == user.end())
             retire(s, false);

@@ -57,7 +57,17 @@ Bytes fspec(const std::vector<int>& frns) {
 Bytes block(const Bytes& records) {
   const std::size_t len = records.size() + 3;
   Bytes out{0x15, static_cast<uint8_t>(len >> 8), static_cast<uint8_t>(len & 0xFF)};
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
+  // gcc 11 false positive: -Wstringop-overread ("reading 1 or more bytes from a
+  // region of size 0") on the memcpy inlined from vector::insert, on a path
+  // where records is empty and insert copies nothing.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overread"
+#endif
   out.insert(out.end(), records.begin(), records.end());
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 11
+#pragma GCC diagnostic pop
+#endif
   return out;
 }
 

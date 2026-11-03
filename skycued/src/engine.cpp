@@ -123,8 +123,7 @@ std::string fileStamp()
 
 Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_ptr<InputManager> inputs,
                Forwarder& forwarder, Recorder* received, Recorder* sent, Recorder* fisb)
-    : io_(io),
-      config_(config),
+    : config_(config),
       inputs_(std::move(inputs)),
       forwarder_(forwarder),
       received_(received),

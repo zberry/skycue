@@ -234,7 +234,6 @@ private:
     std::string filterDescription() const;
     void pushFilterChange(const std::string& origin);
 
-    boost::asio::io_context& io_;
     Config config_;
     // Destroyed after every member below it; safe because ~Engine calls stop() first (no input callback runs after).
     std::unique_ptr<InputManager> inputs_;

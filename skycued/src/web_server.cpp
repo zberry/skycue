@@ -79,8 +79,11 @@ FileRead readRegularFile(const std::string& path, std::string& text)
         result = FileRead::missing;
     else if (static_cast<std::size_t>(st.st_size) > kStaticFileLimit)
         result = FileRead::too_large;
-    else if (const int flags = ::fcntl(fd, F_GETFL); flags < 0 || ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0)
-        result = FileRead::error;
+    if (result == FileRead::ok) {
+        const int flags = ::fcntl(fd, F_GETFL);
+        if (flags < 0 || ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0)
+            result = FileRead::error;
+    }
     if (result != FileRead::ok) {
         ::close(fd);
         return result;

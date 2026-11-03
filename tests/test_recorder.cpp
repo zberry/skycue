@@ -709,6 +709,30 @@ BOOST_AUTO_TEST_CASE(replay_pacing)
     BOOST_TEST(gap < 400);
 }
 
+// Found by fuzz_recording (mode 0) on seed 5, a readsb line of
+// fixtures/fisb/received-with-uplinks.jsonl (2015) against a replay started
+// in 2026 at speed 1e-6: the delay was clamped above only, so a record before
+// the first one (a hand-edited file need not be in order) gave -3.7e23 s,
+// and the double-to-int64 nanosecond conversion overflowed (undefined
+// behaviour, a garbage timer expiry).
+BOOST_AUTO_TEST_CASE(fuzz_recording_replay_delay_overflow)
+{
+    using skycued::replayDelay;
+    skycued::RecordingRecord rec;
+    BOOST_REQUIRE(skycued::parseRecordingLine(R"({"now":1422072720.377,"hex":"a3b5f8"})", rec) ==
+                  skycued::LineKind::readsb_raw);
+    const sys_clock::time_point start{std::chrono::seconds(1793577600)};  // 2026-11-02T00:00:00Z
+    BOOST_TEST((replayDelay(rec.time - start, 1e-6) == steady::duration::zero()));
+    BOOST_TEST((replayDelay(-1s, 1.0) == steady::duration::zero()));  // earlier records play at once
+
+    const auto max = std::chrono::duration_cast<steady::duration>(
+        std::chrono::duration<double>(skycued::kMaxReplayDelaySeconds));
+    BOOST_TEST((replayDelay(start - rec.time, 1e-6) == max));
+    BOOST_TEST((replayDelay(sys_clock::duration::max(), 1e-300) == max));
+    BOOST_TEST((replayDelay(2s, 4.0) == steady::duration(500ms)));
+    BOOST_TEST((replayDelay(0s, 1.0) == steady::duration::zero()));
+}
+
 BOOST_AUTO_TEST_CASE(replay_default_speed_is_realtime)
 {
     TempDir tmp;

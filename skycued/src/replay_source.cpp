@@ -11,12 +11,19 @@
 #include <utility>
 
 namespace skycued {
-namespace {
 
-// Far enough out to be "never" while keeping steady_clock arithmetic safe.
-constexpr double kMaxDelaySeconds = 1e9;
-
-}  // namespace
+std::chrono::steady_clock::duration replayDelay(std::chrono::system_clock::duration offset, double speed)
+{
+    double seconds = std::chrono::duration<double>(offset).count() / speed;
+    // Both bounds, written so a NaN fails them too: an offset before the
+    // first record (a file out of order) or a tiny speed would otherwise
+    // overflow the conversion to steady_clock's int64 nanoseconds.
+    if (!(seconds >= 0))
+        seconds = 0;
+    if (!(seconds <= kMaxReplayDelaySeconds))
+        seconds = kMaxReplayDelaySeconds;
+    return std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(seconds));
+}
 
 ReplaySource::ReplaySource(boost::asio::io_context& io, std::string path, double speed, bool loop)
     : io_(io), timer_(io), path_(std::move(path)), speed_(speed), loop_(loop)
@@ -128,10 +135,7 @@ void ReplaySource::scheduleNext()
     // Absolute schedule from start_, so per-record delays never accumulate.
     const auto offset =
         (records_[next_].time - records_.front().time) + loop_shift_ * static_cast<int64_t>(pass_);
-    double seconds = std::chrono::duration<double>(offset).count() / speed_;
-    seconds = std::min(seconds, kMaxDelaySeconds);
-    timer_.expires_at(start_ + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                   std::chrono::duration<double>(seconds)));
+    timer_.expires_at(start_ + replayDelay(offset, speed_));
     timer_.async_wait([this, alive](const boost::system::error_code& ec) {
         if (!ec && !alive.expired())
             emitNext();

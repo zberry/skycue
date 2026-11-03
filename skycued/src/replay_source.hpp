@@ -34,6 +34,15 @@
 
 namespace skycued {
 
+// The wait from a replay's start to a record `offset` into the recording at
+// `speed` (> 0): offset / speed seconds, clamped to [0,
+// kMaxReplayDelaySeconds] (far enough out to be "never" while keeping
+// steady_clock arithmetic safe); a negative offset (a record before the
+// first, in a hand-edited file) or a NaN gives 0. Pure; ReplaySource paces
+// with it.
+constexpr double kMaxReplayDelaySeconds = 1e9;
+std::chrono::steady_clock::duration replayDelay(std::chrono::system_clock::duration offset, double speed);
+
 class ReplaySource {
 public:
     // speed: 1.0 = real time; N = N times faster; 0 = no pacing (every

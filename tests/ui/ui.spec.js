@@ -488,6 +488,32 @@ test('cues_recent_drops_only_kept_in_this_browser', async ({ page }) => {
   expect(await page.evaluate(() => window.localStorage.getItem('skycue.cues.dropsOnly'))).toBe('0');
 });
 
+// The header strip (stats, Weather, Table) on one row at 1280 px, with
+// live numbers in it (here and, with the FIS-B stats filled, in the 2015
+// sample's describe).
+// headerRowOffsets: how far the middles of Weather and Table sit from the
+// brand's (a wrapped button is a whole row, about 20 px, off), once no stat
+// is cut short (the strip lets them give way before the buttons wrap).
+async function headerRowOffsets(page) {
+  const cut = await page.locator('#stats > .stat').evaluateAll((ss) =>
+    ss.filter((e) => !e.hidden && e.scrollWidth > e.clientWidth).map((e) => e.textContent.trim()));
+  expect(cut, 'stats cut short').toEqual([]);
+  const y = async (sel) => { const b = await page.locator(sel).boundingBox(); return b.y + b.height / 2; };
+  const brand = await y('#stats .brand');
+  return [Math.abs((await y('#wx-toggle')) - brand), Math.abs((await y('#table-toggle')) - brand)];
+}
+test('header_fits_one_row_at_1280', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openPage(page);
+  await waitMarkers(page, 10);
+  for (const d of await headerRowOffsets(page)) expect(d).toBeLessThan(4);
+  // And at the widths between it and 1920 (where the font and gaps grow).
+  for (const width of [1400, 1401, 1600, 1700, 1920]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const d of await headerRowOffsets(page)) expect(d, `at ${width} px`).toBeLessThan(4);
+  }
+});
+
 test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {
   await openPage(page); await waitMarkers(page, 10);
   await page.locator('#wx-toggle').click();
@@ -901,6 +927,17 @@ test.describe('fisb radar (tg30)', () => {
 
 test.describe('fisb text and airspace (2015 sample)', () => {
   test.use({ baseURL: FISB_BASE });
+
+  test('header_fits_one_row_at_1280_with_fisb_stats', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openFisbPage(page);
+    await expect(page.locator('#stat-fisb-stations')).not.toHaveText('–');
+    for (const d of await headerRowOffsets(page)) expect(d).toBeLessThan(4);
+    for (const width of [1401, 1600, 1700]) {
+      await page.setViewportSize({ width, height: 800 });
+      for (const d of await headerRowOffsets(page)) expect(d, `at ${width} px`).toBeLessThan(4);
+    }
+  });
 
   test('tfr_polygon_rendered_and_clickable', async ({ page }) => {
     const errors = watchErrors(page);

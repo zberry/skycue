@@ -358,13 +358,24 @@ table.cfg-table td.cfg-restart { padding-right: 0; white-space: nowrap; text-ali
 .badge { display: inline-block; padding: 0 5px; border: 1px solid var(--line); border-radius: 8px; font-size: 10px; color: var(--muted); }
 
 /* Five tabs on one row needs about 340 px of side panel at the 13 px tab
-   font; below 1280 px the panel narrows and the tabs may wrap. */
+   font; below 1280 px the panel narrows and the tabs may wrap.
+   The header strip (14 stats, Weather, Table) stays on one row from 1280 px:
+   it needs about 1600 px at 13 px with 18 px gaps, so it is 12 px with 8 px
+   gaps up to 1700 px and 11 px up to 1400 px. Should wide numbers still not
+   fit, the plain stats give way (cut with an ellipsis), never the buttons. */
+@media (max-width: 1700px) {
+  #stats { gap: 2px 8px; font-size: 12px; }
+}
 @media (min-width: 1280px) {
   .tabs [role="tablist"] { flex-wrap: nowrap; }
+  #stats { flex-wrap: nowrap; }
+  #stats > * { white-space: nowrap; flex: none; }
+  #stats > .stat:not(.stat-btn) { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 1400px) {
   #filters { width: 230px; }
-  #stats { gap: 2px 12px; font-size: 12px; }
+  #stats { font-size: 11px; }
+  #stats button { padding: 2px 8px; }
   /* Recent decisions wraps in the narrower panel instead of scrolling sideways. */
   #cues-recent td { white-space: normal; overflow-wrap: anywhere; }
 }

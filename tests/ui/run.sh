@@ -157,11 +157,14 @@ wait_fisb "$radar_base" "$(grep -c '"uat_uplink"' "$radar_rec")" || fail "tg30 u
 # Map tiles: one more skycued (the readsb fixture) serving a copy of the www
 # directory (without its own tiles/) with generated tiles while meta.json
 # claims zoom 0..6: 2/1/1 in four coloured quadrants (the fallback for the
-# zoom-6 tiles around the receiver, 4 levels up) and one native zoom-6
-# tile, 6/18/24 (the receiver's), transparent in its west half, which is
-# outside the "spot" region's bbox, so the page draws 2/1/1 underneath it.
+# zoom-6 tiles around the receiver, 4 levels up), one native zoom-6 tile,
+# 6/18/24 (the receiver's), transparent in its west half, which is outside
+# the "spot" region's bbox, and its parent 5/9/12, transparent in its north
+# half and in no region (an edge tile too). Under 6/18/24 the page draws
+# 2/1/1, the nearest ancestor inside a region, not 5/9/12; the other three
+# children of 5/9/12 fall back to it, with 2/1/1 under them.
 tiles_www="$tmp/www-tiles"
-mkdir -p "$tiles_www/tiles/2/1" "$tiles_www/tiles/6/18" || fail "tiles www dir"
+mkdir -p "$tiles_www/tiles/2/1" "$tiles_www/tiles/5/9" "$tiles_www/tiles/6/18" || fail "tiles www dir"
 for f in "$www"/* "$www"/.[!.]*; do
   [ -e "$f" ] || continue
   case $(basename "$f") in tiles|overlays) continue ;; esac
@@ -192,6 +195,7 @@ def png(path, pixel):  # 256x256 RGBA, pixel(x, y) -> (r, g, b, a)
 quad = [[(0x2e, 0x8b, 0x57, 255), (0x1e, 0x90, 0xff, 255)], [(0xff, 0xa5, 0x00, 255), (0x80, 0x00, 0x80, 255)]]
 png(os.path.join(sys.argv[1], "2/1/1.png"), lambda x, y: quad[y // 128][x // 128])
 png(os.path.join(sys.argv[1], "6/18/24.png"), lambda x, y: (0, 0, 0, 0) if x < 128 else (0xff, 0x00, 0xff, 255))
+png(os.path.join(sys.argv[1], "5/9/12.png"), lambda x, y: (0, 0, 0, 0) if y < 128 else (0x00, 0xce, 0xd1, 255))
 EOP
 printf '%s\n' '{"minZoom":0,"maxZoom":6,"bbox":[-180,-85,180,85],"regions":[{"name":"coarse","bbox":[-180,-85,180,85],"minZoom":0,"maxZoom":2},{"name":"spot","bbox":[-75.9375,30,-73.125,45],"minZoom":6,"maxZoom":6}]}' \
   > "$tiles_www/tiles/meta.json"

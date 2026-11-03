@@ -927,5 +927,26 @@ test('config_text_round_trips_through_the_conf_grammar', () => {
   assert.ok(t.includes('# BLOCK_LIST_FILE cannot be written in skycue.conf'));
 });
 
+test('nearestInsideAncestor skips region-edge ancestors', () => {
+  // tileInsideRegions reads minZoom/maxZoom (app_pure.js:214-221). "g" spans the whole Web
+  // Mercator square (|lat| <= 85.0511), so every z 0..2 tile is inside it.
+  const regions = [{ name: 'g', bbox: [-180, -85.06, 180, 85.06], minZoom: 0, maxZoom: 2 },
+                   { name: 'spot', bbox: [-78, 38, -76, 40], minZoom: 3, maxZoom: 6 }];
+  // 6/18/24 and its z 5..3 ancestors each overlap "spot" without lying inside it.
+  for (let n = 0; n <= 3; n++) {
+    const p = n ? P.parentTile(6, 18, 24, n) : { z: 6, x: 18, y: 24 };
+    const b = P.tileBounds(p.z, p.x, p.y);
+    assert.ok(b.west < -76 && b.east > -78 && b.south < 40 && b.north > 38, 'overlaps at z' + p.z);
+    assert.strictEqual(P.tileInsideRegions(p.z, p.x, p.y, regions), false, 'edge at z' + p.z);
+  }
+  // 6/18/24 lies partly outside "spot"; levels 1-3 (z 5..3) are edge tiles, level 4 (z 2) is inside "g".
+  assert.strictEqual(P.nearestInsideAncestor(6, 18, 24, 1, 4, regions), 4);
+  assert.strictEqual(P.nearestInsideAncestor(6, 18, 24, 1, 3, regions), null);
+  // 2/1/1's parent 1/0/0 reaches 85.0511 N, inside "g"'s 85.06 edge (H9).
+  assert.strictEqual(P.nearestInsideAncestor(2, 1, 1, 1, 4, regions), 1);
+  // Starting further up, and past z 0.
+  assert.strictEqual(P.nearestInsideAncestor(6, 18, 24, 5, 9, regions), 5);
+  assert.strictEqual(P.nearestInsideAncestor(1, 0, 0, 2, 4, regions), null);
+});
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

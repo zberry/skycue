@@ -1151,9 +1151,10 @@ test.describe('fisb text and airspace (2015 sample)', () => {
 });
 
 // Map tiles, against the skycued run.sh starts with generated tiles while
-// meta.json says zoom 0..6: 2/1/1 in four coloured quadrants and one native
+// meta.json says zoom 0..6: 2/1/1 in four coloured quadrants, one native
 // zoom-6 tile, 6/18/24 (the receiver's), transparent in its west half, on
-// the edge of its region. Every other zoom-6 tile is missing.
+// the edge of its region, and its parent 5/9/12, half transparent and in no
+// region. Every other zoom-3..6 tile is missing.
 const TILES_BASE = process.env.SKYCUE_TILES_URL;
 
 test.describe('map tiles fallback', () => {
@@ -1180,7 +1181,7 @@ test.describe('map tiles fallback', () => {
       t.imgs.every((i) => i.natural === 256)), { timeout: 15000 }).toBe(true);
     const tiles = await read();
     const px = (n) => `${n}px`;
-    let fallbacks = 0;
+    let fallbacks = 0, siblings = 0;
     const offsets = new Set();
     for (const t of tiles) {
       const [, x, y] = t.tile.split('/').map(Number);
@@ -1195,6 +1196,15 @@ test.describe('map tiles fallback', () => {
         expect(t.imgs.length).toBe(2);
         expect(t.imgs[0]).toMatchObject(Object.assign({ underlay: true }, parent));
         expect(t.imgs[1]).toMatchObject({ src: 'tiles/6/18/24.png', width: px(256), left: px(0), top: px(0), underlay: false });
+      } else if (x >> 1 === 9 && y >> 1 === 12) {
+        // A sibling: enlarged 5/9/12, itself an edge tile, over 2/1/1.
+        expect(t.fallback, t.tile).toBe('5');
+        expect(t.underlay, t.tile).toBe('2');
+        expect(t.imgs.length).toBe(2);
+        expect(t.imgs[0], t.tile).toMatchObject(Object.assign({ underlay: true }, parent));
+        expect(t.imgs[1], t.tile).toMatchObject({ src: 'tiles/5/9/12.png', natural: 256, width: px(512),
+          left: px(-(x % 2) * 256), top: px(-(y % 2) * 256), underlay: false });
+        siblings++;
       } else {
         expect(x >> 4, t.tile).toBe(1); // the view is inside 2/1/1
         expect(y >> 4, t.tile).toBe(1);
@@ -1207,9 +1217,12 @@ test.describe('map tiles fallback', () => {
     }
     expect(tiles.some((t) => t.tile === '6/18/24'), 'the receiver tile is shown').toBe(true);
     expect(fallbacks).toBeGreaterThanOrEqual(3);
+    expect(siblings).toBeGreaterThanOrEqual(1);
     expect(offsets.size).toBe(fallbacks); // each at its own place in the parent
     const counts = await page.evaluate(() => window.skycueApp.tileCounts());
-    expect(counts.underlay).toBeGreaterThanOrEqual(1);
+    expect(counts.underlay).toBeGreaterThanOrEqual(1 + siblings);
+    // The first view's tiles that Leaflet pruned before they loaded are not failures.
+    expect(counts.failed).toBe(0);
     expect(pageErrors).toEqual([]);
   });
 

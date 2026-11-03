@@ -221,6 +221,19 @@
     });
   }
 
+  // The smallest n, from <= n <= maxLevels, whose ancestor n levels up of
+  // tile z/x/y lies wholly inside a region (tileInsideRegions on the
+  // ancestor), or null: the first ancestor that is opaque everywhere, for an
+  // underlay below a region-edge tile.
+  function nearestInsideAncestor(z, x, y, from, maxLevels, regions) {
+    for (var n = Math.max(1, from); n <= maxLevels; n++) {
+      var p = parentTile(z, x, y, n);
+      if (!p) return null;
+      if (tileInsideRegions(p.z, p.x, p.y, regions)) return n;
+    }
+    return null;
+  }
+
   // A drop for `filtered` only stops forwarding: the aircraft is still
   // observed (and shown, recoloured). Any other reason ends the track.
   function dropRemovesMarker(reason) { return reason !== 'filtered'; }
@@ -991,6 +1004,7 @@
     thousands: thousands, trackKey: trackKey, markerLabel: markerLabel, listHas: listHas,
     sortTracks: sortTracks, graticuleStep: graticuleStep, parentTile: parentTile,
     tileBounds: tileBounds, tileInsideRegions: tileInsideRegions,
+    nearestInsideAncestor: nearestInsideAncestor,
     dropRemovesMarker: dropRemovesMarker,
     CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
     filterHistoryRows: filterHistoryRows,

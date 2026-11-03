@@ -145,25 +145,34 @@
       load(img, 0, function (p) {
         if (!p) {
           // Asynchronously: Leaflet registers the tile after createTile returns.
+          // A tile Leaflet has already dropped (pruned on a zoom) is not a failure.
           setTimeout(function () {
             tile.complete = true;
-            tileCounts.failed++;
+            if (!dropped()) tileCounts.failed++;
             done(new Error('no tile for ' + coords.z + '/' + coords.x + '/' + coords.y), tile);
           }, 0);
           return;
         }
         tile.complete = true;
-        if (p.scale > 1) {
+        // n: how many levels up the shown tile is (0 native).
+        var n = Math.round(Math.log2(p.scale));
+        if (n > 0) {
           tileCounts.fallback++;
           tile.classList.add('tile-fallback');
           tile.setAttribute('data-fallback-zoom', String(p.z));
         } else {
           tileCounts.loaded++;
-          if (o.regions && !P.tileInsideRegions(coords.z, coords.x, coords.y, o.regions)) {
+        }
+        // A tile on a region's edge may be transparent there: below it goes
+        // the nearest ancestor (above the one shown) that lies wholly inside a
+        // region, so the underlay is opaque; none, no underlay.
+        if (o.regions && !P.tileInsideRegions(p.z, p.x, p.y, o.regions)) {
+          var from = P.nearestInsideAncestor(coords.z, coords.x, coords.y, n + 1, o.fallbackLevels, o.regions);
+          if (from !== null) {
             var under = newImg();
             under.className = 'tile-underlay';
             tile.insertBefore(under, img);
-            load(under, 1, function (q) {
+            load(under, from, function (q) {
               if (q) {
                 tileCounts.underlay++;
                 tile.setAttribute('data-underlay-zoom', String(q.z));

@@ -18,14 +18,16 @@
 #   --growth F      largest RSS growth over the window (default 0.05)
 #   --fd-tolerance N  largest fd count change over the window (default 2)
 #
-# Instance A replays fixtures/fisb/received-tg30.jsonl in a loop (tracks and
-# FIS-B); instance B has no readsb/dump978 and one pingstation_json input fed
-# by skycue-pingsim. Each has a WebSocket client (ws_client.mjs) and a cue TCP
+# Instance A replays fixtures/fisb/received-tg30.jsonl in a loop (FIS-B
+# uplinks only: its observations and tracks stay 0); instance B has no
+# readsb/dump978 and one pingstation_json input fed by skycue-pingsim (the
+# tracks). Each has a WebSocket client (ws_client.mjs) and a cue TCP
 # client (skycue-dump --tcp on the port the daemon logged). Ports are
 # ephemeral; every wait is a bounded poll; everything started is stopped by
 # its recorded pid on every exit path.
 #
-# Exit 0 PASS, 1 FAIL, 77 SKIP (no node or curl), 2 usage.
+# Exit 0 PASS, 1 FAIL, 77 SKIP (no node, a node without WebSocket, or no
+# curl), 2 usage.
 
 set -u
 
@@ -82,6 +84,9 @@ python3 -I -c 'import sys; float(sys.argv[1]); int(sys.argv[2])' "$growth" "$fd_
   echo "soak.sh: --growth must be a number and --fd-tolerance a whole number" >&2; exit 2; }
 
 command -v node >/dev/null 2>&1 || { echo "SKIP: node not found"; exit 77; }
+# ws_client.mjs uses node's built-in WebSocket (node 22 and later).
+node -e 'process.exit(typeof WebSocket==="function"?0:1)' >/dev/null 2>&1 || {
+  echo "SKIP: node without WebSocket (need node >= 22)"; exit 77; }
 command -v curl >/dev/null 2>&1 || { echo "SKIP: curl not found"; exit 77; }
 
 slow=${SKYCUE_TEST_SLOW:-1}
@@ -91,7 +96,7 @@ out=${out:-./soak-$(date -u +%Y%m%dT%H%M%SZ)}
 mkdir -p "$out" || { echo "soak.sh: cannot create $out" >&2; exit 2; }
 out=$(cd "$out" && pwd)
 rm -f "$out"/*.pid "$out"/A.log "$out"/B.log "$out"/soak.csv "$out"/verdict.txt "$out"/*.client.log
-work=$(mktemp -d "${TMPDIR:-/tmp}/skycue-soak.XXXXXX") || { echo "soak.sh: mktemp failed" >&2; exit 2; }
+work=$(mktemp -d "$out/work.XXXXXX") || { echo "soak.sh: mktemp failed" >&2; exit 2; }
 
 # --- process bookkeeping ----------------------------------------------------
 # names[i] and pids[i]: everything started, in start order; stopped in reverse.

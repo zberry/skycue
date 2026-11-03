@@ -15,7 +15,9 @@ namespace skycued {
 
 // One JSON object, parsed with Boost.PropertyTree. PropertyTree keeps every
 // scalar as its text, so the getters convert on demand; arrays and nested
-// objects parse but are never returned as scalars.
+// objects parse but are never returned as scalars. Every getter looks its
+// key up literally among this object's own keys (ptree::find, not a path):
+// a key containing '.' is that key, never a path into a nested object.
 class JsonObject {
 public:
     // Longer input is rejected without parsing (a readsb line is about 500 bytes).

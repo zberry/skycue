@@ -363,6 +363,8 @@ table.cfg-table td.cfg-restart { padding-right: 0; white-space: nowrap; text-ali
    it needs about 1600 px at 13 px with 18 px gaps, so it is 12 px with 8 px
    gaps up to 1700 px and 11 px up to 1400 px. Should wide numbers still not
    fit, the plain stats give way (cut with an ellipsis), never the buttons. */
+/* The 12 px step: in effect at 1401-1700 px (the max-width: 1400px rule
+   below takes over at 1400 px and narrower). */
 @media (max-width: 1700px) {
   #stats { gap: 2px 8px; font-size: 12px; }
 }
@@ -370,6 +372,9 @@ table.cfg-table td.cfg-restart { padding-right: 0; white-space: nowrap; text-ali
   .tabs [role="tablist"] { flex-wrap: nowrap; }
   #stats { flex-wrap: nowrap; }
   #stats > * { white-space: nowrap; flex: none; }
+  /* text-overflow: ellipsis, not wrapping: with nowrap the strip cannot grow
+     a second row, so a stat too wide for its share is cut visibly ("...")
+     rather than clipped mid-glyph or pushing the buttons off the row. */
   #stats > .stat:not(.stat-btn) { flex: 0 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 1400px) {

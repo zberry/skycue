@@ -233,6 +233,7 @@ export SKYCUE_RADAR_URL="$radar_base"
 export SKYCUE_TILES_URL="$tiles_base"
 export SKYCUE_OVERLAYS_URL="$ov_base"
 export SKYCUE_RECEIVERS_URL="$rx_base"
+export SKYCUE_CUE_PORT="$cue_port"
 export SKYCUE_UI_OUT="$out_dir"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 (cd "$here" && npx --no-install playwright test)

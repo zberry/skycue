@@ -323,6 +323,23 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .device-marker svg, .station-marker svg { display: block; }
 .help { margin-top: 10px; }
 
+/* cues tab */
+#pane-cues h2 { margin-top: 14px; }
+#pane-cues h2:first-child { margin-top: 0; }
+#cues-counters td { font-variant-numeric: tabular-nums; }
+.cues-scroll { max-height: 40vh; overflow: auto; border-bottom: 1px solid var(--line); }
+table.cues-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.cues-table th { position: sticky; top: 0; background: var(--panel); text-align: left; color: var(--muted); font-weight: normal; padding: 2px 4px 2px 0; }
+table.cues-table td { padding: 2px 4px 2px 0; border-top: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
+table.cues-table td.empty { color: var(--muted); border: none; }
+#cues-recent tbody tr { cursor: pointer; }
+#cues-recent tbody tr:hover { background: var(--panel-2); }
+#cues-recent td:nth-child(4), #cues-recent td:nth-child(5) { white-space: normal; overflow-wrap: anywhere; }
+#cues-clients td:first-child { white-space: normal; word-break: break-all; }
+#cues-clients td:nth-child(3) { white-space: normal; }
+#cues-filters li { display: block; color: var(--text); }
+#cues-filters .cf-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+
 @media (max-width: 1400px) {
   #filters { width: 230px; }
   #details { width: 300px; }

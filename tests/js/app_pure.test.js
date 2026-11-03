@@ -830,6 +830,27 @@ test('winds_periods_and_levels', () => {   // synthetic records
   assert.deepStrictEqual(P.windsLevelsFor(rs, 6), [3000, 6000, 9000]);
   assert.deepStrictEqual(P.windsLevelsFor(rs, 24), []);
 });
+test('ring_and_decision_rows', () => {
+  const r = [];
+  for (let i = 0; i < 205; i++) P.pushRing(r, i, 200);
+  assert.strictEqual(r.length, 200); assert.strictEqual(r[0], 5);
+  assert.deepStrictEqual(P.decisionRow({ type: 'drop', hex: 'a1b2c3', addr_type: 'icao', reason: 'filtered', decision: 'blocked',
+    callsign: 'UAL1423', time: '2020-10-30T09:00:17.000Z' }),
+    { key: 'a1b2c3|icao', time: '2020-10-30T09:00:17.000Z', hex: 'a1b2c3', callsign: 'UAL1423', decision: 'blocked', reason: 'filtered' });
+  assert.strictEqual(P.decisionRow({ type: 'update', hex: 'a1b2c3', addr_type: 'icao', decision: 'send', last_seen: 'T' }).reason, 'sent');
+  assert.strictEqual(P.decisionRow({ type: 'drop', hex: 'a1b2c3', addr_type: 'icao', reason: 'timeout', time: 'T' }).decision, '');
+});
+test('filter_history_rows_diff_consecutive', () => {
+  const rows = P.filterHistoryRows([
+    { time: 'T0', origin: 'startup', filters: { max_range_nm: 150, min_elevation_deg: 0 } },
+    { time: 'T1', origin: 'ui', filters: { max_range_nm: 20, min_elevation_deg: 0 } },
+    { time: 'T2', origin: 'file:skycue.conf', filters: { max_range_nm: 20, min_elevation_deg: 2 } }]);
+  assert.deepStrictEqual(rows.map((r) => r.origin), ['file:skycue.conf', 'ui', 'startup']);
+  assert.deepStrictEqual(rows[0].diffs, [{ field: 'min_elevation_deg', from: 0, to: 2 }]);
+  assert.deepStrictEqual(rows[1].diffs, [{ field: 'max_range_nm', from: 150, to: 20 }]);
+  assert.deepStrictEqual(rows[2].diffs, [{ field: 'max_range_nm', from: null, to: 150 }, { field: 'min_elevation_deg', from: null, to: 0 }]);
+  assert.deepStrictEqual(P.filterHistoryRows([]), []);
+});
 
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

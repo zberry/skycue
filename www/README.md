@@ -112,6 +112,20 @@ Device positions are `.device-marker` markers, FIS-B ground stations
 `.station-marker`. Everything from an input's definition, the device or a
 server error is set with `textContent`, never as markup.
 
+## Cues tab
+
+The Cues tab (`showCues`) shows skycued's output side. `#cues-counters` has
+one row per `CUE_COUNTERS` entry, from every `stats` item. Every `update`
+and `drop` WebSocket item becomes a `decisionRow` pushed into a ring of the
+last `DECISIONS_RING` (200) with `pushRing`, whether the tab is shown or
+not; `#cues-recent` lists it newest first and a row click selects the track
+(`data-key` is `trackKey`). `#cues-filters` is `GET /api/filters/history`
+through `filterHistoryRows`, which diffs consecutive entries (newest first;
+the startup entry has every field, from `null`), and `#cues-clients` is
+`GET /api/cues/clients` (`tr.tcp`, `tr.udp`). While the tab is shown both
+are fetched again every 5 s, and the history also on every `filters` item.
+Origins, endpoints and callsigns are set with `textContent`.
+
 ## Geometry
 
 `elevationDeg` in `app_pure.js` duplicates `skycued/src/geo.cpp`

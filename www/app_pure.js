@@ -225,6 +225,51 @@
   // observed (and shown, recoloured). Any other reason ends the track.
   function dropRemovesMarker(reason) { return reason !== 'filtered'; }
 
+  // ---- Cues tab ----
+  // The stats counters the tab shows, in this order (docs/web-api.md, the
+  // stats object): what was sent, then the drops by reason and the
+  // filtered drops by the decision that dropped them.
+  var CUE_COUNTERS = [
+    ['sent_updates', 'Updates sent'], ['sent_drops', 'Drops sent'],
+    ['drops_timeout', 'Dropped: timeout'], ['drops_filtered', 'Dropped: filtered'],
+    ['drops_blocked', 'Filtered: blocked'], ['drops_out_of_range', 'Filtered: out of range'],
+    ['drops_below_elevation', 'Filtered: below elevation'], ['drops_no_position', 'Filtered: no position'],
+    ['drops_source_lost', 'Dropped: source lost']
+  ];
+  var DECISIONS_RING = 200;         // update / drop items kept for the Recent decisions table
+
+  // Appends `item`, drops the oldest past `cap`; the same array.
+  function pushRing(ring, item, cap) {
+    ring.push(item);
+    if (ring.length > cap) ring.splice(0, ring.length - cap);
+    return ring;
+  }
+
+  // One Recent decisions row from an `update` or `drop` ws item.
+  function decisionRow(it) {
+    var drop = it.type === 'drop';
+    return {
+      key: trackKey(it), time: drop ? it.time : it.last_seen, hex: it.hex, callsign: it.callsign || '',
+      decision: drop ? (it.decision || '') : it.decision, reason: drop ? it.reason : 'sent'
+    };
+  }
+
+  // GET /api/filters/history's changes (oldest first, each the new state)
+  // as rows newest first, each with what changed from the entry before it;
+  // the first (startup) entry has every field, from null.
+  function filterHistoryRows(changes) {
+    var rows = [];
+    changes.forEach(function (c, i) {
+      var prev = i ? changes[i - 1].filters || {} : null, cur = c.filters || {}, diffs = [];
+      Object.keys(cur).forEach(function (f) {
+        var from = prev && f in prev ? prev[f] : null;
+        if (!prev || from !== cur[f]) diffs.push({ field: f, from: from, to: cur[f] });
+      });
+      rows.unshift({ time: c.time, origin: c.origin, diffs: diffs });
+    });
+    return rows;
+  }
+
   function backoffMs(attempt) { return Math.min(5000, 500 * Math.pow(2, attempt)); }
 
   // skycued's data clock minus the browser's clock, after seeing the
@@ -861,6 +906,8 @@
     sortTracks: sortTracks, graticuleStep: graticuleStep, parentTile: parentTile,
     tileBounds: tileBounds, tileInsideRegions: tileInsideRegions,
     dropRemovesMarker: dropRemovesMarker,
+    CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
+    filterHistoryRows: filterHistoryRows,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,

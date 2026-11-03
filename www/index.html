@@ -102,6 +102,7 @@
         <button type="button" role="tab" id="tab-track" aria-controls="pane-track" aria-selected="true">Track</button>
         <button type="button" role="tab" id="tab-weather" aria-controls="pane-weather" aria-selected="false">Weather</button>
         <button type="button" role="tab" id="tab-receiver" aria-controls="pane-receiver" aria-selected="false">Receiver</button>
+        <button type="button" role="tab" id="tab-cues" aria-controls="pane-cues" aria-selected="false">Cues</button>
       </div>
       <button type="button" id="details-close" aria-label="Close (Esc)">×</button>
     </div>
@@ -199,6 +200,24 @@
       <ul id="stations-list" class="rx-list"></ul>
       <h2>Decoder health</h2>
       <table id="decoder-health" class="kv"><tbody></tbody></table>
+    </section>
+    <section id="pane-cues" role="tabpanel" aria-labelledby="tab-cues" hidden>
+      <h2>Counters</h2>
+      <table id="cues-counters" class="kv"><tbody></tbody></table>
+      <h2>Recent decisions</h2>
+      <div class="cues-scroll">
+        <table id="cues-recent" class="cues-table">
+          <thead><tr><th>Time</th><th>Address</th><th>Callsign</th><th>Decision</th><th>Reason</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <h2>Filter changes</h2>
+      <ul id="cues-filters" class="rx-list"></ul>
+      <h2>Cue clients</h2>
+      <table id="cues-clients" class="cues-table">
+        <thead><tr><th>Endpoint</th><th>Direction</th><th>Since</th><th>Sent</th></tr></thead>
+        <tbody></tbody>
+      </table>
     </section>
   </aside>
 </main>

@@ -393,6 +393,64 @@ test('screenshots', async ({ page }, testInfo) => {
   await page.screenshot({ path: testInfo.outputPath(`skycue-table-${testInfo.project.name}.png`), fullPage: true });
 });
 
+// ---- Cues tab ------------------------------------------------------------------
+const net = require('net');
+const TARGET_KEY = `${TARGET}|icao`;
+// Adds TARGET to or removes it from the block list: a same-origin POST from the page.
+const blockTarget = (page, op) => page.evaluate(([o, hex]) => fetch('api/lists/block', { method: 'POST',
+  headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [o]: [hex] }) }).then((r) => r.status), [op, TARGET]);
+test('cues_tab_rows_counters_history_clients', async ({ page }) => {
+  const errors = watchErrors(page);
+  const sock = net.connect(Number(process.env.SKYCUE_CUE_PORT), '127.0.0.1');
+  await new Promise((ok) => sock.once('connect', ok));
+  try {
+    await openPage(page); await waitMarkers(page, 10);
+    await page.locator('#wx-toggle').click();
+    await page.locator('#tab-cues').click();
+    await expect(page.locator('#pane-cues')).toBeVisible();
+    // a block makes a filtered drop row with decision "blocked", its removal a send at once (this
+    // replay's own sends can be 40 s apart)
+    expect(await blockTarget(page, 'add')).toBe(200);
+    await expect(page.locator(`#cues-recent tbody tr[data-key="${TARGET_KEY}"]`, { hasText: 'blocked' }).first()).toBeVisible({ timeout: 10000 });
+    expect(await blockTarget(page, 'remove')).toBe(200);
+    await expect.poll(() => page.locator('#cues-recent tbody tr').count(), { timeout: 15000 }).toBeGreaterThan(1);
+    await expect(page.locator('#cues-recent tbody tr').first()).toContainText('sent');
+    // the rendered counters match the API within the 1 s stats cadence
+    const shown = async (k) => Number(await page.locator(`#cues-counters tr[data-counter="${k}"] td.v`).innerText());
+    const st = (await api('/api/stats')).body;
+    expect(Math.abs((await shown('sent_updates')) - st.sent_updates)).toBeLessThanOrEqual(st.sent_updates * 0.2 + 50);
+    expect(st.drops_blocked).toBeGreaterThan(0);
+    for (const k of ['drops_blocked', 'drops_out_of_range', 'drops_below_elevation', 'drops_no_position'])
+      await expect.poll(async () => (await shown(k)) === (await api('/api/stats')).body[k], { timeout: 3000 }).toBe(true);
+    expect(st.drops_filtered).toBe(st.drops_blocked + st.drops_out_of_range + st.drops_below_elevation + st.drops_no_position);
+    await expect(page.locator('#cues-filters li').last()).toContainText('startup');
+    // a range change from the page is the newest entry, origin "ui", old → new (a wider range drops nothing)
+    const r0 = (await api('/api/filters')).body.max_range_nm;
+    const putRange = (v) => page.evaluate((x) => fetch('api/filters', { method: 'PUT',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ max_range_nm: x }) }).then((r) => r.status), v);
+    expect(await putRange(r0 + 1)).toBe(200);
+    try {
+      await expect(page.locator('#cues-filters li').first()).toContainText(`ui: max range ${r0} → ${r0 + 1} nm`);
+    } finally { expect(await putRange(null)).toBe(200); }
+    // this test's own cue connection is listed
+    await expect(page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` })).toHaveCount(1, { timeout: 10000 });
+    await expect(page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` })).toContainText('accepted');
+  } finally { sock.destroy(); }
+  expect(errors).toEqual([]);
+});
+test('cues_row_click_selects_track', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.locator('#wx-toggle').click(); await page.locator('#tab-cues').click();
+  // TARGET's own sends can be 40 s apart in this replay, so a block and its removal make its row now
+  expect(await blockTarget(page, 'add')).toBe(200);
+  expect(await blockTarget(page, 'remove')).toBe(200);
+  const row = page.locator(`#cues-recent tbody tr[data-key="${TARGET_KEY}"]`).first();
+  await expect(row).toBeVisible({ timeout: 15000 });
+  await row.click();
+  await expect(page.locator('#tab-track')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#details [data-field="hex"]')).toHaveText(TARGET);
+});
+
 // ---- FIS-B ---------------------------------------------------------------------
 async function apiAt(base, path) {
   const r = await fetch(base + path);

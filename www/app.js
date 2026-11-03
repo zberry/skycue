@@ -619,14 +619,16 @@
 
   // ---- selection panel ---------------------------------------------------------
   // The side panel: a Track tab (the selected aircraft), a Weather tab
-  // (FIS-B text reports and the clicked airspace shape) and a Receiver tab
-  // (inputs, ground stations, decoder health). The tabs are the panel's
+  // (FIS-B text reports and the clicked airspace shape), a Receiver tab
+  // (inputs, ground stations, decoder health) and a Cues tab (what was sent
+  // and dropped, filter changes, cue clients). The tabs are the panel's
   // [role=tab] buttons, tab-<name> showing pane-<name>; a header button with
   // data-opens-tab="<name>" toggles the panel on that tab. TAB_SHOWN[name]
   // draws a tab when it is shown. A new tab: its markup and one entry here.
   var TAB_SHOWN = {
     weather: function () { renderWx(true); },
-    receiver: function () { renderReceiver(); }
+    receiver: function () { renderReceiver(); },
+    cues: showCues
   };
   var activeTab = 'track';
   function eachEl(selector, fn) { Array.prototype.forEach.call(document.querySelectorAll(selector), fn); }
@@ -911,6 +913,7 @@
     setStat('stat-tracks-forwarded', String(s.tracks_forwarded));
     applyInputLines(s.inputs, now);
     rx.stats = s;
+    if (tabShown('cues')) renderCueCounters();
     setStat('stat-tcp', String(s.tcp_clients));
     setStat('stat-udp', String(s.udp_targets));
     setStat('stat-rec-drops', String((s.recorder_dropped_received || 0) + (s.recorder_dropped_sent || 0)));
@@ -2154,6 +2157,122 @@
     });
   }
 
+  // ---- Cues tab ------------------------------------------------------------------
+  // docs/operating.md, Cues tab. The counters follow every stats item; every
+  // update and drop item goes into a ring of the last DECISIONS_RING whether
+  // the tab is shown or not; the filter changes (GET /api/filters/history)
+  // and the cue clients (GET /api/cues/clients) are fetched when the tab is
+  // shown and every CUES_POLL_MS while it is, the history also on every
+  // `filters` item. Server strings go in through textContent.
+  var CUES_POLL_MS = 5000;
+  var FILTER_TEXT = { max_range_nm: ['max range', ' nm'], min_elevation_deg: ['min elevation', '°'] };
+  var cues = { ring: [], recentDirty: true, historySeq: 0, clientsSeq: 0 };
+
+  function onDecision(it) {
+    P.pushRing(cues.ring, P.decisionRow(it), P.DECISIONS_RING);
+    cues.recentDirty = true;
+  }
+  function clockTime(iso) {
+    var ms = Date.parse(iso);
+    return isNaN(ms) ? '' : new Date(ms).toISOString().substr(11, 8) + 'Z';
+  }
+  function renderCueCounters() {
+    var body = $('cues-counters').tBodies[0], s = rx.stats || {};
+    if (!body.rows.length) {
+      P.CUE_COUNTERS.forEach(function (c) {
+        var tr = el('tr');
+        tr.setAttribute('data-counter', c[0]);
+        tr.appendChild(el('th', null, c[1]));
+        tr.appendChild(el('td', 'v'));
+        body.appendChild(tr);
+      });
+    }
+    P.CUE_COUNTERS.forEach(function (c, i) {
+      var td = body.rows[i].cells[1], text = String(s[c[0]] || 0);
+      if (td.textContent !== text) td.textContent = text;
+    });
+  }
+  function renderCueRecent() {
+    cues.recentDirty = false;
+    var body = $('cues-recent').tBodies[0];
+    body.textContent = '';
+    for (var i = cues.ring.length - 1; i >= 0; i--) {
+      var r = cues.ring[i], tr = el('tr');
+      tr.setAttribute('data-key', r.key);
+      tr.appendChild(el('td', null, clockTime(r.time)));
+      tr.appendChild(el('td', null, r.hex));
+      tr.appendChild(el('td', null, r.callsign));
+      var d = el('td', null, r.decision);
+      if (r.decision) d.className = 'decision-' + (P.decisionColor(r.decision) || 'unknown');
+      tr.appendChild(d);
+      tr.appendChild(el('td', null, r.reason));
+      body.appendChild(tr);
+    }
+  }
+  function filterDiffText(d) {
+    var f = FILTER_TEXT[d.field] || [d.field, ''];
+    var v = function (x) { return x === null || x === undefined ? '—' : String(x); };
+    return f[0] + ' ' + (d.from === null ? '' : v(d.from) + ' → ') + v(d.to) + f[1];
+  }
+  function renderCueFilters(changes) {
+    var ul = $('cues-filters'), rows = P.filterHistoryRows(changes);
+    ul.textContent = '';
+    if (!rows.length) ul.appendChild(el('li', 'empty', 'None.'));
+    rows.forEach(function (r) {
+      var li = el('li');
+      li.appendChild(el('span', 'cf-time', clockTime(r.time)));
+      li.appendChild(document.createTextNode(' ' + r.origin + ': ' +
+        (r.diffs.length ? r.diffs.map(filterDiffText).join(', ') : 'no change')));
+      ul.appendChild(li);
+    });
+  }
+  function clientRow(cls, cells) {
+    var tr = el('tr', cls);
+    cells.forEach(function (c) { tr.appendChild(el('td', null, c)); });
+    return tr;
+  }
+  function renderCueClients(c) {
+    var body = $('cues-clients').tBodies[0], tcp = c.tcp || [], udp = c.udp || [], now = Date.now();
+    body.textContent = '';
+    tcp.forEach(function (t) {
+      var ms = Date.parse(t.connected_since);
+      body.appendChild(clientRow('tcp', [t.endpoint, t.direction,
+        isNaN(ms) ? '' : clockTime(t.connected_since) + ' · ' + P.formatAge(ms, now), P.thousands(t.bytes_sent || 0) + ' B']));
+    });
+    udp.forEach(function (u) {
+      body.appendChild(clientRow('udp', [u.endpoint, 'udp', '', P.thousands(u.datagrams_sent || 0) + ' datagrams']));
+    });
+    if (!tcp.length && !udp.length) {
+      var td = el('td', 'empty', 'None.');
+      td.colSpan = 4;
+      body.appendChild(el('tr', 'empty')).appendChild(td);
+    }
+  }
+  // A response that an answer to a later request overtook is not shown.
+  function fetchCueHistory() {
+    var seq = ++cues.historySeq;
+    request('GET', 'api/filters/history').then(function (h) {
+      if (seq === cues.historySeq) renderCueFilters(h.changes || []);
+    }).catch(function () { /* the WebSocket watchdog reports a dead skycued */ });
+  }
+  function fetchCueClients() {
+    var seq = ++cues.clientsSeq;
+    request('GET', 'api/cues/clients').then(function (c) {
+      if (seq === cues.clientsSeq) renderCueClients(c);
+    }).catch(function () { /* as above */ });
+  }
+  function showCues() {
+    renderCueCounters();
+    renderCueRecent();
+    fetchCueHistory();
+    fetchCueClients();
+  }
+  function pollCues() {
+    if (!connected || !tabShown('cues')) return;
+    fetchCueHistory();
+    fetchCueClients();
+  }
+
   // ---- the add / edit form ----
   function formEl(name) { return $('input-form').elements[name]; }
   function formFields() { return P.inputFields(formEl('type').value, formEl('transport').value); }
@@ -2316,11 +2435,11 @@
         clockOffsetMs = P.nextClockOffset(clockOffsetMs, Date.parse(it.last_seen), Date.now());
         onTrack(it, true);
         break;
-      case 'update': flashSent(onTrack(it, false)); break;
-      case 'drop': onDrop(it); break;
+      case 'update': flashSent(onTrack(it, false)); onDecision(it); break;
+      case 'drop': onDrop(it); onDecision(it); break;
       case 'expired': removeEntry(P.trackKey(it)); break; // never forwarded, gone from skycued's table
       case 'stats': lastStatsWall = Date.now(); applyStats(it); break;
-      case 'filters': applyFilters(it); break;
+      case 'filters': applyFilters(it); if (tabShown('cues')) fetchCueHistory(); break;
       case 'lists': applyLists(it); break;
       case 'inputs': applyInputs(it.inputs); break;
       case 'fisb_text': case 'fisb_shape': case 'fisb_radar': case 'fisb_raster': case 'fisb_expired':
@@ -2481,6 +2600,10 @@
       var tr = ev.target.closest('tr');
       if (tr) select(tr.getAttribute('data-key'));
     });
+    $('cues-recent').tBodies[0].addEventListener('click', function (ev) {
+      var tr = ev.target.closest('tr[data-key]');
+      if (tr) select(tr.getAttribute('data-key'));
+    });
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') closePanel();
     });
@@ -2488,6 +2611,7 @@
     setInterval(watchdog, 1000);
     setInterval(pollFisb, FISB_POLL_MS);
     setInterval(pollInputs, INPUTS_POLL_MS);
+    setInterval(pollCues, CUES_POLL_MS);
     var ticks = 0;
     setInterval(function () {
       if (selectedKey) renderDetails(); // ages
@@ -2495,6 +2619,7 @@
       if (tableDirty) renderTable();
       if (map) radarAgeTick();
       if (tabShown('receiver')) renderReceiver(); // ages, rates
+      if (tabShown('cues') && cues.recentDirty) renderCueRecent();
       if (++ticks % 15 === 0) fisb.wxDirty = fisb.symDirty = true; // ages and age classes
       renderWx();
       if (fisb.symDirty) renderWxSymbols();

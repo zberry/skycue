@@ -474,7 +474,13 @@ BOOST_AUTO_TEST_CASE(poller_destroyed_mid_flight)
     BOOST_REQUIRE(server.requestCount() == 1u);
     poller.reset();
     auto done = std::async(std::launch::async, [&] { io.restart(); io.run(); });
-    BOOST_REQUIRE((done.wait_for(kWait) == std::future_status::ready));
+    if (done.wait_for(kWait) != std::future_status::ready) {
+        // The future's destructor joins io.run(): stop it first, so a
+        // regression fails this case instead of hanging the binary (H8).
+        io.stop();
+        done.wait();
+        BOOST_FAIL("the io_context still had work after the poller was destroyed");
+    }
     BOOST_TEST(results == 0);
 }
 

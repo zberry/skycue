@@ -38,12 +38,18 @@ ClockCheck checkDeviceTime(std::optional<std::chrono::system_clock::time_point> 
 
 // A seconds-of-day value (ASTERIX 071/073/075/077) dated with the UTC date of
 // `now`: a time-of-day more than 12 h ahead of now's belongs to the previous
-// day, more than 12 h behind to the next day.
-std::chrono::system_clock::time_point timeOfDay(double tod_s, std::chrono::system_clock::time_point now);
+// day, more than 12 h behind to the next day (exactly 12 h stays). nullopt
+// unless -1 <= tod_s < 86402 (a 074/076 FSI may move a time one second out of
+// the day); NaN and infinities included.
+std::optional<std::chrono::system_clock::time_point> timeOfDay(double tod_s,
+                                                               std::chrono::system_clock::time_point now);
 
 // The pingStation's timeOfReceptionS/NS: seconds since the GPS epoch
 // (1980-01-06, Unix 315964800) plus nanoseconds. No leap-second correction: in
-// the ICD example the counter equals the UTC timeStamp.
-std::chrono::system_clock::time_point gpsCounterTime(uint64_t s, uint64_t ns);
+// the ICD example the counter equals the UTC timeStamp. nullopt when
+// s >= kMaxGpsCounterS or ns >= 1e9 (garbage, and the nanosecond arithmetic
+// must not overflow).
+constexpr uint64_t kMaxGpsCounterS = uint64_t{1} << 32;  // about 136 years
+std::optional<std::chrono::system_clock::time_point> gpsCounterTime(uint64_t s, uint64_t ns);
 
 }  // namespace skycued

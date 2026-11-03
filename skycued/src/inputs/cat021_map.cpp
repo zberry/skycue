@@ -119,8 +119,12 @@ std::optional<TrackObservation> mapCat021Record(const Cat021Record& r, const Cat
     obs.received_time = ctx.arrival;
 
     ClockCheck clock = checkDeviceTime(std::nullopt, ctx.arrival, ctx.time_mode);
-    if (auto tod = deviceTod(r)) {
-        clock = checkDeviceTime(timeOfDay(*tod, ctx.arrival), ctx.arrival, ctx.time_mode);
+    // A time of day outside the day dates to nothing: arrival, as with no time item.
+    std::optional<std::chrono::system_clock::time_point> device;
+    if (auto tod = deviceTod(r))
+        device = timeOfDay(*tod, ctx.arrival);
+    if (device) {
+        clock = checkDeviceTime(device, ctx.arrival, ctx.time_mode);
         counts.clock_offset_s = clock.offset_s;
         if (clock.rejected)
             ++counts.clock_rejects;

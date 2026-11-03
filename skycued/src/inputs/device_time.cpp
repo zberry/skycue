@@ -104,8 +104,10 @@ ClockCheck checkDeviceTime(std::optional<system_clock::time_point> device, syste
     return out;
 }
 
-system_clock::time_point timeOfDay(double tod_s, system_clock::time_point now)
+std::optional<system_clock::time_point> timeOfDay(double tod_s, system_clock::time_point now)
 {
+    if (!(tod_s >= -1.0 && tod_s < kSecondsPerDay + 2.0))  // false for NaN too
+        return std::nullopt;
     const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
     const int64_t day_ns = kSecondsPerDay * 1000000000;
     int64_t midnight_ns = now_ns / day_ns * day_ns;
@@ -120,8 +122,10 @@ system_clock::time_point timeOfDay(double tod_s, system_clock::time_point now)
     return fromNs(midnight_ns + std::llround(tod_s * 1e9));
 }
 
-system_clock::time_point gpsCounterTime(uint64_t s, uint64_t ns)
+std::optional<system_clock::time_point> gpsCounterTime(uint64_t s, uint64_t ns)
 {
+    if (s >= kMaxGpsCounterS || ns >= 1000000000)
+        return std::nullopt;
     return fromNs((kGpsEpochUnixS + static_cast<int64_t>(s)) * 1000000000 + static_cast<int64_t>(ns));
 }
 

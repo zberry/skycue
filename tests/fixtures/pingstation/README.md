@@ -6,7 +6,7 @@ Used by `test_pingstation` (ctest `pingstation`).
 
 `icd-traffic-1090.json`, `icd-status.json` and `icd-status-verbatim.json` are the JSON
 examples of the the vendor interface document, document the vendor interface document-001, pages 12–13,
-transcribed by hand from the PDF (the PDF itself is not committed; it stays git-ignored).
+transcribed from the PDF (the PDF itself is not committed; it stays git-ignored).
 These files are the repository's copy of those examples. The coordinates, addresses, GUIDs
 and times in them are the vendor's example values, not real observations.
 

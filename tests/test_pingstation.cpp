@@ -15,6 +15,7 @@
 #include <ctime>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -145,19 +146,64 @@ BOOST_AUTO_TEST_CASE(clock_check_window)
 
 BOOST_AUTO_TEST_CASE(tod_midnight_wrap)
 {
-    auto near = [](TP a, TP b) { return std::abs(secondsBetween(a, b)) < 1e-6; };
+    auto near = [](std::optional<TP> a, TP b) { return a && std::abs(secondsBetween(*a, b)) < 1e-6; };
     BOOST_TEST(near(timeOfDay(0.2, utc(2026, 11, 2, 23, 59, 59, 900000000)),
                     utc(2026, 11, 3, 0, 0, 0, 200000000)));
     BOOST_TEST(near(timeOfDay(86399.8, utc(2026, 11, 3, 0, 0, 0, 100000000)),
                     utc(2026, 11, 2, 23, 59, 59, 800000000)));
     BOOST_TEST(near(timeOfDay(11 * 3600.0, utc(2026, 11, 2, 12, 0, 0)), utc(2026, 11, 2, 11, 0, 0)));
     BOOST_TEST(near(timeOfDay(13 * 3600.0, utc(2026, 11, 2, 12, 0, 0)), utc(2026, 11, 2, 13, 0, 0)));
+
+    // Boundaries: exactly 12 h either way stays on the same day, 1 ms more moves.
+    const TP six = utc(2026, 11, 2, 6, 0, 0);
+    BOOST_TEST(near(timeOfDay(18 * 3600.0, six), utc(2026, 11, 2, 18, 0, 0)));
+    BOOST_TEST(near(timeOfDay(18 * 3600.0 + 0.001, six), utc(2026, 11, 1, 18, 0, 0, 1000000)));
+    const TP eighteen = utc(2026, 11, 2, 18, 0, 0);
+    BOOST_TEST(near(timeOfDay(6 * 3600.0, eighteen), utc(2026, 11, 2, 6, 0, 0)));
+    BOOST_TEST(near(timeOfDay(6 * 3600.0 - 0.001, eighteen), utc(2026, 11, 3, 5, 59, 59, 999000000)));
+
+    // Not a time of day.
+    BOOST_TEST(!timeOfDay(std::nan(""), six));
+    BOOST_TEST(!timeOfDay(std::numeric_limits<double>::infinity(), six));
+    BOOST_TEST(!timeOfDay(1e300, six));
+    BOOST_TEST(!timeOfDay(-2.0, six));
+    BOOST_TEST(!timeOfDay(86402.0, six));
+    BOOST_TEST(near(timeOfDay(-1.0, six), utc(2026, 11, 1, 23, 59, 59)));  // 074 FSI 2 at 00:00:00
 }
 
 BOOST_AUTO_TEST_CASE(gps_counter_time)
 {
-    BOOST_TEST(epochNs(gpsCounterTime(0, 0)) == int64_t{315964800} * 1000000000);
-    BOOST_TEST(epochNs(gpsCounterTime(1355001092, 317283895)) == int64_t{1670965892317283895});
+    BOOST_TEST(epochNs(gpsCounterTime(0, 0).value()) == int64_t{315964800} * 1000000000);
+    BOOST_TEST(epochNs(gpsCounterTime(1355001092, 317283895).value()) == int64_t{1670965892317283895});
+    BOOST_TEST(gpsCounterTime((uint64_t{1} << 32) - 1, 999999999).has_value());
+    BOOST_TEST(!gpsCounterTime(uint64_t{1} << 32, 0));
+    BOOST_TEST(!gpsCounterTime(100000000000, 0));
+    BOOST_TEST(!gpsCounterTime(UINT64_MAX, 0));
+    BOOST_TEST(!gpsCounterTime(0, 1000000000));
+}
+
+BOOST_AUTO_TEST_CASE(gps_counter_out_of_range_uses_arrival)
+{
+    const TP arrival = utc(2026, 11, 2, 12, 0, 0);
+    const auto r = parse(R"({"icaoAddress":"ABCDEF","utcSync":1,"timeOfReceptionS":100000000000,)"
+                         R"("timeOfReceptionNS":0,"detail":{"rawData":"5d4840d6202cc3"}})");
+    BOOST_TEST(r.rejected == 0u);
+    BOOST_REQUIRE_EQUAL(r.raw_frames.size(), 1u);
+    BOOST_TEST((r.raw_frames[0].time == arrival));
+    BOOST_TEST(r.clock_rejects == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(huge_rates_dropped)
+{
+    auto o = one(R"("horVelocityCMS":1e300,"verVelocityCMS":-1e300,"altitudeMM":1e300)");
+    BOOST_TEST(!o.gs_kt);
+    BOOST_TEST(!o.baro_rate_fpm);
+    BOOST_TEST(!o.alt_baro_ft);
+    auto g = one(R"("verVelocityCMS":1e300,"detail":{"verVelocitySrc":1})");
+    BOOST_TEST(!g.geom_rate_fpm);
+    auto edge = one(R"("horVelocityCMS":999999,"verVelocityCMS":-999999)");
+    BOOST_TEST(edge.gs_kt.has_value());
+    BOOST_TEST(edge.baro_rate_fpm.has_value());
 }
 
 // ---- JSON ----
@@ -440,7 +486,7 @@ BOOST_AUTO_TEST_CASE(address_qualifiers)
 
 BOOST_AUTO_TEST_CASE(squawk_raw_value_dropped)
 {
-    for (const char* raw : {"8000", "1288", "-1", "12345"}) {
+    for (const char* raw : {"8000", "1288", "-1", "12345", "1305.0", "\"12a\""}) {
         const auto r = parse(std::string(R"({"icaoAddress":"ABCDEF","squawk":)") + raw + "}");
         BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
         BOOST_TEST(!r.observations[0].squawk, raw);
@@ -843,6 +889,18 @@ BOOST_AUTO_TEST_CASE(cat021_time_chain)
     r.tod075.reset();
     r.hp074.reset();
     BOOST_TEST((posTime(r) == kCatArrival));
+
+    // A time of day past 24 h (the 24-bit field allows 131072 s) is not used.
+    {
+        Cat021Record bad = base();
+        bad.tod073 = 0xFFFFFF;
+        Cat021Counts c;
+        auto o = map(bad, c);
+        BOOST_REQUIRE(o);
+        BOOST_TEST((o->position_time.value() == kCatArrival));
+        BOOST_TEST(!c.clock_offset_s);
+        BOOST_TEST(c.clock_rejects == 0u);
+    }
 
     // No time item: no offset.
     {

@@ -18,9 +18,9 @@ using std::chrono::system_clock;
 constexpr double kMmPerFt = 304.8;
 constexpr double kKtPerCms = 0.0194384;
 constexpr double kFpmPerCms = 1.9685;
-// timeOfReceptionS above this (about 34,800 years) is garbage, and would
-// overflow the nanosecond arithmetic.
-constexpr int64_t kMaxGpsCounterS = int64_t{1} << 40;
+// Velocities at or beyond this (10 km/s) are garbage; the bound also keeps
+// the conversion to float defined.
+constexpr double kMaxSpeedCms = 1e6;
 
 const char* const kEmergencies[] = {"none", "general", "lifeguard", "minfuel", "nordo", "unlawful", "downed"};
 
@@ -122,9 +122,10 @@ void addRawFrame(const JsonObject& a, const std::string& raw, const PingContext&
     if (a.getInt("utcSync") == std::optional<int64_t>(1)) {
         auto s = a.getInt("timeOfReceptionS");
         auto ns = a.getInt("timeOfReceptionNS");
-        if (s && ns && *s >= 0 && *s <= kMaxGpsCounterS && *ns >= 0 && *ns < 1000000000) {
-            auto t = gpsCounterTime(static_cast<uint64_t>(*s), static_cast<uint64_t>(*ns));
-            time = checkDeviceTime(t, ctx.arrival, ctx.time_mode).used;
+        if (s && ns && *s >= 0 && *ns >= 0) {
+            // Out of range: arrival, like a counter that is absent.
+            if (auto t = gpsCounterTime(static_cast<uint64_t>(*s), static_cast<uint64_t>(*ns)))
+                time = checkDeviceTime(t, ctx.arrival, ctx.time_mode).used;
         }
     }
     r.raw_frames.push_back(RawFrame{kind, std::move(*hex), time});
@@ -194,12 +195,12 @@ bool mapAircraft(const JsonObject& a, const std::string& text, const PingContext
         }
     }
 
-    if (auto v = a.getDouble("horVelocityCMS"); v && *v >= 0)
+    if (auto v = a.getDouble("horVelocityCMS"); v && *v >= 0 && *v < kMaxSpeedCms)
         obs.gs_kt = static_cast<float>(*v * kKtPerCms);
     // svHeadingType 1 (heading rather than track) is stored as track too.
     if (auto h = a.getDouble("headingDE2"); h && *h >= 0 && *h < 36000)
         obs.track_deg = static_cast<float>(*h / 100);
-    if (auto v = a.getDouble("verVelocityCMS")) {
+    if (auto v = a.getDouble("verVelocityCMS"); v && std::fabs(*v) < kMaxSpeedCms) {
         const int64_t src = fromDetail("verVelocitySrc").value_or(0);
         const float fpm = static_cast<float>(*v * kFpmPerCms);
         if (src == 0)
@@ -212,8 +213,9 @@ bool mapAircraft(const JsonObject& a, const std::string& text, const PingContext
         obs.on_ground = *ground == 2;
 
     obs.callsign = trimmed(a.has("callsign") ? a.getString("callsign") : a.getString("Callsign"));
-    if (auto sq = a.getInt("squawk")) {
-        obs.squawk = squawkText(*sq);
+    if (a.has("squawk")) {
+        auto sq = a.getInt("squawk");  // nullopt for 1305.0, "12a", an object
+        obs.squawk = sq ? squawkText(*sq) : std::nullopt;
         if (!obs.squawk)
             r.bad_squawk = true;
     }

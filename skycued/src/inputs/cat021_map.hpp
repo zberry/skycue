@@ -33,7 +33,8 @@ struct Cat021Counts {
 // nullopt for a skipped record. The position (131, else 130) is dropped when
 // 040 marks it suspect (CL=1, CPR, RCF, IPC, LLC, LDPJ) or it is out of range;
 // position_time comes with a position only: 071, else 073 (+074), else 077,
-// else 075 (+076), else arrival, dated with timeOfDay and clamped. on_ground
+// else 075 (+076), else arrival, dated with timeOfDay (a time of day outside
+// the day counts as absent) and clamped. on_ground
 // only when 040 ext 1 is present. 132 never sets rssi.
 std::optional<TrackObservation> mapCat021Record(const asterix::Cat021Record& r, const Cat021Context& ctx,
                                                 Cat021Counts& counts);

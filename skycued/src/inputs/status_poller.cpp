@@ -9,6 +9,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 
@@ -31,7 +32,7 @@ struct Attempt {
         error_code ignored;
         resolver.cancel();
         sock.close(ignored);
-        timer.cancel(ignored);
+        timer.cancel();
     }
 
     tcp::resolver resolver;
@@ -44,6 +45,14 @@ struct Attempt {
 };
 
 }  // namespace
+
+std::string httpHostHeader(const HttpUrl& url)
+{
+    std::string host = url.host.find(':') != std::string::npos ? "[" + url.host + "]" : url.host;
+    if (url.port != 80)
+        host += ":" + std::to_string(url.port);
+    return host;
+}
 
 struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
     Impl(asio::io_context& io_, HttpUrl url_, std::chrono::seconds interval_, std::chrono::milliseconds timeout_)
@@ -64,6 +73,23 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
 
     std::string where() const { return url.host + ":" + std::to_string(url.port); }
 
+    // The poller when `a` is still its request in flight, else null. Every
+    // completion handler starts here. A timed-out attempt is finished here:
+    // a completion queued before the timeout fired must not go on (a late
+    // resolve would let async_connect reopen the closed socket, with no
+    // timer left to end the attempt).
+    static std::shared_ptr<Impl> live(const std::weak_ptr<Impl>& weak, const std::shared_ptr<Attempt>& a)
+    {
+        auto self = weak.lock();
+        if (!self || self->attempt != a)
+            return nullptr;
+        if (a->timed_out) {
+            self->finish(a, nullptr, std::string());
+            return nullptr;
+        }
+        return self;
+    }
+
     void poll()
     {
         last_start = std::chrono::steady_clock::now();
@@ -73,7 +99,7 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
         a->req.method(http::verb::get);
         a->req.target(url.target);
         a->req.version(11);
-        a->req.set(http::field::host, url.port == 80 ? url.host : where());
+        a->req.set(http::field::host, httpHostHeader(url));
         a->req.set(http::field::connection, "close");
 
         std::weak_ptr<Attempt> weak_attempt = a;
@@ -89,8 +115,8 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
         std::weak_ptr<Impl> weak = shared_from_this();
         a->resolver.async_resolve(url.host, std::to_string(url.port),
                                   [weak, a](const error_code& ec, tcp::resolver::results_type results) {
-                                      auto self = weak.lock();
-                                      if (!self || self->attempt != a)
+                                      auto self = live(weak, a);
+                                      if (!self)
                                           return;
                                       if (ec) {
                                           self->finish(a, nullptr, "cannot resolve " + self->url.host + ": " +
@@ -105,8 +131,8 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
     {
         std::weak_ptr<Impl> weak = shared_from_this();
         asio::async_connect(a->sock, results, [weak, a](const error_code& ec, const tcp::endpoint&) {
-            auto self = weak.lock();
-            if (!self || self->attempt != a)
+            auto self = live(weak, a);
+            if (!self)
                 return;
             if (ec) {
                 self->finish(a, nullptr, "cannot connect to " + self->where() + ": " + ec.message());
@@ -120,8 +146,8 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
     {
         std::weak_ptr<Impl> weak = shared_from_this();
         http::async_write(a->sock, a->req, [weak, a](const error_code& ec, std::size_t) {
-            auto self = weak.lock();
-            if (!self || self->attempt != a)
+            auto self = live(weak, a);
+            if (!self)
                 return;
             if (ec) {
                 self->finish(a, nullptr, "cannot send to " + self->where() + ": " + ec.message());
@@ -138,16 +164,16 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
     {
         std::weak_ptr<Impl> weak = shared_from_this();
         http::async_read_header(a->sock, a->buf, a->parser, [weak, a](const error_code& ec, std::size_t) {
-            auto self = weak.lock();
-            if (!self || self->attempt != a)
+            auto self = live(weak, a);
+            if (!self)
                 return;
-            if (ec || a->parser.is_done()) {
+            // Not a 200: the status code decides and the body is not read.
+            if (ec || a->parser.is_done() || a->parser.get().result_int() != 200) {
                 self->received(a, ec);
                 return;
             }
             http::async_read(a->sock, a->buf, a->parser, [weak, a](const error_code& bec, std::size_t) {
-                auto s = weak.lock();
-                if (s && s->attempt == a)
+                if (auto s = live(weak, a))
                     s->received(a, bec);
             });
         });
@@ -155,6 +181,16 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
 
     void received(const std::shared_ptr<Attempt>& a, const error_code& ec)
     {
+        // The parsed status line decides first (an unparsed one reads as the
+        // default 200), so a 500 announcing a large body is "HTTP 500".
+        const unsigned code = a->parser.get().result_int();
+        if (code != 200) {
+            std::string error = "HTTP " + std::to_string(code);
+            if (code >= 300 && code < 400)
+                error += " (redirects are not followed)";
+            finish(a, nullptr, error);
+            return;
+        }
         if (ec == http::error::body_limit) {
             finish(a, nullptr, "response body over " + std::to_string(kMaxStatusBytes) + " bytes");
             return;
@@ -163,15 +199,7 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
             finish(a, nullptr, "cannot read the response from " + where() + ": " + ec.message());
             return;
         }
-        const unsigned code = a->parser.get().result_int();
-        if (code == 200) {
-            finish(a, &a->parser.get().body(), std::string());
-            return;
-        }
-        std::string error = "HTTP " + std::to_string(code);
-        if (code >= 300 && code < 400)
-            error += " (redirects are not followed)";
-        finish(a, nullptr, error);
+        finish(a, &a->parser.get().body(), std::string());
     }
 
     // Ends the attempt, arms the next one and reports.
@@ -188,7 +216,14 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
 
     void armNext()
     {
-        next.expires_at(last_start + interval);
+        // Counted from the last start, but never sooner than min(interval,
+        // 1 s) after this finish, so an overrunning request is not followed
+        // back to back. (InputDef keeps status_interval_s in 5..3600, so an
+        // interval of 0 does not reach here from an input.)
+        const auto now = std::chrono::steady_clock::now();
+        const std::chrono::steady_clock::duration gap = std::min<std::chrono::steady_clock::duration>(
+            interval, std::chrono::seconds(1));
+        next.expires_at(std::max(last_start + interval, now + gap));
         std::weak_ptr<Impl> weak = shared_from_this();
         next.async_wait([weak, g = gen](const error_code& ec) {
             auto self = weak.lock();
@@ -204,8 +239,7 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
             return;
         running = false;
         ++gen;
-        error_code ignored;
-        next.cancel(ignored);
+        next.cancel();
         if (attempt) {
             attempt->abort();
             attempt.reset();

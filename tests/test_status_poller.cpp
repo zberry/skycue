@@ -12,6 +12,7 @@
 #include <sys/time.h>
 
 #include <atomic>
+#include <future>
 
 using namespace enginetest;
 using asio::ip::udp;
@@ -96,6 +97,11 @@ struct HttpServer {
         std::lock_guard<std::mutex> lock(m);
         return requests.size();
     }
+    steady::time_point requestTime(std::size_t i)
+    {
+        std::lock_guard<std::mutex> lock(m);
+        return request_times.at(i);
+    }
     std::string request(std::size_t i)
     {
         std::lock_guard<std::mutex> lock(m);
@@ -123,6 +129,7 @@ private:
             {
                 std::lock_guard<std::mutex> lock(m);
                 requests.emplace_back(asio::buffers_begin(buf.data()), asio::buffers_end(buf.data()));
+                request_times.push_back(steady::now());
             }
             if (r.silent) {
                 held.push_back(std::move(s));
@@ -142,6 +149,7 @@ private:
     std::vector<Reply> replies;
     std::mutex m;
     std::vector<std::string> requests;
+    std::vector<steady::time_point> request_times;
     std::atomic<bool> done{false};
     std::thread thread;
 };
@@ -160,8 +168,9 @@ struct PollerProbe {
     std::vector<Result> results;
     steady::time_point started;
 
+    // `hold`: the io thread sleeps that long right after start().
     PollerProbe(IoThread& thread, HttpUrl url, std::chrono::seconds interval = 30s,
-                std::chrono::milliseconds timeout = 5s)
+                std::chrono::milliseconds timeout = 5s, std::chrono::milliseconds hold = 0ms)
         : t(thread)
     {
         t.call([&] {
@@ -172,6 +181,7 @@ struct PollerProbe {
             });
             started = steady::now();
             poller->start();
+            std::this_thread::sleep_for(hold);
         });
     }
     ~PollerProbe()
@@ -392,4 +402,102 @@ BOOST_AUTO_TEST_CASE(poller_stop_cancels_inflight)
     p.stop();
     std::this_thread::sleep_for(900ms);  // past the server's answer
     BOOST_TEST(p.count() == 0u);
+}
+
+// A timeout that fires before the resolve or connect completes (1 ms here)
+// must still end the attempt: the late completion may not go on to connect
+// and wait on a server that never answers, and the next poll is armed.
+BOOST_AUTO_TEST_CASE(timeout_racing_a_completion_keeps_polling)
+{
+    HttpServer server({{"", 0ms, true}});
+    IoThread t;
+    // Holding the io thread lets the timer expire and the resolve complete
+    // before either handler runs.
+    PollerProbe p(t, server.url(), 1s, 1ms, 50ms);
+    BOOST_REQUIRE(eventuallyWithin(4s, [&] { return p.count() >= 3u; }));
+    for (std::size_t i = 0; i < 3; ++i) {
+        BOOST_TEST(!p.at(i).ok);
+        BOOST_TEST(p.at(i).error == "no response within 1 ms");
+    }
+}
+
+BOOST_AUTO_TEST_CASE(non_200_ends_after_the_header)
+{
+    // A 500 announcing a body over the limit, cut short: the status code
+    // decides and the body is not read.
+    HttpServer server({{"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 1000000\r\n\r\npartial", 0ms}});
+    IoThread t;
+    PollerProbe p(t, server.url());
+    BOOST_REQUIRE(eventuallyWithin(1s, [&] { return p.count() == 1u; }));
+    BOOST_TEST(p.at(0).error == "HTTP 500");
+}
+
+// A request slower than the interval: one in flight at a time, and the next
+// starts no sooner than min(interval, 1 s) after the previous finished.
+BOOST_AUTO_TEST_CASE(slow_server_one_poll_in_flight)
+{
+    HttpServer server({{response("200 OK", statusFixture()), 1200ms}});
+    IoThread t;
+    PollerProbe p(t, server.url(), 1s);
+    BOOST_REQUIRE(eventuallyWithin(6s, [&] { return p.count() >= 2u && server.requestCount() >= 3u; }));
+    for (std::size_t i = 1; i < 3; ++i)
+        BOOST_TEST((server.requestTime(i) - p.at(i - 1).at >= 900ms));
+}
+
+BOOST_AUTO_TEST_CASE(no_status_url_no_request)
+{
+    HttpServer server({{response("200 OK", statusFixture())}});
+    IoThread t;
+    InputProbe p(t, std::make_unique<PingJsonInput>(
+                        t.io, defOf(R"({"id":"ps","type":"pingstation_json","bind":"127.0.0.1","port":)" +
+                                    std::to_string(freeUdpPort()) + "}")));
+    BOOST_REQUIRE(eventually([&] { return p.state().connected; }));
+    std::this_thread::sleep_for(300ms);
+    BOOST_TEST(server.requestCount() == 0u);
+    BOOST_TEST(p.state().counters.status_ok == 0u);
+    BOOST_TEST(p.state().counters.status_fail == 0u);
+}
+
+// Destroyed with a request in flight: no callback, and the io_context runs
+// out of work (nothing is left waiting on the silent server).
+BOOST_AUTO_TEST_CASE(poller_destroyed_mid_flight)
+{
+    HttpServer server({{"", 0ms, true}});
+    asio::io_context io;
+    int results = 0;
+    auto poller = std::make_unique<StatusPoller>(io, server.url(), 30s);
+    poller->onResult([&](const std::string*, const std::string&) { ++results; });
+    poller->start();
+    const auto until = steady::now() + kWait;
+    while (server.requestCount() == 0 && steady::now() < until)
+        io.run_for(10ms);
+    BOOST_REQUIRE(server.requestCount() == 1u);
+    poller.reset();
+    auto done = std::async(std::launch::async, [&] { io.restart(); io.run(); });
+    BOOST_REQUIRE((done.wait_for(kWait) == std::future_status::ready));
+    BOOST_TEST(results == 0);
+}
+
+BOOST_AUTO_TEST_CASE(cat021_input_status_failure_counted)
+{
+    HttpServer server({{response("500 Internal Server Error", "")}});
+    IoThread t;
+    InputProbe p(t, std::make_unique<PingCat021Input>(
+                        t.io, defOf(R"({"id":"cat","type":"pingstation_cat021","transport":"udp",)"
+                                    R"("bind":"127.0.0.1","port":)" +
+                                    std::to_string(freeUdpPort()) + R"(,"status_url":")" + server.urlText() +
+                                    R"("})")));
+    BOOST_REQUIRE(eventually([&] { return p.state().counters.status_fail == 1u; }));
+    const InputState s = p.state();
+    BOOST_TEST(s.status_fail_streak == 1u);
+    BOOST_TEST(s.counters.status_ok == 0u);
+    BOOST_TEST(s.last_error == "status: HTTP 500");
+}
+
+BOOST_AUTO_TEST_CASE(host_header)
+{
+    BOOST_TEST(skycued::httpHostHeader(HttpUrl{"10.0.0.5", 80, "/"}) == "10.0.0.5");
+    BOOST_TEST(skycued::httpHostHeader(HttpUrl{"ping.local", 8080, "/"}) == "ping.local:8080");
+    BOOST_TEST(skycued::httpHostHeader(HttpUrl{"fe80::1", 80, "/"}) == "[fe80::1]");
+    BOOST_TEST(skycued::httpHostHeader(HttpUrl{"fe80::1", 8080, "/"}) == "[fe80::1]:8080");
 }

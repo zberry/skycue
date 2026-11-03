@@ -5,6 +5,7 @@
 // response_parser with body_limit.
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -70,6 +71,11 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
     unsigned gen = 0;  // bumped by stop(): a wait armed before it is stale
     std::shared_ptr<Attempt> attempt;  // the request in flight
     std::chrono::steady_clock::time_point last_start;
+    // Resolves issued and not yet completed. Asio runs every resolve of the
+    // io_context on one private thread, and cancel() cannot interrupt a
+    // getaddrinfo that blocks (a silent nameserver), so a timed-out attempt
+    // can leave its lookup behind. A poll is skipped while one is.
+    unsigned resolves_pending = 0;
 
     std::string where() const { return url.host + ":" + std::to_string(url.port); }
 
@@ -93,6 +99,10 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
     void poll()
     {
         last_start = std::chrono::steady_clock::now();
+        if (resolves_pending > 0) {
+            skip("resolve still pending");
+            return;
+        }
         auto a = std::make_shared<Attempt>(io);
         attempt = a;
         a->parser.body_limit(kMaxStatusBytes);
@@ -113,8 +123,11 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
         });
 
         std::weak_ptr<Impl> weak = shared_from_this();
+        ++resolves_pending;
         a->resolver.async_resolve(url.host, std::to_string(url.port),
                                   [weak, a](const error_code& ec, tcp::resolver::results_type results) {
+                                      if (auto p = weak.lock())
+                                          --p->resolves_pending;
                                       auto self = live(weak, a);
                                       if (!self)
                                           return;
@@ -212,6 +225,21 @@ struct StatusPoller::Impl : std::enable_shared_from_this<Impl> {
         armNext();  // before the handler, so a stop() from it cancels the wait
         if (auto h = handler)  // a copy: the handler may replace itself
             h(body, error);
+    }
+
+    // A poll not attempted: reported as a failure (from the io_context, not
+    // from inside start()), and the next one armed as usual.
+    void skip(const char* why)
+    {
+        armNext();
+        std::weak_ptr<Impl> weak = shared_from_this();
+        asio::post(io, [weak, g = gen, why] {
+            auto self = weak.lock();
+            if (!self || !self->running || self->gen != g)
+                return;
+            if (auto h = self->handler)
+                h(nullptr, why);
+        });
     }
 
     void armNext()

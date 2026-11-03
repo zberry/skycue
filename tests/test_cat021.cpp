@@ -301,10 +301,33 @@ BOOST_AUTO_TEST_CASE(round_trip_every_modelled_item) {
   BOOST_REQUIRE_EQUAL(r.opaque.size(), 1u);
   BOOST_CHECK(r.opaque.at(48) == hex("05 08 70 f1 40"));
 
-  // Without sgv, the encoder writes RE from opaque[48].
+  // `in` had only sgv: the RE above was built from it. The decoded record has
+  // both, and opaque[48] (here the same bytes) is what gets written.
   Cat021Record no_sgv = r;
   no_sgv.sgv.reset();
   BOOST_CHECK(encodeRecord(no_sgv) == rec);
+}
+
+// opaque[48] wins over sgv (an RE may carry more than SGV).
+BOOST_AUTO_TEST_CASE(re_with_tnh_round_trips) {
+  // RE LEN 7: primary 0A (SGV b4, TNH b2), SGV 70 f1 40 (3 octets), TNH 40 00.
+  const Bytes re = hex("07 0a 70 f1 40 40 00");
+  const Bytes rec = join({fspec({1, 48}), hex("01 02"), re});
+  const DecodedBlock d = decode(block(rec));
+  BOOST_REQUIRE(!d.error);
+  const Cat021Record& r = d.records.at(0);
+  BOOST_REQUIRE(r.sgv);
+  BOOST_CHECK_EQUAL(r.sgv->gss_raw, 120);
+  BOOST_CHECK_EQUAL(*r.sgv->hgt_raw, 32);
+  BOOST_CHECK(r.opaque.at(48) == re);
+  BOOST_CHECK(encodeRecord(r) == r.bytes);
+
+  // Both set, with a different sgv: the output RE is opaque[48].
+  Cat021Record both = r;
+  both.sgv = SurfaceVector{true, false, false, false, 7, {}};
+  const Bytes out = encodeRecord(both);
+  BOOST_CHECK(out == rec);
+  BOOST_CHECK(slice(out, itemOffset(out, 48), re.size()) == re);
 }
 
 BOOST_AUTO_TEST_CASE(air_speed_ias) {
@@ -579,6 +602,23 @@ BOOST_AUTO_TEST_CASE(ident_invalid_code_reads_question_mark) {
   BOOST_CHECK_EQUAL(*d.records.at(0).ident, "?ABC    ");
 }
 
+// Characters outside the ICAO 6-bit set are written as space, never thrown on,
+// so a decoded ident with '?' re-encodes.
+BOOST_AUTO_TEST_CASE(encode_maps_bad_ident_chars_to_space) {
+  Cat021Record r;
+  r.ident = "ab?C-1";
+  const Bytes rec = encodeRecord(r);
+  const DecodedBlock d = decode(block(rec));
+  BOOST_REQUIRE(!d.error);
+  BOOST_CHECK_EQUAL(*d.records.at(0).ident, "   C 1  ");
+
+  const DecodedBlock q = decode(block(join({fspec({29}), hex("00 10 83 82 08 20")})));
+  BOOST_REQUIRE(!q.error);
+  BOOST_CHECK_EQUAL(*q.records.at(0).ident, "?ABC    ");
+  const Bytes again = encodeRecord(q.records.at(0));
+  BOOST_CHECK(slice(again, itemOffset(again, 29), 6) == hex("80 10 83 82 08 20"));  // code 0 -> space (32)
+}
+
 BOOST_AUTO_TEST_CASE(encode_rejects_bad_values) {
   Cat021Record r;
   r.address = 0x1000000;
@@ -587,8 +627,6 @@ BOOST_AUTO_TEST_CASE(encode_rejects_bad_values) {
   r.mode3a = 010000;
   BOOST_CHECK_THROW(encodeRecord(r), std::invalid_argument);
   r = Cat021Record{};
-  r.ident = "ab";
-  BOOST_CHECK_THROW(encodeRecord(r), std::invalid_argument);
   r.ident = "ABCDEFGHI";
   BOOST_CHECK_THROW(encodeRecord(r), std::invalid_argument);
   r = Cat021Record{};
@@ -684,7 +722,9 @@ BOOST_AUTO_TEST_CASE(framer_passed_blocks_always_decode) {
   std::mt19937 rng(20261102);
   auto pick = [&rng](uint32_t n) { return static_cast<uint32_t>(rng() % n); };
   Bytes stream;
-  std::size_t good_blocks = 0;
+  std::vector<Bytes> good;
+  std::vector<bool> good_after_garbage;
+  bool after_garbage = false;
   for (int i = 0; i < 2000; ++i) {
     Cat021Record r = icdRecord();
     r.address = pick(0x1000000);
@@ -693,22 +733,28 @@ BOOST_AUTO_TEST_CASE(framer_passed_blocks_always_decode) {
     Bytes blk = pick(3) == 0 ? encodeBlock({r, r}) : encodeBlock({r});
     switch (pick(4)) {
       case 0: {  // garbage run
-        // It starts with 00 (never a category) so the framer leaves sync before
-        // the random bytes: in sync, a garbage header with a large LEN is framed
-        // by that LEN by design (waited for or skipped), which would swallow the
-        // good blocks this test needs.
-        stream.push_back(0x00);
-        const uint32_t n = pick(24);
+        const uint32_t n = 1 + pick(24);
         for (uint32_t k = 0; k < n; ++k) stream.push_back(static_cast<uint8_t>(pick(256)));
+        after_garbage = true;
         break;
       }
-      case 1:  // corrupted block (one byte past the header changed)
+      case 1:  // a block cut short (a sender that died mid-write)
+        if (pick(2)) {
+          const std::size_t cut = 1 + pick(static_cast<uint32_t>(blk.size() - 1));
+          stream.insert(stream.end(), blk.begin(), blk.begin() + static_cast<std::ptrdiff_t>(cut));
+          after_garbage = true;
+          break;
+        }
+        // or a corrupted block (one byte past the header changed)
         blk[3 + pick(static_cast<uint32_t>(blk.size() - 3))] ^= static_cast<uint8_t>(1 + pick(255));
         stream.insert(stream.end(), blk.begin(), blk.end());
+        after_garbage = false;
         break;
       default:
         stream.insert(stream.end(), blk.begin(), blk.end());
-        ++good_blocks;
+        good.push_back(blk);
+        good_after_garbage.push_back(after_garbage);
+        after_garbage = false;
         break;
     }
   }
@@ -720,13 +766,165 @@ BOOST_AUTO_TEST_CASE(framer_passed_blocks_always_decode) {
     f.feed(stream.data() + off, n, out);
     off += n;
   }
-  BOOST_TEST_MESSAGE("good " << good_blocks << " out " << out.size() << " runs "
-                             << f.droppedRuns() << " other " << f.otherCategoryBlocks());
-  BOOST_CHECK_GT(out.size(), good_blocks / 2);
+  // Match the good blocks, in stream order, against what came out.
+  std::size_t next = 0, lost = 0, lost_bytes = 0, false_bytes = 0;
+  for (std::size_t g = 0; g < good.size(); ++g) {
+    std::size_t k = next;
+    while (k < out.size() && out[k] != good[g]) ++k;
+    if (k < out.size()) {
+      for (std::size_t u = next; u < k; ++u) false_bytes += out[u].size();
+      next = k + 1;
+    } else {
+      ++lost;
+      lost_bytes += good[g].size();
+    }
+  }
+  for (std::size_t u = next; u < out.size(); ++u) false_bytes += out[u].size();
+  BOOST_TEST_MESSAGE("good " << good.size() << " out " << out.size() << " lost " << lost
+                             << " runs " << f.droppedRuns() << " dropped " << f.droppedBytes()
+                             << " other " << f.otherCategoryBlocks() << " skipped " << f.skippedBytes()
+                             << " false_bytes "
+                             << false_bytes);
+  // Where the bytes of lost good blocks went. Only three things consume input:
+  // a counted dropped byte, a counted in-sync other-category skip, and an
+  // emitted block. A lost block's bytes that were emitted belong to emitted
+  // blocks that are not good blocks (damage that happened to walk cleanly).
+  // So this is exact accounting, not a tolerance: nothing else may lose data.
+  BOOST_CHECK_LE(lost_bytes, f.droppedBytes() + f.skippedBytes() + false_bytes);
+  // And every input byte is accounted for (the rest is the buffered tail).
+  std::size_t out_bytes = 0;
+  for (const Bytes& b : out) out_bytes += b.size();
+  BOOST_CHECK_LE(out_bytes + f.droppedBytes() + f.skippedBytes(), stream.size());
+  BOOST_CHECK_LT(stream.size() - (out_bytes + f.droppedBytes() + f.skippedBytes()), 65536u);
+  // Corrupted or cut blocks that still walk cleanly are passed (they decode).
+  BOOST_CHECK_GT(false_bytes, 0u);
   BOOST_CHECK_GT(f.droppedRuns(), 0u);
   for (const Bytes& b : out) {
     const DecodedBlock d = decode(b);
     BOOST_CHECK(!d.error);
     BOOST_CHECK(!d.records.empty());
+  }
+}
+
+
+BOOST_AUTO_TEST_CASE(unknown_compound_subfield_is_error) {
+  const std::vector<std::pair<int, Bytes>> cases = {
+      {31, hex("08")},           // 220: b4 is spare
+      {34, hex("20")},           // 110: b6 is spare
+      {42, hex("01 01 01 20")},  // 295: subfield 24 does not exist
+  };
+  for (const auto& c : cases) {
+    BOOST_TEST_CONTEXT("frn " << c.first) {
+      const DecodedBlock d = decode(block(join({fspec({1, c.first}), hex("01 02"), c.second})));
+      BOOST_CHECK(d.error);
+      BOOST_CHECK(d.records.empty());
+      BOOST_CHECK(d.error_text.find("compound subfield") != std::string::npos);
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(explicit_len_zero_is_error) {
+  for (int frn : {48, 49}) {
+    BOOST_TEST_CONTEXT("frn " << frn) {
+      const DecodedBlock d = decode(block(join({fspec({1, frn}), hex("01 02"), hex("00")})));
+      BOOST_CHECK(d.error);
+      BOOST_CHECK(d.records.empty());
+    }
+  }
+}
+
+BOOST_AUTO_TEST_CASE(repetitive_and_explicit_past_len_are_errors) {
+  // 250 REP 5 needs 40 octets, 8 remain.
+  BOOST_CHECK(decode(block(join({fspec({39}), hex("05"), Bytes(8, 0x11)}))).error);
+  // RE LEN 9, 3 octets remain.
+  BOOST_CHECK(decode(block(join({fspec({48}), hex("09 08 70")}))).error);
+  // A good record before the bad one is kept.
+  const DecodedBlock d =
+      decode(block(join({fspec({1}), hex("01 02"), fspec({39}), hex("02"), Bytes(15, 0)})));
+  BOOST_CHECK(d.error);
+  BOOST_CHECK_EQUAL(d.records.size(), 1u);
+}
+
+BOOST_AUTO_TEST_CASE(decode_rejects_other_category_and_empty_block) {
+  Bytes blk = encodeBlock({icdRecord()});
+  blk[0] = 48;
+  BOOST_CHECK(decode(blk).error);
+  const DecodedBlock d = decode(hex("15 00 03"));
+  BOOST_CHECK(d.error);
+  BOOST_CHECK(d.records.empty());
+  BOOST_CHECK(decode(hex("15 00")).error);
+}
+
+// Out of sync (after a dropped `00`), a good block that arrives in pieces is
+// waited for and then passed out; the walk resumes across feeds.
+BOOST_AUTO_TEST_CASE(framer_out_of_sync_block_across_feeds) {
+  Cat021Record two = icdRecord();
+  const Bytes a = encodeBlock({two, two, two});
+  const Bytes stream = join({hex("00"), a});
+  Cat021StreamFramer f(Edition::e2_6);
+  std::vector<Bytes> out;
+  const std::size_t cuts[] = {4, 5, 30, 60, 110, 140};
+  std::size_t off = 0;
+  for (std::size_t c : cuts) {
+    f.feed(stream.data() + off, c - off, out);
+    off = c;
+    BOOST_CHECK(out.empty());
+    BOOST_CHECK(!f.inSync());
+  }
+  f.feed(stream.data() + off, stream.size() - off, out);
+  BOOST_REQUIRE_EQUAL(out.size(), 1u);
+  BOOST_CHECK(out[0] == a);
+  BOOST_CHECK_EQUAL(f.droppedRuns(), 1u);
+  BOOST_CHECK_EQUAL(f.droppedBytes(), 1u);
+  BOOST_CHECK(f.inSync());
+}
+
+// In sync, a CAT 21 header whose buffered prefix already fails the walk is
+// dropped at once instead of waited for. After A comes `15 00 ff` (LEN 255);
+// the next bytes are A's again: FSPEC 15 00 (FRN 4, 6), 015 = 35, 130 = c7 11
+// 3b 69 c1 80, then A's `00` (SAC) as an FSPEC with no item: error after only
+// 12 buffered bytes. `00` and `ff` are then dropped out of sync.
+BOOST_AUTO_TEST_CASE(framer_in_sync_bad_prefix_drops_at_once) {
+  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes stream = join({a, hex("15 00 ff"), a, a});
+  Cat021StreamFramer f(Edition::e2_6);
+  std::vector<Bytes> out;
+  const std::size_t first = a.size() + 3 + 20;  // far less than LEN 255
+  f.feed(stream.data(), first, out);
+  BOOST_CHECK_EQUAL(out.size(), 1u);
+  BOOST_CHECK_EQUAL(f.droppedBytes(), 3u);
+  BOOST_CHECK_EQUAL(f.droppedRuns(), 1u);
+  f.feed(stream.data() + first, stream.size() - first, out);
+  BOOST_CHECK_EQUAL(out.size(), 3u);
+  BOOST_CHECK_EQUAL(f.droppedBytes(), 3u);
+  BOOST_CHECK(f.inSync());
+}
+
+// Other-category blocks are skipped in sync only up to LEN 4096.
+BOOST_AUTO_TEST_CASE(framer_other_category_len_limit) {
+  const Bytes a = encodeBlock({icdRecord()});
+  {
+    Bytes cat48 = hex("30 10 00");  // LEN 4096: skipped
+    cat48.resize(4096, 0x15);
+    const Bytes stream = join({a, cat48, a});
+    Cat021StreamFramer f(Edition::e2_6);
+    std::vector<Bytes> out;
+    f.feed(stream.data(), stream.size(), out);
+    BOOST_CHECK_EQUAL(out.size(), 2u);
+    BOOST_CHECK_EQUAL(f.otherCategoryBlocks(), 1u);
+    BOOST_CHECK_EQUAL(f.skippedBytes(), 4096u);
+    BOOST_CHECK_EQUAL(f.droppedBytes(), 0u);
+  }
+  {
+    // LEN 4097: drop `30` and leave sync; `10 01` are dropped out of sync.
+    const Bytes stream = join({a, hex("30 10 01"), a});
+    Cat021StreamFramer f(Edition::e2_6);
+    std::vector<Bytes> out;
+    f.feed(stream.data(), stream.size(), out);
+    BOOST_CHECK_EQUAL(out.size(), 2u);
+    BOOST_CHECK_EQUAL(f.otherCategoryBlocks(), 0u);
+    BOOST_CHECK_EQUAL(f.droppedRuns(), 1u);
+    BOOST_CHECK_EQUAL(f.droppedBytes(), 3u);
+    BOOST_CHECK(f.inSync());
   }
 }

@@ -90,11 +90,12 @@ Bytes encodeTime(const Time074& t, const char* what) {
   return out;
 }
 
+// Characters outside the ICAO 6-bit set (including the decoder's '?') become
+// space, so a decoded record always re-encodes.
 uint32_t identCode(char c) {
   if (c >= 'A' && c <= 'Z') return static_cast<uint32_t>(c - 'A' + 1);
   if (c >= '0' && c <= '9') return static_cast<uint32_t>(c - '0' + 48);
-  if (c == ' ') return 32;
-  bad("ident character outside A-Z, 0-9 and space");
+  return 32;
 }
 
 Bytes encode170(const std::string& ident) {
@@ -242,8 +243,8 @@ std::optional<Bytes> modelled(const Cat021Record& r, int frn) {
       if (!r.amplitude132) return std::nullopt;
       out.push_back(static_cast<uint8_t>(*r.amplitude132));
       return out;
-    case 48:
-      if (!r.sgv) return std::nullopt;
+    case 48:  // opaque[48] (the RE as received) wins over sgv
+      if (!r.sgv || r.opaque.count(48) != 0) return std::nullopt;
       return encodeReSgv(*r.sgv);
     default:
       return std::nullopt;

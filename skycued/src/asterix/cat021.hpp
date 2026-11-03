@@ -198,10 +198,12 @@ WalkStatus walkRecord(const uint8_t* p, std::size_t avail, RecordLayout& out);
 // an error. Without it, the body is a prefix of a block still arriving:
 // need_more means no error so far. A body with no record is an error. When
 // `layouts` is given, it receives the layout of every record walked cleanly
-// before the result (decodeBlock decodes exactly those).
+// before the result (decodeBlock decodes exactly those). When `walked` is
+// given, it receives the number of bytes of those records (where a later walk
+// of the same prefix can resume).
 WalkStatus walkRecords(const uint8_t* p, std::size_t n, bool complete, Edition edition,
                        std::vector<RecordLayout>* layouts = nullptr,
-                       std::string* error_text = nullptr);
+                       std::string* error_text = nullptr, std::size_t* walked = nullptr);
 
 }  // namespace detail
 

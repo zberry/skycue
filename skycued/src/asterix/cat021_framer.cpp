@@ -11,6 +11,7 @@ void Cat021StreamFramer::reset() {
   buf_.clear();
   skip_ = 0;
   in_sync_ = true;
+  walked_ = 0;
 }
 
 void Cat021StreamFramer::dropByte(std::size_t& pos) {
@@ -20,6 +21,7 @@ void Cat021StreamFramer::dropByte(std::size_t& pos) {
   }
   ++dropped_bytes_;
   ++pos;
+  walked_ = 0;
 }
 
 void Cat021StreamFramer::feed(const uint8_t* data, std::size_t size,
@@ -27,6 +29,7 @@ void Cat021StreamFramer::feed(const uint8_t* data, std::size_t size,
   if (skip_ > 0) {
     const std::size_t n = std::min(skip_, size);
     skip_ -= n;
+    skipped_bytes_ += n;
     data += n;
     size -= n;
   }
@@ -40,29 +43,42 @@ void Cat021StreamFramer::feed(const uint8_t* data, std::size_t size,
     const std::size_t len = (std::size_t{p[1]} << 8) | p[2];
 
     if (cat == 21 && len >= 3) {
+      // The cached walk belongs to the candidate at buf_[0] (where the last
+      // feed() stopped to wait).
+      const std::size_t start = pos == 0 ? walked_ : 0;
+      const std::size_t body = len - 3;
       if (avail >= len) {
-        if (detail::walkRecords(p + 3, len - 3, true, edition_) == detail::WalkStatus::ok) {
+        const bool clean =
+            (start > 0 && start == body) ||
+            detail::walkRecords(p + 3 + start, body - start, true, edition_) ==
+                detail::WalkStatus::ok;
+        if (clean) {
           blocks_out.emplace_back(p, p + len);
           pos += len;
           in_sync_ = true;
+          walked_ = 0;
         } else {
           dropByte(pos);
         }
         continue;
       }
-      if (in_sync_) break;  // wait for the rest of the block
-      if (detail::walkRecords(p + 3, avail - 3, false, edition_) == detail::WalkStatus::need_more) {
-        break;  // a plausible candidate: wait
+      std::size_t walked = 0;
+      if (detail::walkRecords(p + 3 + start, avail - 3 - start, false, edition_, nullptr, nullptr,
+                              &walked) == detail::WalkStatus::need_more) {
+        walked_ = start + walked;
+        break;  // a plausible candidate: wait for the rest
       }
       dropByte(pos);
       continue;
     }
 
-    if (in_sync_ && cat != 0 && len >= 3) {
+    if (in_sync_ && cat != 0 && len >= 3 && len <= kMaxOtherCategoryLen) {
       ++other_category_blocks_;
       const std::size_t take = std::min(len, avail);
       pos += take;
+      skipped_bytes_ += take;
       skip_ = len - take;
+      walked_ = 0;
       continue;
     }
 

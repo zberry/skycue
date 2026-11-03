@@ -234,26 +234,32 @@ WalkStatus walkRecord(const uint8_t* p, std::size_t avail, RecordLayout& out) {
 }
 
 WalkStatus walkRecords(const uint8_t* p, std::size_t n, bool complete, Edition edition,
-                       std::vector<RecordLayout>* layouts, std::string* error_text) {
+                       std::vector<RecordLayout>* layouts, std::string* error_text,
+                       std::size_t* walked) {
   (void)edition;  // every supported edition shares the 2.2+ length rules
   std::size_t off = 0;
+  const auto done = [&](WS st) {
+    if (walked) *walked = off;
+    return st;
+  };
   while (off < n) {
     RecordLayout layout;
     const WS st = walkRecord(p + off, n - off, layout);
     if (st == WS::error) {
-      return fail(error_text,
-                  "record at body offset " + std::to_string(off) + ": " + layout.error_text);
+      return done(fail(error_text,
+                       "record at body offset " + std::to_string(off) + ": " + layout.error_text));
     }
     if (st == WS::need_more) {
-      if (!complete) return WS::need_more;
-      return fail(error_text, "record at body offset " + std::to_string(off) + " runs past LEN");
+      if (!complete) return done(WS::need_more);
+      return done(
+          fail(error_text, "record at body offset " + std::to_string(off) + " runs past LEN"));
     }
     off += layout.size;
     if (layouts) layouts->push_back(std::move(layout));
   }
-  if (!complete) return WS::need_more;
-  if (n == 0) return fail(error_text, "block has no record");
-  return WS::ok;
+  if (!complete) return done(WS::need_more);
+  if (n == 0) return done(fail(error_text, "block has no record"));
+  return done(WS::ok);
 }
 
 }  // namespace detail

@@ -5,14 +5,18 @@
 // decoded; the consumer decodes each block it is handed, once.
 //
 // In sync (at the start, after reset() and after every block passed out):
-//  - CAT 21 with LEN >= 3: wait until the block is complete; if it walks
-//    cleanly, pass it out, else drop one byte and leave sync.
-//  - another CAT (1..255) with LEN >= 3: skip LEN bytes, count it.
-//  - anything else (CAT 0, LEN < 3): drop one byte and leave sync.
+//  - CAT 21 with LEN >= 3: pass it out once it is complete and walks cleanly.
+//    While it is still arriving, it is waited for only as long as the bytes
+//    already buffered walk without error. On a walk error, drop one byte and
+//    leave sync.
+//  - another CAT (1..255) with 3 <= LEN <= kMaxOtherCategoryLen: skip LEN bytes
+//    and count it.
+//  - anything else (CAT 0, LEN < 3, another CAT with a larger LEN): drop one
+//    byte and leave sync.
 // Out of sync: drop one byte at a time until a CAT 21 block with LEN >= 3 walks
-// cleanly. A candidate still arriving is waited for only while the bytes
-// already buffered walk without error; otherwise its first byte is dropped at
-// once. Each out-of-sync period counts one dropped run.
+// cleanly, with the same rule for a candidate still arriving. Each out-of-sync
+// period counts one dropped run. The walk of a waiting candidate resumes where
+// the previous feed() left it.
 
 #include "asterix/cat021.hpp"
 
@@ -25,6 +29,10 @@ namespace asterix {
 
 class Cat021StreamFramer {
  public:
+  // Real blocks from the pingStation 3 are under 1 KiB; a larger "other
+  // category" header is more likely garbage than a block worth skipping.
+  static constexpr std::size_t kMaxOtherCategoryLen = 4096;
+
   explicit Cat021StreamFramer(Edition edition);
 
   // Appends every block completed by these bytes to blocks_out.
@@ -35,6 +43,8 @@ class Cat021StreamFramer {
   uint64_t droppedRuns() const { return dropped_runs_; }
   uint64_t droppedBytes() const { return dropped_bytes_; }
   uint64_t otherCategoryBlocks() const { return other_category_blocks_; }
+  // Bytes skipped as other-category blocks (headers included).
+  uint64_t skippedBytes() const { return skipped_bytes_; }
   bool inSync() const { return in_sync_; }
 
  private:
@@ -44,9 +54,12 @@ class Cat021StreamFramer {
   std::vector<uint8_t> buf_;
   std::size_t skip_ = 0;  // bytes of an other-category block still to skip
   bool in_sync_ = true;
+  // Body bytes of the candidate at buf_[0] already walked cleanly.
+  std::size_t walked_ = 0;
   uint64_t dropped_runs_ = 0;
   uint64_t dropped_bytes_ = 0;
   uint64_t other_category_blocks_ = 0;
+  uint64_t skipped_bytes_ = 0;
 };
 
 }  // namespace asterix

@@ -45,6 +45,7 @@ struct TrackSnapshot {
     std::chrono::system_clock::time_point first_seen{}, last_seen{};  // receive times
     std::optional<std::string> emergency, category;
     double rssi = 0;  // dBFS; NaN when never reported
+    std::string input;  // the newest observation's input id; empty when not known
 };
 
 struct Snapshot {

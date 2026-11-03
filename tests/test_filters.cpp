@@ -142,6 +142,25 @@ BOOST_AUTO_TEST_CASE(airborne_no_altitude_passes_elevation)
     BOOST_TEST(static_cast<int>(fs.evaluate(ground).decision) == static_cast<int>(Decision::below_elevation));
 }
 
+BOOST_AUTO_TEST_CASE(on_ground_unset_treated_as_airborne)
+{
+    auto fs = filters(250.0, 2.0);
+    // Unset (the input did not say): the reported altitude is used, as for false.
+    TrackState unset = track(0x555555, 20.0, 40000);
+    BOOST_TEST(!unset.latest.on_ground.has_value());
+    FilterResult u = fs.evaluate(unset);
+    BOOST_TEST(static_cast<int>(u.decision) == static_cast<int>(Decision::send));
+    BOOST_TEST(u.elevation_deg > 15.0);
+
+    TrackState airborne = track(0x555555, 20.0, 40000);
+    airborne.latest.on_ground = false;
+    BOOST_TEST(fs.evaluate(airborne).elevation_deg == u.elevation_deg, boost::test_tools::tolerance(1e-9));
+
+    // Unset without any altitude: no usable elevation, as for an airborne target.
+    TrackState bare = track(0x555555, 20.0, std::nullopt, std::nullopt);
+    BOOST_TEST(std::isnan(fs.evaluate(bare).elevation_deg));
+}
+
 BOOST_AUTO_TEST_CASE(no_position)
 {
     auto fs = filters(150.0, 0.0);

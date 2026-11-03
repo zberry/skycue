@@ -139,10 +139,14 @@ std::optional<TrackObservation> parse(const std::string& line)
         obs.position_time = fromEpochSeconds(position_s);
     }
 
-    if (json->getString("alt_baro").value_or("") == "ground")
+    // alt_baro "ground" or a number asserts on_ground; without it the line
+    // does not say (unset).
+    if (json->getString("alt_baro").value_or("") == "ground") {
         obs.on_ground = true;
-    else
-        obs.alt_baro_ft = feet(json->getDouble("alt_baro"));
+    } else if (auto alt = json->getDouble("alt_baro")) {
+        obs.on_ground = false;
+        obs.alt_baro_ft = feet(alt);
+    }
     obs.alt_geom_ft = feet(json->getDouble("alt_geom"));
     obs.gs_kt = toFloat(json->getDouble("gs"));
     obs.track_deg = toFloat(json->getDouble("track"));

@@ -294,7 +294,7 @@ StatsReport computeStats(const std::vector<RecordingRecord>& input, const StatsO
     };
 
     std::map<TrackId, Acc> acc;
-    std::map<std::string, std::set<TrackId>> source_ac, type_ac;
+    std::map<std::string, std::set<TrackId>> source_ac, type_ac, input_ac;
     std::map<std::pair<TrackId, std::string>, std::size_t> squawk_index;
     std::map<long, std::pair<uint64_t, std::set<TrackId>>> range_bins, alt_bins;
     std::vector<double> ranges, speeds;
@@ -319,13 +319,16 @@ StatsReport computeStats(const std::vector<RecordingRecord>& input, const StatsO
             continue;
         const TrackObservation& o = r.obs;
         ++ac.observations;
-        ++(o.on_ground ? ac.on_ground : ac.airborne);
+        ++(o.on_ground.value_or(false) ? ac.on_ground : ac.airborne);
         const char* src = recording::sourceName(o.source);
         const char* typ = recording::addressTypeName(o.id.type);
         ++ac.by_source[src].obs;
         source_ac[src].insert(o.id);
         ++ac.by_addr_type[typ].obs;
         type_ac[typ].insert(o.id);
+        const std::string in = o.input_id.empty() ? "(none)" : o.input_id;
+        ++ac.by_input[in].obs;
+        input_ac[in].insert(o.id);
 
         Acc& a = acc[o.id];
         if (a.obs++ == 0)
@@ -417,6 +420,8 @@ StatsReport computeStats(const std::vector<RecordingRecord>& input, const StatsO
         kv.second.aircraft = source_ac[kv.first].size();
     for (auto& kv : ac.by_addr_type)
         kv.second.aircraft = type_ac[kv.first].size();
+    for (auto& kv : ac.by_input)
+        kv.second.aircraft = input_ac[kv.first].size();
     for (const auto& kv : acc) {
         if (kv.second.callsign)
             ++ac.with_callsign;
@@ -738,6 +743,7 @@ std::string formatStatsTextBody(const StatsReport& rep)
     };
     counts("By source", "source", ac.by_source);
     counts("By address type", "addr_type", ac.by_addr_type);
+    counts("By input", "input", ac.by_input);
     out += fmt("With callsign: %llu aircraft\n", ull(ac.with_callsign));
     out += fmt("With registration: %llu aircraft\n", ull(ac.with_registration));
     if (ac.emergency_squawks.empty()) {
@@ -1014,6 +1020,7 @@ std::string formatStatsJson(const StatsReport& rep)
         w.add("airborne", i64(ac.airborne)).add("on_ground", i64(ac.on_ground));
         w.addRaw("by_source", countsJson(ac.by_source));
         w.addRaw("by_addr_type", countsJson(ac.by_addr_type));
+        w.addRaw("by_input", countsJson(ac.by_input));
         w.add("with_callsign", i64(ac.with_callsign)).add("with_registration", i64(ac.with_registration));
         std::vector<std::string> hits;
         for (const auto& h : ac.emergency_squawks) {

@@ -154,6 +154,8 @@ void putTrack(JsonWriter& w, const TrackSnapshot& ts)
     addOpt(w, "emergency", ts.emergency);
     addOpt(w, "category", ts.category);
     addFinite(w, "rssi", ts.rssi);
+    if (!ts.input.empty())
+        w.add("input", ts.input);
 }
 
 ApiResponse json(unsigned status, std::string body)

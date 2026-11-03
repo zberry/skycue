@@ -300,6 +300,31 @@ BOOST_AUTO_TEST_CASE(skips_range_sections_without_receiver)
     BOOST_TEST(json.find("\"altitude_histogram\":{") != std::string::npos);
 }
 
+BOOST_AUTO_TEST_CASE(by_input_counts)
+{
+    std::vector<RecordingRecord> recs{obs(0, 0xa1), obs(1, 0xa1), obs(2, 0xa2), obs(3, 0xa1), obs(4, 0xb3)};
+    recs[0].obs.input_id = "ps-north";
+    recs[1].obs.input_id = "ps-north";
+    recs[2].obs.input_id = "ps-north";
+    recs[3].obs.input_id = "readsb";  // recs[4] has no input
+    const StatsReport r = computeStats(recs, StatsOptions{});
+    BOOST_REQUIRE(r.aircraft.by_input.size() == 3u);
+    BOOST_TEST(r.aircraft.by_input.at("ps-north").aircraft == 2u);
+    BOOST_TEST(r.aircraft.by_input.at("ps-north").obs == 3u);
+    BOOST_TEST(r.aircraft.by_input.at("readsb").aircraft == 1u);
+    BOOST_TEST(r.aircraft.by_input.at("readsb").obs == 1u);
+    BOOST_TEST(r.aircraft.by_input.at("(none)").aircraft == 1u);
+    BOOST_TEST(r.aircraft.by_input.at("(none)").obs == 1u);
+
+    const std::string json = formatStatsJson(r);
+    BOOST_TEST(json.find("\"by_input\":{\"(none)\":{\"aircraft\":1,\"obs\":1},"
+                         "\"ps-north\":{\"aircraft\":2,\"obs\":3},"
+                         "\"readsb\":{\"aircraft\":1,\"obs\":1}}") != std::string::npos);
+    const std::string text = formatStatsText(r);
+    BOOST_TEST(text.find("By input:\n") != std::string::npos);
+    BOOST_TEST(text.find("  ps-north               2        3\n") != std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(output_is_deterministic)
 {
     std::vector<RecordingRecord> recs{obsAt(0, 0xa1, 39.0, -77.0, 12000), obsAt(0, 0xb2, 39.1, -77.1, 2000),

@@ -591,6 +591,7 @@ TrackSnapshot Engine::trackSnapshot(const TrackState& state, const FilterResult&
     t.emergency = state.latest.emergency;
     t.category = state.latest.category;
     t.rssi = state.latest.rssi.value_or(std::numeric_limits<double>::quiet_NaN());
+    t.input = state.last_input;
     return t;
 }
 

@@ -27,9 +27,11 @@ const char* recordKindName(RecordKind kind);
 struct RecordingRecord {
     std::chrono::system_clock::time_point time;  // the record's "time" (readsb: "now")
     RecordKind kind = RecordKind::obs;
-    // obs: the observation. update/keyframe: the sent track's fields that
-    // have a TrackObservation counterpart (received_time = time). drop: id
-    // only. Otherwise empty.
+    // obs: the observation, with input_id from the record's "input" (empty
+    // when absent, and for a readsb line) and on_ground unset when the record
+    // has no "on_ground". update/keyframe: the sent track's fields that have
+    // a TrackObservation counterpart (received_time = time). drop: id only.
+    // Otherwise empty.
     TrackObservation obs;
     std::optional<float> vrate_fpm;  // update/keyframe: "vrate_fpm"
     bool keyframe_flag = false;      // update/keyframe: "keyframe"

@@ -19,9 +19,10 @@ struct TrackState {
     skycue::Source source{skycue::Source::other};
     // Merged observation: each optional field keeps the last known value when a
     // newer observation lacks it; lat/lon/position_time move together.
-    // received_time, source and raw_line always come from the newest;
-    // on_ground from the newest that carries alt_baro (on_ground or a value).
+    // received_time, source, raw_line and input_id always come from the
+    // newest; on_ground from the newest that sets it.
     TrackObservation latest;
+    std::string last_input;                                     // the newest observation's input_id
     std::chrono::system_clock::time_point first_seen{};         // received_time of the first observation
     std::chrono::system_clock::time_point last_seen{};          // newest received_time
     std::chrono::system_clock::time_point last_position_time{}; // newest position time (if ever positioned)

@@ -131,6 +131,8 @@ int main(int argc, char** argv)
     if (vm.count("help")) {
         std::cout << "usage: skycue-stats [options] FILE...\n"
                      "Summarises received/sent JSONL recordings and readsb JSON captures (.gz too).\n"
+                     "The Aircraft section counts observations by source, by address type and by input\n"
+                     "(\"By input\": the obs records' input id, \"(none)\" for records without one).\n"
                   << opts;
         return 0;
     }

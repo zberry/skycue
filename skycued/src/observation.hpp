@@ -18,13 +18,14 @@ struct TrackObservation {
     std::chrono::system_clock::time_point received_time{};               // readsb "now"
     std::optional<std::chrono::system_clock::time_point> position_time;  // now - seen_pos; set with lat/lon
     std::optional<double> lat, lon;                                      // both or neither
-    bool on_ground = false;
+    std::optional<bool> on_ground;  // unset: the input did not say
     std::optional<int32_t> alt_baro_ft, alt_geom_ft;
     std::optional<float> gs_kt, track_deg, baro_rate_fpm, geom_rate_fpm;
     std::optional<std::string> callsign, squawk, registration, emergency, category;
     std::optional<uint8_t> nic, nac_p;
     std::optional<double> rssi;
     std::string raw_line;  // kept for the received recording
+    std::string input_id;  // the input that produced it; empty when not known
 };
 
 // Where the Engine gets its observations: readsb's JSON port or a replay.

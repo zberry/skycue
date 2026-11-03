@@ -47,7 +47,7 @@ BOOST_AUTO_TEST_CASE(parses_minimal_line)
     BOOST_REQUIRE(obs->lat && obs->lon);
     BOOST_TEST(*obs->lat == 38.912345);
     BOOST_TEST(*obs->lon == -75.987654);
-    BOOST_TEST(!obs->on_ground);
+    BOOST_TEST((obs->on_ground == false));  // a numeric alt_baro asserts airborne
     BOOST_TEST(obs->alt_baro_ft.value_or(0) == 36000);
     BOOST_TEST(obs->alt_geom_ft.value_or(0) == 36525);
     BOOST_TEST(obs->gs_kt.value_or(0) == 460.2f);
@@ -71,11 +71,20 @@ BOOST_AUTO_TEST_CASE(ground_altitude)
         R"({"now":1793545200.0,"hex":"a7d3e6","type":"adsb_icao","flight":"UAL455  ","alt_baro":"ground",)"
         R"("gs":14.6,"true_heading":181.4,"lat":38.85,"lon":-77.04,"nic":8,"rc":186,"seen_pos":0.1})");
     BOOST_REQUIRE(obs);
-    BOOST_TEST(obs->on_ground);
+    BOOST_TEST((obs->on_ground == true));
     BOOST_TEST(!obs->alt_baro_ft);
     BOOST_TEST(!obs->alt_geom_ft);
     BOOST_TEST(obs->gs_kt.value_or(0) == 14.6f);
     BOOST_TEST(obs->lat.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(on_ground_unset_without_alt_baro)
+{
+    // No alt_baro: the line says nothing about whether the target is on the ground.
+    auto obs = parseReadsbLine(R"({"now":1793545200.0,"hex":"a7d3e6","type":"adsb_icao","lat":38.85,"lon":-77.04})");
+    BOOST_REQUIRE(obs);
+    BOOST_TEST(!obs->on_ground.has_value());
+    BOOST_TEST(!obs->alt_baro_ft);
 }
 
 BOOST_AUTO_TEST_CASE(no_position_line)
@@ -300,7 +309,7 @@ BOOST_AUTO_TEST_CASE(sample_fixture_parses_fully)
         if (!obs)
             continue;
         ++parsed;
-        on_ground += obs->on_ground ? 1 : 0;
+        on_ground += obs->on_ground.value_or(false) ? 1 : 0;
         with_position += obs->lat ? 1 : 0;
         uat += obs->source == Source::uat_978 ? 1 : 0;
         tisb += obs->source == Source::tisb ? 1 : 0;

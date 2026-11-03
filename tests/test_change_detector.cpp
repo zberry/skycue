@@ -52,6 +52,7 @@ TrackState positioned()
     s.latest.callsign = "AAL1";
     s.latest.squawk = "1200";
     s.latest.emergency = "none";
+    s.latest.on_ground = false;
     s.last_seen = kWall;
     s.last_position_time = kWall;
     return s;
@@ -127,6 +128,16 @@ BOOST_AUTO_TEST_CASE(identity_bypasses_min_interval)
         s.latest.callsign = "AAL2";
         BOOST_TEST(shouldSend(s, kS0 + 5s, kDefaults) == SendReason::identity);
     }
+}
+
+BOOST_AUTO_TEST_CASE(on_ground_unset_on_both_sides_is_no_change)
+{
+    // An input that never said whether the target is on the ground: it was
+    // sent as airborne (false), and unset still reads as airborne.
+    TrackState s = sent();
+    BOOST_TEST(s.last_sent->on_ground == false);
+    s.latest.on_ground.reset();
+    BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::none);
 }
 
 BOOST_AUTO_TEST_CASE(moved_10m_sends)

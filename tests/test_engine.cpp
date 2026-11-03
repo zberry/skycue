@@ -949,6 +949,26 @@ BOOST_AUTO_TEST_CASE(filter_history_ring)
     });
 }
 
+BOOST_AUTO_TEST_CASE(filter_history_uses_the_wall_clock_during_a_replay)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(baseConfig(), fakeSource(src));
+    fx.t.call([&] {
+        TrackObservation o = nearbyObservation(0x777777, 0);
+        o.received_time = std::chrono::system_clock::from_time_t(1420070400);  // 2015: a replay's data clock
+        o.position_time = o.received_time;
+        src->connection(true);
+        src->emit(o);
+        BOOST_TEST((fx.engine->snapshot().now < std::chrono::system_clock::from_time_t(1500000000)));  // the data clock is in 2015
+        fx.engine->setFilterConfig({20, 0}, "ui");
+        const auto h = fx.engine->filterHistory();
+        BOOST_REQUIRE(h.size() == 2u);
+        const auto wall = std::chrono::system_clock::now();
+        for (const auto& c : h)
+            BOOST_TEST(std::chrono::duration<double>(wall - c.time).count() < 60.0);
+    });
+}
+
 BOOST_AUTO_TEST_CASE(filter_history_load_before_start)
 {
     IoThread t;

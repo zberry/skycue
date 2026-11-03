@@ -569,7 +569,9 @@ void Engine::setFilterConfig(FilterConfig config, const std::string& origin)
 
 void Engine::pushFilterChange(const std::string& origin)
 {
-    filter_history_.push_back(FilterChange{dataNow(), origin, filters_.config()});
+    // The wall clock, always: an operator audit log, so during a replay the
+    // startup entry and later changes do not mix the two clocks.
+    filter_history_.push_back(FilterChange{std::chrono::system_clock::now(), origin, filters_.config()});
     if (filter_history_.size() > kFilterHistoryMax)
         filter_history_.pop_front();
 }

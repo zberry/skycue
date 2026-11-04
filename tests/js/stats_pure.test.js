@@ -496,10 +496,13 @@ test('polarSeries: 8 bands x 72, holder lookup', () => {
 });
 
 test('histBars: labels and values', () => {
-  assert.deepStrictEqual(S.histBars({ start: -8000, bin: 500, counts: [1, 2] }),
-    { labels: ['-8000–-7500', '-7500–-7000'], values: [1, 2] });
+  // The first bin also holds the values below it, the last those above.
+  assert.deepStrictEqual(S.histBars({ start: -8000, bin: 500, counts: [1, 2, 3] }),
+    { labels: ['<-7500', '-7500–-7000', '-7000+'], values: [1, 2, 3] });
   assert.deepStrictEqual(S.histBars({ start: 0, bin: 10, counts: [0, 4, 0, 5, 0, 0] }),
-    { labels: ['0–10', '10–20', '20–30', '30–40', '40–50', '50–60'], values: [0, 4, 0, 5, 0, 0] });
+    { labels: ['<10', '10–20', '20–30', '30–40', '40–50', '50+'], values: [0, 4, 0, 5, 0, 0] });
+  assert.deepStrictEqual(S.histBars({ start: -50, bin: 1, counts: [2, 0, 7] }, true),
+    { labels: ['<-49', '-49–-48', '-48+'], values: [2, 0, 7] });
   // trim: the empty bins before the first and after the last count go.
   assert.deepStrictEqual(S.histBars({ start: 0, bin: 10, counts: [0, 4, 0, 5, 0, 0] }, true),
     { labels: ['10–20', '20–30', '30–40'], values: [4, 0, 5] });

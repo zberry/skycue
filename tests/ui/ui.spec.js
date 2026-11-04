@@ -2731,7 +2731,8 @@ test('stats_coverage_polar_histograms_and_density', async ({ page }, testInfo) =
     expect(o.series.length, id).toBe(1);
     expect(o.series[0].type).toBe('bar');
     expect(o.xAxis[0].data.length).toBe(o.series[0].data.length);
-    o.xAxis[0].data.forEach((l) => expect(l).toMatch(/^-?\d+–-?\d+$/));
+    // "<end>" first (it holds the values below), "<start>+" last.
+    o.xAxis[0].data.forEach((l) => expect(l).toMatch(/^(<-?\d+|-?\d+–-?\d+|-?\d+\+)$/));
     expect(o.series[0].data.reduce((a, v) => a + v, 0)).toBeGreaterThan(0);
     expect(await cardCaption(page, id)).toMatch(/^\d{1,3}(,\d{3})* observations · since /);
   }
@@ -2854,7 +2855,15 @@ test('stats_signal_rssi_vs_range_and_histogram', async ({ page }, testInfo) => {
   expect(o.xAxis[0].data.length).toBeGreaterThanOrEqual(Math.min(10, rssi.counts.length));
   expect(o.xAxis[0].data.length).toBeLessThanOrEqual(Math.min(rssi.counts.length, Math.max(10, lastCol + 2)));
   o.series[0].data.forEach((c) => expect(c[0]).toBeLessThan(o.xAxis[0].data.length));
-  expect(o.yAxis[0].data.length).toBe(rssi.counts[0].length);
+  // The signal axis: the levels with counts and one bin either side.
+  const levels = (m) => {
+    let lo = Infinity, hi = -1;
+    m.counts.forEach((row) => row.forEach((v, b) => { if (v > 0) { lo = Math.min(lo, b); hi = Math.max(hi, b); } }));
+    return Math.min(m.counts[0].length - 1, hi + 1) - Math.max(0, lo - 1) + 1;
+  };
+  expect(o.yAxis[0].data.length).toBeGreaterThanOrEqual(levels(rssi));
+  expect(o.yAxis[0].data.length).toBeLessThanOrEqual(levels(rssi2));
+  expect(o.yAxis[0].data.length).toBeLessThan(rssi.counts[0].length);
   // Cells only appear while the replay runs: the drawing lies between the two reads.
   const cols = (m) => m.counts.filter((row) => row.some((n) => n > 0)).length;
   const nonZero = (m) => m.counts.reduce((a, row) => a + row.filter((n) => n > 0).length, 0);
@@ -2864,7 +2873,12 @@ test('stats_signal_rssi_vs_range_and_histogram', async ({ page }, testInfo) => {
   expect(o.series[0].data.length).toBeGreaterThanOrEqual(nonZero(rssi));
   expect(o.series[0].data.length).toBeLessThanOrEqual(nonZero(rssi2));
   // Each median point sits on a bin of the rssi axis.
-  o.series[1].data.forEach((m) => { expect(Number.isInteger(m[1])).toBe(true); expect(m[1]).toBeGreaterThanOrEqual(0); });
+  o.series[1].data.forEach((m) => {
+    expect(Number.isInteger(m[1])).toBe(true);
+    expect(m[1]).toBeGreaterThanOrEqual(0);
+    expect(m[1]).toBeLessThan(o.yAxis[0].data.length);
+  });
+  o.series[0].data.forEach((c) => expect(c[1]).toBeLessThan(o.yAxis[0].data.length));
   const h = await cardOption(page, 'signal-rssi');
   expect(h.series.map((s) => s.type)).toEqual(['bar']);
   expect(h.series[0].data.reduce((a, v) => a + v, 0)).toBeGreaterThan(0);
@@ -2872,4 +2886,63 @@ test('stats_signal_rssi_vs_range_and_histogram', async ({ page }, testInfo) => {
   const sec = sectionOf(page, '#stats-signal');
   await sec.scrollIntoViewIfNeeded();
   await sec.screenshot({ path: testInfo.outputPath(`skycue-stats-signal-${testInfo.project.name}.png`) });
+});
+
+// The remainder bar ('other', many countries) is muted, shows no pointer
+// and its click changes nothing. The fixture has two countries, so the
+// summary is answered with 17 and a remainder.
+test('stats_fleet_country_other_bar_is_not_a_filter', async ({ page }) => {
+  await openCards(page, FLEET_CARDS);
+  await page.locator('#stats-live').uncheck();
+  await page.route('**/api/stats/summary*', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    const by = [];
+    for (let i = 0; i < 17; i++) by.push({ name: 'Canada', n: 1 });
+    body.range.by_country = [{ name: 'United States', n: 30 }].concat(by.map((c, i) => ({ name: 'X' + i, n: 1 })),
+      [{ name: 'other', n: 5 }]);
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  const o = await cardOption(page, 'fleet-country');
+  const list = o.yAxis[0].data;
+  expect(list.length).toBe(16);
+  expect(list[15]).toBe('other');
+  expect(o.series[0].data[15].cursor).toBe('default');
+  const before = await page.evaluate(() => JSON.stringify(window.skycueApp.getViewFilters()));
+  await clickItem(page, 'fleet-country', 'countries', 15, 0.5);
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('stats');
+  expect(await page.evaluate(() => JSON.stringify(window.skycueApp.getViewFilters()))).toBe(before);
+  await page.unroute('**/api/stats/summary*');
+});
+
+// From 1700 px (three columns) the wide cards take two columns, so every
+// row of Coverage, Fleet and Signal is full; below, two columns, no spans.
+test('stats_coverage_fleet_signal_rows_are_full', async ({ page }) => {
+  await openCards(page, COVERAGE_CARDS.concat(FLEET_CARDS, SIGNAL_CARDS));
+  const r = await page.evaluate(() => ['stats-coverage', 'stats-fleet', 'stats-signal'].map((id) => {
+    const g = document.getElementById(id).getBoundingClientRect();
+    return { id, gw: g.width, gr: g.right, cards: Array.from(document.querySelectorAll('#' + id + ' .card')).map((c) => {
+      const b = c.getBoundingClientRect();
+      return { id: c.getAttribute('data-card'), w: b.width, right: b.right, top: b.top };
+    }) };
+  }));
+  const vw = await page.evaluate(() => window.innerWidth);
+  const WIDE = ['coverage-range', 'coverage-elevation', 'fleet-altitude', 'fleet-addr-type', 'signal-rssi-range'];
+  for (const sec of r) {
+    for (const c of sec.cards) {
+      if (vw >= 1700 && WIDE.includes(c.id)) {
+        expect(c.w / sec.gw, c.id).toBeGreaterThan(0.6);
+        expect(c.w / sec.gw, c.id).toBeLessThan(0.7);
+      } else if (vw >= 1700) expect(c.w / sec.gw, c.id).toBeLessThan(0.35);
+      else expect(c.w / sec.gw, c.id).toBeLessThan(0.55);
+    }
+    // The last card of each row ends at the grid's right edge (no orphan).
+    if (vw >= 1700) {
+      const rows = {};
+      sec.cards.forEach((c) => { const k = Math.round(c.top); rows[k] = Math.max(rows[k] || 0, c.right); });
+      Object.keys(rows).forEach((k) => expect(rows[k], sec.id + ' row ' + k).toBeCloseTo(sec.gr, 0));
+    }
+  }
 });

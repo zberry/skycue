@@ -363,7 +363,9 @@
   }
 
   // A histogram {start, bin, counts} as bars: labels "<start>–<end>" of each
-  // bin and the counts. With trim, the empty bins before the first count
+  // bin and the counts. The daemon counts values below the first edge in
+  // the first bin and those at or above the last edge in the last, so the
+  // first is "<end>" and the last "<start>+". With trim, the empty bins before the first count
   // and after the last are left out (none at all when every bin is empty).
   function histBars(h, trim) {
     var out = { labels: [], values: [] };
@@ -374,7 +376,8 @@
       while (hi >= lo && !(h.counts[hi] > 0)) hi--;
     }
     for (var i = lo; i <= hi; i++) {
-      out.labels.push(String(h.start + i * h.bin) + '–' + String(h.start + (i + 1) * h.bin));
+      var a = h.start + i * h.bin, b = a + h.bin;
+      out.labels.push(i === h.counts.length - 1 ? a + '+' : i === 0 ? '<' + b : a + '–' + b);
       out.values.push(isNum(h.counts[i]) ? h.counts[i] : 0);
     }
     return out;

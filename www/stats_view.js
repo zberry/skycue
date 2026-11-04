@@ -600,7 +600,8 @@
           var h = polar.holder(p.dataIndex, polarBand(p));
           if (!h) return '';
           var a = p.dataIndex * deg;
-          return esc(a + '–' + (a + deg) + '° · ' + p.seriesName + ' ft') + '<br>' +
+          var band = p.seriesName === 'unknown' ? 'altitude unknown' : p.seriesName + ' ft';
+          return esc(a + '–' + (a + deg) + '° · ' + band) + '<br>' +
             esc(host.formatNum(h.max_range_nm, 1, ' nm') + ' · ' + S.keyHex(h.key)) + '<br>' +
             esc(S.isoTime(h.time)) + '<br>' + fmt(h.n) + ' observations';
         } },
@@ -643,8 +644,7 @@
       var max = 1;
       v.data.forEach(function (c) { if (c[2] > max) max = c[2]; });
       var half = v.cell / 2;
-      var side = Math.max(60, ch.getHeight() - 40);   // a square plot, centred
-      var left = Math.max(48, Math.round((ch.getWidth() - side) / 2));
+      var side = Math.max(60, ch.getHeight() - 40);   // a square plot, centred (also after a resize)
       var deg = function (x) { return host.formatNum(x, 1, '°'); };
       ch.setOption({
         animation: false,
@@ -653,7 +653,7 @@
           var c = p.value;
           return esc(host.formatNum(c[1], 3, '°') + ', ' + host.formatNum(c[0], 3, '°')) + '<br>' + fmt(c[2]) + ' positions';
         } },
-        grid: { top: 10, height: side, width: side, left: left },
+        grid: { top: 10, height: side, width: side, left: 'center' },
         // The edges are not round numbers: their labels would crowd the next one.
         xAxis: { type: 'value', min: v.xMin, max: v.xMax, scale: true, splitLine: { show: false },
           axisLabel: { hideOverlap: true, formatter: deg, showMinLabel: false, showMaxLabel: false } },
@@ -661,7 +661,7 @@
           axisLabel: { formatter: deg, showMinLabel: false, showMaxLabel: false } },
         // The colour follows log10(n), so a few busy cells do not wash out the rest.
         visualMap: { type: 'continuous', seriesIndex: 0, dimension: 3, min: -0.5, max: Math.max(0.5, Math.log10(max)),
-          calculable: false, orient: 'vertical', left: left + side + 16, top: 'middle', itemWidth: 10, itemHeight: 120,
+          calculable: false, orient: 'vertical', right: 16, top: 'middle', itemWidth: 10, itemHeight: 120,
           text: [fmt(max), '1'], inRange: { color: [tk.line || '#30363d', tk.accent || '#58a6ff', dec.elev || '#f0883e'] } },
         series: [
           { id: 'cells', name: 'positions', type: 'custom', encode: { x: 0, y: 1 },
@@ -710,7 +710,8 @@
         // The remainder bar is many countries: muted, and no filter.
         series: [{ id: 'countries', name: 'aircraft', type: 'bar', barCategoryGap: '20%', barMaxWidth: 18, cursor: 'pointer',
           data: list.map(function (x) {
-            return { value: x.value, itemStyle: { color: x.name === 'other' ? tk.muted : tk.accent } };
+            return x.name === 'other' ? { value: x.value, cursor: 'default', itemStyle: { color: tk.muted } }
+              : { value: x.value, itemStyle: { color: tk.accent } };
           }) }]
       });
     }
@@ -760,14 +761,19 @@
       h.data.forEach(function (c) { if (c[0] > last) last = c[0]; });
       var cols = Math.min(h.ranges, Math.max(10, last + 2));
       for (i = 0; i < cols; i++) xs.push(i === h.ranges - 1 ? (i * rb) + '+' : (i * rb) + '–' + ((i + 1) * rb));
-      for (i = 0; i < h.levels; i++) ys.push(String(start + i * bin));
+      // The signal axis: the levels with counts and one bin either side.
+      var lo = h.levels, hi = -1;
+      h.data.forEach(function (c) { lo = Math.min(lo, c[1]); hi = Math.max(hi, c[1]); });
+      lo = hi < 0 ? 0 : Math.max(0, lo - 1);
+      hi = hi < 0 ? h.levels - 1 : Math.min(h.levels - 1, hi + 1);
+      for (i = lo; i <= hi; i++) ys.push(String(start + i * bin));
       h.data.forEach(function (c) { if (c[2] > max) max = c[2]; });
       ch.setOption({
         animation: false,
         tooltip: { trigger: 'item', formatter: function (p) {
           if (p.seriesId === 'median') return esc(xs[p.value[0]] + ' nm') + '<br>median ' + host.formatNum(h.median[p.dataIndex][1], 0, ' dBFS');
           var c = p.value;
-          return esc(xs[c[0]] + ' nm · ' + ys[c[1]] + '…' + (start + (c[1] + 1) * bin) + ' dBFS') + '<br>' + fmt(c[3]) + ' observations';
+          return esc(xs[c[0]] + ' nm · ' + ys[c[1]] + '…' + (start + (c[1] + lo + 1) * bin) + ' dBFS') + '<br>' + fmt(c[3]) + ' observations';
         } },
         grid: { left: 44, right: 54, top: 12, bottom: 34 },
         xAxis: { type: 'category', data: xs, name: 'nm', nameLocation: 'middle', nameGap: 22, splitArea: { show: false },
@@ -778,10 +784,10 @@
           text: [fmt(max), '1'], inRange: { color: [tk.line || '#30363d', tk.accent || '#58a6ff', dec.elev || '#f0883e'] } },
         series: [
           { id: 'cells', name: 'observations', type: 'heatmap',
-            data: h.data.map(function (c) { return [c[0], c[1], Math.log10(c[2]), c[2]]; }) },
+            data: h.data.map(function (c) { return [c[0], c[1] - lo, Math.log10(c[2]), c[2]]; }) },
           // The median on the same category axes: a dB at a bin's centre is that bin's index.
           { id: 'median', name: 'median', type: 'line', symbol: 'circle', symbolSize: 4, z: 5,
-            data: h.median.map(function (m) { return [m[0], (m[1] - start - bin / 2) / bin]; }),
+            data: h.median.map(function (m) { return [m[0], (m[1] - start - bin / 2) / bin - lo]; }),
             lineStyle: { color: tk.text, width: 1.5 }, itemStyle: { color: tk.text } }
         ]
       });

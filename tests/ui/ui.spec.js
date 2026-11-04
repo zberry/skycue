@@ -677,6 +677,10 @@ test('alerts_ack_all_and_drawer_row_ack', async ({ page }) => {
   await expect(page.locator('#alerts-count')).toHaveText('3');
   await page.locator('#alerts-expand').click();
   await expect.poll(() => drawerIds(page)).toEqual(['T3', 'T2', 'T1']);
+  // The rows alternate (spec 7); the pointer kept off them (hover has its own background).
+  await page.mouse.move(0, 0);
+  const rowBg = (i) => page.locator('#alerts-log tr[data-alert-id]').nth(i).evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await rowBg(1)).not.toBe(await rowBg(0));
   await page.locator('#alerts-log tr[data-alert-id]', { hasText: 'T2' }).locator('.al-ack').click();
   await expect(page.locator('#alerts-count')).toHaveText('2');
   await page.locator('#alerts-ack-all').click();

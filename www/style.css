@@ -174,7 +174,9 @@ input.invalid { border-color: var(--blocked); }
 #alerts-note button { margin-left: 8px; padding: 0 6px; font-size: 12px; }
 #alerts-drawer { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px; border-bottom: 1px solid var(--line); }
 #alerts-log tbody tr[data-alert-id] { cursor: pointer; }
-#alerts-log tbody tr[data-alert-id]:hover { background: var(--panel-2); }
+/* Rows alternate (spec 7): every second one a step up from the panel. */
+#alerts-log tbody tr:nth-child(even) { background: var(--panel-2); }
+#alerts-log tbody tr[data-alert-id]:hover { background: var(--line); }
 #alerts-log tbody tr.acked .al-id, #alerts-log tbody tr.acked .al-detail { color: var(--muted); }
 #alerts-log td.al-detail { white-space: normal; overflow-wrap: anywhere; width: 100%; }
 #alerts-log .al-ack { padding: 0 6px; font-size: 12px; }

@@ -11,8 +11,10 @@
 //
 // A section is a function registerSection(fn): fn(data) runs after every
 // refresh with data = {summary, series, hours, coverage, rssi} (the newest
-// of each; hours, coverage and rssi are fetched on open and every 6th
-// refresh, null until then or after a failed fetch). It adds its cards
+// of each; hours, coverage and rssi are fetched on open, after a reset
+// and every 6th refresh, and kept until the next fetch of them; each is
+// null until fetched and null after its own fetch failed, which leaves
+// the tiles and the other data drawn). It adds its cards
 // once with addCard(sectionEl('traffic'), id, title) and on every call sets
 // each card's whole option with card.chart().setOption(option) (a merge,
 // so the same code serves a chart that was just created or recreated after
@@ -38,7 +40,7 @@
     var st = {
       open: false, range: S.rangeKey(host.storeGet(RANGE_KEY)), res: null, refreshes: 0,
       slowDue: true, liveTimer: null, disposeTimer: null, chain: Promise.resolve(true),
-      tiles: {}, detailKey: null
+      tiles: {}, detailKey: null, disposeMs: DISPOSE_MS
     };
     var data = { summary: null, series: null, hours: null, coverage: null, rssi: null };
     var slots = [];               // every chart: {id, kind: 'card'|'spark', el, inst, ro}
@@ -118,12 +120,12 @@
       tileEls[t.id] = { el: el, slot: addSlot(t.id, 'spark', el.querySelector('.tile-spark')) };
       st.tiles[t.id] = t.text;
     });
-    // A sparkline spans its first bucket to the range's end (the daemon's
-    // data clock), a dot per bucket while there are few.
+    // A sparkline spans its first bucket to its last (each point sits at its
+    // bucket's start, so an axis to the bucket's end would leave a gap), a
+    // dot per bucket while there are few.
     function renderTiles(summary, series) {
-      var r = summary && summary.range ? summary.range : {};
-      var to = Date.parse(r.to);
       S.tiles(summary, series).forEach(function (t) {
+        var n = t.spark.length;
         var te = tileEls[t.id];
         te.el.querySelector('.tile-value').textContent = t.text;
         te.el.querySelector('.tile-sub').textContent = t.sub;
@@ -136,7 +138,7 @@
           animation: false,
           grid: { left: 0, right: 0, top: 2, bottom: 1 },
           tooltip: { show: false },
-          xAxis: { type: 'time', show: false, min: t.spark.length ? t.spark[0][0] : null, max: isNaN(to) ? null : to },
+          xAxis: { type: 'time', show: false, min: n ? t.spark[0][0] : null, max: n > 1 ? t.spark[n - 1][0] : null },
           yAxis: { type: 'value', show: false, min: 0 },
           series: [{ type: 'line', data: t.spark, showSymbol: t.spark.length < 3, symbol: 'circle', symbolSize: 3,
             itemStyle: { color: col }, silent: true,
@@ -156,9 +158,16 @@
       // estimate of it (dataNow) can trail by a moment, which would leave
       // out the aircraft seen in that moment (most of them, live).
       var qs = 'from=' + encodeURIComponent(q.from);
+      // Snapshot and clear: an open() or reset while this one is in flight
+      // sets it again for the next refresh.
       var slow = st.slowDue;
+      st.slowDue = false;
+      // A failing slow request is null on its own (logged), not a failed refresh.
+      var opt = function (path) {
+        return get(path).catch(function (err) { console.error('stats ' + path, err); return null; });
+      };
       var reqs = [get('api/stats/summary?' + qs), get('api/stats/series?res=' + q.res + '&' + qs)];
-      if (slow) reqs.push(get('api/stats/series?res=hour'), get('api/stats/coverage'), get('api/stats/rssi'));
+      if (slow) reqs.push(opt('api/stats/series?res=hour'), opt('api/stats/coverage'), opt('api/stats/rssi'));
       return Promise.all(reqs).then(function (r) {
         data.summary = r[0];
         data.series = r[1];
@@ -169,7 +178,7 @@
         }
         st.res = q.res;
         st.refreshes++;
-        st.slowDue = st.refreshes % SLOW_EVERY === 0;
+        st.slowDue = st.slowDue || st.refreshes % SLOW_EVERY === 0;
         showMsg('');
         $('stats-since').textContent = S.sinceText(data.summary && data.summary.since);
         if (!st.open) return true;
@@ -184,6 +193,7 @@
           }
         })).then(function () { return true; });
       }).catch(function (err) {
+        if (slow) st.slowDue = true;   // not fetched: the next refresh does
         showMsg('Statistics unavailable: ' + (err && err.message), true);
         return false;
       });
@@ -257,7 +267,7 @@
       clearTimeout(st.liveTimer);
       st.liveTimer = null;
       clearTimeout(st.disposeTimer);
-      st.disposeTimer = setTimeout(disposeCharts, DISPOSE_MS);
+      st.disposeTimer = setTimeout(disposeCharts, st.disposeMs);
     }
     function hasCanvas(s) { return !!s.el.querySelector('canvas'); }
     function state() {
@@ -276,7 +286,9 @@
     // The sections register here, each with registerSection(fn), using
     // sectionEl(name) and addCard (see the head of this file).
 
-    return { open: open, close: close, isOpen: function () { return st.open; }, state: state, refreshNow: refreshNow };
+    // setDisposeMs: the dispose delay for the next close() (tests).
+    return { open: open, close: close, isOpen: function () { return st.open; }, state: state, refreshNow: refreshNow,
+      setDisposeMs: function (ms) { st.disposeMs = ms >= 0 ? ms : DISPOSE_MS; } };
   }
 
   window.skycueStatsView = { create: create };

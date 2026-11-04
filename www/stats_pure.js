@@ -91,12 +91,15 @@
     var maxKey = typeof r.max_range_key === 'string' ? r.max_range_key : '';
     var maxNm = v('max_range_nm');
     var out = [
+      // "N new" only when it can be read as part of the count (after a
+      // restart of the replay's clock the ledger can hold fewer in range).
       { id: 'aircraft', label: 'Aircraft', value: v('aircraft'),
-        sub: v('new_aircraft') === null ? '' : countText(v('new_aircraft')) + ' new', field: 'aircraft' },
+        sub: v('new_aircraft') !== null && v('aircraft') !== null && v('new_aircraft') <= v('aircraft')
+          ? countText(v('new_aircraft')) + ' new' : (has ? 'in range' : ''), field: 'aircraft' },
       { id: 'observations', label: 'Observations', value: v('observations'),
         sub: v('positions') === null ? '' : countText(v('positions')) + ' positions', field: 'observations' },
       { id: 'sent', label: 'Sent cues', value: v('sent_updates'), sub: 'updates sent', field: 'sent_updates' },
-      { id: 'drops', label: 'Drops', value: v('drops'), sub: 'timeout · filtered · source lost', field: DROP_FIELDS },
+      { id: 'drops', label: 'Drops', value: v('drops'), sub: 'timeout/filter/lost', field: DROP_FIELDS },
       { id: 'max_range', label: 'Max range', value: maxNm,
         sub: maxNm === null ? '' : maxKey.split('|')[0], field: 'max_range_nm' },
       { id: 'emergencies', label: 'Emergencies', value: v('emergencies'), sub: 'emergency squawks', field: 'emergencies' }

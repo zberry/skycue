@@ -2988,7 +2988,12 @@
     // (stats_view.js state()) and a refresh now (a Promise).
     showMain: showMain,
     mainView: function () { return mainView; },
-    stats: function () { return statsView ? statsView.state() : null; },
+    stats: (function () {
+      var f = function () { return statsView ? statsView.state() : null; };
+      // The delay before a hidden Stats view disposes its charts (default 60 s).
+      f.setDisposeMs = function (ms) { if (statsView) statsView.setDisposeMs(ms); };
+      return f;
+    })(),
     statsRefresh: function () { return statsView ? statsView.refreshNow() : Promise.resolve(false); },
     resetViewFilters: resetViewFilters,
     shownCount: viewShownCount,

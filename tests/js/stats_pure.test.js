@@ -114,6 +114,8 @@ test('tiles: ids, values, max range sub', () => {
   const by = {};
   tiles.forEach((t) => { by[t.id] = t; });
   assert.strictEqual(by.aircraft.value, 12);
+  assert.strictEqual(by.aircraft.sub, '3 new');
+  assert.strictEqual(by.drops.sub, 'timeout/filter/lost');
   assert.strictEqual(by.observations.value, 12345);
   assert.strictEqual(by.observations.text, '12,345');
   assert.strictEqual(by.sent.value, 1500);
@@ -142,6 +144,17 @@ test('tiles: each has a spark; drops = timeout + filtered + source lost', () => 
   assert.deepStrictEqual(vals('sent'), [0, 1, 2, 3]);
   assert.deepStrictEqual(vals('max_range'), [0, 51.5, 80.25, 12]);
   assert.deepStrictEqual(vals('emergencies'), [0, 0, 1, 0]);
+});
+
+test('tiles: aircraft sub without a count larger than the tile', () => {
+  const sm = summary();
+  sm.range.aircraft = 1;
+  sm.range.new_aircraft = 12;
+  const t = S.tiles(sm, null).find((x) => x.id === 'aircraft');
+  assert.strictEqual(t.text, '1');
+  assert.strictEqual(t.sub, 'in range');
+  sm.range.new_aircraft = 1;
+  assert.strictEqual(S.tiles(sm, null).find((x) => x.id === 'aircraft').sub, '1 new');
 });
 
 test('tiles: no data yet', () => {

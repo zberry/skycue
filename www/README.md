@@ -31,6 +31,26 @@ through npm). It is not committed: the page loads it from
 `vendor/`, `tiles/` and `overlays/` (scripts/make-overlays.sh) in this directory are git-ignored, for local use
 only; the build never copies them.
 
+## ECharts
+
+The statistics charts use Apache ECharts 5.6.0 (Apache-2.0), pinned in
+`cmake/sources.cmake` as the npm registry tarball (`echarts-5.6.0.tgz`,
+which ships the prebuilt `dist/echarts.min.js`; only extracted, never run
+through npm). It is not committed: the page loads it from
+`vendor/echarts/echarts.min.js`, and `LICENSE`, `NOTICE` and
+`licenses/LICENSE-d3` are installed beside it.
+
+- **Superbuild**: the `echarts` step extracts the tarball and the skycue
+  step installs those files into `stage/share/skycue/www/vendor/echarts/`.
+- **Standalone skycue build**: pass the extracted package root,
+  ```sh
+  mkdir -p /tmp/echarts && tar xzf sources/echarts-5.6.0.tgz -C /tmp/echarts \
+    package/dist/echarts.min.js package/LICENSE package/NOTICE package/licenses/LICENSE-d3
+  cmake -S skycue -B build-skycue -DSKYCUE_ECHARTS_DIR=/tmp/echarts/package
+  ```
+  (with `-DSKYCUE_LEAFLET_DIR` as above). Without `SKYCUE_ECHARTS_DIR` the
+  page has no chart library and the tests that need it say SKIP.
+
 ## Map tiles
 
 When `www/tiles/<z>/<x>/<y>.png` exist (see `/api/tiles-available`) the page

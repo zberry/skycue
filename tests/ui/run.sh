@@ -37,6 +37,10 @@ if [ ! -e "$www/vendor/leaflet/leaflet.js" ]; then
   echo "SKIP: Leaflet not staged in $www (configure with -DSKYCUE_LEAFLET_DIR)"
   exit 77
 fi
+if [ ! -e "$www/vendor/echarts/echarts.min.js" ]; then
+  echo "SKIP: ECharts not staged in $www (configure with -DSKYCUE_ECHARTS_DIR)"
+  exit 77
+fi
 
 tmp=$(mktemp -d)
 pidfile="$tmp/skycued.pid"

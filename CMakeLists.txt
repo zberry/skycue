@@ -43,9 +43,11 @@ endif()
 
 set(SKYCUE_LEAFLET_DIR "" CACHE PATH
   "Leaflet's extracted dist/ directory (leaflet.js, leaflet.css, images/); staged and installed under www/vendor/leaflet")
+set(SKYCUE_ECHARTS_DIR "" CACHE PATH
+  "ECharts' extracted npm package root (dist/echarts.min.js, LICENSE, NOTICE, licenses/LICENSE-d3); staged and installed under www/vendor/echarts")
 option(SKYCUE_UI_TESTS "Register the headless-browser test ui_playwright (skips itself without node/Playwright)" ON)
 
-# The web UI: www/ plus Leaflet, assembled in ${PROJECT_BINARY_DIR}/www-stage
+# The web UI: www/ plus Leaflet and ECharts, assembled in ${PROJECT_BINARY_DIR}/www-stage
 # (what the tests serve with --www-dir) and installed to share/skycue/www.
 # vendor/ and tiles/ in the source tree are local, untracked additions:
 # neither is copied from there.
@@ -70,6 +72,21 @@ if(SKYCUE_LEAFLET_DIR)
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${SKYCUE_LEAFLET_DIR}/images
       ${SKYCUE_WWW_STAGE}/vendor/leaflet/images)
 endif()
+# ECharts: the one prebuilt file plus the licence files Apache-2.0 asks to
+# travel with it (LICENSE names the d3-derived parts, licenses/LICENSE-d3).
+if(SKYCUE_ECHARTS_DIR)
+  foreach(_f dist/echarts.min.js LICENSE NOTICE licenses/LICENSE-d3)
+    if(NOT EXISTS "${SKYCUE_ECHARTS_DIR}/${_f}")
+      message(FATAL_ERROR "skycue: SKYCUE_ECHARTS_DIR=${SKYCUE_ECHARTS_DIR} has no ${_f}")
+    endif()
+  endforeach()
+  list(APPEND _skycue_www_cmds
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SKYCUE_WWW_STAGE}/vendor/echarts/licenses
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SKYCUE_ECHARTS_DIR}/dist/echarts.min.js
+      ${SKYCUE_ECHARTS_DIR}/LICENSE ${SKYCUE_ECHARTS_DIR}/NOTICE ${SKYCUE_WWW_STAGE}/vendor/echarts/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SKYCUE_ECHARTS_DIR}/licenses/LICENSE-d3
+      ${SKYCUE_WWW_STAGE}/vendor/echarts/licenses/)
+endif()
 add_custom_target(www_stage ALL ${_skycue_www_cmds}
   COMMENT "Staging the web UI in ${SKYCUE_WWW_STAGE}" VERBATIM)
 install(FILES ${_skycue_www_files} DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www)
@@ -78,6 +95,13 @@ if(SKYCUE_LEAFLET_DIR)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/leaflet)
   install(DIRECTORY ${SKYCUE_LEAFLET_DIR}/images/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/leaflet/images)
+endif()
+if(SKYCUE_ECHARTS_DIR)
+  install(FILES ${SKYCUE_ECHARTS_DIR}/dist/echarts.min.js ${SKYCUE_ECHARTS_DIR}/LICENSE
+    ${SKYCUE_ECHARTS_DIR}/NOTICE
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/echarts)
+  install(FILES ${SKYCUE_ECHARTS_DIR}/licenses/LICENSE-d3
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/echarts/licenses)
 endif()
 
 add_subdirectory(skycued)

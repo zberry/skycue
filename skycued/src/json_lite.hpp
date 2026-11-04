@@ -31,11 +31,25 @@ public:
     // `max_bytes` replaces kMaxTextBytes (for a small file rather than a line).
     static std::optional<JsonObject> parse(const std::string& text, std::size_t max_bytes = kMaxTextBytes);
 
+    // Moves are O(1) (the tree is swapped, not copied; ptree has no move
+    // constructor of its own); copies copy the tree.
+    JsonObject(const JsonObject&) = default;
+    JsonObject& operator=(const JsonObject&) = default;
+    JsonObject(JsonObject&& other) noexcept { tree_.swap(other.tree_); }
+    JsonObject& operator=(JsonObject&& other) noexcept
+    {
+        tree_.swap(other.tree_);
+        return *this;
+    }
+
     // The keys of this object, in file order.
     std::vector<std::string> keys() const;
     // The nested object `key`; nullopt when absent or not an object. ({} and
     // [] cannot be told apart, so an empty array is an empty object.)
     std::optional<JsonObject> getObject(const char* key) const;
+    // As getObject, but moves the nested object out without copying it
+    // (`key` then holds an empty object): for reading a large file once.
+    std::optional<JsonObject> takeObject(const char* key);
     // The array `key` of scalars, each as its text; nullopt when absent, not
     // an array, or holding an array/object. ([] and {} read as empty arrays.)
     std::optional<std::vector<std::string>> getStringArray(const char* key) const;
@@ -58,6 +72,7 @@ public:
     bool has(const char* key) const;
 
 private:
+    JsonObject() = default;
     explicit JsonObject(const boost::property_tree::ptree& tree) : tree_(tree) {}
     // ptree has no move constructor (Boost 1.75): swap the parsed tree in.
     explicit JsonObject(boost::property_tree::ptree&& tree) { tree_.swap(tree); }

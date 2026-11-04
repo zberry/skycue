@@ -68,6 +68,22 @@ std::optional<JsonObject> JsonObject::getObject(const char* key) const
     return JsonObject(node);
 }
 
+std::optional<JsonObject> JsonObject::takeObject(const char* key)
+{
+    auto it = tree_.find(key);
+    if (it == tree_.not_found())
+        return std::nullopt;
+    auto& node = it->second;
+    if (node.empty() && !node.data().empty())  // a scalar
+        return std::nullopt;
+    for (const auto& child : node)
+        if (child.first.empty())  // an array
+            return std::nullopt;
+    JsonObject out;
+    out.tree_.swap(node);
+    return std::optional<JsonObject>(std::move(out));
+}
+
 std::optional<std::vector<std::string>> JsonObject::getStringArray(const char* key) const
 {
     auto it = tree_.find(key);

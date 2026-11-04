@@ -77,6 +77,39 @@
 // series_since follows a late bucket made before the first one). dirty(): set by any stored change (observe, sent, dropped,
 // reset; a tick only when a value changes, never for placing empty buckets),
 // cleared by markSaved().
+//
+// The stats file (stats_store_json.cpp). toJson() writes the whole store as
+// one JSON object, version kStatsFileVersion, deterministic (ledger sorted by
+// TrackId, grid by cell, maps in key order, doubles via formatRoundTrip).
+// JsonObject reads arrays of scalars and of objects only, so every table is
+// columnar: one array per field, all of one table the same length. Keys of
+// aircraft are "<hex>|<addr_type>" (addressTypeName), the page's trackKey; an
+// unset optional is "". fromJson() validates every field and builds a new
+// store, which keeps only what the file holds: the tick() bases, the open
+// address sets and the restart-log clock start empty, dirty() is false
+// (true when the load had to evict). A ledger over aircraft_max is evicted
+// down in steps of max(1, aircraft_max / 20), oldest last_seen first, and a
+// grid over grid_cells_max keeps the cells with the most observations.
+//
+// File layout (version 1):
+//   version, since, series_since (each absent when unset), evicted,
+//   uat_seen, grid_full (informative; recomputed on load);
+//   minutes, hours: {start: [s...], <every StatsBucket counter>: [...],
+//     max_range_nm: [...], max_range_key: ["<key>" | ""],
+//     by_input: {<input id>: [...]}}  (all of one ring's length, <= its cap,
+//     contiguous, starts aligned to 60 / 3600 s);
+//   hist: {range, altitude, speed, vertical_rate, elevation, rssi: [counts]};
+//   coverage: {max_range_nm, key, time, n: [576], sector-major (sector *
+//     kStatsBands + band)};
+//   rssi_by_range: [1250], range-bin-major;
+//   grid: {lat_i, lon_i, n};
+//   counts: {category, source, addr_type, input, decision,
+//     squawk_emergency: {<name>: count}};
+//   aircraft: {key, first_seen, last_seen, observations, positions,
+//     sessions, sent_updates, drops, emergencies, max_range_nm,
+//     max_range_time, max_range_lat, max_range_lon, max_range_bearing_deg,
+//     min_alt_ft, max_alt_ft, max_gs_kt, min_rssi, max_rssi, callsigns,
+//     squawks, inputs (space-joined), registration, category, source}.
 
 #include "filters.hpp"
 #include "observation.hpp"
@@ -99,6 +132,9 @@
 namespace skycued {
 
 struct EngineStats;
+
+constexpr int kStatsFileVersion = 1;
+constexpr std::size_t kStatsFileMaxBytes = 32u << 20;  // a larger file is rejected unread
 
 constexpr std::size_t kStatsMinuteBuckets = 1440;  // 24 h
 constexpr std::size_t kStatsHourBuckets = 720;     // 30 days
@@ -233,6 +269,12 @@ public:
     // Entries in the open distinct-address sets (both rings, both sets).
     std::size_t addressSetEntries() const;
 
+    // The stats file text (see the header comment).
+    std::string toJson() const;
+    // A store with `receiver` and `limits` holding what `text` holds; throws
+    // std::runtime_error("stats file: <field>: <why>") on any invalid field.
+    static StatsStore fromJson(const std::string& text, std::optional<ReceiverPosition> receiver, StatsLimits limits);
+
 private:
     struct Ring {
         int64_t len = 60;
@@ -255,7 +297,9 @@ private:
     static Slot placeIn(Ring& ring, int64_t t_s);
     void restartSeries(int64_t t_s);
     void countInput(std::map<std::string, uint64_t>& m, const std::string& key);
-    void evictOldest(skycue::TrackId keep);  // never evicts `keep`
+    // Erases the n entries with the oldest last_seen_s, never `keep`.
+    void evictOldest(std::size_t n, std::optional<skycue::TrackId> keep);
+    std::size_t evictStep() const;  // max(1, aircraft_max / 20)
     void clearAll();
 
     std::optional<ReceiverPosition> receiver_;
@@ -275,5 +319,19 @@ private:
     std::optional<uint64_t> base_downlink_, base_uplink_, base_products_;
     std::optional<std::chrono::steady_clock::time_point> last_restart_log_;
 };
+
+enum class StatsLoad { loaded, missing, rejected };
+
+// Loads the stats file `path` into `store`. missing (no such file): `store`
+// untouched, nothing logged. Unreadable, over kStatsFileMaxBytes, malformed
+// or the wrong version: one ERROR line naming the file and the reason, the
+// file renamed to `path` + ".bad" (replacing an older one), `store`
+// untouched; rejected. Otherwise `store` is replaced by the file's content
+// with its own receiver and limits; loaded.
+StatsLoad loadStatsFile(const std::string& path, StatsStore& store);
+
+// Writes store.toJson() to `path` with atomicWrite (temp file + rename);
+// throws std::runtime_error as atomicWrite does. Does not markSaved().
+void saveStatsFile(const std::string& path, const StatsStore& store);
 
 }  // namespace skycued

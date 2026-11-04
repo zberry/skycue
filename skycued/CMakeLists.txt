@@ -67,6 +67,7 @@ add_library(skycued_core STATIC
   src/runtime_config.cpp
   src/stats_report.cpp
   src/stats_store.cpp
+  src/stats_store_json.cpp
   src/track_table.cpp
   src/web_api.cpp
   src/web_config.cpp

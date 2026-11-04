@@ -402,6 +402,27 @@ BOOST_AUTO_TEST_CASE(json_object_array)
     BOOST_TEST(!o->getObjectArray("absent"));
 }
 
+BOOST_AUTO_TEST_CASE(json_take_object)
+{
+    auto o = JsonObject::parse(R"({"obj":{"k":{"x":1},"a":[1,2]},"e":{},"arr":[1],"s":"v"})");
+    BOOST_REQUIRE(o);
+    auto obj = o->takeObject("obj");
+    BOOST_REQUIRE(obj);
+    BOOST_TEST(obj->getObject("k").value().getInt("x").value_or(0) == 1);
+    BOOST_TEST(obj->getStringArray("a").value().size() == 2u);
+    // Moved out: the key stays, holding an empty object.
+    BOOST_TEST(o->has("obj"));
+    BOOST_TEST(o->getObject("obj").value().keys().empty());
+    BOOST_TEST(o->takeObject("e").value().keys().empty());
+    BOOST_TEST(!o->takeObject("arr"));
+    BOOST_TEST(o->getStringArray("arr").value().size() == 1u);  // untouched
+    BOOST_TEST(!o->takeObject("s"));
+    BOOST_TEST(!o->takeObject("absent"));
+    // A move swaps the tree: the moved-to object has it.
+    JsonObject moved(std::move(*obj));
+    BOOST_TEST(moved.has("k"));
+}
+
 BOOST_AUTO_TEST_CASE(json_bool)
 {
     auto o = JsonObject::parse(R"({"t":true,"f":false,"one":1,"s":"yes","o":{},"st":"true"})");

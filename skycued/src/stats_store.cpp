@@ -436,19 +436,21 @@ void StatsStore::observe(const TrackObservation& obs, const TrackState& state, c
     a.source = obs.source;
 
     if (is_new && ledger_.size() > limits_.aircraft_max)
-        evictOldest(obs.id);
+        evictOldest(evictStep(), obs.id);
 }
 
-void StatsStore::evictOldest(skycue::TrackId keep)
+std::size_t StatsStore::evictStep() const { return std::max<std::size_t>(1, limits_.aircraft_max / 20); }
+
+void StatsStore::evictOldest(std::size_t n, std::optional<skycue::TrackId> keep)
 {
     // The aircraft being observed is never a candidate, even when the data
     // clock is behind every other entry's last_seen.
     std::vector<std::pair<int64_t, skycue::TrackId>> by_age;
     by_age.reserve(ledger_.size());
     for (const auto& kv : ledger_)
-        if (kv.first != keep)
+        if (!keep || kv.first != *keep)
             by_age.emplace_back(kv.second.last_seen_s, kv.first);
-    const std::size_t k = std::min(std::max<std::size_t>(1, limits_.aircraft_max / 20), by_age.size());
+    const std::size_t k = std::min(n, by_age.size());
     if (k == 0)
         return;
     auto older = [](const std::pair<int64_t, skycue::TrackId>& x, const std::pair<int64_t, skycue::TrackId>& y) {

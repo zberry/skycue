@@ -5,14 +5,24 @@
 #include "stats_store.hpp"
 #include "test_slow.hpp"
 
+#include <ftw.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <set>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace skycued;
 using Clock = std::chrono::system_clock;
@@ -877,4 +887,451 @@ BOOST_AUTO_TEST_CASE(aggregates_100k_observations_fast)
     BOOST_TEST(ms < 1000 * testSlowFactor());
     BOOST_TEST(st.aircraftCount() == 5000u);
     BOOST_TEST(st.totals(StatsRes::hour, kT0, kT0 + 86400).observations == 100000u);
+}
+
+// ---------------------------------------------------------------------------
+// The stats file (Task 2): toJson / fromJson, loadStatsFile, saveStatsFile.
+
+namespace {
+
+int removeStatsEntry(const char* p, const struct stat*, int, struct FTW*) { return ::remove(p); }
+
+struct StatsDir {
+    std::string path;
+    StatsDir()
+    {
+        const char* base = std::getenv("TMPDIR");
+        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/skycue-stats-XXXXXX";
+        std::vector<char> buf(tmpl.begin(), tmpl.end());
+        buf.push_back('\0');
+        if (!::mkdtemp(buf.data()))
+            throw std::runtime_error("mkdtemp failed");
+        path = buf.data();
+    }
+    ~StatsDir() { ::nftw(path.c_str(), removeStatsEntry, 16, FTW_DEPTH | FTW_PHYS); }
+    StatsDir(const StatsDir&) = delete;
+    StatsDir& operator=(const StatsDir&) = delete;
+};
+
+bool fileExists(const std::string& p)
+{
+    struct stat sb {};
+    return ::stat(p.c_str(), &sb) == 0;
+}
+
+void writeText(const std::string& p, const std::string& text)
+{
+    std::ofstream out(p, std::ios::binary | std::ios::trunc);
+    out << text;
+}
+
+std::string readText(const std::string& p)
+{
+    std::ifstream in(p, std::ios::binary);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+// A store fed every kind of event: two aircraft with positions and identity
+// fields, one without a position, sends, drops (filtered with a decision and
+// timeout) and ticks with client samples and UAT deltas, over three hours.
+StatsStore populatedStore()
+{
+    StatsStore st(kRx);
+    Obs a = obsAt(0xa4f2c1, kT0 + 5, 39.2, -76.8);
+    a.obs.callsign = "UAL123";
+    a.obs.squawk = "1200";
+    a.obs.registration = "N123UA";
+    a.obs.category = "A3";
+    a.obs.gs_kt = 412.3f;
+    a.obs.baro_rate_fpm = -640.0f;
+    a.obs.rssi = -12.3;
+    sync(a);
+    feed(st, a, resultFor(23.456789012345, 1.25, Decision::send));
+    a.obs.received_time = at(kT0 + 70);
+    a.obs.callsign = "UAL124";
+    a.obs.input_id = "radar";
+    a.obs.lat = 39.31234567;
+    a.obs.lon = -76.71234567;
+    sync(a);
+    feed(st, a, resultFor(25.1, 1.5, Decision::send));
+
+    Obs b = obsAt(0x00abcd, kT0 + 80, 38.5, -77.3);
+    b.obs.id.type = skycue::AddressType::non_icao;
+    b.state.id = b.obs.id;
+    b.obs.source = skycue::Source::uat_978;
+    b.obs.input_id = "dump978";
+    b.obs.squawk = "7700";
+    b.obs.emergency = "general";
+    b.obs.alt_baro_ft.reset();
+    b.obs.on_ground = true;
+    b.obs.geom_rate_fpm = 0.0f;
+    sync(b);
+    feed(st, b, resultFor(31.5, 0.5, Decision::out_of_range));
+
+    Obs c = obsAt(0x123456, kT0 + 2 * 3600 + 10, 0, 0);
+    c.obs.lat.reset();
+    c.obs.lon.reset();
+    c.obs.alt_baro_ft.reset();
+    sync(c);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    feed(st, c, resultFor(nan, nan, Decision::no_position));
+
+    st.sent(a.obs.id, at(kT0 + 2 * 3600 + 11));
+    st.dropped(b.obs.id, skycue::DropReason::filtered, Decision::out_of_range, at(kT0 + 2 * 3600 + 12));
+    st.dropped(a.obs.id, skycue::DropReason::timeout, std::nullopt, at(kT0 + 2 * 3600 + 13));
+    EngineStats es;
+    es.tcp_clients = 2;
+    es.web_clients = 1;
+    st.tick(at(kT0 + 2 * 3600 + 14), es);
+    es.uat_downlink = 5;
+    es.uat_uplink = 3;
+    es.fisb_products = 7;
+    es.tcp_clients = 3;
+    st.tick(at(kT0 + 2 * 3600 + 15), es);
+    return st;
+}
+
+// Replaces (or, with drop, removes) the first element of the array `array`
+// (e.g. "\"observations\":[") found after `within` in `text`.
+std::string editFirstElement(const std::string& text, const char* within, const char* array,
+                             const std::string& replacement, bool drop = false)
+{
+    const std::size_t w = text.find(within);
+    if (w == std::string::npos)
+        throw std::runtime_error(std::string("no ") + within);
+    const std::size_t a = text.find(array, w);
+    if (a == std::string::npos)
+        throw std::runtime_error(std::string("no ") + array);
+    const std::size_t b = a + std::string(array).size();
+    const std::size_t e = text.find_first_of(",]", b);
+    std::string out = text;
+    if (drop)
+        out.erase(b, e - b + (text[e] == ',' ? 1 : 0));
+    else
+        out.replace(b, e - b, replacement);
+    return out;
+}
+
+// Prepends one bucket (start first_start - 60, zero counters) to every
+// column of the "minutes" object.
+std::string prependMinute(const std::string& text, int64_t first_start)
+{
+    const std::size_t from = text.find("\"minutes\":{");
+    const std::size_t to = text.find("\"hours\":", from);
+    if (from == std::string::npos || to == std::string::npos)
+        throw std::runtime_error("no minutes/hours");
+    std::string res = text.substr(0, from);
+    for (std::size_t i = from; i < to; ++i) {
+        res += text[i];
+        if (text[i] != '[')
+            continue;
+        const std::size_t q2 = i - 2;  // "<key>":[
+        const std::size_t q1 = text.rfind('"', q2 - 1);
+        const std::string key = text.substr(q1 + 1, q2 - q1 - 1);
+        if (key == "start")
+            res += std::to_string(first_start - 60) + ",";
+        else if (key == "max_range_key")
+            res += "\"\",";
+        else
+            res += "0,";
+    }
+    res += text.substr(to);
+    return res;
+}
+
+uint64_t coverageTotal(const StatsStore& st)
+{
+    uint64_t n = 0;
+    for (int s = 0; s < kStatsSectors; ++s)
+        for (int b = 0; b < kStatsBands; ++b)
+            n += st.coverage(s, b).n;
+    return n;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(round_trip_is_identical)
+{
+    const StatsStore st = populatedStore();
+    const std::string text = st.toJson();
+    const StatsStore back = StatsStore::fromJson(text, kRx, StatsLimits());
+    BOOST_TEST(back.toJson() == text);
+    BOOST_TEST(!back.dirty());
+    BOOST_TEST(back.addressSetEntries() == 0u);
+
+    // One ledger entry, field by field.
+    const AircraftStats* a = back.aircraft(icao(0xa4f2c1));
+    BOOST_REQUIRE(a);
+    BOOST_TEST(a->first_seen_s == kT0 + 5);
+    BOOST_TEST(a->last_seen_s == kT0 + 70);
+    BOOST_TEST(a->observations == 2u);
+    BOOST_TEST(a->positions == 2u);
+    BOOST_TEST(a->sessions == 1u);
+    BOOST_TEST(a->sent_updates == 1u);
+    BOOST_TEST(a->drops == 1u);
+    BOOST_TEST(a->max_range_nm.value() == 25.1);
+    BOOST_TEST(a->max_range_time_s == kT0 + 70);
+    BOOST_TEST(a->max_range_lat == 39.31234567);
+    BOOST_TEST(a->max_range_lon == -76.71234567);
+    BOOST_TEST(a->max_range_bearing_deg == st.aircraft(icao(0xa4f2c1))->max_range_bearing_deg);
+    BOOST_TEST(a->min_alt_ft.value() == 12000);
+    BOOST_TEST(a->max_gs_kt.value() == double(412.3f));
+    BOOST_TEST(a->min_rssi.value() == -12.3);
+    BOOST_TEST((a->callsigns == std::vector<std::string>{"UAL123", "UAL124"}));
+    BOOST_TEST((a->squawks == std::vector<std::string>{"1200"}));
+    BOOST_TEST((a->inputs == std::vector<std::string>{"readsb", "radar"}));
+    BOOST_TEST(a->registration.value() == "N123UA");
+    BOOST_TEST(a->category.value() == "A3");
+    BOOST_TEST((a->source == skycue::Source::adsb_1090));
+    const AircraftStats* b = back.aircraft(skycue::TrackId{0x00abcd, skycue::AddressType::non_icao});
+    BOOST_REQUIRE(b);
+    BOOST_TEST((b->source == skycue::Source::uat_978));
+    BOOST_TEST(b->emergencies == 1u);
+    BOOST_TEST(b->min_alt_ft.value() == 0);
+    BOOST_TEST(!b->max_gs_kt);
+    BOOST_TEST(!b->registration);
+    const AircraftStats* c = back.aircraft(icao(0x123456));
+    BOOST_REQUIRE(c);
+    BOOST_TEST(!c->max_range_nm);
+    BOOST_TEST(!c->min_alt_ft);
+    BOOST_TEST(!c->min_rssi);
+
+    // Every coverage cell.
+    BOOST_TEST(coverageTotal(back) == 3u);
+    for (int s = 0; s < kStatsSectors; ++s)
+        for (int band = 0; band < kStatsBands; ++band) {
+            const CoverageCell& x = st.coverage(s, band);
+            const CoverageCell& y = back.coverage(s, band);
+            BOOST_TEST(x.max_range_nm == y.max_range_nm);
+            BOOST_TEST((x.id == y.id));
+            BOOST_TEST(x.time_s == y.time_s);
+            BOOST_TEST(x.n == y.n);
+        }
+
+    // The series, by_input included.
+    for (StatsRes r : {StatsRes::minute, StatsRes::hour}) {
+        const auto& x = st.series(r);
+        const auto& y = back.series(r);
+        BOOST_REQUIRE(x.size() == y.size());
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            BOOST_TEST(x[i].start_s == y[i].start_s);
+            BOOST_TEST(x[i].observations == y[i].observations);
+            BOOST_TEST(x[i].uat_downlink == y[i].uat_downlink);
+            BOOST_TEST(x[i].tcp_clients == y[i].tcp_clients);
+            BOOST_TEST(x[i].drops_filtered == y[i].drops_filtered);
+            BOOST_TEST(x[i].max_range_nm == y[i].max_range_nm);
+            BOOST_TEST((x[i].max_range_id == y[i].max_range_id));
+            BOOST_TEST((x[i].by_input == y[i].by_input));
+        }
+    }
+    BOOST_TEST(back.series(StatsRes::minute).front().by_input.at("readsb") == 1u);
+    BOOST_TEST(back.series(StatsRes::hour).front().by_input.at("dump978") == 1u);
+    BOOST_TEST(back.series(StatsRes::hour).size() == 3u);
+
+    BOOST_TEST(back.sinceS().value() == kT0 + 5);
+    BOOST_TEST(back.seriesSinceS().value() == st.seriesSinceS().value());
+    BOOST_TEST(back.uatSeen());
+    BOOST_TEST(back.gridCells().size() == st.gridCells().size());
+    for (int h = 0; h < 6; ++h)
+        BOOST_TEST((back.histogram(StatsHist(h)).counts == st.histogram(StatsHist(h)).counts));
+    for (int k = 0; k < 6; ++k)
+        BOOST_TEST((back.counts(StatsCount(k)) == st.counts(StatsCount(k))));
+    BOOST_TEST(back.counts(StatsCount::squawk_emergency).at("7700") == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(round_trip_empty_store)
+{
+    const StatsStore st(kRx);
+    const std::string text = st.toJson();
+    const StatsStore back = StatsStore::fromJson(text, kRx, StatsLimits());
+    BOOST_TEST(back.toJson() == text);
+    BOOST_TEST(!back.sinceS());
+    BOOST_TEST(!back.seriesSinceS());
+    BOOST_TEST(back.aircraftCount() == 0u);
+    BOOST_TEST(back.series(StatsRes::minute).empty());
+    BOOST_TEST(!back.uatSeen());
+}
+
+BOOST_AUTO_TEST_CASE(file_size_at_defaults_under_10mb)
+{
+    // 20,000 aircraft, each seen four times (four sessions) with four
+    // callsigns, squawks and inputs and every extreme set; 40,000 grid cells;
+    // both rings full (30.5 days) with 16 inputs. Full-precision positions
+    // and ranges, as the store keeps them.
+    StatsStore st(kRx);
+    const int kObs = 80000;
+    for (int i = 0; i < kObs; ++i) {
+        const uint32_t a = uint32_t(i % 20000);
+        const int k = i / 20000;
+        const int cell = i % 40000;
+        const double frac = double((i * 7919) % 1000) / 1000.0;
+        const double lat = 30.0 + double(cell / 200) * 0.05 + 0.005 + 0.04 * frac;
+        const double lon = -90.0 + double(cell % 200) * 0.05 + 0.005 + 0.04 * (1.0 - frac);
+        Obs o = obsAt(0x100000 + a, kT0 + int64_t(i) * 33, lat, lon);
+        o.obs.alt_baro_ft = 1000 + (i * 37) % 40000;
+        o.obs.gs_kt = 100.0f + float(i % 5000) / 10.0f;
+        o.obs.baro_rate_fpm = float((i % 64) * 64 - 2048);
+        o.obs.rssi = -3.0 - double(i % 400) / 10.0;
+        o.obs.callsign = "CS" + std::to_string(a) + char('A' + k);
+        char sq[8];
+        std::snprintf(sq, sizeof sq, "%04o", unsigned(a * 4 + uint32_t(k)) % 4096u);
+        o.obs.squawk = sq;
+        o.obs.registration = "N" + std::to_string(a);
+        o.obs.category = "A3";
+        o.obs.input_id = "input-" + std::to_string((int(a) + k) % 16);
+        sync(o);
+        feed(st, o, resultFor(10.0 + std::fmod(double(i) * 0.7316283, 240.0), 1.0 + frac, Decision::send));
+    }
+    BOOST_REQUIRE(st.aircraftCount() == 20000u);
+    BOOST_REQUIRE(st.gridCells().size() == 40000u);
+    BOOST_REQUIRE(st.series(StatsRes::minute).size() == kStatsMinuteBuckets);
+    BOOST_REQUIRE(st.series(StatsRes::hour).size() == kStatsHourBuckets);
+    BOOST_REQUIRE(st.counts(StatsCount::input).size() == 16u);
+    BOOST_REQUIRE(st.aircraft(icao(0x100000))->inputs.size() == 4u);
+    BOOST_REQUIRE(st.aircraft(icao(0x100000))->callsigns.size() == 4u);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::string text = st.toJson();
+    const auto t1 = std::chrono::steady_clock::now();
+    const StatsStore back = StatsStore::fromJson(text, kRx, StatsLimits());
+    const auto t2 = std::chrono::steady_clock::now();
+    const auto ms = [](auto d) { return std::chrono::duration_cast<std::chrono::milliseconds>(d).count(); };
+    BOOST_TEST_MESSAGE("stats file at the defaults: " << text.size() << " bytes; toJson " << ms(t1 - t0)
+                                                      << " ms, fromJson " << ms(t2 - t1) << " ms");
+    BOOST_TEST(text.size() < std::size_t(10) * 1024 * 1024);
+    BOOST_TEST(ms(t2 - t1) < 5000 * testSlowFactor());
+    BOOST_TEST(back.aircraftCount() == 20000u);
+    BOOST_TEST((back.toJson() == text));
+}
+
+BOOST_AUTO_TEST_CASE(malformed_files_rejected)
+{
+    const std::string base = populatedStore().toJson();
+    StatsStore full(kRx);
+    for (int64_t m = 0; m < int64_t(kStatsMinuteBuckets); ++m)
+        feed(full, obsAt(1, kT0 + m * 60, 39.0, -77.0));
+    const std::string full_text = full.toJson();
+
+    // The unedited texts load (so each rejection below is the edit's).
+    {
+        StatsDir d;
+        const std::string path = d.path + "/stats.json";
+        for (const std::string* t : {&base, &full_text}) {
+            writeText(path, *t);
+            StatsStore st(kRx);
+            BOOST_REQUIRE(loadStatsFile(path, st) == StatsLoad::loaded);
+        }
+    }
+
+    auto replaced = [](std::string s, const std::string& from, const std::string& to) {
+        const std::size_t p = s.find(from);
+        if (p == std::string::npos)
+            throw std::runtime_error("no " + from);
+        return s.replace(p, from.size(), to);
+    };
+    std::string oversize = base;
+    oversize.append(kStatsFileMaxBytes + 1 - base.size(), ' ');
+
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"truncated", "{"},
+        {"array", "[]"},
+        {"empty", ""},
+        {"version 2", replaced(base, "\"version\":1", "\"version\":2")},
+        {"no version", replaced(base, "\"version\":1,", "")},
+        {"missing minutes", replaced(base, "\"minutes\":", "\"minutez\":")},
+        {"short column", editFirstElement(base, "\"minutes\":{", "\"observations\":[", "", true)},
+        {"1441 minutes", prependMinute(full_text, kT0)},
+        {"negative count", editFirstElement(base, "\"minutes\":{", "\"observations\":[", "-1")},
+        {"negative evicted", replaced(base, "\"evicted\":0", "\"evicted\":-1")},
+        {"hist.range of 49", editFirstElement(base, "\"hist\":{", "\"range\":[", "", true)},
+        {"coverage key", editFirstElement(base, "\"coverage\":{", "\"key\":[", "\"zz|icao\"")},
+        {"aircraft key", editFirstElement(base, "\"aircraft\":{", "\"key\":[", "\"a4f2c1|nonsense\"")},
+        {"non-contiguous", editFirstElement(base, "\"minutes\":{", "\"start\":[", std::to_string(kT0 - 600))},
+        {"oversize", oversize},
+    };
+    for (const auto& c : cases) {
+        BOOST_TEST_CONTEXT(c.first)
+        {
+            StatsDir d;
+            const std::string path = d.path + "/stats.json";
+            writeText(path + ".bad", "an older bad file");
+            writeText(path, c.second);
+            StatsStore st = populatedStore();
+            const std::string before = st.toJson();
+            BOOST_TEST((loadStatsFile(path, st) == StatsLoad::rejected));
+            BOOST_TEST(!fileExists(path));
+            BOOST_TEST(fileExists(path + ".bad"));
+            BOOST_TEST((readText(path + ".bad") == c.second));
+            BOOST_TEST((st.toJson() == before));
+            BOOST_CHECK_THROW(StatsStore::fromJson(c.second, kRx, StatsLimits()), std::runtime_error);
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(missing_file_is_empty_store)
+{
+    StatsDir d;
+    const std::string path = d.path + "/none.json";
+    StatsStore st(kRx);
+    BOOST_TEST((loadStatsFile(path, st) == StatsLoad::missing));
+    BOOST_TEST(!fileExists(path + ".bad"));
+    BOOST_TEST(st.aircraftCount() == 0u);
+    BOOST_TEST(!st.sinceS());
+}
+
+BOOST_AUTO_TEST_CASE(save_then_load)
+{
+    StatsDir d;
+    const std::string path = d.path + "/stats.json";
+    const StatsStore st = populatedStore();
+    saveStatsFile(path, StatsStore(kRx));  // replaced by the next save
+    saveStatsFile(path, st);
+    BOOST_TEST(!fileExists(path + ".tmp"));
+    BOOST_TEST(readText(path) == st.toJson());
+    StatsStore fresh(kRx);
+    BOOST_TEST((loadStatsFile(path, fresh) == StatsLoad::loaded));
+    BOOST_TEST(fresh.toJson() == st.toJson());
+    BOOST_TEST(!fresh.dirty());
+    BOOST_TEST(fileExists(path));
+    BOOST_TEST(!fileExists(path + ".bad"));
+    BOOST_CHECK_THROW(saveStatsFile(d.path + "/no-such-dir/stats.json", st), std::runtime_error);
+}
+
+BOOST_AUTO_TEST_CASE(load_evicts_down_to_cap)
+{
+    StatsStore big(kRx);
+    for (uint32_t a = 0; a < 120; ++a)
+        feed(big, obsAt(a + 1, kT0 + int64_t(a), 39.0, -77.0));
+    BOOST_REQUIRE(big.aircraftCount() == 120u);
+    StatsDir d;
+    const std::string path = d.path + "/stats.json";
+    saveStatsFile(path, big);
+    StatsLimits lim;
+    lim.aircraft_max = 100;
+    StatsStore small(kRx, lim);
+    BOOST_TEST((loadStatsFile(path, small) == StatsLoad::loaded));
+    BOOST_TEST(small.aircraftCount() <= 100u);
+    BOOST_TEST(small.evicted() == 120u - small.aircraftCount());
+    BOOST_TEST(small.aircraft(icao(120)));   // the newest stays
+    BOOST_TEST(!small.aircraft(icao(1)));    // the oldest goes
+    BOOST_TEST(small.limits().aircraft_max == 100u);
+}
+
+BOOST_AUTO_TEST_CASE(restart_on_first_older_obs_after_load)
+{
+    StatsStore st(kRx);
+    const int64_t t = kT0 + 3 * 3600 + 120;
+    feed(st, obsAt(1, t - 600, 39.0, -77.0));
+    feed(st, obsAt(1, t, 39.0, -77.0));
+    StatsStore back = StatsStore::fromJson(st.toJson(), kRx, StatsLimits());
+    BOOST_REQUIRE(back.series(StatsRes::minute).back().start_s == t);
+    feed(back, obsAt(2, t - 3600, 39.0, -77.0));
+    BOOST_TEST(back.series(StatsRes::minute).size() == 1u);
+    BOOST_TEST(back.series(StatsRes::minute).front().start_s == t - 3600);
+    BOOST_TEST(back.series(StatsRes::hour).size() == 1u);
+    BOOST_TEST(back.seriesSinceS().value() == t - 3600);
+    BOOST_TEST(back.aircraftCount() == 2u);
+    BOOST_TEST(back.aircraft(icao(1))->observations == 2u);
 }

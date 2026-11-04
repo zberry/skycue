@@ -172,6 +172,8 @@ input.invalid { border-color: var(--blocked); }
 .card-chart { height: 260px; min-width: 0; }
 @media (min-width: 1700px) {
   .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* The fourth Traffic card takes the whole row, not one cell of three. */
+  .stats-grid [data-card="traffic-week"] { grid-column: 1 / -1; }
 }
 #table-view table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 #table-view th, #table-view td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }

@@ -2270,6 +2270,8 @@ test('stats_traffic_aircraft_and_sent_vs_drops', async ({ page }) => {
   expect(o.series.map((s) => s.name))
     .toEqual(['sent', 'timeout', 'source lost', 'blocked', 'out of range', 'below elevation', 'no position']);
   expect(o.series.map((s) => s.stack)).toEqual(['sent', 'drops', 'drops', 'drops', 'drops', 'drops', 'drops']);
+  // A plain legend (wrapping), not a paged one: all seven entries on view.
+  expect(o.legend[0].type).toBe('plain');
   o.series.forEach((s) => { expect(s.type).toBe('bar'); expect(isPairs(s.data), s.id).toBe(true); });
   // The decision series in the page's decision colours (style.css tokens).
   const col = {};
@@ -2301,6 +2303,14 @@ test('stats_traffic_hour_of_week_heatmap_utc', async ({ page }) => {
   const total = cells.reduce((b, c) => b + c[2], 0);
   const caption = await cardCaption(page, 'traffic-week');
   expect(caption).toMatch(/ · busiest (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d:00 · UTC$/);
+  // From 1700 px (three columns) the heatmap takes the whole row; below,
+  // one of the two columns.
+  const w = await page.evaluate(() => ({
+    grid: document.getElementById('stats-traffic').getBoundingClientRect().width,
+    card: document.querySelector('[data-card="traffic-week"]').getBoundingClientRect().width,
+    vw: window.innerWidth }));
+  if (w.vw >= 1700) expect(w.card).toBeCloseTo(w.grid, 0);
+  else expect(w.card).toBeLessThan(w.grid * 0.6);
   expect(Number(caption.split(' ')[0].replace(/,/g, ''))).toBe(total);
 });
 

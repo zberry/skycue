@@ -311,6 +311,8 @@
       return { type: 'value', min: 0, minInterval: 1, axisLabel: { formatter: function (v) { return fmt(v); } } };
     }
     var LEGEND = { type: 'scroll', top: 0, left: 0, right: 0, itemWidth: 12, itemHeight: 8, textStyle: { fontSize: 11 } };
+    var LEGEND_WRAP = { type: 'plain', top: 0, left: 0, right: 0, itemGap: 8, itemWidth: 12, itemHeight: 8,
+      textStyle: { fontSize: 11 } };
 
     // ---- Traffic (spec 6 item 2) -----------------------------------------------
     var SENT_DROP_LABEL = { sent: 'sent', timeout: 'timeout', source_lost: 'source lost', blocked: 'blocked',
@@ -355,7 +357,10 @@
       if (!d.series) return;
       var a = S.aircraftSeries(d.series);
       var r = rangeOf(d.summary);
-      card.setCaption(r ? fmt(r.aircraft) + ' aircraft · ' + fmt(r.new_aircraft) + ' new' : '');
+      // Without the range totals, only the new ones can be summed (distinct
+      // aircraft per bucket do not add up to the range's).
+      card.setCaption(r ? fmt(r.aircraft) + ' aircraft · ' + fmt(r.new_aircraft) + ' new'
+        : fmt(S.total(d.series, 'new_aircraft')) + ' new');
       var ch = card.chart();
       if (!ch) return;
       ch.setOption({
@@ -379,15 +384,16 @@
       if (!d.series) return;
       var list = S.sentDropSeries(d.series);
       var r = rangeOf(d.summary);
-      card.setCaption(r ? fmt(r.sent_updates) + ' sent · ' + fmt(r.drops) + ' drops' : '');
+      card.setCaption((r ? fmt(r.sent_updates) : fmt(S.total(d.series, 'sent_updates'))) + ' sent · ' +
+        (r ? fmt(r.drops) : fmt(S.total(d.series, S.DROP_FIELDS))) + ' drops');
       var ch = card.chart();
       if (!ch) return;
       ch.setOption({
         animation: false,
         useUTC: true,   // UTC like the toolbar's since and the hour-of-week heatmap
-        legend: LEGEND,
+        legend: LEGEND_WRAP,   // all seven reasons on view (two rows), not paged
         tooltip: { trigger: 'axis', valueFormatter: unitFmt(d.series.res === 'hour' ? 'per hour' : 'per minute') },
-        grid: { left: 40, right: 24, top: 26, bottom: 24 },
+        grid: { left: 40, right: 24, top: 44, bottom: 24 },
         xAxis: timeAxis(d.series),
         yAxis: countAxis(),
         // Two bars per bucket: the updates sent, and the drops stacked by reason.

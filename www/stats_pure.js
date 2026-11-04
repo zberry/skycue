@@ -66,13 +66,17 @@
 
   // [[ms, value]] per bucket of one column, or the per-bucket sum of
   // several (field an array of names); a missing column counts as zeros.
+  // A bucket whose time does not parse is left out.
   function spark(series, field) {
     var fields = Array.isArray(field) ? field : [field];
-    return seriesTimes(series).map(function (ms, i) {
+    var out = [];
+    seriesTimes(series).forEach(function (ms, i) {
+      if (isNaN(ms)) return;
       var v = 0;
       fields.forEach(function (f) { if (Array.isArray(series[f])) v += num(series[f][i]); });
-      return [ms, v];
+      out.push([ms, v]);
     });
+    return out;
   }
 
   // The drops tile: the decisions that mean "not sent" for reasons of the
@@ -134,7 +138,13 @@
     var out = Object.keys(by).map(function (name) {
       var col = Array.isArray(by[name]) ? by[name] : [];
       var sum = 0;
-      var data = times.map(function (ms, i) { var v = num(col[i]); sum += v; return [ms, v]; });
+      var data = [];
+      times.forEach(function (ms, i) {
+        if (isNaN(ms)) return;   // an unparsable bucket time: left out
+        var v = num(col[i]);
+        sum += v;
+        data.push([ms, v]);
+      });
       return { name: name, data: data, sum: sum };
     });
     out.sort(function (a, b) {

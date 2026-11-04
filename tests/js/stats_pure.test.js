@@ -271,6 +271,18 @@ test('uatSeries: three lines', () => {
   assert.deepStrictEqual(S.uatSeries(null), { downlink: [], uplink: [], products: [] });
 });
 
+test('spark and inputSeries: a bucket with an unparsable time is left out', () => {
+  const s = series4();
+  s.t = [T0, 'garbage', T2, T3];
+  assert.deepStrictEqual(S.spark(s, 'observations'), [[M0, 10], [M2, 30], [M3, 40]]);
+  const ins = S.inputSeries(s);
+  assert.deepStrictEqual(ins.map((x) => x.name), ['readsb', 'uat']);
+  assert.deepStrictEqual(ins[0].data, [[M0, 10], [M2, 20], [M3, 25]]);
+  assert.deepStrictEqual(ins[1].data, [[M0, 0], [M2, 10], [M3, 15]]);
+  assert.strictEqual(S.total(s, 'observations'), 80);
+  assert.deepStrictEqual(S.uatSeries(s).uplink, [[M0, 0], [M2, 0], [M3, 0]]);
+});
+
 test('total: a column summed', () => {
   assert.strictEqual(S.total(series4(), 'observations'), 100);
   assert.strictEqual(S.total(series4(), ['drops_timeout', 'drops_source_lost']), 8);

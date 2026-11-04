@@ -623,7 +623,8 @@
       var cells = ac.rows.map(function (r) {
         return [String(r.key)].concat(S.AIRCRAFT_COLS.map(function (c) { return S.aircraftCell(r, c.key); }));
       });
-      var sig = JSON.stringify(cells);
+      // The raw times too: the cells show minutes, their titles the full time.
+      var sig = JSON.stringify([cells, ac.rows.map(function (r) { return [r.first_seen, r.last_seen]; })]);
       if (sig !== ac.bodySig) {
         ac.bodySig = sig;
         var act = document.activeElement;

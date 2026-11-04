@@ -277,7 +277,9 @@ ApiResponse summaryRoute(const std::map<std::string, std::string>& params, const
     Range range;
     if (auto err = parseRange(params, store, now, range))
         return fail(400, *err);
-    const StatsRes res = range.to - range.from <= std::chrono::hours(24) ? StatsRes::minute : StatsRes::hour;
+    // In whole seconds: a nanosecond time-point difference could overflow
+    // for extreme dates (ISO-8601 years 0000..9999 fit int64 seconds).
+    const StatsRes res = range.to_s - range.from_s <= 86400 ? StatsRes::minute : StatsRes::hour;
     SeriesTotals t;
     if (!range.empty) {
         const int64_t len = bucketLen(res);

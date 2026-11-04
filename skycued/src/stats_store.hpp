@@ -88,7 +88,8 @@
 // JsonObject reads arrays of scalars and of objects only, so every table is
 // columnar: one array per field, all of one table the same length. Keys of
 // aircraft are "<hex>|<addr_type>" (addressTypeName), the page's trackKey; an
-// unset optional is "". fromJson() validates every field and builds a new
+// unset optional is "". fromJson() validates every field (every time within
+// 0 .. 2^40 s; the newest hour bucket holds the newest minute) and builds a new
 // store, which keeps only what the file holds: the tick() bases (0), the open
 // address sets and the restart-log clock start empty, dirty() is false
 // (true when the load had to evict). A ledger over aircraft_max is evicted
@@ -328,18 +329,25 @@ private:
     std::optional<std::chrono::steady_clock::time_point> last_restart_log_;
 };
 
-enum class StatsLoad { loaded, missing, rejected };
+enum class StatsLoad { loaded, missing, rejected, not_regular };
+
+// A save larger than this logs a WARN (Engine): the file is getting close to
+// kStatsFileMaxBytes, past which it could not be loaded.
+constexpr std::size_t kStatsFileWarnBytes = 24u << 20;
 
 // Loads the stats file `path` into `store`. missing (no such file): `store`
-// untouched, nothing logged. Unreadable, over kStatsFileMaxBytes, malformed
+// untouched, nothing logged. not_regular (a directory, /dev/null, ...): one
+// ERROR line, the file left alone, `store` untouched; the caller should not
+// save there. Unreadable, over kStatsFileMaxBytes, malformed
 // or the wrong version: one ERROR line naming the file and the reason, the
 // file renamed to `path` + ".bad" (replacing an older one), `store`
 // untouched; rejected. Otherwise `store` is replaced by the file's content
 // with its own receiver and limits; loaded.
 StatsLoad loadStatsFile(const std::string& path, StatsStore& store);
 
-// Writes store.toJson() to `path` with atomicWrite (temp file + rename);
-// throws std::runtime_error as atomicWrite does. Does not markSaved().
-void saveStatsFile(const std::string& path, const StatsStore& store);
+// Writes store.toJson() to `path` with atomicWrite (temp file + rename) and
+// returns the bytes written; throws std::runtime_error as atomicWrite does.
+// Does not markSaved().
+std::size_t saveStatsFile(const std::string& path, const StatsStore& store);
 
 }  // namespace skycued

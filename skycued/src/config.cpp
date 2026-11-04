@@ -275,7 +275,9 @@ Config parseConfigText(const std::string& text, const std::string& name)
             conv.fail(key, std::string(key) + " must be a whole number, got '" + conv.find(key)->value + "'");
         field = static_cast<int>(v);
     };
-    wholeNumber("STATS_AIRCRAFT_MAX", c.stats_aircraft_max, 100, 1000000);
+    // At most 100000: at about 300 bytes an aircraft the stats file stays
+    // well under kStatsFileMaxBytes (32 MiB), so it can always be read back.
+    wholeNumber("STATS_AIRCRAFT_MAX", c.stats_aircraft_max, 100, 100000);
     wholeNumber("STATS_SAVE_S", c.stats_save_s, 10, 86400);
 
     conv.yesNo("RECORD_RAW", c.record_raw);

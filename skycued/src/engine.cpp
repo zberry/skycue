@@ -726,12 +726,18 @@ void Engine::loadStats(const std::string& path, std::chrono::seconds save_interv
     stats_path_ = path;
     stats_save_interval_ = save_interval;
     stats_save_failing_ = false;
+    stats_size_warned_ = false;
     last_stats_save_ = steady::now();
     if (path.empty()) {
         LOG_INFO("stats: STATS_FILE is empty; the statistics are not saved");
         return;
     }
-    if (loadStatsFile(path, stats_store_) == StatsLoad::loaded) {
+    const StatsLoad loaded = loadStatsFile(path, stats_store_);
+    if (loaded == StatsLoad::not_regular) {
+        stats_path_.clear();  // never written: kept in memory only (loadStatsFile logged it)
+        return;
+    }
+    if (loaded == StatsLoad::loaded) {
         const auto since = stats_store_.sinceS();
         LOG_INFO(path << ": statistics of " << stats_store_.aircraftCount() << " aircraft"
                       << (since ? " since " + formatIso8601Ms(std::chrono::system_clock::time_point(
@@ -757,8 +763,12 @@ void Engine::saveStats()
     // one save per STATS_SAVE_S (default 300 s) accepts.
     last_stats_save_ = steady::now();
     try {
-        saveStatsFile(stats_path_, stats_store_);
+        const std::size_t bytes = saveStatsFile(stats_path_, stats_store_);
         stats_store_.markSaved();
+        if (bytes > kStatsFileWarnBytes && !stats_size_warned_)
+            LOG_WARN(stats_path_ << ": " << bytes << " bytes, close to the " << kStatsFileMaxBytes
+                                 << " a load accepts; consider a lower STATS_AIRCRAFT_MAX");
+        stats_size_warned_ = bytes > kStatsFileWarnBytes;
         if (stats_save_failing_)
             LOG_INFO(stats_path_ << ": saved again");
         stats_save_failing_ = false;

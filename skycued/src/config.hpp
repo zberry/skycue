@@ -34,7 +34,7 @@ struct Config {
     std::string inputs_file;             // INPUTS_FILE as written; see resolveInputsFile
     std::string locations_file;          // LOCATIONS_FILE as written (operator CSV id,lat,lon; empty: none)
     std::string stats_file = "skycue.stats.json";  // STATS_FILE as written (empty: statistics not saved)
-    int stats_aircraft_max = 20000;      // STATS_AIRCRAFT_MAX: aircraft ledger cap, 100-1000000
+    int stats_aircraft_max = 20000;      // STATS_AIRCRAFT_MAX: aircraft ledger cap, 100-100000
     int stats_save_s = 300;              // STATS_SAVE_S: seconds between statistics saves, 10-86400
     // Accepted (they are skycue-start.sh's), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";

@@ -69,6 +69,10 @@ constexpr std::size_t kRssiCells = std::size_t(kStatsRssiRangeBins) * std::size_
 // floor(lat / 0.05) and floor(lon / 0.05) of a position on the globe.
 constexpr int64_t kGridLatMax = 1800, kGridLonMax = 3600;
 
+// Every time in the file is within 0 .. 2^40 s (about 34,800 years), so
+// start + len and the differences the store takes cannot overflow.
+constexpr int64_t kTimeMaxS = int64_t(1) << 40;
+
 bool alignedTo(int64_t t_s, int64_t len)
 {
     int64_t r = t_s % len;
@@ -214,6 +218,13 @@ std::string u64Array(const std::vector<uint64_t>& v)
 }
 
 std::string at(const std::string& field, std::size_t i) { return field + "[" + std::to_string(i) + "]"; }
+
+int64_t checkedTime(int64_t t_s, const std::string& field)
+{
+    if (t_s < 0 || t_s > kTimeMaxS)
+        fail(field, std::to_string(t_s) + " s, outside 0.." + std::to_string(kTimeMaxS));
+    return t_s;
+}
 
 template <class T>
 std::optional<T> parseInteger(const std::string& s)
@@ -364,6 +375,7 @@ std::deque<StatsBucket> readRing(Reader& rd, JsonObject& top, const char* ring_n
         fail(ctx + ".start", std::to_string(n) + " buckets, at most " + std::to_string(cap));
     std::deque<StatsBucket> out(n);
     for (std::size_t i = 0; i < n; ++i) {
+        checkedTime(start[i], at(ctx + ".start", i));
         if (!alignedTo(start[i], len))
             fail(at(ctx + ".start", i), "not a multiple of " + std::to_string(len));
         if (i > 0 && start[i] != start[i - 1] + len)
@@ -558,7 +570,7 @@ StatsStore StatsStore::fromJson(const std::string& text, std::optional<ReceiverP
         const std::optional<int64_t> v = top.getInt(k);
         if (!v)
             fail(k, "not an integer");
-        (std::string(k) == "since" ? st.since_s_ : st.series_since_s_) = *v;
+        (std::string(k) == "since" ? st.since_s_ : st.series_since_s_) = checkedTime(*v, k);
     }
     if (!top.has("evicted"))
         fail("evicted", "missing");
@@ -572,6 +584,15 @@ StatsStore StatsStore::fromJson(const std::string& text, std::optional<ReceiverP
 
     st.minute_.buckets = readRing(rd, top, "minutes", st.minute_.len, st.minute_.cap);
     st.hour_.buckets = readRing(rd, top, "hours", st.hour_.len, st.hour_.cap);
+    // Both rings are placed together: both empty, or the newest hour holds
+    // the newest minute.
+    if (st.minute_.buckets.empty() != st.hour_.buckets.empty())
+        fail("hours", "one ring is empty and the other is not");
+    if (!st.minute_.buckets.empty()) {
+        const int64_t m = st.minute_.buckets.back().start_s, h = st.hour_.buckets.back().start_s;
+        if (m < h || m >= h + st.hour_.len)
+            fail("hours.start", "the newest hour does not hold the newest minute");
+    }
 
     JsonObject hist = rd.object(top, "", "hist");
     for (std::size_t h = 0; h < st.hist_.size(); ++h)
@@ -586,7 +607,7 @@ StatsStore StatsStore::fromJson(const std::string& text, std::optional<ReceiverP
         CoverageCell& c = st.coverage_[i];
         c.max_range_nm = cov_range[i];
         c.id = cov_key[i];
-        c.time_s = cov_time[i];
+        c.time_s = checkedTime(cov_time[i], at("coverage.time", i));
         c.n = cov_n[i];
     }
     st.rssi_by_range_ = rd.counts(top, "", "rssi_by_range", kRssiCells);
@@ -685,8 +706,8 @@ StatsStore StatsStore::fromJson(const std::string& text, std::optional<ReceiverP
     for (std::size_t i = 0; i < n; ++i) {
         AircraftStats a;
         a.id = *keys[i];
-        a.first_seen_s = first_seen[i];
-        a.last_seen_s = last_seen[i];
+        a.first_seen_s = checkedTime(first_seen[i], at("aircraft.first_seen", i));
+        a.last_seen_s = checkedTime(last_seen[i], at("aircraft.last_seen", i));
         if (a.first_seen_s > a.last_seen_s)
             fail(at("aircraft.first_seen", i), "after last_seen");
         a.observations = observations[i];
@@ -696,7 +717,7 @@ StatsStore StatsStore::fromJson(const std::string& text, std::optional<ReceiverP
         a.drops = drops[i];
         a.emergencies = emergencies[i];
         a.max_range_nm = max_range_nm[i];
-        a.max_range_time_s = max_range_time[i];
+        a.max_range_time_s = checkedTime(max_range_time[i], at("aircraft.max_range_time", i));
         a.max_range_lat = max_range_lat[i];
         a.max_range_lon = max_range_lon[i];
         a.max_range_bearing_deg = max_range_bearing[i];
@@ -739,7 +760,9 @@ StatsLoad loadStatsFile(const std::string& path, StatsStore& store)
             return StatsLoad::missing;
         reason = std::string("cannot stat: ") + std::strerror(errno);
     } else if (!S_ISREG(sb.st_mode)) {
-        reason = "not a regular file";
+        // A directory, /dev/null, a FIFO: never renamed, never written.
+        LOG_ERROR(path << ": not a regular file; the statistics are kept in memory only this run");
+        return StatsLoad::not_regular;
     } else if (static_cast<uint64_t>(sb.st_size) > kStatsFileMaxBytes) {
         reason = std::to_string(sb.st_size) + " bytes, over the limit of " + std::to_string(kStatsFileMaxBytes);
     } else {
@@ -769,6 +792,11 @@ StatsLoad loadStatsFile(const std::string& path, StatsStore& store)
     return StatsLoad::rejected;
 }
 
-void saveStatsFile(const std::string& path, const StatsStore& store) { atomicWrite(path, store.toJson()); }
+std::size_t saveStatsFile(const std::string& path, const StatsStore& store)
+{
+    const std::string text = store.toJson();
+    atomicWrite(path, text);
+    return text.size();
+}
 
 }  // namespace skycued

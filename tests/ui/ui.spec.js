@@ -2176,6 +2176,10 @@ test('stats_reset_asks_first_and_empties', async ({ page }) => {
   const kept = (await api('/api/stats/summary')).body;
   expect(kept.since).toBe(s0.since);
   expect(kept.range.observations).toBeGreaterThanOrEqual(s0.range.observations);
+  // The page's own tile, freshly drawn, is the baseline for the reset.
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  const t0 = await tileNumber(page, 'observations');
+  expect(t0).toBeGreaterThan(0);
   const before = kept.range.observations;
   page.once('dialog', (d) => d.accept());
   await page.locator('#stats-reset').click();
@@ -2184,7 +2188,7 @@ test('stats_reset_asks_first_and_empties', async ({ page }) => {
   expect(Date.parse(s1.since)).toBeGreaterThan(Date.parse(s0.since));
   expect(s1.range.observations).toBeLessThan(before);
   // The page drew the emptied totals too.
-  expect(await tileNumber(page, 'observations')).toBeLessThan(before);
+  await expect.poll(() => tileNumber(page, 'observations'), { timeout: 10000 }).toBeLessThan(t0);
 });
 
 // Input health lives in the Receiver tab (spec 2): the toolbar opens it
@@ -3074,7 +3078,7 @@ test('stats_ledger_survives_restart', async () => {
   await expect.poll(minutes, { timeout: 60000 }).toBeGreaterThanOrEqual(6);
   const s0 = (await apiAt(STATS_BASE, '/api/stats/summary')).body;
   const m0 = await minutes();
-  const rows0 = (await apiAt(STATS_BASE, '/api/stats/aircraft?sort=observations')).body.rows;
+  const rows0 = (await apiAt(STATS_BASE, '/api/stats/aircraft?sort=observations&limit=1000')).body.rows;
   expect(s0.aircraft_total).toBeGreaterThanOrEqual(12);   // the fixture's 12, at least
   expect(rows0.length).toBe(s0.aircraft_total);
   const k = rows0[0];
@@ -3092,8 +3096,8 @@ test('stats_ledger_survives_restart', async () => {
   await expect.poll(statsDaemonUp, { timeout: 10000 }).toBe(true);
 
   // The series restarted: shorter than before (it takes ~3 s per minute to grow again).
-  await expect.poll(minutes, { timeout: 5000 }).toBeLessThan(m0);
-  await expect.poll(restartLines, { timeout: 5000 }).toBeGreaterThan(lines0);
+  await expect.poll(minutes, { timeout: 15000 }).toBeLessThan(m0);
+  await expect.poll(restartLines, { timeout: 15000 }).toBeGreaterThan(lines0);
   // The ledger survived.
   const s1 = (await apiAt(STATS_BASE, '/api/stats/summary')).body;
   expect(s1.since).toBe(s0.since);

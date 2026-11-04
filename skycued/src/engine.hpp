@@ -188,8 +188,10 @@ public:
 
     // Statistics (see the top of this file). loadStats: "" keeps them in
     // memory only; otherwise loadStatsFile(path) (missing: the store is
-    // kept; rejected: renamed "<path>.bad", the store is kept), and saved
-    // there every `save_interval` while changed (0: every tick). Callable
+    // kept; rejected: renamed "<path>.bad", the store is kept; not a regular
+    // file: kept in memory only, as for "", statsPath() is then ""), and
+    // saved there every `save_interval` while changed (0: every tick). A
+    // save over kStatsFileWarnBytes logs one WARN (again after one under it). Callable
     // before or after start(); a loaded file replaces the store.
     void loadStats(const std::string& path, std::chrono::seconds save_interval);
     const StatsStore& statsStore() const { return stats_store_; }
@@ -298,6 +300,7 @@ private:
     std::chrono::seconds stats_save_interval_{300};
     std::chrono::steady_clock::time_point last_stats_save_{};  // the last save attempt (or start/loadStats)
     bool stats_save_failing_ = false;                          // the last save attempt failed
+    bool stats_size_warned_ = false;                           // the last save was over kStatsFileWarnBytes
 
     boost::asio::steady_timer tick_timer_, stats_timer_, lost_timer_;
     bool started_ = false, stopped_ = false;

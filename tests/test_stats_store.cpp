@@ -1399,3 +1399,82 @@ BOOST_AUTO_TEST_CASE(missing_evicted_rejected)
         BOOST_TEST(std::string(e.what()) == "stats file: evicted: missing");
     }
 }
+
+BOOST_AUTO_TEST_CASE(not_regular_file_left_alone)
+{
+    StatsDir d;
+    const std::string sub = d.path + "/dir.json";
+    BOOST_REQUIRE(::mkdir(sub.c_str(), 0755) == 0);
+    const std::string fifo = d.path + "/fifo.json";
+    BOOST_REQUIRE(::mkfifo(fifo.c_str(), 0644) == 0);
+    for (const std::string& path : {sub, fifo, std::string("/dev/null")}) {
+        StatsStore st = populatedStore();
+        const std::string before = st.toJson();
+        BOOST_TEST((loadStatsFile(path, st) == StatsLoad::not_regular), path);
+        BOOST_TEST(fileExists(path), path);
+        BOOST_TEST(!fileExists(path + ".bad"), path);
+        BOOST_TEST(st.toJson() == before, path);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(times_bounded_on_load)
+{
+    const std::string base = populatedStore().toJson();
+    const int64_t too_big = (int64_t(1) << 40) + 1;
+    auto replaced = [](std::string s, const std::string& from, const std::string& to) {
+        const std::size_t p = s.find(from);
+        if (p == std::string::npos)
+            throw std::runtime_error("no " + from);
+        return s.replace(p, from.size(), to);
+    };
+    const std::string since = "\"since\":" + std::to_string(kT0 + 5);
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"since negative", replaced(base, since, "\"since\":-1")},
+        {"since huge", replaced(base, since, "\"since\":" + std::to_string(too_big))},
+        {"since int64 max", replaced(base, since, "\"since\":9223372036854775807")},
+        {"series_since huge", replaced(base, "\"series_since\":", "\"series_since\":999")},  // 999<10 digits> > 2^40
+        {"minute start huge",
+         editFirstElement(base, "\"minutes\":{", "\"start\":[", std::to_string(int64_t(1) << 41))},
+        {"hour start negative", editFirstElement(base, "\"hours\":{", "\"start\":[", "-3600")},
+        {"coverage time", editFirstElement(base, "\"coverage\":{", "\"time\":[", std::to_string(too_big))},
+        {"last_seen", editFirstElement(base, "\"aircraft\":{", "\"last_seen\":[", std::to_string(too_big))},
+        {"max_range_time", editFirstElement(base, "\"aircraft\":{", "\"max_range_time\":[", "-5")},
+    };
+    for (const auto& c : cases)
+        BOOST_CHECK_THROW(StatsStore::fromJson(c.second, kRx, StatsLimits()), std::runtime_error);
+    // The control: exactly 2^40 is accepted.
+    BOOST_CHECK_NO_THROW(StatsStore::fromJson(
+        replaced(base, since, "\"since\":" + std::to_string(int64_t(1) << 40)), kRx, StatsLimits()));
+}
+
+BOOST_AUTO_TEST_CASE(newest_hour_must_hold_newest_minute)
+{
+    // One observation: one minute bucket at kT0 and one hour bucket at kT0.
+    StatsStore st(kRx);
+    feed(st, obsAt(1, kT0 + 10, 39.0, -77.0));
+    const std::string base = st.toJson();
+    BOOST_CHECK_NO_THROW(StatsStore::fromJson(base, kRx, StatsLimits()));
+    // The hour moved one later (kT0 + 3600 > the minute) or earlier (the
+    // minute is past its end): both rejected.
+    for (const int64_t h : {kT0 + 3600, kT0 - 3600}) {
+        const std::string text = editFirstElement(base, "\"hours\":{", "\"start\":[", std::to_string(h));
+        BOOST_CHECK_THROW(StatsStore::fromJson(text, kRx, StatsLimits()), std::runtime_error);
+    }
+    // One ring empty, the other not.
+    StatsStore empty(kRx);
+    const std::string e = empty.toJson();
+    const std::size_t hm = base.find("\"hours\":{"), hh = base.find("\"hist\":{");
+    const std::size_t em = e.find("\"hours\":{"), eh = e.find("\"hist\":{");
+    std::string mixed = base;
+    mixed.replace(hm, hh - hm, e.substr(em, eh - em));
+    BOOST_CHECK_THROW(StatsStore::fromJson(mixed, kRx, StatsLimits()), std::runtime_error);
+}
+
+BOOST_AUTO_TEST_CASE(save_returns_bytes_written)
+{
+    StatsDir d;
+    const std::string path = d.path + "/stats.json";
+    const StatsStore st = populatedStore();
+    BOOST_TEST(saveStatsFile(path, st) == st.toJson().size());
+    BOOST_TEST(kStatsFileWarnBytes < kStatsFileMaxBytes);
+}

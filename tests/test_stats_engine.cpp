@@ -388,3 +388,78 @@ BOOST_AUTO_TEST_CASE(uat_frames_reach_the_series)
     BOOST_TEST(stored(&StatsBucket::uat_uplink) == after.uat_uplink - before.uat_uplink);
     BOOST_TEST(fx.t.call([&] { return fx.engine->statsStore().uatSeen(); }));
 }
+
+namespace {
+
+uint64_t storeSourceLost(EngineFx& fx)
+{
+    return fx.t.call([&] {
+        uint64_t n = 0;
+        for (const auto& b : fx.engine->statsStore().series(StatsRes::minute))
+            n += b.drops_source_lost;
+        return n;
+    });
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(source_lost_expiry_counted)
+{
+    // The track input never connected: a forwarded track that ages out goes
+    // as source_lost (tick expiry), and the store counts it so.
+    FakeSource* src = nullptr;
+    Config cfg = baseConfig();
+    cfg.track_timeout_s = 1;
+    EngineFx fx(cfg, fakeSource(src));
+    fx.t.call([&] { src->emit(nearbyObservation(0xA00001, 0)); });
+    BOOST_REQUIRE(waitUntil([&] { return fx.stats().drops_source_lost == 1u; }));
+    BOOST_TEST(storeSourceLost(fx) == 1u);
+    fx.t.call([&] {
+        const auto& m = fx.engine->statsStore().series(StatsRes::minute);
+        uint64_t timeouts = 0;
+        for (const auto& b : m)
+            timeouts += b.drops_timeout;
+        BOOST_TEST(timeouts == 0u);
+        BOOST_TEST(fx.engine->statsStore().aircraft(kId)->drops == 1u);
+    });
+}
+
+BOOST_AUTO_TEST_CASE(source_lost_drop_all_counted)
+{
+    // Connected, then lost for TRACK_TIMEOUT_S while the track stays fresh:
+    // dropAllForwarded(source_lost) drops it, and the store counts it so.
+    FakeSource* src = nullptr;
+    Config cfg = baseConfig();
+    cfg.track_timeout_s = 2;
+    EngineFx fx(cfg, fakeSource(src));
+    fx.t.call([&] { src->connection(true); });
+    fx.t.call([&] { src->emit(nearbyObservation(0xA00001, 0)); });
+    fx.t.call([&] { src->connection(false); });
+    // Keep the track fresh so tick expiry never takes it: only the lost timer can.
+    const auto end = steady::now() + slow(6s);
+    while (steady::now() < end && fx.stats().drops_source_lost == 0u) {
+        fx.t.call([&] { src->emit(nearbyObservation(0xA00001, 0)); });
+        std::this_thread::sleep_for(200ms);
+    }
+    const uint64_t engine_lost = fx.stats().drops_source_lost;
+    BOOST_REQUIRE(engine_lost >= 1u);
+    BOOST_TEST(fx.stats().drops_timeout == 0u);
+    BOOST_TEST(storeSourceLost(fx) == fx.stats().drops_source_lost);
+    BOOST_TEST(fx.t.call([&] { return fx.engine->statsStore().aircraft(kId)->drops; }) >= 1u);
+}
+
+BOOST_AUTO_TEST_CASE(not_regular_stats_file_disables_persistence)
+{
+    TempDir dir;
+    for (const std::string& path : {dir.path, std::string("/dev/null")}) {
+        FakeSource* src = nullptr;
+        EngineFx fx(baseConfig(), fakeSource(src));
+        fx.t.call([&] { fx.engine->loadStats(path, std::chrono::seconds(0)); });
+        BOOST_TEST(fx.t.call([&] { return fx.engine->statsPath(); }).empty(), path);
+        fx.t.call([&] { src->emit(nearbyObservation(0xA00001, 0)); });
+        std::this_thread::sleep_for(1500ms);  // a tick or more: no save is attempted
+        fx.stop();
+        BOOST_TEST(!exists(path + ".bad"), path);
+        BOOST_TEST(exists(path), path);
+    }
+}

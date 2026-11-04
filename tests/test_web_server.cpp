@@ -1477,6 +1477,13 @@ BOOST_AUTO_TEST_CASE(stats_range_params)
     BOOST_TEST(s.get<std::string>("range.res") == "hour");
     BOOST_TEST(s.get<int>("range.observations") == 1);
     BOOST_TEST(s.get<int>("range.aircraft") == 1);
+    // The widest dates parseIso8601Ms accepts: to - from is ~585 years, past
+    // int64 nanoseconds; choosing the resolution must not overflow.
+    r = get(f.port, "/api/stats/summary?from=1678-01-01T00:00:00Z&to=2262-01-01T00:00:00Z");
+    BOOST_TEST(r.status == 200u);
+    s = parseJson(r.body);
+    BOOST_TEST(s.get<std::string>("range.res") == "hour");
+    BOOST_TEST(s.get<int>("range.observations") == 1);
 }
 
 BOOST_AUTO_TEST_CASE(stats_series_columns)

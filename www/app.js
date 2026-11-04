@@ -2622,7 +2622,17 @@
   }
 
   // ---- wiring -------------------------------------------------------------------
+  // Each header stat carries its full text as a title, kept in step with
+  // every update, so a value cut by the ellipsis (style.css) reads on hover.
+  function syncStatTitles() {
+    Array.prototype.forEach.call(document.querySelectorAll('#stats > .stat'), function (st) {
+      var t = st.textContent.replace(/\s+/g, ' ').trim();
+      if (st.title !== t) st.title = t;
+    });
+  }
   function wire() {
+    syncStatTitles();
+    new MutationObserver(syncStatTitles).observe($('stats'), { childList: true, characterData: true, subtree: true });
     var stored = null;
     try { stored = window.localStorage.getItem('skycue.hideFiltered'); } catch (err) { /* no storage */ }
     if (stored === '1') setHideFiltered(true);

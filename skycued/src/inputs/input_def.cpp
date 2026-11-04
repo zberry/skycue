@@ -78,6 +78,40 @@ bool validName(const std::string& name)
     return chars <= kMaxNameChars;
 }
 
+// The code point of the well-formed UTF-8 sequence at name[i] and its
+// length, or a length of 0 when there is none (the validName rules).
+std::size_t utf8At(const std::string& name, std::size_t i, std::uint32_t& cp)
+{
+    const auto u = static_cast<unsigned char>(name[i]);
+    std::size_t len = 0;
+    if (u < 0x80) {
+        cp = u;
+        return 1;
+    } else if (u >= 0xC2 && u <= 0xDF) {
+        len = 2;
+        cp = u & 0x1Fu;
+    } else if (u >= 0xE0 && u <= 0xEF) {
+        len = 3;
+        cp = u & 0x0Fu;
+    } else if (u >= 0xF0 && u <= 0xF4) {
+        len = 4;
+        cp = u & 0x07u;
+    } else {
+        return 0;
+    }
+    if (name.size() - i < len)
+        return 0;
+    for (std::size_t k = 1; k < len; ++k) {
+        const auto c = static_cast<unsigned char>(name[i + k]);
+        if ((c & 0xC0u) != 0x80u)
+            return 0;
+        cp = (cp << 6) | (c & 0x3Fu);
+    }
+    if ((len == 3 && cp < 0x800) || (len == 4 && (cp < 0x10000 || cp > 0x10FFFF)) || (cp >= 0xD800 && cp <= 0xDFFF))
+        return 0;
+    return len;
+}
+
 // Dotted decimal, four parts of 0..255 without leading zeros.
 bool isIpv4(const std::string& s)
 {
@@ -266,7 +300,7 @@ bool InputDef::operator==(const InputDef& o) const
            time_mode == o.time_mode && capture == o.capture && peer == o.peer && builtin == o.builtin;
 }
 
-InputDef parseInputDef(const JsonObject& o)
+InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
 {
     std::set<std::string> seen;
     for (const auto& key : o.keys()) {
@@ -310,8 +344,13 @@ InputDef parseInputDef(const JsonObject& o)
 
     if (o.has("name")) {
         d.name = getText(o, "name", "a string");
-        if (!validName(d.name))
-            fail("name must be at most 64 printable characters");
+        if (!validName(d.name)) {
+            if (rule != NameRule::repair)
+                fail("name must be at most 64 printable characters");
+            d.name = repairInputName(d.name);
+            if (repaired != nullptr)
+                *repaired = true;
+        }
     }
     if (o.has("enabled"))
         d.enabled = getFlag(o, "enabled");
@@ -436,6 +475,28 @@ std::optional<HttpUrl> parseHttpUrl(const std::string& url)
 
 bool isValidInputId(const std::string& id) { return validId(id); }
 bool isValidInputName(const std::string& name) { return validName(name); }
+
+std::string repairInputName(const std::string& name)
+{
+    std::string out;
+    std::size_t chars = 0;
+    for (std::size_t i = 0; i < name.size() && chars < kMaxNameChars;) {
+        std::uint32_t cp = 0;
+        const std::size_t len = utf8At(name, i, cp);
+        if (len == 0) {
+            out += "\xEF\xBF\xBD";  // U+FFFD, one per bad byte
+            ++i;
+            ++chars;
+            continue;
+        }
+        if (!(cp < 0x20 || (cp >= 0x7F && cp <= 0x9F))) {
+            out.append(name, i, len);
+            ++chars;
+        }
+        i += len;
+    }
+    return out;
+}
 
 std::string clipForMessage(const std::string& text)
 {

@@ -63,13 +63,23 @@ struct InputDefError : std::runtime_error {
 //
 // PropertyTree keeps every scalar as its text, so a quoted number reads as
 // the number ("80" as 80) and "true" as true.
-InputDef parseInputDef(const JsonObject& object);
+//
+// NameRule::repair (the inputs file at load only): a "name" that breaks the
+// name rule is not an error but is replaced by repairInputName(name), and
+// *repaired is set; the API keeps NameRule::strict.
+enum class NameRule { strict, repair };
+InputDef parseInputDef(const JsonObject& object, NameRule rule = NameRule::strict, bool* repaired = nullptr);
 
 // The id rule: 1 to 32 characters of a-z, 0-9 and '-' (reserved ids pass).
 bool isValidInputId(const std::string& id);
 // The rule for a definition's "name": valid UTF-8, at most 64 characters, no
 // C0 or C1 control character and no DEL.
 bool isValidInputName(const std::string& name);
+// A name that keeps the rule: each byte that does not start a well-formed
+// UTF-8 sequence (and each byte of one cut short) becomes U+FFFD, C0, DEL
+// and C1 controls are dropped, and the result is cut to 64 characters
+// (never inside one). A valid name comes back unchanged.
+std::string repairInputName(const std::string& name);
 // `text` for an error message: as is up to 64 bytes, else its first 64
 // bytes (never splitting a UTF-8 character) and "...".
 std::string clipForMessage(const std::string& text);

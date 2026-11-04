@@ -951,6 +951,41 @@ BOOST_AUTO_TEST_CASE(malformed_file_at_load_renamed_rejected)
     BOOST_TEST(m.on([&](InputManager&) { return hub.starts; }) == 1);
 }
 
+// A name stored before the stricter name rule (invalid UTF-8, a C1 control)
+// is repaired at load, logged at ERROR with its input id, and the rest of
+// the file loads unchanged; the file is not renamed .rejected.
+BOOST_AUTO_TEST_CASE(bad_name_in_file_repaired_at_load)
+{
+    TempDir tmp, logdir;
+    const auto cfg = fileConfig(tmp);
+    const uint16_t a = freeUdpPort(), b = freeUdpPort(), c = freeUdpPort();
+    auto entry = [](const std::string& id, uint16_t port, const std::string& name) {
+        return R"({"id":")" + id + R"(","name":")" + name + R"(","type":"pingstation_json","bind":"127.0.0.1","port":)" +
+               std::to_string(port) + "}";
+    };
+    // "ps" + an overlong C0 AF (which the JSON parser lets through) + "b" +
+    // U+0085 (a C1 control) + "c".
+    const std::string text = R"({"version":1,"inputs":[)" + entry("a", a, "North") + "," +
+                             entry("b", b, "ps\xC0\xAF" "b\xC2\x85" "c") + "," + entry("c", c, "South") + "]}";
+    handWrite(cfg.inputs_file, text);
+    std::string log;
+    {
+        StderrCapture cap(logdir.path + "/stderr.txt");
+        IoThread t;
+        Mgr m(t, cfg);
+        BOOST_TEST(m.ids() == (std::vector<std::string>{"a", "b", "c"}));
+        BOOST_TEST(m.find("a")->def.name == "North");
+        BOOST_TEST(m.find("b")->def.name == "ps\xEF\xBF\xBD\xEF\xBF\xBD" "bc");
+        BOOST_TEST(m.find("c")->def.name == "South");
+        BOOST_TEST(!exists(cfg.inputs_file + ".rejected"));
+        BOOST_TEST(exists(cfg.inputs_file));
+        log = cap.text();
+    }
+    BOOST_TEST(contains(log, "ERROR"), log);
+    BOOST_TEST(contains(log, "input 'b': name repaired"), log);
+    BOOST_TEST(!contains(log, "input 'a'"), log);
+}
+
 BOOST_AUTO_TEST_CASE(capture_without_record_dir_in_file_keeps_inputs)
 {
     TempDir tmp, logdir;

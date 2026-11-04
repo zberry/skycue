@@ -523,7 +523,7 @@ test('header_fits_one_row_at_1280', async ({ page }) => {
 test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await openPage(page);
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
     const b = document.getElementById('stat-rec-drops');
     b.textContent = '1234567890 1234567890 1234567890 1234567890 1234567890 1234567890';
     const stat = b.closest('.stat');
@@ -531,14 +531,18 @@ test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
     const brand = mid(document.querySelector('#stats .brand'));
     const els = [document.getElementById('wx-toggle'), document.getElementById('table-toggle')]
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
-    return {
-      cut: stat.scrollWidth > stat.clientWidth,
-      overflow: getComputedStyle(stat).textOverflow,
-      offsets: els.map((e) => Math.abs(mid(e) - brand))
-    };
+    const cut = stat.scrollWidth > stat.clientWidth;
+    const overflow = getComputedStyle(stat).textOverflow;
+    const offsets = els.map((e) => Math.abs(mid(e) - brand));
+    // The title follows in a microtask (a MutationObserver); no socket
+    // message can run before it.
+    await Promise.resolve();
+    return { cut, overflow, offsets, title: stat.title, full: stat.textContent.replace(/\s+/g, ' ').trim() };
   });
   expect(r.cut, 'the long stat is cut').toBe(true);
   expect(r.overflow).toBe('ellipsis');
+  expect(r.full).toContain('1234567890 1234567890 1234567890 1234567890 1234567890 1234567890');
+  expect(r.title, 'the cut stat reads in full on hover').toBe(r.full);
   for (const d of r.offsets) expect(d).toBeLessThan(4);
 });
 

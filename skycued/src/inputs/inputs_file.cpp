@@ -79,7 +79,10 @@ InputsFile parseInputsFile(const std::string& text)
         for (std::size_t i = 0; i < entries->size(); ++i) {
             const JsonObject& entry = (*entries)[i];
             try {
-                out.inputs.push_back(parseInputDef(entry));
+                bool repaired = false;
+                out.inputs.push_back(parseInputDef(entry, NameRule::repair, &repaired));
+                if (repaired)
+                    out.repaired_names.push_back(out.inputs.back().id);
             } catch (const InputDefError& e) {
                 const auto id = entry.getString("id");
                 fail("inputs[" + std::to_string(i) + "] (" + (id ? *id : "?") + "): " + e.what());

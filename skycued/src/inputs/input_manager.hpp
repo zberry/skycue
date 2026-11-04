@@ -167,6 +167,8 @@ private:
     // Loads and hand edits: one WARN when an entry asks for capture without
     // record_dir. The entry is kept; its input writes no capture file.
     void warnCapture(const std::vector<InputDef>& user) const;
+    // An ERROR line for each input whose stored name was repaired at load.
+    void warnRepaired(const std::vector<std::string>& ids) const;
     std::vector<InputDef> userDefs() const;
     // Writes the file for `user` and the current built-in states (no-op when
     // in-memory). Throws std::runtime_error.

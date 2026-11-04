@@ -24,6 +24,7 @@ constexpr std::size_t kMaxInputsFileBytes = 1024 * 1024;
 struct InputsFile {
     std::vector<InputDef> inputs;              // user inputs, in file order
     std::map<std::string, bool> builtin_enabled;  // "readsb"/"dump978" -> enabled; absent = default
+    std::vector<std::string> repaired_names;      // ids whose stored name broke the name rule and was repaired
 };
 
 // Parses and checks the file's text. Throws InputDefError for: text over
@@ -31,7 +32,9 @@ struct InputsFile {
 // an unknown top-level key, "inputs" not an array of objects, a bad entry
 // (the message is prefixed "inputs[N] (id): ", with "?" for a missing id), a
 // "builtin" entry for an id other than readsb and dump978 or with anything but
-// a boolean "enabled", and any problem validateInputSet finds.
+// a boolean "enabled", and any problem validateInputSet finds. A stored
+// "name" that breaks the name rule is not a bad entry: it is repaired
+// (NameRule::repair) and its id listed in repaired_names.
 InputsFile parseInputsFile(const std::string& text);
 
 // The file as indented text ending in a newline; one definition per line.

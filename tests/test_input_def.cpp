@@ -201,6 +201,30 @@ BOOST_AUTO_TEST_CASE(bind_must_be_ipv4)
         BOOST_TEST(contains(err(cat(std::string(R"("bind":")") + bad + "\"")), "bind"), bad);
 }
 
+// The load-time repair of a stored name (inputs file only; the API stays
+// strict): each invalid UTF-8 byte becomes U+FFFD, control characters (C0,
+// DEL, C1) are dropped, and the result is cut to 64 characters.
+BOOST_AUTO_TEST_CASE(repair_input_name_makes_a_valid_name)
+{
+    using skycued::isValidInputName;
+    using skycued::repairInputName;
+    BOOST_TEST(repairInputName("North") == "North");
+    BOOST_TEST(repairInputName("\xC3\xA9t\xC3\xA9") == "\xC3\xA9t\xC3\xA9");
+    BOOST_TEST(repairInputName("ps\xC0\xAF" "b") == "ps\xEF\xBF\xBD\xEF\xBF\xBD" "b");
+    BOOST_TEST(repairInputName("a\xC2\x85" "b\x01" "c\x7F") == "abc");
+    BOOST_TEST(repairInputName("a\xE2\x82") == "a\xEF\xBF\xBD\xEF\xBF\xBD");  // cut short
+    const std::string longName(70, 'x');
+    BOOST_TEST(repairInputName(longName) == std::string(64, 'x'));
+    std::string wide;
+    for (int i = 0; i < 70; ++i)
+        wide += "\xC3\xA9";
+    const auto cut = repairInputName(wide);
+    BOOST_TEST(cut.size() == 128u);  // 64 two-byte characters, none split
+    for (const std::string& s : {std::string("ps\xC0\xAF"), std::string("\xED\xA0\x80"), std::string("\xF4\x90\x80\x80"),
+                                 std::string("\x80\x80"), longName, wide})
+        BOOST_TEST(isValidInputName(repairInputName(s)));
+}
+
 BOOST_AUTO_TEST_CASE(host_ipv4_or_hostname)
 {
     auto host = [](const std::string& h) {

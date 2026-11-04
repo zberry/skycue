@@ -147,6 +147,7 @@ void InputManager::load()
         rejectFile(e.what(), "built-in inputs only");
         return;
     }
+    warnRepaired(file.repaired_names);
     warnCapture(file.inputs);
     file_builtin_ = file.builtin_enabled;
     for (std::size_t i = 0; i < builtin_count_; ++i) {
@@ -404,6 +405,14 @@ void InputManager::checkCapture(const InputDef& d) const
         throw InputDefError("capture needs RECORD_DIR");
 }
 
+void InputManager::warnRepaired(const std::vector<std::string>& ids) const
+{
+    for (const auto& id : ids)
+        LOG_ERROR(config_.inputs_file << ": input '" << id
+                                      << "': name repaired (it was not valid UTF-8, held a control character or was over"
+                                         " 64 characters); the repaired name is saved on the next change");
+}
+
 void InputManager::warnCapture(const std::vector<InputDef>& user) const
 {
     if (!config_.record_dir.empty())
@@ -533,6 +542,7 @@ void InputManager::reloadFromDisk()
         rejectFile(e.what(), "inputs unchanged");
         return;
     }
+    warnRepaired(file.repaired_names);
     warnCapture(file.inputs);
     applyFile(file.inputs, file.builtin_enabled);
 }

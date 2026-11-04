@@ -964,6 +964,30 @@ test('alerts_clear_history_and_escape', async ({ page }) => {
   await expect(page.locator('#details')).toBeVisible();
 });
 
+// The page's own connection lost (a stopped skycued, as in
+// stalled_server_detected_and_reconnects): an alert once the banner has been
+// up for the hold-off (1 s here), acknowledged with the outage length on
+// the reconnect.
+test('alerts_daemon_loss_after_banner', async ({ page }) => {
+  await alertsOnly(page, ['input_lost']);
+  await openPage(page);
+  await page.evaluate(() => window.skycueApp.alerts.setHoldOffMs(1000));
+  const pid = Number(fs.readFileSync(process.env.SKYCUE_PID_FILE, 'utf8'));
+  process.kill(pid, 'SIGSTOP');
+  try {
+    await expect(page.locator('#conn-banner')).toBeVisible({ timeout: 7000 });
+    await expect(page.locator('#alerts-line .al-id')).toHaveText('skycued', { timeout: 5000 });
+    await expect(page.locator('#alerts-line .al-detail')).toHaveText('connection lost');
+  } finally {
+    process.kill(pid, 'SIGCONT');
+  }
+  await expect(page.locator('#conn-banner')).toBeHidden({ timeout: 15000 });
+  const row = (await alertState(page)).rows.find((r) => r.rule === 'input_lost');
+  expect(row.input).toBe('skycued');
+  expect(row.acked).toBe(true);
+  expect(row.recovered).toMatch(/^recovered after \d+ s$/);
+});
+
 // ---- Config tab ----------------------------------------------------------------
 test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   const errors = watchErrors(page);
@@ -2072,6 +2096,51 @@ test.describe('receiver tab (pingsim)', () => {
     expect(await form.locator('img').count()).toBe(0);
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+  });
+
+  // A UDP input stays connected while its socket is bound, so the case adds
+  // a tcp_listen input (connected while a peer is) and is that peer itself.
+  test('alerts_input_lost_after_hold_off_and_recovers', async ({ page }) => {
+    const port = await new Promise((resolve, reject) => {
+      const s = net.createServer();
+      s.on('error', reject);
+      s.listen(0, '127.0.0.1', () => {
+        const p = s.address().port;
+        s.close(() => resolve(p));
+      });
+    });
+    expect((await rxApi('POST', '/api/inputs', { id: 'ps-tcp', name: 'tcp mast', type: 'pingstation_cat021',
+      transport: 'tcp_listen', bind: '127.0.0.1', port, edition: '2.5' })).status).toBe(201);
+    await alertsOnly(page, ['input_lost']);
+    await openPage(page);
+    const tcpConnected = async () => {
+      const i = (await rxInputs()).find((x) => x.id === 'ps-tcp');
+      return !!(i && i.state && i.state.connected);
+    };
+    const socks = [];
+    const connect = () => { const s = net.connect(port, '127.0.0.1'); s.on('error', () => {}); socks.push(s); return s; };
+    try {
+      const sock = connect();
+      await expect.poll(tcpConnected, { timeout: 10000 }).toBe(true);
+      // The page has seen it connected (ps-sim and ps-tcp).
+      await expect(page.locator('#stat-inputs')).toHaveText('2/2', { timeout: 10000 });
+      sock.destroy();
+      const t0 = Date.now();
+      await page.waitForTimeout(5000);
+      expect((await alertState(page)).rows.filter((r) => r.rule === 'input_lost')).toEqual([]);
+      await expect(page.locator('#alerts-line .al-kind')).toHaveText('Input lost', { timeout: 20000 });
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(10000);
+      await expect(page.locator('#alerts-line .al-id')).toHaveText('tcp mast');
+      await expect(page.locator('#alerts-line .al-detail')).toHaveText('disconnected');
+
+      connect();
+      const lost = async () => (await alertState(page)).rows.find((r) => r.rule === 'input_lost') || null;
+      await expect.poll(async () => { const r = await lost(); return r && r.acked; }, { timeout: 15000 }).toBe(true);
+      expect((await lost()).recovered).toMatch(/^recovered after \d+ s$/);
+      await expect(page.locator('#alerts-count')).toHaveText('0');
+    } finally {
+      socks.forEach((s) => s.destroy());
+    }
   });
 });
 

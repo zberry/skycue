@@ -68,6 +68,15 @@ The chosen range is kept in localStorage `skycue.stats.range`. Charts are
 created once and updated with `setOption`; they are disposed after the
 view has been hidden for a minute.
 
+Each section (Traffic, Weather, Coverage, Fleet, Signal, Aircraft) is one
+`registerSection` call in `stats_view.js`'s `create`, run after every
+refresh with the newest `summary` and `series`; the hourly series,
+`coverage` and `rssi` are fetched on open, after a reset and every 6th
+refresh. The Fleet clicks and the aircraft detail's buttons reach the map
+through the host object `app.js` builds (`setViewFilter`, `select`,
+`showMain`). What the view shows, for operators, is in
+`docs/operating.md` (Stats view, Statistics file).
+
 ## Map tiles
 
 When `www/tiles/<z>/<x>/<y>.png` exist (see `/api/tiles-available`) the page

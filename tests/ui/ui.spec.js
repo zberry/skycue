@@ -1726,3 +1726,130 @@ test('no_overlay_meta_request_without_overlays', async ({ page }) => {
   await openPage(page);
   expect(asked).toEqual([]);
 });
+
+// ---- View section (this browser only): narrows the table ---------------------
+// Fixture facts (tests/fixtures/readsb-sample.jsonl, looped every ~122 s):
+// 12 aircraft, all at US addresses except the TIS-B track ~2c4a1f, which
+// skycued reports as hex 2c4a1f, addr_type non_icao (no country). RPA4521 (ac5e81) is heard only in the first
+// 59 s of each loop and times out (60 s) for a few seconds before the loop
+// restarts, so exact counts that would include it are avoided.
+async function tableRows(page) {
+  return page.$$eval('#table-view tbody tr', (trs) => trs.map((tr) => tr.getAttribute('data-key')));
+}
+async function openTable(page) {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.click('#table-toggle');
+  await expect.poll(() => page.$$eval('#table-view tbody tr', (r) => r.length)).toBeGreaterThanOrEqual(10);
+}
+const TISB = '2c4a1f|non_icao';
+const hexes = (keys) => keys.map((k) => k.split('|')[0]).sort();
+test('view_search_narrows_table_and_shows_count', async ({ page }) => {
+  await openTable(page);
+  const total = (await tableRows(page)).length;
+  await page.fill('#view-search', 'ual');
+  await expect.poll(async () => (await tableRows(page)).length).toBe(2);           // UAL1423, UAL455
+  await expect(page.locator('#view-count')).toHaveText(`showing 2 of ${total}`);
+  await expect(page.locator('#view-badge')).toHaveText('· 1');
+  await expect(page.locator('#view-clear')).toBeEnabled();
+  await page.click('#view-clear');
+  await expect.poll(async () => (await tableRows(page)).length).toBe(total);
+  await expect(page.locator('#view-count')).toHaveText('');
+  await expect(page.locator('#view-badge')).toHaveText('');
+  await expect(page.locator('#view-clear')).toBeDisabled();
+  await expect(page.locator('#view-search')).toHaveValue('');
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+});
+test('view_count_stays_live_with_the_table_closed', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.fill('#view-search', 'ual');
+  await expect(page.locator('#view-count')).toHaveText(/^showing 2 of \d+$/);
+  expect(await page.evaluate(() => window.skycueApp.shownCount())).toBe(2);
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+});
+test('view_altitude_band_and_ground', async ({ page }) => {
+  await openTable(page);
+  await page.fill('#view-alt-min', '10000');
+  // At or above 10,000 ft in the fixture: a2f7b9 FDX1520 24,000, a4f2c1
+  // UAL1423 36,000, a6e9d2 JBU1187 38,000, a8c3e5 DAL872 28,000, ab12f0
+  // AAL2291 12,000-15,600, and ac5e81 RPA4521 18,000: 6 (5 while RPA4521
+  // is timed out, see above).
+  const ALWAYS = ['a2f7b9', 'a4f2c1', 'a6e9d2', 'a8c3e5', 'ab12f0'];
+  await expect.poll(async () => hexes(await tableRows(page)).filter((h) => h !== 'ac5e81')).toEqual(ALWAYS);
+  expect([5, 6]).toContain((await tableRows(page)).length);
+  await page.fill('#view-alt-min', '');
+  await page.uncheck('#view-ground');
+  // The fixture's on-ground aircraft is UAL455 (a7d3e6); inject one more.
+  await page.evaluate(() => window.skycueApp.injectTestMarker({ hex: 'abcdef', decision: 'send', on_ground: true, alt_baro_ft: 0, lat: 38.9, lon: -77.0, position_time: new Date().toISOString() }));
+  await expect.poll(async () => (await tableRows(page)).some((k) => k.indexOf('abcdef') >= 0)).toBe(false);
+  expect((await tableRows(page)).some((k) => k.indexOf('a7d3e6') >= 0)).toBe(false);
+  await expect(page.locator('#view-badge')).toHaveText('· 1');
+  await page.check('#view-ground');
+  await expect.poll(async () => (await tableRows(page)).some((k) => k.indexOf('abcdef') >= 0)).toBe(true);
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+});
+test('view_class_emergency_category_country', async ({ page }) => {
+  await openTable(page);
+  await page.click('#view-classes button[data-class="airline"]');          // off
+  await expect(page.locator('#view-classes button[data-class="airline"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(async () => (await tableRows(page)).some((k) => k.indexOf(TARGET) >= 0)).toBe(false);
+  await page.click('#view-classes button[data-class="airline"]');          // on again
+  await expect(page.locator('#view-classes button[data-class="airline"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.selectOption('#view-category', 'A1');
+  await expect.poll(async () => (await tableRows(page)).length).toBe(2);   // N512RG, N3157K
+  await page.selectOption('#view-category', '');
+  await page.selectOption('#view-country', 'Ireland');
+  await expect.poll(async () => (await tableRows(page)).length).toBe(0);
+  await page.selectOption('#view-country', 'United States');
+  // All 11 ICAO-addressed aircraft (10 while RPA4521 is timed out); never
+  // the TIS-B track, which has no country.
+  await expect.poll(async () => (await tableRows(page)).length).toBeGreaterThanOrEqual(10);
+  expect(await tableRows(page)).not.toContain(TISB);
+  await page.selectOption('#view-country', 'other');
+  await expect.poll(async () => await tableRows(page)).toEqual([TISB]);
+  await page.selectOption('#view-country', '');
+  await page.evaluate(() => window.skycueApp.injectTestMarker({ hex: 'ae0001', decision: 'send', squawk: '7700', alt_baro_ft: 5000, lat: 38.9, lon: -77.0, position_time: new Date().toISOString() }));
+  await page.check('#view-emergency');
+  await expect.poll(async () => await tableRows(page)).toEqual(expect.arrayContaining([expect.stringContaining('ae0001')]));
+  expect((await tableRows(page)).length).toBe(1);
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+});
+test('view_decision_pill_narrows_table', async ({ page }) => {
+  await openTable(page);
+  const pill = page.locator('#view-decisions button[data-decision="sent"]');
+  await expect(pill).toHaveAttribute('aria-pressed', 'true');
+  await pill.click();
+  await expect(pill).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(async () => (await page.$$eval('#table-view tbody td[data-key="decision"]',
+    (tds) => tds.filter((td) => td.querySelector('.decision-sent')).length))).toBe(0);
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().decisions)).not.toContain('sent');
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+  await expect(pill).toHaveAttribute('aria-pressed', 'true');
+});
+test('view_persists_across_reload_and_slash_focuses_search', async ({ page }) => {
+  await openTable(page);
+  await page.fill('#view-search', 'dal');
+  await page.check('input[name="view-map-mode"][value="dim"]');
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view')))).toMatchObject({ search: 'dal', mapMode: 'dim' });
+  await page.reload(); await openPage(page); await waitMarkers(page, 1);
+  await expect(page.locator('#view-search')).toHaveValue('dal');
+  await expect(page.locator('input[name="view-map-mode"][value="dim"]')).toBeChecked();
+  await expect(page.locator('#view-badge')).toHaveText('· 1');
+  await page.locator('body').press('/');
+  await expect(page.locator('#view-search')).toBeFocused();
+  await expect(page.locator('#view-search')).toHaveValue('dal');            // the '/' is not typed
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#view-search')).toHaveValue('');
+  await expect(page.locator('#view-search')).not.toBeFocused();
+  await expect(page.locator('#view-badge')).toHaveText('');
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+});
+test('view_section_fits_panel_and_details_show_class_and_country', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'abcdefghij', altMin: 10000, altMax: 45000, gsMin: 100, gsMax: 600, rangeMin: 10, rangeMax: 250 }));
+  const over = await page.evaluate(() => { const f = document.getElementById('filters'); return f.scrollWidth - f.clientWidth; });
+  expect(over).toBeLessThanOrEqual(0);
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+  const panel = await selectTarget(page);
+  await expect(panel.locator('[data-field="class"]')).toHaveText('airline');
+  await expect(panel.locator('[data-field="country"]')).toHaveText('United States');
+});

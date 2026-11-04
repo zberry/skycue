@@ -392,3 +392,27 @@ table.cfg-table td.cfg-restart { padding-right: 0; white-space: nowrap; text-ali
 /* "Hide filtered": a view option kept in this browser only. */
 label.check { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
 label.check input { width: auto; margin: 0; }
+
+/* The View section (spec 3, 7): narrows the table and the map, kept in this
+   browser only. Same language as Filters: muted 12 px labels, .row, .msg. */
+#view-badge { color: var(--muted); }
+#filters .view-sub { margin: -6px 0 0; font-size: 12px; color: var(--muted); }
+#filters .view-label { color: var(--muted); font-size: 12px; margin: 8px 0 4px; }
+#view-search { width: 100%; }
+.band { display: flex; align-items: center; gap: 4px; }
+.band input { flex: 1 1 0; width: 0; min-width: 0; }
+.band span { color: var(--muted); flex: none; }
+#view label.check { display: flex; margin: 6px 0 0; }
+.pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.pills button {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 2px;
+  border: 1px solid var(--line); background: none; color: var(--muted); font-size: 12px; line-height: 1;
+}
+.pills button .sw { margin-right: 4px; }
+.pills button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+.pills button[aria-pressed="false"] .sw { opacity: .35; }
+.view-map-mode { gap: 14px; }
+.view-map-mode label.check { color: var(--text); font-size: 13px; }
+.view-foot { align-items: center; justify-content: space-between; margin-top: 10px; }
+.view-foot .msg { margin: 0; flex: 1; min-width: 0; }
+.view-foot button { flex: none; }

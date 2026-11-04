@@ -1002,7 +1002,9 @@ test('icaoCountry: allocation blocks and edges', () => {
   assert.strictEqual(P.icaoCountry('484b6e'), 'Netherlands');
   assert.strictEqual(P.icaoCountry('c01234'), 'Canada');
   assert.strictEqual(P.icaoCountry('7c6b2a'), 'Australia');
-  assert.strictEqual(P.icaoCountry('~2c4a1f'), null);   // TIS-B, unallocated block
+  assert.strictEqual(P.icaoCountry('~2c4a1f'), null);   // TIS-B track-file id, not an ICAO address
+  assert.strictEqual(P.icaoCountry('~a4f2c1'), null);   // even when the digits would be US
+  assert.strictEqual(P.icaoMilitary('~ae1234'), false);
   assert.strictEqual(P.icaoCountry('zz'), null);
   assert.strictEqual(P.icaoCountry(undefined), null);
   assert.ok(P.ICAO_COUNTRIES.indexOf('United States') >= 0 && P.ICAO_COUNTRIES.length > 150);
@@ -1070,6 +1072,104 @@ test('address tables: sorted, each first <= last, no overlaps', () => {
     const hex = m[0].toString(16).padStart(6, '0');
     assert.ok(P.icaoCountry(hex) !== null, 'military block ' + hex + ' inside a national block');
   });
+});
+
+test('normalizeView: defaults, partial, malformed', () => {
+  assert.deepStrictEqual(P.normalizeView(undefined), P.VIEW_DEFAULTS);
+  assert.deepStrictEqual(P.normalizeView('{'), P.VIEW_DEFAULTS);
+  assert.deepStrictEqual(P.normalizeView(42), P.VIEW_DEFAULTS);
+  const v = P.normalizeView({ search: 'ual', altMin: '3000', altMax: 'x', decisions: ['sent', 'bogus'], classes: 7, mapMode: 'DIM', category: 'A3', country: 'Ireland', emergency: 1 });
+  assert.strictEqual(v.search, 'ual'); assert.strictEqual(v.altMin, 3000); assert.strictEqual(v.altMax, null);
+  assert.deepStrictEqual(v.decisions, ['sent']); assert.deepStrictEqual(v.classes, P.VIEW_DEFAULTS.classes);
+  assert.strictEqual(v.mapMode, 'hide'); assert.strictEqual(v.category, 'A3'); assert.strictEqual(v.country, 'Ireland');
+  assert.strictEqual(v.emergency, true);
+  assert.strictEqual(P.normalizeView({ mapMode: 'dim' }).mapMode, 'dim');
+  assert.strictEqual(P.normalizeView(JSON.stringify(v)).altMin, 3000, 'accepts a JSON string');
+});
+test('normalizeView: copies arrays, never hands out the defaults', () => {
+  assert.ok(Object.isFrozen(P.VIEW_DEFAULTS));
+  const v = P.normalizeView(null);
+  v.decisions.push('bogus'); v.classes.length = 0;
+  assert.strictEqual(P.VIEW_DEFAULTS.decisions.length, 5);
+  assert.deepStrictEqual(P.VIEW_DEFAULTS.classes, P.CLASSES);
+  assert.deepStrictEqual(P.VIEW_DEFAULTS.decisions, ['sent', 'allow_listed', 'out_of_range', 'below_elevation', 'blocked']);
+});
+test('viewActiveCount', () => {
+  assert.strictEqual(P.viewActiveCount(P.VIEW_DEFAULTS), 0);
+  assert.strictEqual(P.viewActiveCount(P.normalizeView({ mapMode: 'dim' })), 0);
+  assert.strictEqual(P.viewActiveCount(P.normalizeView({ search: 'a', altMin: 1, altMax: 2, ground: false, emergency: true })), 3);
+  assert.strictEqual(P.viewActiveCount(P.normalizeView({ decisions: ['sent'], classes: ['airline'], category: 'A1', country: 'Canada', gsMax: 100, rangeMin: 5 })), 6);
+});
+test('trackAlt', () => {
+  assert.strictEqual(P.trackAlt({ on_ground: true, alt_baro_ft: 500 }), 0);
+  assert.strictEqual(P.trackAlt({ alt_baro_ft: 500, alt_geom_ft: 600 }), 500);
+  assert.strictEqual(P.trackAlt({ alt_geom_ft: 600 }), 600);
+  assert.strictEqual(P.trackAlt({}), null);
+});
+test('searchMatches over hex, callsign, registration, squawk', () => {
+  const t = { hex: 'a4f2c1', callsign: 'UAL1423', registration: 'N12345', squawk: '7700' };
+  ['', 'A4F2', 'ual', '1423', 'n123', '7700'].forEach((q) => assert.strictEqual(P.searchMatches(t, q), true, q));
+  ['zzz', '7701'].forEach((q) => assert.strictEqual(P.searchMatches(t, q), false, q));
+  assert.strictEqual(P.searchMatches({ hex: 'abc123' }, 'abc'), true);
+});
+test('viewMatches: bands, ground, unknown values, min > max', () => {
+  const V = (o) => P.normalizeView(o);
+  const air = { hex: 'a4f2c1', callsign: 'UAL1423', category: 'A3', alt_baro_ft: 35000, gs_kt: 450, range_nm: 40, decision: 'send' };
+  const gnd = { hex: 'a5b06d', callsign: 'N512RG', category: 'A1', on_ground: true, alt_baro_ft: 100, gs_kt: 5, range_nm: 3, decision: 'below_elevation' };
+  const nogs = { hex: '4b0de1', alt_baro_ft: 1000, range_nm: 10, decision: 'out_of_range' };
+  assert.strictEqual(P.viewMatches(air, V({})), true);
+  assert.strictEqual(P.viewMatches(air, V({ altMin: 30000 })), true);
+  assert.strictEqual(P.viewMatches(air, V({ altMax: 30000 })), false);
+  assert.strictEqual(P.viewMatches(gnd, V({ altMin: 0 })), true);
+  assert.strictEqual(P.viewMatches(gnd, V({ ground: false })), false);
+  assert.strictEqual(P.viewMatches(gnd, V({ altMin: 0, altMax: 100, ground: false })), false, 'ground off beats the band');
+  assert.strictEqual(P.viewMatches(nogs, V({ gsMin: 0 })), false, 'unknown value fails an active band');
+  assert.strictEqual(P.viewMatches(nogs, V({ altMin: 500 })), true);
+  assert.strictEqual(P.viewMatches(air, V({ gsMin: 500, gsMax: 100 })), false, 'min > max matches nothing');
+  assert.strictEqual(P.viewMatches(air, V({ rangeMin: 10, rangeMax: 50 })), true);
+  assert.strictEqual(P.viewMatches(air, V({ rangeMax: 39.9 })), false);
+});
+test('viewMatches: decisions, classes, emergency, category, country, search', () => {
+  const V = (o) => P.normalizeView(o);
+  const air = { hex: 'a4f2c1', callsign: 'UAL1423', category: 'A3', alt_baro_ft: 35000, gs_kt: 450, range_nm: 40, decision: 'send', squawk: '3341' };
+  const nopos = { hex: 'a0d4b7', callsign: 'SWA3310', decision: 'no_position' };
+  const mil = { hex: 'ae1234', squawk: '7700', decision: 'blocked', category: 'A3' };
+  assert.strictEqual(P.viewMatches(air, V({ decisions: ['sent'] })), true);
+  assert.strictEqual(P.viewMatches(air, V({ decisions: ['blocked'] })), false);
+  assert.strictEqual(P.viewMatches(nopos, V({ decisions: ['blocked'] })), true, 'no_position ignores decision toggles');
+  assert.strictEqual(P.viewMatches(air, V({ classes: ['airline'] })), true);
+  assert.strictEqual(P.viewMatches(air, V({ classes: ['military'] })), false);
+  assert.strictEqual(P.viewMatches(mil, V({ classes: ['military'] })), true);
+  assert.strictEqual(P.viewMatches(air, V({ emergency: true })), false);
+  assert.strictEqual(P.viewMatches(mil, V({ emergency: true })), true);
+  assert.strictEqual(P.viewMatches(air, V({ category: 'A3' })), true);
+  assert.strictEqual(P.viewMatches(air, V({ category: 'A1' })), false);
+  assert.strictEqual(P.viewMatches(nopos, V({ category: 'none' })), true);
+  assert.strictEqual(P.viewMatches({ hex: 'a4f2c1', category: 'B2', decision: 'send' }, V({ category: 'other' })), true);
+  assert.strictEqual(P.viewMatches(air, V({ country: 'United States' })), true);
+  assert.strictEqual(P.viewMatches(air, V({ country: 'Ireland' })), false);
+  assert.strictEqual(P.viewMatches({ hex: '~2c4a1f', decision: 'send' }, V({ country: 'other' })), true);
+  assert.strictEqual(P.viewMatches(air, V({ search: '3341' })), true);
+  assert.strictEqual(P.viewMatches(air, V({ search: 'ryr', decisions: ['sent'] })), false, 'every rule must pass');
+});
+test('trackClass: the address-based military check only for ICAO addresses', () => {
+  assert.strictEqual(P.trackClass({ hex: 'ae1234', addr_type: 'tisb_trackfile' }), 'unknown');
+  assert.strictEqual(P.trackClass({ hex: 'ae1234', addr_type: 'icao' }), 'military');
+  assert.strictEqual(P.trackClass({ hex: 'ae1234' }), 'military', 'no addr_type: taken as ICAO');
+  assert.strictEqual(P.trackClass({ hex: 'ae1234', addr_type: 'non_icao', callsign: 'RCH123' }), 'military', 'the callsign still counts');
+});
+test('viewMatches country: a non-ICAO address has no country', () => {
+  const V = (o) => P.normalizeView(o);
+  const tisb = { hex: 'ae1234', addr_type: 'tisb_trackfile', decision: 'send' };
+  const icao = { hex: 'ae1234', addr_type: 'icao', decision: 'send' };
+  assert.strictEqual(P.trackCountry(tisb), null);
+  assert.strictEqual(P.trackCountry(icao), 'United States');
+  assert.strictEqual(P.viewMatches(tisb, V({ country: 'United States' })), false);
+  assert.strictEqual(P.viewMatches(tisb, V({ country: 'other' })), true);
+  assert.strictEqual(P.viewMatches(icao, V({ country: 'United States' })), true);
+  assert.strictEqual(P.viewMatches(icao, V({ country: 'other' })), false);
+  assert.strictEqual(P.viewMatches(tisb, V({ classes: ['military'] })), false);
+  assert.strictEqual(P.viewMatches(icao, V({ classes: ['military'] })), true);
 });
 
 console.log(passed + ' passed, ' + failed + ' failed');

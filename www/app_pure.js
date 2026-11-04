@@ -1277,12 +1277,12 @@
     return out.sort();
   })();
 
-  // An address as an integer: an optional leading '~' (TIS-B) is dropped,
-  // then exactly 6 hex digits; anything else is null.
+  // An ICAO address as an integer: exactly 6 hex digits, anything else is
+  // null. A leading '~' marks a TIS-B track-file id, not an ICAO address, so
+  // it is null too (no country, not military).
   function parseHex(hex) {
     if (typeof hex !== 'string') return null;
-    var s = hex.charAt(0) === '~' ? hex.slice(1) : hex;
-    return /^[0-9a-f]{6}$/i.test(s) ? parseInt(s, 16) : null;
+    return /^[0-9a-f]{6}$/i.test(hex) ? parseInt(hex, 16) : null;
   }
 
   // The block holding address v in a sorted [first, last, ...] table, or null.
@@ -1334,11 +1334,18 @@
   var CATEGORY_LABELS = { A1: 'light', A2: 'small', A3: 'large', A4: 'high vortex', A5: 'heavy',
     A6: 'high performance', A7: 'rotorcraft' };
 
+  // The address rules (country, military block) apply only to a track whose
+  // addr_type is 'icao' or absent: a non-ICAO address (TIS-B track file,
+  // non_icao, other) carries no allocation meaning.
+  function isIcaoAddressed(t) { return t.addr_type === undefined || t.addr_type === null || t.addr_type === 'icao'; }
+  // The country of a track's address (null for non-ICAO addresses).
+  function trackCountry(t) { return isIcaoAddressed(t) ? icaoCountry(t.hex) : null; }
+
   // The estimated class of a track, from its address, callsign, emitter
   // category and registration (spec 3a).
   function trackClass(t) {
     var kind = callsignKind(t.callsign);
-    if (icaoMilitary(t.hex) || kind === 'military') return 'military';
+    if ((isIcaoAddressed(t) && icaoMilitary(t.hex)) || kind === 'military') return 'military';
     var cat = t.category || '';
     if (kind === 'airline' || (kind !== null && (cat === 'A3' || cat === 'A4' || cat === 'A5'))) return 'airline';
     if (cat === 'A1' || cat === 'A2' || cat === 'A7' || kind === 'registration' ||
@@ -1351,6 +1358,124 @@
     if (t.emergency && t.emergency !== 'none') return true;
     var sq = t.squawk;
     return sq === '7500' || sq === '7600' || sq === '7700';
+  }
+
+  // The View section's settings (spec 3, 6): what the operator narrows the
+  // table and map to, kept in this browser only. Numbers are null for "no
+  // bound"; decisions are colour classes, classes are trackClass names.
+  var VIEW_DECISIONS = ['sent', 'allow_listed', 'out_of_range', 'below_elevation', 'blocked'];
+  var VIEW_CATEGORIES = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
+  var VIEW_DEFAULTS = Object.freeze({
+    search: '', altMin: null, altMax: null, ground: true, gsMin: null, gsMax: null,
+    rangeMin: null, rangeMax: null, decisions: Object.freeze(VIEW_DECISIONS.slice()),
+    classes: Object.freeze(CLASSES.slice()), emergency: false, category: '', country: '', mapMode: 'hide'
+  });
+
+  function viewNumber(v) {
+    if (typeof v === 'string') v = v.trim() === '' ? null : Number(v);
+    return typeof v === 'number' && isFinite(v) ? v : null;
+  }
+  function viewBool(v, dflt) {
+    return typeof v === 'boolean' || typeof v === 'number' ? !!v : dflt;
+  }
+  // The known values of `allowed` that `v` holds, in `allowed`'s order; the
+  // default (copied) when v is not an array.
+  function viewSet(v, allowed) {
+    if (!Array.isArray(v)) return allowed.slice();
+    return allowed.filter(function (a) { return v.indexOf(a) >= 0; });
+  }
+
+  // Any input (an object, a JSON string, garbage) to a full view; each field
+  // falls back to its default on its own. Arrays are fresh copies.
+  function normalizeView(obj) {
+    if (typeof obj === 'string') {
+      try { obj = JSON.parse(obj); } catch (e) { obj = null; }
+    }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) obj = {};
+    var cat = obj.category, country = obj.country;
+    return {
+      search: typeof obj.search === 'string' ? obj.search : '',
+      altMin: viewNumber(obj.altMin), altMax: viewNumber(obj.altMax),
+      ground: viewBool(obj.ground, true),
+      gsMin: viewNumber(obj.gsMin), gsMax: viewNumber(obj.gsMax),
+      rangeMin: viewNumber(obj.rangeMin), rangeMax: viewNumber(obj.rangeMax),
+      decisions: viewSet(obj.decisions, VIEW_DECISIONS),
+      classes: viewSet(obj.classes, CLASSES),
+      emergency: viewBool(obj.emergency, false),
+      category: cat === 'other' || cat === 'none' || VIEW_CATEGORIES.indexOf(cat) >= 0 ? cat : '',
+      country: country === 'other' || ICAO_COUNTRIES.indexOf(country) >= 0 ? country : '',
+      mapMode: obj.mapMode === 'dim' ? 'dim' : 'hide'
+    };
+  }
+
+  // How many controls differ from the default (the heading badge). The
+  // altitude band and its ground box count as one; the map mode never counts.
+  function viewActiveCount(v) {
+    var n = 0;
+    if (String(v.search || '').trim() !== '') n++;
+    if (v.altMin !== null || v.altMax !== null || !v.ground) n++;
+    if (v.gsMin !== null || v.gsMax !== null) n++;
+    if (v.rangeMin !== null || v.rangeMax !== null) n++;
+    if (v.decisions.length !== VIEW_DECISIONS.length) n++;
+    if (v.classes.length !== CLASSES.length) n++;
+    if (v.emergency) n++;
+    if (v.category) n++;
+    if (v.country) n++;
+    return n;
+  }
+
+  // The table's altitude: 0 on the ground, else barometric, else geometric.
+  function trackAlt(t) {
+    if (t.on_ground) return 0;
+    if (typeof t.alt_baro_ft === 'number') return t.alt_baro_ft;
+    if (typeof t.alt_geom_ft === 'number') return t.alt_geom_ft;
+    return null;
+  }
+
+  // Case-insensitive substring over hex, callsign, registration and squawk.
+  function searchMatches(t, text) {
+    var q = String(text || '').trim().toLowerCase();
+    if (!q) return true;
+    var fields = [t.hex, t.callsign, t.registration, t.squawk];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (f !== undefined && f !== null && String(f).trim().toLowerCase().indexOf(q) >= 0) return true;
+    }
+    return false;
+  }
+
+  // A band with a bound set fails an unknown value; min > max fails all.
+  function inBand(v, min, max) {
+    if (min === null && max === null) return true;
+    if (typeof v !== 'number' || !isFinite(v)) return false;
+    return (min === null || v >= min) && (max === null || v <= max);
+  }
+
+  // Does track t pass every rule of view v (spec 3)? The selected-aircraft
+  // exemption is the page's business, not this function's.
+  function viewMatches(t, v) {
+    if (!searchMatches(t, v.search)) return false;
+    if (t.on_ground && !v.ground) return false;
+    if (!inBand(trackAlt(t), v.altMin, v.altMax)) return false;
+    if (!inBand(t.gs_kt, v.gsMin, v.gsMax)) return false;
+    if (!inBand(t.range_nm, v.rangeMin, v.rangeMax)) return false;
+    // Only the five toggleable colour classes are subject to the pills:
+    // no_position (null) and an unrecognised decision ('unknown') are not.
+    var dc = decisionColor(t.decision);
+    if (VIEW_DECISIONS.indexOf(dc) >= 0 && v.decisions.indexOf(dc) < 0) return false;
+    if (v.classes.indexOf(trackClass(t)) < 0) return false;
+    if (v.emergency && !isEmergency(t)) return false;
+    if (v.category) {
+      var cat = t.category || '';
+      if (v.category === 'none' ? cat !== '' :
+          v.category === 'other' ? (cat === '' || VIEW_CATEGORIES.indexOf(cat) >= 0) :
+          cat !== v.category) return false;
+    }
+    if (v.country) {
+      var c = trackCountry(t);
+      if (v.country === 'other' ? c !== null : c !== v.country) return false;
+    }
+    return true;
   }
 
   var api = {
@@ -1394,7 +1519,9 @@
     ICAO_BLOCKS: ICAO_BLOCKS, MILITARY_BLOCKS: MILITARY_BLOCKS, ICAO_COUNTRIES: ICAO_COUNTRIES,
     icaoCountry: icaoCountry, icaoMilitary: icaoMilitary,
     MILITARY_CALLSIGN_PREFIXES: MILITARY_CALLSIGN_PREFIXES, callsignKind: callsignKind,
-    CLASSES: CLASSES, CATEGORY_LABELS: CATEGORY_LABELS, trackClass: trackClass, isEmergency: isEmergency
+    CLASSES: CLASSES, CATEGORY_LABELS: CATEGORY_LABELS, trackClass: trackClass, isEmergency: isEmergency, trackCountry: trackCountry,
+    VIEW_DEFAULTS: VIEW_DEFAULTS, normalizeView: normalizeView, viewActiveCount: viewActiveCount,
+    trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

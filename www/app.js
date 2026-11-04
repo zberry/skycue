@@ -31,6 +31,11 @@
   var editing = {};                 // filter key -> the input holds an uncommitted edit
   var actionsSig = '';
   var hideFiltered = false;         // view option, kept in localStorage; never sent to skycued
+  // The View section's filters (P.normalizeView; spec 3, 6): kept in
+  // localStorage, never sent to skycued, read once here before the first
+  // render. (`view`, further down, is the map style and overlays.)
+  var VIEW_FILTER_KEY = 'skycue.view';
+  var viewFilter = P.normalizeView(storeGet(VIEW_FILTER_KEY));
 
   var $ = function (id) { return document.getElementById(id); };
   function dataNow() { return Date.now() + clockOffsetMs; }
@@ -550,6 +555,126 @@
     updateHiddenCount();
   }
 
+  // ---- View section --------------------------------------------------------------
+  // Narrows the table (and the map: Task 3) to the tracks that match every
+  // active control. The selected aircraft is exempt, so a filter change never
+  // drops or deselects it.
+  function viewShows(e) { return e.key === selectedKey || P.viewMatches(e.t, viewFilter); }
+  function renderAllEntries() { tracks.forEach(function (e) { renderEntry(e, false); }); }
+  function saveView() { storeSet(VIEW_FILTER_KEY, JSON.stringify(viewFilter)); }
+  var VIEW_NUMBERS = { altMin: 'view-alt-min', altMax: 'view-alt-max', gsMin: 'view-gs-min', gsMax: 'view-gs-max',
+    rangeMin: 'view-range-min', rangeMax: 'view-range-max' };
+  function pillValues(groupId, attr) {
+    var out = [];
+    eachEl('#' + groupId + ' button[' + attr + ']', function (b) {
+      if (b.getAttribute('aria-pressed') === 'true') out.push(b.getAttribute(attr));
+    });
+    return out;
+  }
+  function setPills(groupId, attr, on) {
+    eachEl('#' + groupId + ' button[' + attr + ']', function (b) {
+      b.setAttribute('aria-pressed', String(on.indexOf(b.getAttribute(attr)) >= 0));
+    });
+  }
+  function applyViewToControls() {
+    var v = viewFilter;
+    $('view-search').value = v.search;
+    Object.keys(VIEW_NUMBERS).forEach(function (k) { $(VIEW_NUMBERS[k]).value = v[k] === null ? '' : String(v[k]); });
+    $('view-ground').checked = v.ground;
+    setPills('view-decisions', 'data-decision', v.decisions);
+    setPills('view-classes', 'data-class', v.classes);
+    $('view-emergency').checked = v.emergency;
+    $('view-category').value = v.category;
+    $('view-country').value = v.country;
+    eachEl('input[name="view-map-mode"]', function (r) { r.checked = r.value === v.mapMode; });
+  }
+  function readViewFromControls() {
+    var o = {
+      search: $('view-search').value, ground: $('view-ground').checked, emergency: $('view-emergency').checked,
+      decisions: pillValues('view-decisions', 'data-decision'), classes: pillValues('view-classes', 'data-class'),
+      category: $('view-category').value, country: $('view-country').value,
+      mapMode: (document.querySelector('input[name="view-map-mode"]:checked') || {}).value
+    };
+    Object.keys(VIEW_NUMBERS).forEach(function (k) { o[k] = $(VIEW_NUMBERS[k]).value; });
+    return P.normalizeView(o);
+  }
+  // N of "showing N of M", from the tracks themselves (live with the table closed).
+  function viewShownCount() {
+    var n = 0;
+    tracks.forEach(function (e) { if (viewShows(e)) n++; });
+    return n;
+  }
+  function updateViewStatus() {
+    var active = P.viewActiveCount(viewFilter);
+    $('view-count').textContent = active > 0 ? 'showing ' + viewShownCount() + ' of ' + tracks.size : '';
+    $('view-badge').textContent = active > 0 ? '· ' + active : '';
+    $('view-clear').disabled = active === 0;
+  }
+  // Merges `partial` into the view, persists and re-renders. `fromControls`:
+  // the controls already show it (the operator is typing), leave them be.
+  function setViewFilters(partial, fromControls) {
+    viewFilter = P.normalizeView(Object.assign({}, viewFilter, partial));
+    if (!fromControls) applyViewToControls();
+    saveView();
+    tableDirty = true;
+    renderAllEntries();
+    updateViewStatus();
+    renderTable();
+  }
+  function resetViewFilters() { setViewFilters(P.VIEW_DEFAULTS); }
+  function togglePill(field, value) {
+    var on = viewFilter[field].slice(), i = on.indexOf(value);
+    if (i >= 0) on.splice(i, 1); else on.push(value);
+    var o = {};
+    o[field] = on;
+    setViewFilters(o);
+  }
+  function wireView() {
+    var cat = $('view-category');
+    var opts = [['', 'any']];
+    Object.keys(P.CATEGORY_LABELS).forEach(function (c) { opts.push([c, P.CATEGORY_LABELS[c] + ' (' + c + ')']); });
+    opts.push(['other', 'other'], ['none', 'none']);
+    opts.forEach(function (o) { cat.appendChild(new Option(o[1], o[0])); });
+    var country = $('view-country');
+    country.appendChild(new Option('any', ''));
+    P.ICAO_COUNTRIES.forEach(function (c) { country.appendChild(new Option(c, c)); });
+    country.appendChild(new Option('other / unknown', 'other'));
+    applyViewToControls();
+    updateViewStatus();
+    var fromControls = function () { setViewFilters(readViewFromControls(), true); };
+    ['view-search'].concat(Object.keys(VIEW_NUMBERS).map(function (k) { return VIEW_NUMBERS[k]; })).forEach(function (id) {
+      $(id).addEventListener('input', fromControls);
+    });
+    ['view-ground', 'view-emergency', 'view-category', 'view-country'].forEach(function (id) {
+      $(id).addEventListener('change', fromControls);
+    });
+    eachEl('input[name="view-map-mode"]', function (r) { r.addEventListener('change', fromControls); });
+    eachEl('#view-decisions button[data-decision]', function (b) {
+      b.addEventListener('click', function () { togglePill('decisions', b.getAttribute('data-decision')); });
+    });
+    eachEl('#view-classes button[data-class]', function (b) {
+      b.addEventListener('click', function () { togglePill('classes', b.getAttribute('data-class')); });
+    });
+    $('view-clear').addEventListener('click', resetViewFilters);
+    // Escape in the search clears and blurs it; the panel stays open.
+    $('view-search').addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+      ev.stopPropagation();
+      $('view-search').blur();
+      if (viewFilter.search !== '') setViewFilters({ search: '' });
+    });
+  }
+  // `/` focuses the search unless the key goes to a control or has a modifier.
+  function slashFocusesSearch(ev) {
+    if (ev.key !== '/' || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+    var tag = ev.target && ev.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON' ||
+        (ev.target && ev.target.isContentEditable)) return false;
+    ev.preventDefault();
+    $('view-search').focus();
+    return true;
+  }
+
   function pruneTrail(e) {
     var cutoff = dataNow() - cfg.trailSeconds * 1000;
     var i = 0;
@@ -728,6 +853,7 @@
   var FIELDS = [
     ['hex', 'Hex'], ['addr_type', 'Address type'], ['source', 'Source'], ['callsign', 'Callsign'],
     ['registration', 'Registration'], ['squawk', 'Squawk'], ['category', 'Category'], ['emergency', 'Emergency'],
+    ['class', 'Class (est.)'], ['country', 'Country'],
     ['lat', 'Latitude', function (v) { return v.toFixed(5) + '°'; }],
     ['lon', 'Longitude', function (v) { return v.toFixed(5) + '°'; }],
     ['position_time', 'Position time', fmtTime],
@@ -756,7 +882,11 @@
       $('details-title').textContent = 'Track';
       return;
     }
+    // A shallow copy: the derived rows (class, country) and the bearing are
+    // for display only, never stored on the track.
     var t = Object.assign({}, e.t);
+    t['class'] = P.trackClass(e.t);
+    t.country = P.trackCountry(e.t) || '—';
     var r = cfg.receiver;
     if (r && typeof t.lat === 'number') t.bearing = P.bearingDeg(r.lat, r.lon, t.lat, t.lon);
     $('details-title').textContent = (t.callsign || t.hex) + (t.registration ? ' · ' + t.registration : '');
@@ -958,7 +1088,7 @@
   function renderTable() {
     if ($('table-view').hidden) return;
     tableDirty = false;
-    var rows = Array.from(tracks.values()).map(function (e) {
+    var rows = Array.from(tracks.values()).filter(viewShows).map(function (e) {
       var t = e.t;
       var alt = t.on_ground ? 0 : (typeof t.alt_baro_ft === 'number' ? t.alt_baro_ft : t.alt_geom_ft);
       return { key: e.key, t: t, hex: t.hex, callsign: t.callsign, registration: t.registration, alt: alt,
@@ -2636,6 +2766,7 @@
     var stored = null;
     try { stored = window.localStorage.getItem('skycue.hideFiltered'); } catch (err) { /* no storage */ }
     if (stored === '1') setHideFiltered(true);
+    wireView();
     $('hide-filtered').addEventListener('change', function () { setHideFiltered($('hide-filtered').checked); });
     var sel = $('ring-alt');
     RING_ALTS_FT.forEach(function (ft) {
@@ -2746,6 +2877,7 @@
     });
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') closePanel();
+      else slashFocusesSearch(ev);
     });
     setInterval(prune, 2000);
     setInterval(watchdog, 1000);
@@ -2756,7 +2888,7 @@
     setInterval(function () {
       if (selectedKey) renderDetails(); // ages
       updateHiddenCount();
-      if (tableDirty) renderTable();
+      if (tableDirty) { updateViewStatus(); renderTable(); }
       if (map) radarAgeTick();
       if (tabShown('receiver')) renderReceiver(); // ages, rates
       if (tabShown('cues') && cues.recentDirty) renderCueRecent();
@@ -2795,6 +2927,12 @@
     setHideFiltered: setHideFiltered,
     getHideFiltered: function () { return hideFiltered; },
     hiddenCount: updateHiddenCount,
+    // The View section: its filters (a copy), merge-normalise-persist, back
+    // to the defaults, and N of "showing N of M".
+    getViewFilters: function () { return JSON.parse(JSON.stringify(viewFilter)); },
+    setViewFilters: function (partial) { setViewFilters(partial); },
+    resetViewFilters: resetViewFilters,
+    shownCount: viewShownCount,
     // Adds a marker skycued does not know (the reconnect test checks it goes).
     injectTestMarker: function (t) { onTrack(t, true); },
     dataNow: dataNow,

@@ -49,6 +49,60 @@
       <label class="check" for="hide-filtered"><input id="hide-filtered" type="checkbox"> Hide filtered</label>
       <p id="hidden-count" class="msg" role="status"></p>
     </section>
+    <section id="view" aria-labelledby="view-heading">
+      <h2 id="view-heading">View <span id="view-badge"></span></h2>
+      <p class="view-sub">this browser only</p>
+      <label for="view-search">Search</label>
+      <input id="view-search" type="text" placeholder="hex, callsign or reg" autocomplete="off" spellcheck="false" title="Press / to search">
+      <label for="view-alt-min">Altitude (ft)</label>
+      <div class="band">
+        <input id="view-alt-min" type="number" step="100" placeholder="min" inputmode="numeric" aria-label="Altitude min (ft)">
+        <span>–</span>
+        <input id="view-alt-max" type="number" step="100" placeholder="max" inputmode="numeric" aria-label="Altitude max (ft)">
+      </div>
+      <label class="check" for="view-ground"><input id="view-ground" type="checkbox" checked> ground</label>
+      <label for="view-gs-min">Speed (kt)</label>
+      <div class="band">
+        <input id="view-gs-min" type="number" step="10" placeholder="min" inputmode="numeric" aria-label="Speed min (kt)">
+        <span>–</span>
+        <input id="view-gs-max" type="number" step="10" placeholder="max" inputmode="numeric" aria-label="Speed max (kt)">
+      </div>
+      <label for="view-range-min">Range (nm)</label>
+      <div class="band">
+        <input id="view-range-min" type="number" step="1" placeholder="min" inputmode="numeric" aria-label="Range min (nm)">
+        <span>–</span>
+        <input id="view-range-max" type="number" step="1" placeholder="max" inputmode="numeric" aria-label="Range max (nm)">
+      </div>
+      <p class="view-label" id="view-decisions-label">Decisions</p>
+      <div id="view-decisions" class="pills" role="group" aria-labelledby="view-decisions-label">
+        <button type="button" data-decision="sent" aria-pressed="true" title="sent"><i class="sw decision-sent"></i>sent</button>
+        <button type="button" data-decision="allow_listed" aria-pressed="true" title="allow listed"><i class="sw decision-allow_listed"></i>allow</button>
+        <button type="button" data-decision="out_of_range" aria-pressed="true" title="out of range"><i class="sw decision-out_of_range"></i>range</button>
+        <button type="button" data-decision="below_elevation" aria-pressed="true" title="below elevation"><i class="sw decision-below_elevation"></i>elev</button>
+        <button type="button" data-decision="blocked" aria-pressed="true" title="blocked"><i class="sw decision-blocked"></i>blocked</button>
+      </div>
+      <p class="view-label" id="view-classes-label">Class (estimated)</p>
+      <div id="view-classes" class="pills" role="group" aria-labelledby="view-classes-label">
+        <button type="button" data-class="airline" aria-pressed="true">airline</button>
+        <button type="button" data-class="private" aria-pressed="true">private</button>
+        <button type="button" data-class="military" aria-pressed="true">military</button>
+        <button type="button" data-class="unknown" aria-pressed="true">unknown</button>
+      </div>
+      <label class="check" for="view-emergency"><input id="view-emergency" type="checkbox"> emergency only</label>
+      <label for="view-category">Category</label>
+      <select id="view-category"></select>
+      <label for="view-country">Country</label>
+      <select id="view-country"></select>
+      <p class="view-label" id="view-map-label">Non-matching on the map</p>
+      <div class="row view-map-mode" role="radiogroup" aria-labelledby="view-map-label">
+        <label class="check"><input type="radio" name="view-map-mode" value="hide" checked> hide</label>
+        <label class="check"><input type="radio" name="view-map-mode" value="dim"> dim</label>
+      </div>
+      <div class="row view-foot">
+        <p id="view-count" class="msg" role="status"></p>
+        <button id="view-clear" type="button" disabled>Clear</button>
+      </div>
+    </section>
     <section>
       <h2>Allow list</h2>
       <ul id="list-allow" class="list"></ul>

@@ -9,6 +9,7 @@
 #include "web_config.hpp"
 #include "web_fisb.hpp"
 #include "web_inputs.hpp"
+#include "web_stats.hpp"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -577,7 +578,8 @@ std::string tilesAvailableJson(const std::string& www_dir)
 std::string errorJson(const std::string& message) { return JsonWriter().add("error", message).str(); }
 
 ApiRequest makeApiRequest(const std::string& method, const std::string& target,
-                          const std::vector<std::pair<std::string, std::string>>& fields, std::string body)
+                          const std::vector<std::pair<std::string, std::string>>& fields, std::string body,
+                          std::string peer)
 {
     ApiRequest r;
     r.method = method;
@@ -594,6 +596,7 @@ ApiRequest makeApiRequest(const std::string& method, const std::string& target,
         r.headers[name] = field.second;
     }
     r.body = std::move(body);
+    r.peer = std::move(peer);
     return r;
 }
 
@@ -666,6 +669,8 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return handleInputsApi(request, engine);
         if (isFisbPath(path))
             return handleFisbApi(request, engine);
+        if (isStatsPath(path))
+            return handleStatsApi(request, engine, context.stats);
         if (path == "/api/tiles-available")
             return get ? json(200, tilesAvailableJson(www_dir)) : notAllowed("GET");
         return error(404, "no such API path: " + path);

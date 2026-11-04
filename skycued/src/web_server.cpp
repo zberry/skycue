@@ -147,6 +147,7 @@ struct WebServer::Impl : std::enable_shared_from_this<WebServer::Impl> {
     std::vector<Item> pending;                                   // events of this io turn
     bool flush_posted = false;
     uint64_t batch = 0;  // the batch `pending` is collecting
+    webapi::StatsApiState stats_api;  // the reset rate limit
 
     Impl(asio::io_context& io_, Engine& e, RuntimeConfig& rc, WebConfig c)
         : io(io_), engine(e), runtime(rc), cfg(std::move(c)), acceptor(io_), accept_retry(io_)
@@ -245,8 +246,9 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
             std::vector<std::pair<std::string, std::string>> fields;
             for (const auto& field : req)
                 fields.emplace_back(toString(field.name_string()), toString(field.value()));
-            const webapi::ApiRequest api = webapi::makeApiRequest(method, target, fields, std::move(req.body()));
-            webapi::ApiContext ctx{srv->engine, srv->runtime, srv->cfg.www_dir, srv->cfg.daemon};
+            const webapi::ApiRequest api = webapi::makeApiRequest(method, target, fields, std::move(req.body()),
+                                                                  peer);
+            webapi::ApiContext ctx{srv->engine, srv->runtime, srv->cfg.www_dir, srv->cfg.daemon, &srv->stats_api};
             const auto r = webapi::handleApi(api, ctx);
             if (r.status >= 500)
                 LOG_ERROR("web: " << method << " " << path << ": " << r.body);

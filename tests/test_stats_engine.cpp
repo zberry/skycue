@@ -7,6 +7,7 @@
 #include "engine_events.hpp"
 #include "engine_test_support.hpp"
 #include "filters.hpp"
+#include "inputs/dump978_input.hpp"
 #include "stats_store.hpp"
 #include "time_util.hpp"
 
@@ -300,5 +301,52 @@ BOOST_AUTO_TEST_CASE(fisb_products_counted)
         });
     };
     BOOST_TEST(waitUntil([&] { return stored() == products; }, slow(3s)));
+    BOOST_TEST(fx.t.call([&] { return fx.engine->statsStore().uatSeen(); }));
+}
+
+BOOST_AUTO_TEST_CASE(uat_frames_reach_the_series)
+{
+    // A real Dump978Input (EngineStats takes uat_downlink/uat_uplink from
+    // it) beside a track input that starts the data clock.
+    TestServer server;
+    FakeInput* readsb = nullptr;
+    auto make = [&](asio::io_context& io) {
+        auto inputs = std::make_unique<InputManager>(io, skycued::InputManagerConfig{});
+        auto r = std::make_unique<FakeInput>(fakeDef("readsb"));
+        readsb = r.get();
+        inputs->addBuiltin(std::move(r));
+        InputDef uat = fakeDef("dump978", InputType::dump978);
+        uat.port = server.port();
+        uat.builtin = true;
+        inputs->addBuiltin(std::make_unique<skycued::Dump978Input>(io, uat));
+        inputs->load();
+        return inputs;
+    };
+    EngineFx fx(baseConfig(), std::function<std::unique_ptr<InputManager>(asio::io_context&)>(make));
+    auto sock = server.accept(kWait);
+    BOOST_REQUIRE(sock);
+    sock->non_blocking(false);
+    fx.t.call([&] { readsb->emit(nearbyObservation(0xA00001, 0)); });
+    std::this_thread::sleep_for(1500ms);  // a tick takes the counter base
+    const skycued::EngineStats before = fx.stats();
+    std::string lines;
+    for (int i = 0; i < 5; ++i)
+        lines += "-4567;\n-89ab;\n+0123;\n";
+    asio::write(*sock, asio::buffer(lines));
+    BOOST_REQUIRE(waitUntil([&] { return fx.stats().uat_downlink == before.uat_downlink + 10; }));
+    const skycued::EngineStats after = fx.stats();
+    BOOST_TEST(after.uat_uplink == before.uat_uplink + 5);
+    using skycued::StatsBucket;
+    auto stored = [&](uint64_t StatsBucket::*f) {
+        return fx.t.call([&] {
+            uint64_t n = 0;
+            for (const auto& b : fx.engine->statsStore().series(StatsRes::minute))
+                n += b.*f;
+            return n;
+        });
+    };
+    BOOST_TEST(waitUntil([&] { return stored(&StatsBucket::uat_downlink) == 10u; }, slow(3s)));
+    BOOST_TEST(stored(&StatsBucket::uat_downlink) == after.uat_downlink - before.uat_downlink);
+    BOOST_TEST(stored(&StatsBucket::uat_uplink) == after.uat_uplink - before.uat_uplink);
     BOOST_TEST(fx.t.call([&] { return fx.engine->statsStore().uatSeen(); }));
 }

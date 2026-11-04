@@ -8,6 +8,7 @@
 // written as null; times are ISO-8601 UTC with milliseconds.
 
 #include "engine_events.hpp"
+#include "web_stats.hpp"
 
 #include <skycue/types.hpp>
 
@@ -59,14 +60,16 @@ struct ApiRequest {
     std::string query;                          // after '?' (without it), "" when none
     std::map<std::string, std::string> headers;  // names lower-cased
     std::string body;
+    std::string peer;  // the client's "address:port" ("" when not known)
 };
 
 // The ApiRequest for one HTTP request, as WebServer builds it: path is the
 // target up to the first '?' or '#'; query is what follows the '?' up to
 // any '#' ("" when the '?' is missing or inside the fragment); each field
-// name is lower-cased and of a repeated name the last wins.
+// name is lower-cased and of a repeated name the last wins; peer as given.
 ApiRequest makeApiRequest(const std::string& method, const std::string& target,
-                          const std::vector<std::pair<std::string, std::string>>& fields, std::string body);
+                          const std::vector<std::pair<std::string, std::string>>& fields, std::string body,
+                          std::string peer = "");
 
 // What the routes work on.
 struct ApiContext {
@@ -74,6 +77,7 @@ struct ApiContext {
     RuntimeConfig& runtime;
     std::string www_dir;
     const DaemonInfo* daemon = nullptr;  // GET /api/config (web_config.hpp); nullptr: that is a 500
+    StatsApiState* stats = nullptr;      // /api/stats/* (web_stats.hpp); nullptr: reset is not rate-limited
 };
 
 // True for "/api" and every path under "/api/".

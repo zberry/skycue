@@ -1359,3 +1359,414 @@ BOOST_AUTO_TEST_CASE(cues_clients_route)
     BOOST_TEST(request(f.port, http::verb::post, "/api/cues/clients").status == 405u);
     client.stop();
 }
+
+// ---- /api/stats/* (docs/web-api.md "Statistics") ----
+
+namespace {
+
+const std::regex kIsoMs("^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$");
+
+// An observation of `address` near the receiver with an airline callsign and
+// a signal level; a4xxxx addresses are the United States'.
+TrackObservation statsObs(uint32_t address, double lat_offset = 0)
+{
+    auto o = nearbyObservation(address, lat_offset);
+    o.callsign = "UAL" + std::to_string(address & 0xf) + "1";
+    o.rssi = -20.0;
+    return o;
+}
+
+std::vector<std::string> keysOf(const pt::ptree& rows)
+{
+    std::vector<std::string> out;
+    for (const auto& kv : rows)
+        out.push_back(kv.second.get<std::string>("key"));
+    return out;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(stats_summary_shape)
+{
+    WebFx f;
+    for (uint32_t a : {0xa40001u, 0xa40002u, 0xa40003u})
+        f.emit(statsObs(a, 0.01 * double(a & 0xf)));
+    const Reply r = get(f.port, "/api/stats/summary");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.content_type == "application/json");
+    const pt::ptree s = parseJson(r.body);
+    BOOST_TEST(std::regex_match(s.get<std::string>("since"), kIsoMs));
+    BOOST_TEST(std::regex_match(s.get<std::string>("series_since"), kIsoMs));
+    BOOST_TEST(std::regex_match(s.get<std::string>("now"), kIsoMs));
+    BOOST_TEST(s.get<double>("receiver.lat") == 38.9);
+    BOOST_TEST(s.get<double>("receiver.lon") == -77.0);
+    BOOST_TEST(s.get<int>("aircraft_total") == 3);
+    BOOST_TEST(s.get<int>("evicted") == 0);
+    BOOST_TEST(s.get<bool>("uat_seen") == false);
+    const pt::ptree& range = s.get_child("range");
+    BOOST_TEST(std::regex_match(range.get<std::string>("from"), kIsoMs));
+    BOOST_TEST(std::regex_match(range.get<std::string>("to"), kIsoMs));
+    BOOST_TEST(range.get<std::string>("res") == "minute");
+    BOOST_TEST(range.get<int>("observations") == 3);
+    BOOST_TEST(range.get<int>("positions") == 3);
+    BOOST_TEST(range.get<int>("new_aircraft") == 3);
+    BOOST_TEST(range.get<int>("emergencies") == 0);
+    BOOST_TEST(range.get<int>("aircraft") == 3);
+    BOOST_TEST(range.get<double>("max_range_nm") > 0.0);
+    BOOST_TEST(has(range.get<std::string>("max_range_key"), "|icao"));
+    int classes = 0;
+    for (const auto& kv : range.get_child("by_class"))
+        classes += kv.second.get_value<int>();
+    BOOST_TEST(classes == 3);
+    BOOST_TEST(range.get<int>("by_class.airline") == 3);
+    BOOST_TEST(range.get_child("by_class").size() == 4u);
+    const pt::ptree& countries = range.get_child("by_country");
+    BOOST_REQUIRE(countries.size() == 1u);
+    BOOST_TEST(countries.front().second.get<std::string>("name") == "United States");
+    BOOST_TEST(countries.front().second.get<int>("n") == 3);
+    for (const char* h : {"range", "altitude", "speed", "vertical_rate", "elevation", "rssi"})
+        BOOST_TEST(s.get_child(std::string("hist.") + h).count("counts") == 1u, h);
+    BOOST_TEST(s.get_child("hist.range.counts").size() == 50u);
+    BOOST_TEST(s.get<double>("hist.range.bin") == 10.0);
+    BOOST_TEST(s.get<double>("hist.rssi.start") == -50.0);
+    BOOST_TEST(s.get<int>("counts.by_source.adsb_1090") >= 3);
+    BOOST_TEST(s.get<int>("counts.by_addr_type.icao") == 3);
+    BOOST_TEST(s.get<int>("counts.by_input.readsb") == 3);
+    for (const char* c : {"by_category", "by_decision", "by_squawk_emergency"})
+        BOOST_TEST(s.get_child("counts").count(c) == 1u, c);
+}
+
+BOOST_AUTO_TEST_CASE(stats_range_params)
+{
+    WebFx f;
+    f.emit(statsObs(0xa40001));
+    for (const char* bad : {"/api/stats/summary?from=bad", "/api/stats/summary?to=2026-13-01T00:00:00Z",
+                            "/api/stats/series?from=yesterday"}) {
+        const Reply r = get(f.port, bad);
+        BOOST_TEST(r.status == 400u, bad);
+        BOOST_TEST(has(r.body, "\"error\":"), bad);
+    }
+    // to before from: an empty range.
+    Reply r = get(f.port, "/api/stats/summary?from=2030-01-01T00:00:00Z&to=2020-01-01T00:00:00Z");
+    BOOST_TEST(r.status == 200u);
+    pt::ptree s = parseJson(r.body);
+    BOOST_TEST(s.get<int>("range.observations") == 0);
+    BOOST_TEST(s.get<int>("range.aircraft") == 0);
+    BOOST_TEST(s.get<int>("aircraft_total") == 1);  // whole history is not ranged
+    // from in the future (to defaults to the data clock).
+    r = get(f.port, "/api/stats/summary?from=2100-01-01T00:00:00Z");
+    BOOST_TEST(r.status == 200u);
+    s = parseJson(r.body);
+    BOOST_TEST(s.get<int>("range.aircraft") == 0);
+    BOOST_TEST(s.get<int>("range.observations") == 0);
+    BOOST_TEST(s.get_child("range.by_country").empty());
+    // No parameters: since .. now.
+    r = get(f.port, "/api/stats/summary");
+    BOOST_TEST(r.status == 200u);
+    s = parseJson(r.body);
+    BOOST_TEST(s.get<int>("range.observations") == 1);
+    BOOST_TEST(s.get<int>("range.aircraft") == 1);
+    BOOST_TEST(s.get<std::string>("range.from") <= s.get<std::string>("since"));
+    // More than 24 h: hourly.
+    r = get(f.port, "/api/stats/summary?from=2020-01-01T00:00:00Z");
+    BOOST_TEST(r.status == 200u);
+    s = parseJson(r.body);
+    BOOST_TEST(s.get<std::string>("range.res") == "hour");
+    BOOST_TEST(s.get<int>("range.observations") == 1);
+    BOOST_TEST(s.get<int>("range.aircraft") == 1);
+}
+
+BOOST_AUTO_TEST_CASE(stats_series_columns)
+{
+    WebFx f;
+    f.emit(statsObs(0xa40001));
+    f.emit(statsObs(0xa40002));
+    Reply r = get(f.port, "/api/stats/series?res=minute");
+    BOOST_TEST(r.status == 200u);
+    pt::ptree s = parseJson(r.body);
+    BOOST_TEST(s.get<std::string>("res") == "minute");
+    BOOST_TEST(s.get<int>("bucket_s") == 60);
+    const std::size_t n = s.get_child("t").size();
+    BOOST_TEST(n >= 1u);
+    BOOST_TEST(std::regex_match(s.get_child("t").front().second.data(), kIsoMs));
+    BOOST_TEST(s.get_child("observations").size() == n);
+    BOOST_TEST(s.get_child("by_input.readsb").size() == n);
+    for (const char* c : {"positions", "aircraft", "new_aircraft", "sent_updates", "drops_timeout", "drops_filtered",
+                          "drops_source_lost", "drops_blocked", "drops_out_of_range", "drops_below_elevation",
+                          "drops_no_position", "uat_downlink", "uat_uplink", "fisb_products", "emergencies",
+                          "tcp_clients", "web_clients", "max_range_nm", "max_range_key"})
+        BOOST_TEST(s.get_child(c).size() == n, c);
+    int obs = 0;
+    for (const auto& kv : s.get_child("observations"))
+        obs += kv.second.get_value<int>();
+    BOOST_TEST(obs == 2);
+    // The default is minute.
+    BOOST_TEST(parseJson(get(f.port, "/api/stats/series").body).get<int>("bucket_s") == 60);
+    r = get(f.port, "/api/stats/series?res=hour");
+    BOOST_TEST(r.status == 200u);
+    s = parseJson(r.body);
+    BOOST_TEST(s.get<std::string>("res") == "hour");
+    BOOST_TEST(s.get<int>("bucket_s") == 3600);
+    BOOST_TEST(s.get_child("t").size() == 1u);
+    BOOST_TEST(s.get_child("observations").front().second.get_value<int>() == 2);
+    r = get(f.port, "/api/stats/series?res=week");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(has(r.body, "\"error\":"));
+    // An empty range: empty columns.
+    s = parseJson(get(f.port, "/api/stats/series?from=2100-01-01T00:00:00Z").body);
+    BOOST_TEST(s.get_child("t").empty());
+    BOOST_TEST(s.get_child("observations").empty());
+}
+
+BOOST_AUTO_TEST_CASE(stats_coverage_and_rssi)
+{
+    WebFx f;
+    for (uint32_t a : {0xa40001u, 0xa40002u, 0xa40003u})
+        f.emit(statsObs(a, 0.01 * double(a & 0xf)));
+    Reply r = get(f.port, "/api/stats/coverage");
+    BOOST_TEST(r.status == 200u);
+    pt::ptree s = parseJson(r.body);
+    BOOST_TEST(s.get<int>("sector_deg") == 5);
+    BOOST_TEST(s.get_child("bands").size() == 8u);
+    BOOST_TEST(s.get_child("bands").front().second.data() == "0-2.5k");
+    BOOST_TEST(s.get<double>("receiver.lat") == 38.9);
+    const pt::ptree& cells = s.get_child("cells");
+    BOOST_REQUIRE(!cells.empty());
+    int n = 0;
+    const std::regex key("^a4000[1-3]\\|icao$");
+    for (const auto& kv : cells) {
+        const pt::ptree& c = kv.second;
+        BOOST_TEST(c.get<int>("sector") >= 0);
+        BOOST_TEST(c.get<int>("sector") <= 71);
+        BOOST_TEST(c.get<int>("band") >= 0);
+        BOOST_TEST(c.get<int>("band") <= 7);
+        BOOST_TEST(std::regex_match(c.get<std::string>("key"), key));
+        BOOST_TEST(std::regex_match(c.get<std::string>("time"), kIsoMs));
+        BOOST_TEST(c.get<double>("max_range_nm") > 0.0);
+        n += c.get<int>("n");
+    }
+    BOOST_TEST(n == 3);
+    BOOST_TEST(s.get<double>("grid.cell_deg") == 0.05);
+    BOOST_TEST(s.get<int>("grid.cap") == 40000);
+    BOOST_TEST(s.get<bool>("grid.full") == false);
+    const pt::ptree& grid = s.get_child("grid.cells");
+    BOOST_REQUIRE(!grid.empty());
+    BOOST_TEST(grid.front().second.size() == 3u);
+    int gn = 0;
+    for (const auto& kv : grid) {
+        auto it = kv.second.begin();
+        const double lat = it->second.get_value<double>();
+        const double lon = (++it)->second.get_value<double>();
+        gn += (++it)->second.get_value<int>();
+        BOOST_TEST(lat > 38.9);
+        BOOST_TEST(lat < 39.1);
+        BOOST_TEST(lon == -76.975);  // the centre of the cell [-77.0, -76.95)
+    }
+    BOOST_TEST(gn == 3);
+
+    r = get(f.port, "/api/stats/rssi");
+    BOOST_TEST(r.status == 200u);
+    s = parseJson(r.body);
+    BOOST_TEST(s.get<int>("range_bin_nm") == 10);
+    BOOST_TEST(s.get<int>("rssi_bin_db") == 2);
+    BOOST_TEST(s.get<int>("rssi_start") == -50);
+    const pt::ptree& counts = s.get_child("counts");
+    BOOST_REQUIRE(counts.size() == 50u);
+    int total = 0;
+    for (const auto& row : counts) {
+        BOOST_TEST(row.second.size() == 25u);
+        for (const auto& v : row.second)
+            total += v.second.get_value<int>();
+    }
+    BOOST_TEST(total == 3);
+    // rssi -20 is bin 15 of the first range bin (< 10 nm).
+    auto first = counts.front().second.begin();
+    std::advance(first, 15);
+    BOOST_TEST(first->second.get_value<int>() == 3);
+}
+
+BOOST_AUTO_TEST_CASE(stats_aircraft_sort_and_q)
+{
+    WebFx f;
+    for (int i = 0; i < 3; ++i)
+        f.emit(statsObs(0xa40003));
+    for (int i = 0; i < 2; ++i) {
+        auto o = statsObs(0xa40002);
+        o.registration = std::string("N123AB");
+        f.emit(o);
+    }
+    f.emit(statsObs(0xa40001));
+
+    Reply r = get(f.port, "/api/stats/aircraft?sort=observations&dir=asc");
+    BOOST_TEST(r.status == 200u);
+    pt::ptree s = parseJson(r.body);
+    BOOST_TEST(s.get<int>("total") == 3);
+    BOOST_TEST(s.get<int>("offset") == 0);
+    BOOST_TEST(s.get<int>("limit") == 100);
+    BOOST_TEST(s.get<int>("evicted") == 0);
+    std::vector<int> obs;
+    for (const auto& kv : s.get_child("rows"))
+        obs.push_back(kv.second.get<int>("observations"));
+    BOOST_TEST((obs == std::vector<int>{1, 2, 3}));
+    s = parseJson(get(f.port, "/api/stats/aircraft?sort=observations").body);
+    BOOST_TEST((keysOf(s.get_child("rows")) == std::vector<std::string>{"a40003|icao", "a40002|icao", "a40001|icao"}));
+    // Default: last_seen desc (a40001 was heard last).
+    s = parseJson(get(f.port, "/api/stats/aircraft").body);
+    BOOST_TEST(keysOf(s.get_child("rows")).front() == "a40001|icao");
+
+    // One row in full.
+    const pt::ptree& row = s.get_child("rows").front().second;
+    BOOST_TEST(row.get<std::string>("hex") == "a40001");
+    BOOST_TEST(row.get<std::string>("addr_type") == "icao");
+    BOOST_TEST(std::regex_match(row.get<std::string>("first_seen"), kIsoMs));
+    BOOST_TEST(std::regex_match(row.get<std::string>("last_seen"), kIsoMs));
+    BOOST_TEST(std::regex_match(row.get<std::string>("max_range_time"), kIsoMs));
+    BOOST_TEST(row.get<int>("sessions") == 1);
+    BOOST_TEST(row.get<int>("positions") == 1);
+    BOOST_TEST(row.get<double>("max_range_nm") > 0.0);
+    BOOST_TEST(row.get<int>("max_alt_ft") == 5000);
+    BOOST_TEST(row.get<double>("max_gs_kt") == 200.0);
+    BOOST_TEST(row.get<double>("max_rssi") == -20.0);
+    BOOST_TEST(row.get_child("callsigns").front().second.data() == "UAL11");
+    BOOST_TEST(row.get_child("inputs").front().second.data() == "readsb");
+    BOOST_TEST(row.get<std::string>("source") == "adsb_1090");
+    BOOST_TEST(row.get<std::string>("class") == "airline");
+    BOOST_TEST(row.get<std::string>("country") == "United States");
+    BOOST_TEST(row.count("registration") == 0u);  // unset: left out
+    BOOST_TEST(row.count("category") == 0u);
+
+    for (const char* bad : {"/api/stats/aircraft?sort=bogus", "/api/stats/aircraft?sort=callsigns",
+                            "/api/stats/aircraft?dir=up", "/api/stats/aircraft?limit=x",
+                            "/api/stats/aircraft?offset=-1", "/api/stats/aircraft?offset=1.5"}) {
+        r = get(f.port, bad);
+        BOOST_TEST(r.status == 400u, bad);
+        BOOST_TEST(has(r.body, "\"error\":"), bad);
+    }
+
+    s = parseJson(get(f.port, "/api/stats/aircraft?q=n123ab").body);
+    BOOST_TEST(s.get<int>("total") == 1);
+    BOOST_TEST(s.get<std::string>("rows..hex") == "a40002");
+    BOOST_TEST(s.get<std::string>("rows..registration") == "N123AB");
+    s = parseJson(get(f.port, "/api/stats/aircraft?q=ual31").body);  // a callsign
+    BOOST_TEST(s.get<int>("total") == 1);
+    BOOST_TEST(s.get<std::string>("rows..hex") == "a40003");
+    s = parseJson(get(f.port, "/api/stats/aircraft?q=A4000").body);  // the address
+    BOOST_TEST(s.get<int>("total") == 3);
+    s = parseJson(get(f.port, "/api/stats/aircraft?q=nothing").body);
+    BOOST_TEST(s.get<int>("total") == 0);
+    BOOST_TEST(s.get_child("rows").empty());
+
+    s = parseJson(get(f.port, "/api/stats/aircraft?limit=5000").body);
+    BOOST_TEST(s.get<int>("limit") == 1000);
+    s = parseJson(get(f.port, "/api/stats/aircraft?limit=0").body);
+    BOOST_TEST(s.get<int>("limit") == 1);
+    BOOST_TEST(s.get_child("rows").size() == 1u);
+    s = parseJson(get(f.port, "/api/stats/aircraft?offset=7").body);
+    BOOST_TEST(s.get<int>("total") == 3);
+    BOOST_TEST(s.get_child("rows").empty());
+}
+
+BOOST_AUTO_TEST_CASE(stats_aircraft_paging_stable)
+{
+    WebFx f;
+    // 25 aircraft with one observation each, heard in descending address order.
+    for (int i = 24; i >= 0; --i)
+        f.emit(statsObs(0xa40100u + uint32_t(i)));
+    std::vector<std::string> keys;
+    for (int offset : {0, 10, 20}) {
+        const pt::ptree s = parseJson(
+            get(f.port, "/api/stats/aircraft?sort=observations&limit=10&offset=" + std::to_string(offset)).body);
+        BOOST_TEST(s.get<int>("total") == 25);
+        BOOST_TEST(s.get<int>("offset") == offset);
+        const auto page = keysOf(s.get_child("rows"));
+        BOOST_TEST(page.size() == (offset == 20 ? 5u : 10u));
+        keys.insert(keys.end(), page.begin(), page.end());
+    }
+    BOOST_REQUIRE(keys.size() == 25u);
+    BOOST_TEST(std::is_sorted(keys.begin(), keys.end()));
+    BOOST_TEST(std::set<std::string>(keys.begin(), keys.end()).size() == 25u);
+    BOOST_TEST(keys.front() == "a40100|icao");
+}
+
+BOOST_AUTO_TEST_CASE(stats_aircraft_entry_and_404)
+{
+    WebFx f;
+    f.emit(statsObs(0xa40001));
+    Reply r = get(f.port, "/api/stats/aircraft/a40001");
+    BOOST_TEST(r.status == 200u);
+    pt::ptree s = parseJson(r.body);
+    BOOST_TEST(s.get<std::string>("key") == "a40001|icao");
+    BOOST_TEST(s.get<int>("observations") == 1);
+    BOOST_TEST(s.get<std::string>("class") == "airline");
+    BOOST_TEST(get(f.port, "/api/stats/aircraft/A40001").status == 200u);
+    BOOST_TEST(get(f.port, "/api/stats/aircraft/a40001?addr_type=icao").status == 200u);
+    BOOST_TEST(get(f.port, "/api/stats/aircraft/a40001?addr_type=non_icao").status == 404u);
+    BOOST_TEST(get(f.port, "/api/stats/aircraft/a40001?addr_type=bogus").status == 400u);
+    r = get(f.port, "/api/stats/aircraft/a4ffff");
+    BOOST_TEST(r.status == 404u);
+    BOOST_TEST(has(r.body, "\"error\":"));
+    for (const char* bad : {"/api/stats/aircraft/zz", "/api/stats/aircraft/a4000g", "/api/stats/aircraft/a400011",
+                            "/api/stats/aircraft/"})
+        BOOST_TEST(get(f.port, bad).status == 400u, bad);
+    r = request(f.port, http::verb::post, "/api/stats/aircraft/a40001", "{}");
+    BOOST_TEST(r.status == 405u);
+    BOOST_TEST(r.allow == "GET");
+}
+
+BOOST_AUTO_TEST_CASE(stats_reset_guarded)
+{
+    WebFx f;
+    f.emit(statsObs(0xa40001));
+    const std::string since = parseJson(get(f.port, "/api/stats/summary").body).get<std::string>("since");
+    Reply r = requestWith(f.port, http::verb::post, "/api/stats/reset", "{}", {});
+    BOOST_TEST(r.status == 415u);
+    r = requestWith(f.port, http::verb::post, "/api/stats/reset", "{}",
+                    {{"Content-Type", "application/json"}, {"Origin", "http://evil.example"}});
+    BOOST_TEST(r.status == 403u);
+    r = request(f.port, http::verb::post, "/api/stats/reset", "[]");
+    BOOST_TEST(r.status == 400u);
+    r = request(f.port, http::verb::post, "/api/stats/reset", "{\"all\":true}");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(parseJson(get(f.port, "/api/stats/summary").body).get<int>("aircraft_total") == 1);
+
+    std::this_thread::sleep_for(1100ms);  // since moves to a later second
+    r = request(f.port, http::verb::post, "/api/stats/reset", "{}");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "{\"ok\":true}");
+    const pt::ptree s = parseJson(get(f.port, "/api/stats/summary").body);
+    BOOST_TEST(s.get<int>("aircraft_total") == 0);
+    BOOST_TEST(s.get<int>("range.observations") == 0);
+    BOOST_TEST(s.get<std::string>("since") > since);
+    // At most one reset every 5 s.
+    r = request(f.port, http::verb::post, "/api/stats/reset", "{}");
+    BOOST_TEST(r.status == 429u);
+    BOOST_TEST(has(r.body, "\"error\":"));
+
+    for (http::verb v : {http::verb::delete_, http::verb::get, http::verb::put}) {
+        r = request(f.port, v, "/api/stats/reset", "{}");
+        BOOST_TEST(r.status == 405u);
+        BOOST_TEST(r.allow == "POST");
+    }
+}
+
+BOOST_AUTO_TEST_CASE(stats_unknown_path_404)
+{
+    WebFx f;
+    f.emit(statsObs(0xa40001));
+    for (const char* p : {"/api/stats/nope", "/api/stats/", "/api/stats/summary/x", "/api/stats/aircraft/a40001/x"}) {
+        const Reply r = get(f.port, p);
+        BOOST_TEST(r.status == 404u, p);
+        BOOST_TEST(has(r.body, "\"error\":"), p);
+    }
+    for (const char* p : {"/api/stats/summary", "/api/stats/series", "/api/stats/coverage", "/api/stats/rssi",
+                          "/api/stats/aircraft"}) {
+        const Reply r = request(f.port, http::verb::post, p, "{}");
+        BOOST_TEST(r.status == 405u, p);
+        BOOST_TEST(r.allow == "GET", p);
+    }
+    BOOST_TEST(request(f.port, http::verb::post, "/api/stats/reset", "{}").status == 200u);
+    // The engine's lifetime counters are not reset.
+    const pt::ptree s = parseJson(get(f.port, "/api/stats").body);
+    BOOST_TEST(s.get<int>("observations") == 1);
+    BOOST_TEST(s.get<int>("tracks_total") == 1);
+}

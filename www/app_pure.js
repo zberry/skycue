@@ -492,6 +492,12 @@
   function radarOpacity(ageMs, product, base) {
     return radarFaded(ageMs, product) ? base * 0.5 : base;
   }
+  // The slider's base opacity from its stored value (skycue.radarOpacity):
+  // a number in the slider's range [0.2, 1], else the default 0.7.
+  function radarOpacityValue(stored) {
+    var v = stored === null || stored === undefined || stored === '' ? NaN : Number(stored);
+    return isFinite(v) && v >= 0.2 && v <= 1 ? v : 0.7;
+  }
 
   // Seconds the newest product time runs ahead of the data clock, when that
   // is more than the 10 min a receiver clock or a ground station can be
@@ -1544,7 +1550,7 @@
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,
     shapeFamily: shapeFamily, shapeStyle: shapeStyle, ageClass: ageClass, mosaicBounds: mosaicBounds,
-    RADAR_FADE_MS: RADAR_FADE_MS, radarFaded: radarFaded, radarOpacity: radarOpacity,
+    RADAR_FADE_MS: RADAR_FADE_MS, radarFaded: radarFaded, radarOpacity: radarOpacity, radarOpacityValue: radarOpacityValue,
     CLOCK_SKEW_WARN_S: CLOCK_SKEW_WARN_S, skewWarning: skewWarning, radarNeedsFetch: radarNeedsFetch,
     mercY: mercY, mosaicCanvasSize: mosaicCanvasSize, stationMatches: stationMatches,
     trackVisible: trackVisible, hiddenCount: hiddenCount,

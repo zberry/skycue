@@ -312,6 +312,15 @@ test('radarOpacity: half past 15 min (regional) / 30 min (CONUS)', () => {
   assert.strictEqual(P.RADAR_FADE_MS[64], 30 * min);
 });
 
+test('radarOpacityValue: a stored number in [0.2, 1], else 0.7', () => {
+  assert.strictEqual(P.radarOpacityValue(null), 0.7);
+  assert.strictEqual(P.radarOpacityValue('0.4'), 0.4);
+  assert.strictEqual(P.radarOpacityValue('1'), 1);
+  assert.strictEqual(P.radarOpacityValue('0.1'), 0.7);
+  assert.strictEqual(P.radarOpacityValue('abc'), 0.7);
+  assert.strictEqual(P.radarOpacityValue('0.2'), 0.2);
+});
+
 test('skewWarning: only past 10 min ahead', () => {
   assert.strictEqual(P.skewWarning(undefined), null);
   assert.strictEqual(P.skewWarning(0), null);

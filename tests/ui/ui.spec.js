@@ -1064,6 +1064,15 @@ async function clickableIndex(page, selector) {
   }, selector);
 }
 
+// The main daemon has no radar or raster: the opacity slider has nothing to
+// act on, so it is disabled and its row dimmed.
+test('radar_opacity_disabled_without_products', async ({ page }) => {
+  await openPage(page);
+  await expect(page.locator('label[for="radar-opacity"]')).toHaveText('Radar opacity');
+  await expect(page.locator('#radar-opacity')).toBeDisabled();
+  await expect(page.locator('#radar-opacity-row')).toHaveClass(/\bdisabled\b/);
+});
+
 test.describe('fisb radar (tg30)', () => {
   test.use({ baseURL: RADAR_BASE });
 
@@ -1119,6 +1128,49 @@ test.describe('fisb radar (tg30)', () => {
     await page.locator('#radar-opacity').fill('0.2');
     await expect.poll(opacity).toBeCloseTo(0.2, 2);
     await expect(page.locator('img.fisb-radar-conus')).toHaveCSS('opacity', '0.2');
+  });
+
+  // One slider for the NEXRAD layers and the other rasters alike, kept in
+  // this browser across a reload.
+  test('radar_opacity_reaches_rasters_and_persists', async ({ page }) => {
+    await openFisbPage(page);
+    const slider = page.locator('#radar-opacity');
+    await expect(slider).toBeEnabled();
+    await expect(page.locator('#radar-opacity-row')).not.toHaveClass(/\bdisabled\b/);
+    await layerToggle(page, 'Other rasters').check();
+    await page.locator('#raster-select').selectOption('70');
+    await page.locator('#raster-band').selectOption('0');
+    const raster = page.locator('img.leaflet-image-layer.fisb-raster');
+    await expect(raster).toHaveCount(1);
+    const regional = page.locator('img.leaflet-image-layer.fisb-radar-regional');
+    await expect(regional).toHaveCount(1);
+    const opacity = (loc) => () => loc.evaluate((el) => Number(getComputedStyle(el).opacity));
+    await slider.fill('0.4');
+    await expect.poll(opacity(raster)).toBeCloseTo(0.4, 2);
+    await expect.poll(opacity(regional)).toBeCloseTo(0.4, 2);
+    expect(await page.evaluate(() => localStorage.getItem('skycue.radarOpacity'))).toBe('0.4');
+    await page.reload();
+    await openFisbPage(page);
+    await expect(slider).toHaveValue('0.4');
+    await expect(regional).toHaveCount(1);
+    await expect.poll(opacity(regional)).toBeCloseTo(0.4, 2);
+  });
+
+  test('radar_opacity_follows_layer_toggles', async ({ page }) => {
+    await openFisbPage(page);
+    const slider = page.locator('#radar-opacity');
+    await expect(slider).toBeEnabled();
+    await layerToggle(page, 'Radar (regional)').uncheck();
+    await layerToggle(page, 'Radar (CONUS)').uncheck();
+    await expect(slider).toBeDisabled();
+    await expect(page.locator('#radar-opacity-row')).toHaveClass(/\bdisabled\b/);
+    await layerToggle(page, 'Other rasters').check();
+    await page.locator('#raster-select').selectOption('70');
+    await page.locator('#raster-band').selectOption('0');
+    await expect(page.locator('img.leaflet-image-layer.fisb-raster')).toHaveCount(1);
+    await expect(slider).toBeEnabled();
+    await layerToggle(page, 'Other rasters').uncheck();
+    await expect(slider).toBeDisabled();
   });
 
   // Regional radar fades to half opacity past 15 min, CONUS past 30 min

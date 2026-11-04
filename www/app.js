@@ -1461,6 +1461,7 @@
     conus: { product: 64, label: 'Radar (CONUS)', head: null, drawn: null, fetching: false, again: false }
   };
   var radarGroups = {}, shapeGroups = {}, rasterGroup = null;
+  var RADAR_OPACITY_KEY = 'skycue.radarOpacity';   // the opacity slider's value, per browser
 
   function swatchName(color, name) {
     return '<i class="sw" style="color:' + color + '"></i>' + esc(name);
@@ -1490,6 +1491,9 @@
     L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(map);
     rasterGroup.on('add', function () { $('raster-box').hidden = false; loadRaster(); });
     rasterGroup.on('remove', function () { $('raster-box').hidden = true; });
+    [radarGroups.regional, radarGroups.conus, rasterGroup].forEach(function (g) {
+      g.on('add remove', syncOpacityControl);
+    });
 
     var WxControl = L.Control.extend({
       options: { position: 'bottomright' },
@@ -1497,8 +1501,8 @@
         var div = L.DomUtil.create('div', 'wx-control');
         div.innerHTML =
           '<div id="radar-age">radar –</div>' +
-          '<label for="radar-opacity">Opacity</label> ' +
-          '<input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7">' +
+          '<div id="radar-opacity-row"><label for="radar-opacity">Radar opacity</label> ' +
+          '<input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7"></div>' +
           '<div id="radar-legend" class="legend-row"></div>' +
           '<div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span>: not yet in force · ' +
           '<span class="ln-cancelled">dashed</span>: cancelled</div>' +
@@ -1512,7 +1516,12 @@
       }
     });
     new WxControl().addTo(map);
-    $('radar-opacity').addEventListener('input', applyRadarOpacity);
+    $('radar-opacity').value = String(P.radarOpacityValue(storeGet(RADAR_OPACITY_KEY)));
+    $('radar-opacity').addEventListener('input', function () {
+      storeSet(RADAR_OPACITY_KEY, $('radar-opacity').value);
+      applyRadarOpacity();
+    });
+    syncOpacityControl();
     $('raster-select').addEventListener('change', function () {
       fisb.rasterPick = { product: Number($('raster-select').value), band: null };   // its lowest band with data
       renderRasterSelect();
@@ -1621,6 +1630,17 @@
       if (el) el.classList.toggle('faded', faded);
     });
     if (fisb.raster) fisb.raster.overlay.setOpacity(base);
+    syncOpacityControl();
+  }
+  // The slider is enabled only while something it controls is drawn: a
+  // radar mosaic on a layer that is on, or a raster product. Run on the
+  // layers' add and remove and from applyRadarOpacity; clearRadar and
+  // clearRaster are not hooked, the 1 s tick (radarAgeTick) syncs them.
+  function syncOpacityControl() {
+    var on = Object.keys(radar).some(function (w) { return radar[w].drawn && map.hasLayer(radarGroups[w]); }) ||
+      !!(fisb.raster && map.hasLayer(rasterGroup));
+    $('radar-opacity').disabled = !on;
+    $('radar-opacity-row').classList.toggle('disabled', !on);
   }
 
   function loadRadar(which) {

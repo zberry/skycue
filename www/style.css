@@ -420,6 +420,7 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 }
 .wx-control label { color: var(--muted); }
 .wx-control input[type="range"] { width: 120px; vertical-align: middle; padding: 0; }
+#radar-opacity-row.disabled { opacity: .45; }   /* nothing it controls is drawn: like a disabled button */
 .wx-control select { max-width: 200px; font-size: 12px; margin: 4px 0; }
 #radar-age { color: var(--text); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 .legend-note { margin-top: 4px; }

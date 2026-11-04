@@ -34,6 +34,8 @@
   <span id="main-buttons" role="group" aria-label="Main view">
     <button id="table-toggle" type="button" aria-pressed="false">Table</button>
     <button id="stats-toggle" type="button" aria-pressed="false">Stats</button>
+    <button id="alerts-toggle" class="strip-toggle" type="button" aria-pressed="true" aria-controls="alerts"
+      title="Show or hide the alert strip">Alerts<span id="alerts-badge" hidden>0</span></button>
   </span>
 </header>
 <div id="conn-banner" role="alert" hidden>Disconnected from skycued, reconnecting…</div>
@@ -74,6 +76,31 @@
     <section id="view" aria-labelledby="view-heading">
       <h2 id="view-heading">Display filters <span id="view-badge"></span></h2>
       <p class="view-sub">this browser only</p>
+      <label for="view-set-select">Sets</label>
+      <div class="row view-sets">
+        <select id="view-set-select" title="Saved filter sets: keys 1–9 apply one, 0 clears"></select>
+        <button id="view-set-save" type="button" title="Save the current Display filters as a set">Save</button>
+        <button id="view-set-delete" type="button" title="Delete the chosen set" disabled>Delete</button>
+        <button id="view-set-more" type="button" title="More set actions" aria-label="More set actions"
+          aria-haspopup="menu" aria-expanded="false" aria-controls="view-set-menu">⋯</button>
+        <div id="view-set-menu" role="menu" aria-label="Filter set actions" hidden>
+          <button type="button" role="menuitem" data-act="rename">Rename</button>
+          <button type="button" role="menuitem" data-act="up">Move up</button>
+          <button type="button" role="menuitem" data-act="down">Move down</button>
+          <button type="button" role="menuitem" data-act="export" title="Download the filter sets and the alert settings as a file">Export…</button>
+          <button type="button" role="menuitem" data-act="import" title="Load filter sets and alert settings from a file">Import…</button>
+        </div>
+      </div>
+      <input id="settings-file" type="file" accept=".json,application/json" hidden>
+      <div id="settings-import" role="group" aria-label="Import settings" hidden>
+        <p id="settings-import-text" class="msg"></p>
+        <div class="row view-sets">
+          <button id="settings-import-replace" type="button" title="Use the file's filter sets and alert settings instead of yours">Replace</button>
+          <button id="settings-import-merge" type="button" title="Add the file's filter sets to yours and take its alert rules">Merge</button>
+          <button id="settings-import-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+      <p id="view-set-msg" class="msg" role="status"></p>
       <label class="check" for="hide-filtered"><input id="hide-filtered" type="checkbox"> Hide filtered</label>
       <p id="hidden-count" class="msg" role="status"></p>
       <label for="view-search">Search</label>
@@ -193,6 +220,42 @@
         <h2 id="stats-h-aircraft">Aircraft</h2>
         <div id="stats-aircraft" class="stats-grid"></div>
       </section>
+    </div>
+    <div id="alerts" role="region" aria-label="Alerts">
+      <div id="alerts-drawer" hidden>
+        <table id="alerts-log" class="cues-table">
+          <thead><tr><th>time</th><th>kind</th><th>aircraft / input</th><th>detail</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="alerts-config" role="dialog" aria-labelledby="alerts-config-title" hidden>
+        <div class="alerts-config-head">
+          <h3 id="alerts-config-title">Alert settings</h3>
+          <button id="alerts-config-close" type="button" aria-label="Close alert settings">×</button>
+        </div>
+        <table id="alerts-rules">
+          <thead><tr><th>rule</th><th>on</th><th>sound</th><th>parameters</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <label class="field">Watch list (hex, callsign or registration prefix, one per line)
+          <textarea id="alerts-watch" rows="4" autocomplete="off" spellcheck="false"></textarea></label>
+        <label class="field check"><input id="alerts-mute" type="checkbox"> Mute all alert sounds</label>
+        <div class="form-buttons"><button id="alerts-clear" type="button">Clear history</button></div>
+      </div>
+      <div id="alerts-note" role="status" hidden></div>
+      <div class="alerts-bar">
+        <span id="alerts-count" title="Unacknowledged alerts">0</span>
+        <span id="alerts-line" role="button" tabindex="0">No unacknowledged alerts</span>
+        <span id="alerts-sound-hint" title="Browsers play sound only after a click on the page"><span
+          aria-hidden="true">🔕</span> click to enable sound</span>
+        <button id="alerts-ack" type="button" disabled>Ack</button>
+        <button id="alerts-ack-all" type="button" disabled>Ack all</button>
+        <button id="alerts-expand" type="button" aria-expanded="false" aria-controls="alerts-drawer"
+          title="Alert history">▲</button>
+        <button id="alerts-gear" type="button" title="Alert settings" aria-label="Alert settings"
+          aria-expanded="false" aria-controls="alerts-config">⚙</button>
+        <button id="alerts-hide" type="button" title="Hide the alert strip" aria-label="Hide the alert strip">×</button>
+      </div>
     </div>
   </div>
   <aside id="details" tabindex="-1" aria-label="Side panel" hidden>
@@ -337,9 +400,11 @@
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/echarts/echarts.min.js"></script>
 <script src="app_pure.js"></script>
+<script src="alerts_pure.js"></script>
 <script src="stats_pure.js"></script>
 <script src="chart_theme.js"></script>
 <script src="stats_view.js"></script>
+<script src="alerts_view.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

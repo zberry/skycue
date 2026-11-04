@@ -53,6 +53,13 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 #panel-buttons > button:hover, #panel-buttons > button[aria-pressed="true"], #panel-buttons > button:focus-visible,
 #main-buttons > button:hover, #main-buttons > button[aria-pressed="true"], #main-buttons > button:focus-visible { z-index: 1; }
 [data-opens-tab][aria-pressed="true"], #table-toggle[aria-pressed="true"], #stats-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+/* Alerts: pressed means "the alert strip is shown", not "this view is
+   shown", so it does not take the views' accent look. */
+#alerts-toggle.strip-toggle[aria-pressed="true"] { background: var(--bg); }
+#alerts-badge {
+  display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 7px; background: var(--accent);
+  color: var(--bg); font-size: 11px; font-weight: 700; line-height: 14px; font-variant-numeric: tabular-nums;
+}
 #stat-inputs { padding: 0 6px; font-weight: 600; font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
 
@@ -137,6 +144,63 @@ input.invalid { border-color: var(--blocked); }
 }
 #table-view[hidden] { display: none; }
 
+/* Alert strip (spec 3.1, 7; alerts_view.js): the bottom edge of the main
+   area, over the map, the table and the Stats view; 32 px collapsed, the
+   drawer above the bar while expanded (at most 40 % of the main area).
+   alerts_view.js sets --alerts-h to the strip's height while it is shown. */
+#alerts {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1100; max-height: 40%;
+  display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--line); font-size: 13px;
+}
+#map-wrap.alerts-on .leaflet-bottom { bottom: 32px; }
+#map-wrap.alerts-on #table-view, #map-wrap.alerts-on #stats-view { padding-bottom: calc(var(--alerts-h, 32px) + var(--gutter)); }
+.alerts-bar { flex: none; height: 32px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+.alerts-bar > button { flex: none; padding: 1px 8px; font-size: 12px; }
+#alerts-count {
+  flex: none; min-width: 20px; box-sizing: border-box; padding: 0 6px; border-radius: 9px; text-align: center;
+  background: var(--accent); color: var(--bg); font-size: 12px; font-weight: 700; line-height: 18px; font-variant-numeric: tabular-nums;
+}
+#alerts.has-emergency #alerts-count { background: var(--blocked); color: #fff; }
+#alerts-line { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+#alerts-line.none { color: var(--muted); cursor: default; }
+#alerts-line > span + span { margin-left: 8px; }
+#alerts .al-time, #alerts .al-kind { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+#alerts .al-id { font-family: ui-monospace, Menlo, Consolas, monospace; }
+#alerts .al-detail { color: var(--text); }
+#alerts-note {
+  flex: none; padding: 4px 8px 0; font-size: 12px; color: #e3b341;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#alerts-note button { margin-left: 8px; padding: 0 6px; font-size: 12px; }
+#alerts-drawer { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px; border-bottom: 1px solid var(--line); }
+#alerts-log tbody tr[data-alert-id] { cursor: pointer; }
+/* Rows alternate (spec 7): every second one a step up from the panel. */
+#alerts-log tbody tr:nth-child(even) { background: var(--panel-2); }
+#alerts-log tbody tr[data-alert-id]:hover { background: var(--line); }
+#alerts-log tbody tr.acked .al-id, #alerts-log tbody tr.acked .al-detail { color: var(--muted); }
+#alerts-log td.al-detail { white-space: normal; overflow-wrap: anywhere; width: 100%; }
+#alerts-log .al-ack { padding: 0 6px; font-size: 12px; }
+#alerts-sound-hint { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* The config panel (spec 3.4, 7): over the drawer at the strip's right end,
+   above the bar; the field look of the Receiver tab's #input-form. */
+#alerts-config {
+  position: absolute; right: 8px; bottom: 32px; z-index: 1; width: 360px; max-width: calc(100% - 16px);
+  max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-bottom: none;
+}
+#alerts-config[hidden] { display: none; }
+.alerts-config-head { display: flex; align-items: center; }
+.alerts-config-head h3 { flex: 1; }
+#alerts-config-close { padding: 0 6px; }
+#alerts-rules { width: 100%; border-collapse: collapse; font-size: 12px; }
+#alerts-rules th { text-align: left; color: var(--muted); font-weight: normal; padding: 2px 4px 2px 0; }
+#alerts-rules td { padding: 2px 4px 2px 0; border-top: 1px solid var(--line); vertical-align: middle; }
+#alerts-rules td.rule-title { white-space: nowrap; }
+#alerts-rules .rule-param { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); margin-right: 6px; white-space: nowrap; }
+#alerts-rules .rule-param input { width: 64px; }
+#alerts-config input.invalid { border-color: var(--blocked); outline-color: var(--blocked); }
+#alerts-watch { box-sizing: border-box; resize: vertical; font-family: ui-monospace, Menlo, Consolas, monospace; }
+
 /* Stats view (spec 6): overlays the map like the table and scrolls; a
    toolbar, the headline tiles, then one card grid per section (2 columns,
    3 from 1700 px). A card is a title, a one-line caption and a chart. */
@@ -171,7 +235,11 @@ input.invalid { border-color: var(--blocked); }
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
   display: flex; flex-direction: column; min-width: 0;
 }
+.card-head { display: flex; align-items: center; gap: 8px; min-height: 20px; }
 .card-title { margin: 0; font-size: 13px; font-weight: 600; }
+/* A card's small buttons (CSV) at the right of its title; the ledger's sits in its bar. */
+.card-action, #stats-aircraft-csv { padding: 0 8px; font-size: 12px; line-height: 18px; }
+.card-head .card-action { margin-left: auto; }
 .card-caption { margin: 2px 0 6px; font-size: 12px; color: var(--muted); min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-chart { height: 260px; min-width: 0; }
 @media (min-width: 1700px) {
@@ -352,6 +420,7 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 }
 .wx-control label { color: var(--muted); }
 .wx-control input[type="range"] { width: 120px; vertical-align: middle; padding: 0; }
+#radar-opacity-row.disabled { opacity: .45; }   /* nothing it controls is drawn: like a disabled button */
 .wx-control select { max-width: 200px; font-size: 12px; margin: 4px 0; }
 #radar-age { color: var(--text); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 .legend-note { margin-top: 4px; }
@@ -408,10 +477,11 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .input-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .input-actions button { font-size: 12px; padding: 2px 8px; }
 #input-form { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
-#input-form h3 { font-size: 13px; margin: 0 0 6px; }
-#input-form label.field { display: block; color: var(--muted); font-size: 12px; margin: 6px 0 0; }
-#input-form label.field input:not([type="checkbox"]), #input-form label.field select { display: block; width: 100%; margin-top: 2px; }
-#input-form label.field.check { display: flex; margin-top: 8px; }
+#input-form h3, #alerts-config h3 { font-size: 13px; margin: 0 0 6px; }
+#input-form label.field, #alerts-config label.field { display: block; color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+#input-form label.field input:not([type="checkbox"]), #input-form label.field select,
+#alerts-config label.field textarea { display: block; width: 100%; margin-top: 2px; }
+#input-form label.field.check, #alerts-config label.field.check { display: flex; margin-top: 8px; }
 #input-form select:disabled { opacity: .6; }
 #input-form input[readonly] { color: var(--muted); }
 .field-error { display: block; color: var(--blocked); font-size: 11px; min-height: 0; }
@@ -526,3 +596,16 @@ label.check input { width: auto; margin: 0; }
 .view-foot { align-items: center; justify-content: space-between; margin-top: 10px; }
 .view-foot .msg { margin: 0; flex: 1; min-width: 0; }
 .view-foot button { flex: none; }
+/* Saved filter sets (spec 4.2, 7): the select and three small buttons on one
+   line in the panel; the "⋯" menu drops below the row, right-aligned. */
+.view-sets { position: relative; align-items: center; gap: 4px; }
+#filters .view-sets select { flex: 1; min-width: 0; width: auto; }
+.view-sets > button { flex: none; padding: 4px 6px; font-size: 12px; }
+#view-set-menu {
+  position: absolute; top: 100%; right: 0; z-index: 10; margin-top: 2px; padding: 4px 0;
+  display: flex; flex-direction: column; min-width: 120px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 4px 12px rgba(0, 0, 0, .4);
+}
+#view-set-menu button { border: none; border-radius: 0; background: none; text-align: left; padding: 4px 10px; font-size: 13px; }
+#view-set-menu button:hover:not(:disabled) { background: var(--panel); }
+#settings-import-text { color: var(--text); overflow-wrap: anywhere; }

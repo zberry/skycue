@@ -36,6 +36,16 @@
   // render. (`view`, further down, is the map style and overlays.)
   var VIEW_FILTER_KEY = 'skycue.view';
   var viewFilter = P.normalizeView(storeGet(VIEW_FILTER_KEY));
+  // Saved filter sets (P.normalizeViewSets; spec 4): named View states with
+  // their Hide filtered, kept in localStorage. `activeSet` is the index of
+  // the set last applied or saved (null: "— current —").
+  var VIEW_SETS_KEY = 'skycue.viewSets';
+  var viewSets = P.normalizeViewSets(storeGet(VIEW_SETS_KEY));
+  var activeSet = null;
+  // The alert config's store (alerts_view.js owns it; the settings import
+  // writes it only without the strip). AP: alerts_pure.js, may be absent.
+  var ALERTS_KEY = 'skycue.alerts';
+  var AP = window.skycueAlertsPure || null;
 
   var $ = function (id) { return document.getElementById(id); };
   function dataNow() { return Date.now() + clockOffsetMs; }
@@ -568,6 +578,7 @@
     try { window.localStorage.setItem('skycue.hideFiltered', hideFiltered ? '1' : '0'); } catch (err) { /* private window */ }
     renderAllEntries();
     updateHiddenCount();
+    syncViewSetSelect();
   }
 
   // ---- View section --------------------------------------------------------------
@@ -634,6 +645,7 @@
     saveView();
     tableDirty = true;
     scheduleViewRender();
+    syncViewSetSelect();
   }
   // One map/status/table pass per frame however many input events arrive
   // (typing in the search fires one per key).
@@ -693,15 +705,243 @@
       if (viewFilter.search !== '') setViewFilters({ search: '' });
     });
   }
+  // Whether the key goes to a field that takes typing (a page shortcut
+  // must leave it alone).
+  function typingTarget(ev) {
+    var tag = ev.target && ev.target.tagName;
+    return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || !!(ev.target && ev.target.isContentEditable);
+  }
   // `/` focuses the search unless the key goes to a control or has a modifier.
   function slashFocusesSearch(ev) {
     if (ev.key !== '/' || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
-    var tag = ev.target && ev.target.tagName;
-    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON' ||
-        (ev.target && ev.target.isContentEditable)) return false;
+    if (typingTarget(ev) || (ev.target && ev.target.tagName === 'BUTTON')) return false;
     ev.preventDefault();
     $('view-search').focus();
     return true;
+  }
+
+  // ---- Saved filter sets -------------------------------------------------------
+  function saveViewSets() { storeSet(VIEW_SETS_KEY, JSON.stringify(viewSets)); }
+  // The select's options, the "(modified)" marker and which buttons apply.
+  // A modified active set shows as a hidden "<name> (modified)" option, so
+  // choosing the set itself again is a change and re-applies it.
+  function syncViewSetSelect() {
+    var sel = $('view-set-select');
+    if (!sel) return;
+    var n = viewSets.sets.length;
+    if (activeSet !== null && activeSet >= n) activeSet = null;
+    while (sel.options.length) sel.remove(0);
+    sel.appendChild(new Option('— current —', ''));
+    viewSets.sets.forEach(function (set, i) { sel.appendChild(new Option(set.name, String(i))); });
+    var active = activeSet === null ? null : viewSets.sets[activeSet];
+    if (active && !P.viewSetMatches(active, viewFilter, hideFiltered)) {
+      // Right after the active set's own option, so the arrow keys on the
+      // closed select step from the set's place in the list.
+      var marker = new Option(active.name + ' (modified)', 'modified');
+      marker.hidden = true;
+      sel.insertBefore(marker, sel.options[activeSet + 2] || null);
+      sel.value = 'modified';
+    } else sel.value = activeSet === null ? '' : String(activeSet);
+    $('view-set-delete').disabled = activeSet === null;
+    var item = function (act) { return document.querySelector('#view-set-menu [data-act="' + act + '"]'); };
+    item('rename').disabled = activeSet === null;
+    item('up').disabled = activeSet === null || activeSet === 0;
+    item('down').disabled = activeSet === null || activeSet === n - 1;
+  }
+  // The whole set: every View field and Hide filtered.
+  function applyViewSet(i) {
+    var set = viewSets.sets[i];
+    if (!set) return;
+    activeSet = i;
+    setViewFilters(set.view);
+    setHideFiltered(set.hideFiltered);
+  }
+  function viewSetMsg(text, isError) { showMsg($('view-set-msg'), text, isError); }
+  function saveViewSet() {
+    var current = activeSet === null ? '' : viewSets.sets[activeSet].name;
+    var raw = window.prompt('Name for this filter set', current);
+    if (raw === null) return;
+    var name = P.viewSetName(raw);
+    if (name === '') return;
+    var taken = viewSets.sets.some(function (s) { return s.name === name; });
+    if (taken && !window.confirm('Replace the filter set "' + name + '"?')) return;
+    var r = P.putViewSet(viewSets, name, viewFilter, hideFiltered);
+    if (r.error) { viewSetMsg(r.error, true); return; }
+    viewSets = r.store;
+    activeSet = r.index;
+    saveViewSets();
+    viewSetMsg('');
+    syncViewSetSelect();
+  }
+  function deleteViewSet() {
+    if (activeSet === null) return;
+    if (!window.confirm('Delete the filter set "' + viewSets.sets[activeSet].name + '"?')) return;
+    viewSets.sets.splice(activeSet, 1);
+    activeSet = null;
+    saveViewSets();
+    viewSetMsg('');
+    syncViewSetSelect();
+  }
+  function renameViewSet() {
+    if (activeSet === null) return;
+    var set = viewSets.sets[activeSet];
+    var raw = window.prompt('Name for this filter set', set.name);
+    if (raw === null) return;
+    var name = P.viewSetName(raw);
+    if (name === '' || name === set.name) return;
+    if (viewSets.sets.some(function (s) { return s.name === name; })) {
+      viewSetMsg('A set named "' + name + '" already exists.', true);
+      return;
+    }
+    set.name = name;
+    saveViewSets();
+    viewSetMsg('');
+    syncViewSetSelect();
+  }
+  function moveViewSet(by) {
+    var to = activeSet === null ? -1 : activeSet + by;
+    if (to < 0 || to >= viewSets.sets.length) return;
+    var set = viewSets.sets.splice(activeSet, 1)[0];
+    viewSets.sets.splice(to, 0, set);
+    activeSet = to;
+    saveViewSets();
+    syncViewSetSelect();
+  }
+
+  // ---- Settings file (spec 4.4): the sets and the alert config -----------------
+  // A download of `text` as the file `name`; the object URL goes on the next tick.
+  function downloadText(name, text, mime) {
+    var url = URL.createObjectURL(new Blob([text], { type: mime }));
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.hidden = true;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+  }
+  // The alert config now: the strip's own (with hidden and drawer) or, without
+  // the strip, the stored one.
+  function currentAlerts() {
+    return alertsView ? alertsView.config() : AP.normalizeConfig(storeGet(ALERTS_KEY));
+  }
+  function exportSettings() {
+    downloadText(AP.settingsFileName(Date.now()),
+      JSON.stringify(AP.settingsFile(viewSets, currentAlerts()), null, 2), 'application/json');
+  }
+  // The parsed file waiting for Replace or Merge (null: the panel is hidden).
+  var pendingImport = null;
+  function setImportPanel(pending) {
+    pendingImport = pending;
+    $('settings-import').hidden = !pending;
+    if (!pending) { $('settings-import-text').textContent = ''; return; }
+    var r = pending.parsed;
+    var text = pending.name + ': ' + r.sets.length + ' filter sets' +
+      (r.alerts ? ' and the alert settings' : '') + '. Replace yours, or merge?';
+    var replaced = AP.mergeSettings({ sets: viewSets.sets, alerts: currentAlerts() }, r, 'merge').replacedNames;
+    if (replaced.length) text += '\nMerge replaces: ' + replaced.join(', ');
+    $('settings-import-text').textContent = text;
+  }
+  // Reads the chosen file and offers Replace or Merge; never sent to skycued.
+  function importSettings(file) {
+    setImportPanel(null);
+    if (file.size > AP.SETTINGS_MAX_BYTES) {
+      $('settings-file').value = '';
+      viewSetMsg('File too large (over 1 MB).', true);
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      $('settings-file').value = '';
+      var r = AP.parseSettings(String(reader.result));
+      if (!r.ok) { viewSetMsg('Cannot import: ' + r.error + '.', true); return; }
+      viewSetMsg('');
+      setImportPanel({ name: file.name, parsed: r });
+    };
+    reader.onerror = function () {
+      $('settings-file').value = '';
+      viewSetMsg('Cannot import: the file could not be read.', true);
+    };
+    reader.readAsText(file);
+  }
+  function applyImport(mode) {
+    if (!pendingImport) return;
+    var r = pendingImport.parsed;
+    var m = AP.mergeSettings({ sets: viewSets.sets, alerts: currentAlerts() }, r, mode);
+    viewSets = P.normalizeViewSets({ version: 1, sets: m.sets });
+    if (mode === 'replace') activeSet = null;
+    saveViewSets();
+    if (alertsView) alertsView.setConfig(m.alerts); // stores skycue.alerts
+    else storeSet(ALERTS_KEY, JSON.stringify(m.alerts));
+    setImportPanel(null);
+    var n = r.sets.length - m.droppedNames.length;
+    viewSetMsg('Imported ' + n + ' filter sets.' + (m.droppedNames.length ? '\nNot imported (at most ' +
+      P.VIEW_SETS_MAX + ' sets): ' + m.droppedNames.join(', ') : ''));
+    syncViewSetSelect();
+  }
+
+  function setViewSetMenu(open) {
+    $('view-set-menu').hidden = !open;
+    $('view-set-more').setAttribute('aria-expanded', String(open));
+    if (open) {
+      var first = document.querySelector('#view-set-menu button:not([disabled])');
+      if (first) first.focus();
+    } else if ($('view-set-menu').contains(document.activeElement)) $('view-set-more').focus();
+  }
+  // Keys 1–9 apply that set, 0 clears to the defaults; not with a modifier
+  // or while a field takes typing.
+  function digitAppliesSet(ev) {
+    if (!/^[0-9]$/.test(ev.key) || ev.ctrlKey || ev.metaKey || ev.altKey || typingTarget(ev)) return false;
+    if (ev.key === '0') {
+      activeSet = null;
+      resetViewFilters();
+    } else {
+      var i = Number(ev.key) - 1;
+      if (i >= viewSets.sets.length) return false;
+      applyViewSet(i);
+    }
+    ev.preventDefault();
+    return true;
+  }
+  function wireViewSets() {
+    var sel = $('view-set-select');
+    sel.addEventListener('change', function () {
+      if (sel.value === '') { activeSet = null; syncViewSetSelect(); } else if (sel.value === 'modified') applyViewSet(activeSet);
+      else applyViewSet(Number(sel.value));
+    });
+    $('view-set-save').addEventListener('click', saveViewSet);
+    $('view-set-delete').addEventListener('click', deleteViewSet);
+    $('view-set-more').addEventListener('click', function () { setViewSetMenu($('view-set-menu').hidden); });
+    var acts = { rename: renameViewSet, up: function () { moveViewSet(-1); }, down: function () { moveViewSet(1); },
+      'export': exportSettings, 'import': function () { $('settings-file').click(); } };
+    // Without alerts_pure.js there is no settings file.
+    ['export', 'import'].forEach(function (act) {
+      document.querySelector('#view-set-menu [data-act="' + act + '"]').disabled = !AP;
+    });
+    $('view-set-menu').addEventListener('click', function (ev) {
+      var b = ev.target.closest('button[data-act]');
+      if (!b || b.disabled || !acts[b.getAttribute('data-act')]) return;
+      setViewSetMenu(false);
+      acts[b.getAttribute('data-act')]();
+    });
+    $('settings-file').addEventListener('change', function () {
+      var file = $('settings-file').files[0];
+      if (file) importSettings(file);
+    });
+    $('settings-import-replace').addEventListener('click', function () { applyImport('replace'); });
+    $('settings-import-merge').addEventListener('click', function () { applyImport('merge'); });
+    $('settings-import-cancel').addEventListener('click', function () { setImportPanel(null); });
+    // Escape closes the menu only, not the side panel too.
+    $('view-set-menu').addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+      ev.stopPropagation();
+      setViewSetMenu(false);
+    });
+    document.addEventListener('click', function (ev) {
+      if (!$('view-set-menu').hidden && !ev.target.closest('#view-set-menu, #view-set-more')) setViewSetMenu(false);
+    });
+    syncViewSetSelect();
   }
 
   function pruneTrail(e) {
@@ -717,6 +957,7 @@
     if (e.marker) map.removeLayer(e.marker);
     if (e.trail) map.removeLayer(e.trail);
     tracks.delete(key);
+    if (alertsView) alertsView.trackGone(key);
     if (key === selectedKey) deselect();
     tableDirty = true;
   }
@@ -741,6 +982,7 @@
     }
     e.t = t;
     if (observed) e.seenWall = Date.now();
+    if (alertsView) alertsView.track(e.t);
     renderEntry(e, observed);
     if (key === selectedKey) renderDetails();
     tableDirty = true;
@@ -756,6 +998,7 @@
   }
 
   function onDrop(d) {
+    if (alertsView) alertsView.drop(d);
     var key = P.trackKey(d);
     var e = tracks.get(key);
     if (!e) return;
@@ -1159,6 +1402,7 @@
   // the active one goes back to the map.
   var mainView = 'map';
   var statsView = null;             // stats_view.js, made in wire()
+  var alertsView = null;            // alerts_view.js, made in wire()
   function showMain(which) {
     if (which !== 'table' && (which !== 'stats' || !statsView)) which = 'map';
     var prev = mainView;
@@ -1219,6 +1463,7 @@
     conus: { product: 64, label: 'Radar (CONUS)', head: null, drawn: null, fetching: false, again: false }
   };
   var radarGroups = {}, shapeGroups = {}, rasterGroup = null;
+  var RADAR_OPACITY_KEY = 'skycue.radarOpacity';   // the opacity slider's value, per browser
 
   function swatchName(color, name) {
     return '<i class="sw" style="color:' + color + '"></i>' + esc(name);
@@ -1248,6 +1493,9 @@
     L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(map);
     rasterGroup.on('add', function () { $('raster-box').hidden = false; loadRaster(); });
     rasterGroup.on('remove', function () { $('raster-box').hidden = true; });
+    [radarGroups.regional, radarGroups.conus, rasterGroup].forEach(function (g) {
+      g.on('add remove', syncOpacityControl);
+    });
 
     var WxControl = L.Control.extend({
       options: { position: 'bottomright' },
@@ -1255,8 +1503,8 @@
         var div = L.DomUtil.create('div', 'wx-control');
         div.innerHTML =
           '<div id="radar-age">radar –</div>' +
-          '<label for="radar-opacity">Opacity</label> ' +
-          '<input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7">' +
+          '<div id="radar-opacity-row"><label for="radar-opacity">Radar opacity</label> ' +
+          '<input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7"></div>' +
           '<div id="radar-legend" class="legend-row"></div>' +
           '<div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span>: not yet in force · ' +
           '<span class="ln-cancelled">dashed</span>: cancelled</div>' +
@@ -1270,7 +1518,12 @@
       }
     });
     new WxControl().addTo(map);
-    $('radar-opacity').addEventListener('input', applyRadarOpacity);
+    $('radar-opacity').value = String(P.radarOpacityValue(storeGet(RADAR_OPACITY_KEY)));
+    $('radar-opacity').addEventListener('input', function () {
+      storeSet(RADAR_OPACITY_KEY, $('radar-opacity').value);
+      applyRadarOpacity();
+    });
+    syncOpacityControl();
     $('raster-select').addEventListener('change', function () {
       fisb.rasterPick = { product: Number($('raster-select').value), band: null };   // its lowest band with data
       renderRasterSelect();
@@ -1379,6 +1632,17 @@
       if (el) el.classList.toggle('faded', faded);
     });
     if (fisb.raster) fisb.raster.overlay.setOpacity(base);
+    syncOpacityControl();
+  }
+  // The slider is enabled only while something it controls is drawn: a
+  // radar mosaic on a layer that is on, or a raster product. Run on the
+  // layers' add and remove and from applyRadarOpacity; clearRadar and
+  // clearRaster are not hooked, the 1 s tick (radarAgeTick) syncs them.
+  function syncOpacityControl() {
+    var on = Object.keys(radar).some(function (w) { return radar[w].drawn && map.hasLayer(radarGroups[w]); }) ||
+      !!(fisb.raster && map.hasLayer(rasterGroup));
+    $('radar-opacity').disabled = !on;
+    $('radar-opacity-row').classList.toggle('disabled', !on);
   }
 
   function loadRadar(which) {
@@ -2140,6 +2404,7 @@
   function applyInputs(list) {
     rx.inputs = Array.isArray(list) ? list : [];
     rx.wall = Date.now();
+    if (alertsView) alertsView.inputs(rx.inputs);
     // An id that went may come back as a new input: forget its client state.
     var ids = {};
     rx.inputs.forEach(function (i) { ids[i.id] = true; });
@@ -2165,6 +2430,7 @@
       if (!inp || !inp.state) return;
       ['connected', 'messages', 'observations', 'uplinks', 'rejected'].forEach(function (k) { inp.state[k] = l[k]; });
     });
+    if (alertsView) alertsView.inputs(rx.inputs);
     updateInputsHeader();
   }
   function updateInputsHeader() {
@@ -2705,11 +2971,15 @@
   function setConnected(on) {
     connected = on;
     $('conn-banner').hidden = on;
+    if (alertsView) alertsView.daemon(on);
   }
 
   var snapshotCount = 0;            // snapshots applied (a test hook)
   function onSnapshot(s) {
     snapshotCount++;
+    // A silent baseline for the "new"-type alert rules (spec 11), the
+    // inputs seeded by both of the snapshot's inputs lists.
+    if (alertsView) alertsView.beginBaseline();
     clearAll();
     clockOffsetMs = Date.parse(s.now) - Date.now();
     if (isNaN(clockOffsetMs)) clockOffsetMs = 0;
@@ -2724,6 +2994,7 @@
     applyFilters(s.filters);
     updateReceiver();
     (s.tracks || []).forEach(function (t) { onTrack(t, true); });
+    if (alertsView) alertsView.endBaseline(Array.from(tracks.keys()));
     if (selectedKey && !tracks.has(selectedKey)) deselect();
     else if (selectedKey) renderDetails();
     attempt = 0;
@@ -2815,6 +3086,7 @@
     try { stored = window.localStorage.getItem('skycue.hideFiltered'); } catch (err) { /* no storage */ }
     if (stored === '1') setHideFiltered(true);
     wireView();
+    wireViewSets();
     $('hide-filtered').addEventListener('change', function () { setHideFiltered($('hide-filtered').checked); });
     var sel = $('ring-alt');
     RING_ALTS_FT.forEach(function (ft) {
@@ -2911,10 +3183,28 @@
       statsView = window.skycueStatsView.create({
         request: request, select: select, hasTrack: function (key) { return tracks.has(key); },
         setViewFilter: function (partial) { setViewFilters(partial); }, showMain: showMain,
-        thousands: P.thousands, formatNum: P.formatNum, storeGet: storeGet, storeSet: storeSet, dataNow: dataNow
+        thousands: P.thousands, formatNum: P.formatNum, storeGet: storeGet, storeSet: storeSet, dataNow: dataNow,
+        download: downloadText
       });
     } else $('stats-toggle').hidden = true;
     $('stats-toggle').addEventListener('click', function () { showMain(mainView === 'stats' ? 'map' : 'stats'); });
+    if (window.skycueAlertsView && window.skycueAlertsPure) {
+      alertsView = window.skycueAlertsView.create({
+        dataNow: dataNow, storeGet: storeGet, storeSet: storeSet, request: request,
+        hasTrack: function (key) { return tracks.has(key); },
+        // Whether Hide filtered leaves the track on the map.
+        trackVisible: function (key) { return P.trackVisible(tracks.get(key).t.decision, true); },
+        getHideFiltered: function () { return hideFiltered; },
+        setHideFiltered: setHideFiltered,
+        selectTrack: function (key) { showMain('map'); select(key); },
+        openReceiver: function () { openPanel('receiver'); },
+        openStatsAircraft: function (key) { showMain('stats'); if (statsView) statsView.openAircraft(key); },
+        tracks: function () { return Array.from(tracks.values()).map(function (e) { return e.t; }); }
+      });
+    } else {
+      $('alerts-toggle').hidden = true;
+      $('alerts').hidden = true;
+    }
     Array.prototype.forEach.call(document.querySelectorAll('#table-view th'), function (th) {
       th.addEventListener('click', function () { sortBy(th.getAttribute('data-key')); });
       th.addEventListener('keydown', function (ev) {
@@ -2932,8 +3222,8 @@
       if (tr) select(tr.getAttribute('data-key'));
     });
     document.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape') closePanel();
-      else slashFocusesSearch(ev);
+      if (ev.key === 'Escape') { setViewSetMenu(false); closePanel(); }
+      else if (!slashFocusesSearch(ev)) digitAppliesSet(ev);
     });
     setInterval(prune, 2000);
     setInterval(watchdog, 1000);
@@ -2952,6 +3242,7 @@
       if (++ticks % 15 === 0) fisb.wxDirty = fisb.symDirty = true; // ages and age classes
       renderWx();
       if (fisb.symDirty) renderWxSymbols();
+      if (alertsView) alertsView.tick(); // input hold-offs, the log
     }, 1000);
   }
 
@@ -3000,8 +3291,20 @@
       f.openAircraft = function (key) { return statsView ? statsView.openAircraft(key) : Promise.resolve(); };
       return f;
     })(),
+    // The alert strip's state (alerts_view.js state()), with its input
+    // hold-off (default 10 s) and the rules' config.
+    alerts: (function () {
+      var f = function () { return alertsView ? alertsView.state() : null; };
+      f.setHoldOffMs = function (ms) { if (alertsView) alertsView.setHoldOffMs(ms); };
+      f.config = function () { return alertsView ? alertsView.config() : null; };
+      f.setConfig = function (cfg) { if (alertsView) alertsView.setConfig(cfg); };
+      return f;
+    })(),
     statsRefresh: function () { return statsView ? statsView.refreshNow() : Promise.resolve(false); },
     resetViewFilters: resetViewFilters,
+    // Saved filter sets: the store (a copy) and the active set's index or null.
+    viewSets: function () { return JSON.parse(JSON.stringify(viewSets)); },
+    activeViewSet: function () { return activeSet; },
     shownCount: viewShownCount,
     // The 2-s trail and stale-track prune, run now.
     prune: function () { prune(); },
@@ -3009,6 +3312,8 @@
     renderAll: function () { viewRenderPending = true; flushViewRender(); },
     // Adds a marker skycued does not know (the reconnect test checks it goes).
     injectTestMarker: function (t) { onTrack(t, true); },
+    // Removes a track as a drop or the prune would (the alert strip's "no longer tracked").
+    removeTestMarker: function (key) { removeEntry(key); },
     dataNow: dataNow,
     // FIS-B: the initial /api/fisb/* load is done; WebSocket items through
     // the page's own handler; what the radar canvases hold.

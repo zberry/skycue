@@ -34,14 +34,16 @@ const FISB_BASE = process.env.SKYCUE_FISB_URL;
 const RADAR_BASE = process.env.SKYCUE_RADAR_URL;
 
 // Every request the page makes goes to the origin it was loaded from
-// (data: URLs, the radar canvases, are not requests to a host).
+// (data: URLs, the radar canvases, are not requests to a host; nor is a
+// blob: URL of the page's own origin, a download it made).
 let offOrigin;
 test.beforeEach(async ({ page, baseURL }) => {
   offOrigin = [];
   const origin = baseURL.replace(/\/$/, '');
   const wsOrigin = origin.replace(/^http/, 'ws');
   page.on('request', (r) => {
-    if (!r.url().startsWith(origin + '/') && !r.url().startsWith('data:')) offOrigin.push(r.url());
+    const u = r.url();
+    if (!u.startsWith(origin + '/') && !u.startsWith('data:') && !u.startsWith('blob:' + origin + '/')) offOrigin.push(u);
   });
   page.on('websocket', (ws) => {
     if (!ws.url().startsWith(wsOrigin + '/')) offOrigin.push(ws.url());
@@ -500,32 +502,39 @@ test('cues_recent_drops_only_kept_in_this_browser', async ({ page }) => {
   expect(await page.evaluate(() => window.localStorage.getItem('skycue.cues.dropsOnly'))).toBe('0');
 });
 
-// The header strip (stats, the four panel buttons, Table) on one row at 1280 px, with
+// The header strip (stats, the four panel buttons, Table, Stats, Alerts with a
+// two-digit badge) on one row at 1280 px, with
 // live numbers in it (here and, with the FIS-B stats filled, in the 2015
 // sample's describe). A plain stat too long for its share is cut with an
 // ellipsis by design (style.css), so a cut is not checked here; see
 // header_long_stat_is_ellipsised_on_one_row for that.
-// headerRowOffsets: how far the vertical middles of the panel buttons, Table, Stats and every
-// shown stat sit from the brand's (a wrapped control is a whole row, about
-// 20 px, off).
-async function headerRowOffsets(page) {
-  return page.evaluate(() => {
+// headerRowOffsets: how far the vertical middles of the panel buttons, Table, Stats, Alerts and
+// every shown stat sit from the brand's (a wrapped control is a whole row, about
+// 20 px, off). With `badge`, the Alerts count badge is first shown with that
+// text (in the same evaluate, so no live alert can redraw it in between).
+async function headerRowOffsets(page, badge) {
+  return page.evaluate((badge) => {
+    const b = document.getElementById('alerts-badge');
+    if (badge !== null && b) {
+      b.textContent = badge;
+      b.hidden = false;
+    }
     const mid = (e) => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
     const brand = mid(document.querySelector('#stats .brand'));
-    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle'))
+    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle, #alerts-toggle'))
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
     return els.map((e) => Math.abs(mid(e) - brand));
-  });
+  }, badge === undefined ? null : badge);
 }
 test('header_fits_one_row_at_1280', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await openPage(page);
   await waitMarkers(page, 10);
-  for (const d of await headerRowOffsets(page)) expect(d).toBeLessThan(4);
+  for (const d of await headerRowOffsets(page, '99')) expect(d).toBeLessThan(4);
   // And at the widths between it and 1920 (where the font and gaps grow).
   for (const width of [1400, 1401, 1600, 1700, 1920]) {
     await page.setViewportSize({ width, height: 800 });
-    for (const d of await headerRowOffsets(page)) expect(d, `at ${width} px`).toBeLessThan(4);
+    for (const d of await headerRowOffsets(page, '99')) expect(d, `at ${width} px`).toBeLessThan(4);
   }
 });
 
@@ -541,7 +550,7 @@ test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
     const stat = b.closest('.stat');
     const mid = (e) => { const q = e.getBoundingClientRect(); return q.top + q.height / 2; };
     const brand = mid(document.querySelector('#stats .brand'));
-    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle'))
+    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle, #alerts-toggle'))
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
     const cut = stat.scrollWidth > stat.clientWidth;
     const overflow = getComputedStyle(stat).textOverflow;
@@ -611,6 +620,374 @@ test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {
   await expect.poll(() => page.locator('#cues-recent tbody tr').count(), { timeout: 15000 }).toBeGreaterThan(1);
   const scroll = page.locator('#pane-cues .cues-scroll');
   expect(await scroll.evaluate((e) => e.scrollWidth - e.clientWidth)).toBeLessThanOrEqual(0);
+});
+
+// ---- Alerts ----------------------------------------------------------------------
+// The alert strip at the bottom of the main area (alerts_view.js over the
+// engine in alerts_pure.js). Each case names the rules it runs with
+// (alertsOnly), so the default-on rules on the live replay add no rows.
+const ALERT_RULES = ['emergency', 'military_new', 'sent_new', 'input_lost', 'range_enter', 'altitude_below',
+  'new_country', 'watch', 'drop_filtered'];
+// skycue.alerts before the first load only (a reload keeps what the page stored).
+async function alertsOnly(page, on, extra) {
+  await page.addInitScript(([on, all, extra]) => {
+    if (sessionStorage.getItem('alertsSeeded')) return;
+    sessionStorage.setItem('alertsSeeded', '1');
+    const rules = {};
+    all.forEach((id) => { rules[id] = { enabled: on.includes(id) }; });
+    localStorage.setItem('skycue.alerts', JSON.stringify(Object.assign({ version: 1, rules }, extra || {})));
+  }, [on, ALERT_RULES, extra || null]);
+}
+const EMERG = { hex: 'fff7a0', addr_type: 'icao', callsign: 'TEST77', lat: 38.95, lon: -76.9, decision: 'send',
+  squawk: '7700', range_nm: 6, alt_baro_ft: 9000, track_deg: 0 };
+const inject = (page, o) => page.evaluate((t) => window.skycueApp.injectTestMarker(t), Object.assign({}, EMERG, o));
+const alertState = (page) => page.evaluate(() => window.skycueApp.alerts());
+const drawerIds = (page) => page.locator('#alerts-log tr[data-alert-id] .al-id').allTextContents();
+
+test('alerts_emergency_raises_strip_and_badge', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await expect(page.locator('#alerts')).toHaveClass(/\bhas-emergency\b/);
+  await expect(page.locator('#alerts-line .al-kind')).toHaveText('Emergency');
+  await expect(page.locator('#alerts-line .al-id')).toHaveText('TEST77');
+  await expect(page.locator('#alerts-line .al-detail')).toHaveText('squawk 7700');
+  await expect(page.locator('#alerts-line .al-time')).toHaveText(/^\d\d:\d\d:\d\dZ$/);
+  await expect(page.locator('#alerts-badge')).toBeVisible();
+  await expect(page.locator('#alerts-badge')).toHaveText('1');
+
+  await page.locator('#alerts-ack').click();
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+  await expect(page.locator('#alerts-badge')).toBeHidden();
+  await expect(page.locator('#alerts-line')).toHaveText('No unacknowledged alerts');
+  await expect(page.locator('#alerts')).not.toHaveClass(/\bhas-emergency\b/);
+
+  await page.locator('#alerts-expand').click();
+  await expect(page.locator('#alerts-drawer')).toBeVisible();
+  await expect(page.locator('#alerts-expand')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveCount(1);
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveClass(/\backed\b/);
+});
+
+test('alerts_ack_all_and_drawer_row_ack', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  for (const n of [1, 2, 3]) await inject(page, { hex: `fff7a${n}`, callsign: `T${n}` });
+  await expect(page.locator('#alerts-count')).toHaveText('3');
+  await page.locator('#alerts-expand').click();
+  await expect.poll(() => drawerIds(page)).toEqual(['T3', 'T2', 'T1']);
+  // The rows alternate (spec 7); the pointer kept off them (hover has its own background).
+  await page.mouse.move(0, 0);
+  const rowBg = (i) => page.locator('#alerts-log tr[data-alert-id]').nth(i).evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await rowBg(1)).not.toBe(await rowBg(0));
+  await page.locator('#alerts-log tr[data-alert-id]', { hasText: 'T2' }).locator('.al-ack').click();
+  await expect(page.locator('#alerts-count')).toHaveText('2');
+  await page.locator('#alerts-ack-all').click();
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+  await expect(page.locator('#alerts-log tr[data-alert-id]:not(.acked)')).toHaveCount(0);
+  await expect(page.locator('#alerts-log tr.acked')).toHaveCount(3);
+});
+
+test('alerts_hide_show_and_persist', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await page.locator('#alerts-expand').click();
+  await page.locator('#alerts-hide').click();
+  await expect(page.locator('#alerts')).toBeHidden();
+  await expect(page.locator('#alerts-toggle')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#alerts-badge')).toHaveText('1');
+
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await expect(page.locator('#alerts')).toBeHidden();
+  await page.locator('#alerts-toggle').click();
+  await expect(page.locator('#alerts')).toBeVisible();
+  await expect(page.locator('#alerts-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await expect(page.locator('#alerts-drawer')).toBeVisible();
+  await expect(page.locator('#alerts-expand')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveCount(1);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('skycue.alerts')).hidden)).toBe(false);
+});
+
+test('alerts_reload_keeps_log_without_refiring', async ({ page }) => {
+  await alertsOnly(page, ['watch'], { watch: [TARGET] });
+  await openPage(page);
+  await expect.poll(async () => (await alertState(page)).rows.length, { timeout: 20000 }).toBe(1);
+  const r0 = (await alertState(page)).rows[0];
+  expect([r0.rule, r0.key]).toEqual(['watch', `${TARGET}|icao`]);
+
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await waitMarkers(page, 10);
+  expect((await alertState(page)).rows.length).toBe(1);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await page.locator('#alerts-ack').click();
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await waitMarkers(page, 10);
+  const s = await alertState(page);
+  expect(s.rows.length).toBe(1);
+  expect(s.unacked).toBe(0);
+  expect(s.rows[0].quiet).toBe(false);
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+});
+
+test('alerts_click_selects_aircraft', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await page.locator('#table-toggle').click();
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('table');
+  await page.locator('#alerts-line').click();
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('map');
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe('fff7a0');
+});
+
+test('alerts_click_turns_hide_filtered_off', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  try {
+    await inject(page, { hex: 'fff7a4', decision: 'out_of_range' });
+    await expect(page.locator('#alerts-count')).toHaveText('1');
+    await page.evaluate(() => window.skycueApp.setHideFiltered(true));
+    await page.locator('#alerts-line').click();
+    expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(false);
+    await expect(page.locator('#alerts-note')).toHaveText('Hide filtered turned off to show TEST77.');
+    expect(await page.evaluate(() => window.skycueApp.selected())).toBe('fff7a4');
+  } finally {
+    await page.evaluate(() => window.skycueApp.setHideFiltered(false));
+  }
+});
+
+test('alerts_click_untracked_offers_stats', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await page.route('**/api/stats/aircraft/fff7a5*', (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ key: 'fff7a5|icao', hex: 'fff7a5', addr_type: 'icao', first_seen: '2026-11-04T12:00:00.000Z',
+      last_seen: '2026-11-04T12:01:00.000Z', observations: 1 }) }));
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page, { hex: 'fff7a5' });
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await page.evaluate(() => window.skycueApp.removeTestMarker('fff7a5|icao'));
+  await page.locator('#alerts-line').click();
+  await expect(page.locator('#alerts-note')).toContainText('TEST77 is no longer tracked.');
+  await expect(page.locator('#alerts-open-stats')).toBeVisible();
+  await expect(page.locator('#alerts-open-stats')).toHaveText('Open in Stats');
+  await page.locator('#alerts-open-stats').click();
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('stats');
+  await expect.poll(async () => (await statsState(page)).detailKey).toBe('fff7a5|icao');
+
+  await page.locator('#stats-toggle').click();     // back to the map
+  await inject(page, { hex: 'fff7a6' });           // no route: the ledger answers 404
+  await expect(page.locator('#alerts-count')).toHaveText('2');
+  await page.evaluate(() => window.skycueApp.removeTestMarker('fff7a6|icao'));
+  const answered = page.waitForResponse((r) => r.url().includes('/api/stats/aircraft/fff7a6'));
+  await page.locator('#alerts-line').click();
+  await answered;
+  await expect(page.locator('#alerts-note')).toContainText('TEST77 is no longer tracked.');
+  await expect(page.locator('#alerts-open-stats')).toBeHidden();
+});
+
+test('alerts_text_is_not_html', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  const evil = '<img src=x onerror="window.__xss=1">';
+  await inject(page, { hex: 'fff7a7', callsign: evil });
+  await expect(page.locator('#alerts-line .al-id')).toHaveText(evil);
+  await page.locator('#alerts-expand').click();
+  await expect(page.locator('#alerts-log tr[data-alert-id] .al-id')).toHaveText(evil);
+  expect(await page.locator('#alerts img').count()).toBe(0);
+  expect(await page.locator('#alerts-drawer img').count()).toBe(0);
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+});
+
+test('alerts_strip_leaves_map_controls_clear', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  const s = await page.locator('#alerts').boundingBox();
+  // The scale and the weather control (the main daemon has no tiles, so no
+  // attribution control).
+  const bottoms = await page.evaluate(() => Array.from(document.querySelectorAll('#map .leaflet-bottom .leaflet-control'))
+    .filter((e) => e.offsetParent !== null).map((e) => e.getBoundingClientRect().bottom));
+  expect(bottoms.length).toBeGreaterThan(0);
+  for (const b of bottoms) expect(b).toBeLessThanOrEqual(s.y + 1);
+  const padding = (sel) => page.locator(sel).evaluate((e) => parseFloat(getComputedStyle(e).paddingBottom));
+  await page.locator('#table-toggle').click();
+  expect(await padding('#table-view')).toBeGreaterThanOrEqual(s.height);
+  await page.locator('#stats-toggle').click();
+  expect(await padding('#stats-view')).toBeGreaterThanOrEqual(s.height);
+  await page.locator('#stats-toggle').click();
+});
+
+test('alerts_survive_garbage_storage', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('skycue.alerts', '{"rules":7,"hidden":"x"}');
+    const rows = [];
+    for (let i = 0; i < 5000; i++) {
+      if (i % 7 === 0) { rows.push(i % 2 ? null : 'junk'); continue; }
+      rows.push({ id: i % 11 === 0 ? 'x' : i, rule: i % 5 === 0 ? 'bogus' : 'emergency',
+        time: i % 13 === 0 ? 'never' : new Date(1.7e12 + i * 1000).toISOString(), key: i % 3 ? `ab${i}|icao` : 42,
+        label: i % 4 ? `L${i}` : { a: 1 }, detail: 'squawk 7700', acked: i % 2 === 0, quiet: 'yes' });
+    }
+    localStorage.setItem('skycue.alertLog', JSON.stringify({ version: 1, nextId: 'q', rows,
+      pairs: { 'emergency|ab1|icao': 5, 'bogus|x': {} } }));
+  });
+  const errors = watchErrors(page);
+  await openPage(page);
+  await expect(page.locator('#alerts')).toBeVisible();
+  expect((await alertState(page)).rows.length).toBeLessThanOrEqual(200);
+  expect(errors).toEqual([]);
+});
+
+// Alerts pressed means "the strip is shown", not "this view is shown", so it
+// does not take the pressed look of Table and Stats.
+test('alerts_toggle_pressed_differs_from_view_pressed', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await page.locator('#stats-toggle').click();
+  await expect(page.locator('#stats-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#alerts-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await page.mouse.move(0, 0);
+  const bg = (sel) => page.locator(sel).evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await bg('#alerts-toggle')).not.toBe(await bg('#stats-toggle'));
+  await page.locator('#stats-toggle').click();
+});
+
+const storedAlerts = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('skycue.alerts')));
+
+// No AudioContext before the first click anywhere (spec 3.3); then a raised
+// row with sound on plays its pattern, and Mute silences it.
+test('alerts_sound_waits_for_a_click', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__acCount = 0;
+    const Real = window.AudioContext;
+    window.AudioContext = function () { window.__acCount++; return new Real(); };
+  });
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  expect(await page.evaluate(() => window.__acCount)).toBe(0);
+  await expect(page.locator('#alerts-sound-hint')).toBeVisible();
+  await expect(page.locator('#alerts-sound-hint')).toContainText('click to enable sound');
+  expect((await alertState(page)).tones).toEqual([]);
+
+  await page.locator('#view-heading').click();
+  expect(await page.evaluate(() => window.__acCount)).toBe(1);
+  await expect(page.locator('#alerts-sound-hint')).toBeHidden();
+  expect((await alertState(page)).armed).toBe(true);
+  await inject(page, { hex: 'fff7b1' });
+  await expect(page.locator('#alerts-count')).toHaveText('2');
+  expect((await alertState(page)).tones).toEqual(['double']);
+
+  await page.locator('#alerts-gear').click();
+  await page.locator('#alerts-mute').check();
+  await inject(page, { hex: 'fff7b2' });
+  await expect(page.locator('#alerts-count')).toHaveText('3');
+  expect((await alertState(page)).tones).toEqual(['double']);
+  expect(await page.evaluate(() => window.__acCount)).toBe(1);
+});
+
+test('alerts_config_enables_range_enter', async ({ page }) => {
+  await alertsOnly(page, []);
+  await openPage(page);
+  await page.locator('#alerts-gear').click();
+  await expect(page.locator('#alerts-config')).toBeVisible();
+  expect((await alertState(page)).configOpen).toBe(true);
+  await expect(page.locator('#alerts-rules tr[data-rule]')).toHaveCount(ALERT_RULES.length);
+  const row = page.locator('#alerts-rules tr[data-rule="range_enter"]');
+  await row.locator('.rule-enabled').check();
+  const threshold = row.locator('[data-param="threshold_nm"]');
+  await threshold.fill('8');
+  await threshold.press('Tab');
+  expect((await storedAlerts(page)).rules.range_enter).toEqual({ enabled: true, sound: false, threshold_nm: 8 });
+  await inject(page, { hex: 'fff7b3', callsign: 'TESTRG', squawk: '1200', range_nm: 5 });
+  await expect(page.locator('#alerts-line .al-kind')).toHaveText('Range');
+  await expect(page.locator('#alerts-line .al-detail')).toHaveText('inside 8 nm (5.0 nm)');
+
+  await threshold.fill('-1');
+  await expect(threshold).toHaveClass(/\binvalid\b/);
+  await threshold.press('Tab');
+  expect((await storedAlerts(page)).rules.range_enter.threshold_nm).toBe(8);
+});
+
+test('alerts_watch_list_from_config', async ({ page }) => {
+  await alertsOnly(page, []);
+  await openPage(page);
+  await page.locator('#alerts-gear').click();
+  await page.locator('#alerts-rules tr[data-rule="watch"] .rule-enabled').check();
+  await page.locator('#alerts-watch').fill('testw\nzzz');
+  await page.locator('#alerts-watch').blur();
+  expect((await storedAlerts(page)).watch).toEqual(['testw', 'zzz']);
+  await inject(page, { hex: 'fff7b4', callsign: 'TESTW1', squawk: '1200' });
+  await expect(page.locator('#alerts-line .al-kind')).toHaveText('Watch');
+  await expect(page.locator('#alerts-line .al-detail')).toHaveText('matches watch entry "testw"');
+});
+
+test('alerts_clear_history_and_escape', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await inject(page, { hex: 'fff7b5' });
+  await inject(page, { hex: 'fff7b6' });
+  await expect(page.locator('#alerts-count')).toHaveText('2');
+  await page.locator('#alerts-expand').click();
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveCount(2);
+  await page.locator('#rx-toggle').click();
+  await expect(page.locator('#details')).toBeVisible();
+  await page.locator('#alerts-gear').click();
+  let question = null;
+  page.once('dialog', (d) => { question = d.message(); d.accept(); });
+  await page.locator('#alerts-clear').click();
+  expect(question).toBe('Clear the alert history? Acknowledged and unacknowledged alerts are removed.');
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveCount(0);
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('skycue.alertLog')).rows)).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#alerts-config')).toBeHidden();
+  expect((await alertState(page)).configOpen).toBe(false);
+  await expect(page.locator('#details')).toBeVisible();
+});
+
+// The page's own connection lost (a stopped skycued, as in
+// stalled_server_detected_and_reconnects): an alert once the banner has been
+// up for the hold-off (1 s here), acknowledged with the outage length on
+// the reconnect.
+test('alerts_daemon_loss_after_banner', async ({ page }) => {
+  await alertsOnly(page, ['input_lost']);
+  await openPage(page);
+  await page.evaluate(() => window.skycueApp.alerts.setHoldOffMs(1000));
+  const pid = Number(fs.readFileSync(process.env.SKYCUE_PID_FILE, 'utf8'));
+  process.kill(pid, 'SIGSTOP');
+  try {
+    await expect(page.locator('#conn-banner')).toBeVisible({ timeout: 7000 });
+    await expect(page.locator('#alerts-line .al-id')).toHaveText('skycued', { timeout: 5000 });
+    await expect(page.locator('#alerts-line .al-detail')).toHaveText('connection lost');
+  } finally {
+    process.kill(pid, 'SIGCONT');
+  }
+  await expect(page.locator('#conn-banner')).toBeHidden({ timeout: 15000 });
+  const row = (await alertState(page)).rows.find((r) => r.rule === 'input_lost');
+  expect(row.input).toBe('skycued');
+  expect(row.acked).toBe(true);
+  expect(row.recovered).toMatch(/^recovered after \d+ s$/);
 });
 
 // ---- Config tab ----------------------------------------------------------------
@@ -687,6 +1064,15 @@ async function clickableIndex(page, selector) {
   }, selector);
 }
 
+// The main daemon has no radar or raster: the opacity slider has nothing to
+// act on, so it is disabled and its row dimmed.
+test('radar_opacity_disabled_without_products', async ({ page }) => {
+  await openPage(page);
+  await expect(page.locator('label[for="radar-opacity"]')).toHaveText('Radar opacity');
+  await expect(page.locator('#radar-opacity')).toBeDisabled();
+  await expect(page.locator('#radar-opacity-row')).toHaveClass(/\bdisabled\b/);
+});
+
 test.describe('fisb radar (tg30)', () => {
   test.use({ baseURL: RADAR_BASE });
 
@@ -742,6 +1128,49 @@ test.describe('fisb radar (tg30)', () => {
     await page.locator('#radar-opacity').fill('0.2');
     await expect.poll(opacity).toBeCloseTo(0.2, 2);
     await expect(page.locator('img.fisb-radar-conus')).toHaveCSS('opacity', '0.2');
+  });
+
+  // One slider for the NEXRAD layers and the other rasters alike, kept in
+  // this browser across a reload.
+  test('radar_opacity_reaches_rasters_and_persists', async ({ page }) => {
+    await openFisbPage(page);
+    const slider = page.locator('#radar-opacity');
+    await expect(slider).toBeEnabled();
+    await expect(page.locator('#radar-opacity-row')).not.toHaveClass(/\bdisabled\b/);
+    await layerToggle(page, 'Other rasters').check();
+    await page.locator('#raster-select').selectOption('70');
+    await page.locator('#raster-band').selectOption('0');
+    const raster = page.locator('img.leaflet-image-layer.fisb-raster');
+    await expect(raster).toHaveCount(1);
+    const regional = page.locator('img.leaflet-image-layer.fisb-radar-regional');
+    await expect(regional).toHaveCount(1);
+    const opacity = (loc) => () => loc.evaluate((el) => Number(getComputedStyle(el).opacity));
+    await slider.fill('0.4');
+    await expect.poll(opacity(raster)).toBeCloseTo(0.4, 2);
+    await expect.poll(opacity(regional)).toBeCloseTo(0.4, 2);
+    expect(await page.evaluate(() => localStorage.getItem('skycue.radarOpacity'))).toBe('0.4');
+    await page.reload();
+    await openFisbPage(page);
+    await expect(slider).toHaveValue('0.4');
+    await expect(regional).toHaveCount(1);
+    await expect.poll(opacity(regional)).toBeCloseTo(0.4, 2);
+  });
+
+  test('radar_opacity_follows_layer_toggles', async ({ page }) => {
+    await openFisbPage(page);
+    const slider = page.locator('#radar-opacity');
+    await expect(slider).toBeEnabled();
+    await layerToggle(page, 'Radar (regional)').uncheck();
+    await layerToggle(page, 'Radar (CONUS)').uncheck();
+    await expect(slider).toBeDisabled();
+    await expect(page.locator('#radar-opacity-row')).toHaveClass(/\bdisabled\b/);
+    await layerToggle(page, 'Other rasters').check();
+    await page.locator('#raster-select').selectOption('70');
+    await page.locator('#raster-band').selectOption('0');
+    await expect(page.locator('img.leaflet-image-layer.fisb-raster')).toHaveCount(1);
+    await expect(slider).toBeEnabled();
+    await layerToggle(page, 'Other rasters').uncheck();
+    await expect(slider).toBeDisabled();
   });
 
   // Regional radar fades to half opacity past 15 min, CONUS past 30 min
@@ -1012,10 +1441,10 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openFisbPage(page);
     await expect(page.locator('#stat-fisb-stations')).not.toHaveText('–');
-    for (const d of await headerRowOffsets(page)) expect(d).toBeLessThan(4);
+    for (const d of await headerRowOffsets(page, '99')) expect(d).toBeLessThan(4);
     for (const width of [1401, 1600, 1700]) {
       await page.setViewportSize({ width, height: 800 });
-      for (const d of await headerRowOffsets(page)) expect(d, `at ${width} px`).toBeLessThan(4);
+      for (const d of await headerRowOffsets(page, '99')) expect(d, `at ${width} px`).toBeLessThan(4);
     }
   });
 
@@ -1722,6 +2151,51 @@ test.describe('receiver tab (pingsim)', () => {
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => window.__xss)).toBeUndefined();
   });
+
+  // A UDP input stays connected while its socket is bound, so the case adds
+  // a tcp_listen input (connected while a peer is) and is that peer itself.
+  test('alerts_input_lost_after_hold_off_and_recovers', async ({ page }) => {
+    const port = await new Promise((resolve, reject) => {
+      const s = net.createServer();
+      s.on('error', reject);
+      s.listen(0, '127.0.0.1', () => {
+        const p = s.address().port;
+        s.close(() => resolve(p));
+      });
+    });
+    expect((await rxApi('POST', '/api/inputs', { id: 'ps-tcp', name: 'tcp mast', type: 'pingstation_cat021',
+      transport: 'tcp_listen', bind: '127.0.0.1', port, edition: '2.5' })).status).toBe(201);
+    await alertsOnly(page, ['input_lost']);
+    await openPage(page);
+    const tcpConnected = async () => {
+      const i = (await rxInputs()).find((x) => x.id === 'ps-tcp');
+      return !!(i && i.state && i.state.connected);
+    };
+    const socks = [];
+    const connect = () => { const s = net.connect(port, '127.0.0.1'); s.on('error', () => {}); socks.push(s); return s; };
+    try {
+      const sock = connect();
+      await expect.poll(tcpConnected, { timeout: 10000 }).toBe(true);
+      // The page has seen it connected (ps-sim and ps-tcp).
+      await expect(page.locator('#stat-inputs')).toHaveText('2/2', { timeout: 10000 });
+      sock.destroy();
+      const t0 = Date.now();
+      await page.waitForTimeout(5000);
+      expect((await alertState(page)).rows.filter((r) => r.rule === 'input_lost')).toEqual([]);
+      await expect(page.locator('#alerts-line .al-kind')).toHaveText('Input lost', { timeout: 20000 });
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(10000);
+      await expect(page.locator('#alerts-line .al-id')).toHaveText('tcp mast');
+      await expect(page.locator('#alerts-line .al-detail')).toHaveText('disconnected');
+
+      connect();
+      const lost = async () => (await alertState(page)).rows.find((r) => r.rule === 'input_lost') || null;
+      await expect.poll(async () => { const r = await lost(); return r && r.acked; }, { timeout: 15000 }).toBe(true);
+      expect((await lost()).recovered).toMatch(/^recovered after \d+ s$/);
+      await expect(page.locator('#alerts-count')).toHaveText('0');
+    } finally {
+      socks.forEach((s) => s.destroy());
+    }
+  });
 });
 
 test.describe('receiver tab (FIS-B, 2015 sample)', () => {
@@ -1933,6 +2407,228 @@ test('view_section_fits_panel_and_details_show_class_and_country', async ({ page
   const panel = await selectTarget(page);
   await expect(panel.locator('[data-field="class"]')).toHaveText('airline');
   await expect(panel.locator('[data-field="country"]')).toHaveText('United States');
+});
+
+// Saved filter sets (spec §4): named Display-filter states in this browser,
+// recalled from the select or with the number keys.
+const setOptionTexts = (page) => page.$$eval('#view-set-select option', (os) => os.map((o) => o.text));
+const setSelectedText = (page) => page.$eval('#view-set-select', (s) => s.options[s.selectedIndex].text);
+const activeViewSet = (page) => page.evaluate(() => window.skycueApp.activeViewSet());
+async function viewSetMenu(page, act) {
+  await page.click('#view-set-more');
+  await expect(page.locator('#view-set-menu')).toBeVisible();
+  await page.click(`#view-set-menu [data-act="${act}"]`);
+}
+test('view_sets_save_apply_modified_rename_delete_keys', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 1);
+  await expect(page.locator('#view-set-delete')).toBeDisabled();
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'ual' }));
+  let question = null;
+  page.once('dialog', (d) => { question = d.message(); d.accept('Airlines'); });
+  await page.click('#view-set-save');
+  expect(question).toBe('Name for this filter set');
+  expect(await setSelectedText(page)).toBe('Airlines');
+  await expect(page.locator('#view-set-delete')).toBeEnabled();
+  const ual = await page.evaluate(() => window.skycuePure.normalizeView({ search: 'ual' }));
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))))
+    .toEqual({ version: 1, sets: [{ name: 'Airlines', view: ual, hideFiltered: false }] });
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'dal' }));
+  expect(await setSelectedText(page)).toBe('Airlines (modified)');
+  await page.evaluate(() => {
+    window.skycueApp.resetViewFilters();
+    window.skycueApp.setViewFilters({ emergency: true });
+    window.skycueApp.setHideFiltered(true);
+  });
+  page.once('dialog', (d) => { question = d.defaultValue(); d.accept('Emerg'); });
+  await page.click('#view-set-save');
+  expect(question).toBe('Airlines');                                     // the prompt offers the active set's name
+  expect(await setSelectedText(page)).toBe('Emerg');
+  expect(await activeViewSet(page)).toBe(1);
+
+  await page.locator('body').press('1');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().search)).toBe('ual');
+  expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(false);
+  expect(await setSelectedText(page)).toBe('Airlines');
+  await page.locator('body').press('2');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().emergency)).toBe(true);
+  expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(true);
+  await expect(page.locator('#hide-filtered')).toBeChecked();
+  await page.locator('body').press('0');
+  const defaults = await page.evaluate(() => window.skycuePure.VIEW_DEFAULTS);
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters())).toEqual(defaults);
+  await expect(page.locator('#view-set-select')).toHaveValue('');
+  expect(await activeViewSet(page)).toBe(null);
+  await page.locator('body').press('9');                                   // no ninth set: nothing
+  expect(await activeViewSet(page)).toBe(null);
+
+  // A digit typed into a text field is text, never a set.
+  await page.locator('#view-search').focus();
+  await page.keyboard.type('1');
+  await expect(page.locator('#view-search')).toHaveValue('1');
+  expect(await activeViewSet(page)).toBe(null);
+  await page.fill('#view-search', '');
+  await page.locator('#alerts-gear').click();
+  await expect(page.locator('#alerts-config')).toBeVisible();
+  const watch = page.locator('#alerts-watch');
+  const watchBefore = await watch.inputValue();
+  await watch.fill('');
+  await watch.focus();
+  await page.keyboard.type('1');
+  await expect(watch).toHaveValue('1');
+  expect(await activeViewSet(page)).toBe(null);
+  await watch.fill(watchBefore);
+  await watch.blur();
+  await page.click('#alerts-config-close');
+  await expect(page.locator('#alerts-config')).toBeHidden();
+  await page.locator('#stats-toggle').click();
+  await expect(page.locator('#stats-aircraft-search')).toBeVisible();
+  await page.locator('#stats-aircraft-search').focus();
+  await page.keyboard.type('1');
+  await expect(page.locator('#stats-aircraft-search')).toHaveValue('1');
+  expect(await activeViewSet(page)).toBe(null);
+  await page.fill('#stats-aircraft-search', '');
+  await page.evaluate(() => window.skycueApp.showMain('map'));
+
+  await page.selectOption('#view-set-select', { label: 'Airlines' });
+  expect(await activeViewSet(page)).toBe(0);
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().search)).toBe('ual');
+  // Choosing the active set again re-applies it when the state drifted.
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'dal' }));
+  expect(await setSelectedText(page)).toBe('Airlines (modified)');
+  await page.selectOption('#view-set-select', { label: 'Airlines' });
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters())).toEqual(ual);
+  expect(await setSelectedText(page)).toBe('Airlines');
+  expect(await activeViewSet(page)).toBe(0);
+  await page.click('#view-set-more');
+  await expect(page.locator('#view-set-more')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#view-set-menu [data-act="up"]')).toBeDisabled();
+  await expect(page.locator('#view-set-menu [data-act="down"]')).toBeEnabled();
+  await page.locator('#view-set-menu [data-act="rename"]').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#view-set-menu')).toBeHidden();
+  await expect(page.locator('#view-set-more')).toHaveAttribute('aria-expanded', 'false');
+  page.once('dialog', (d) => { question = d.defaultValue(); d.accept('Emerg'); });
+  await viewSetMenu(page, 'rename');
+  expect(question).toBe('Airlines');
+  await expect(page.locator('#view-set-msg')).toHaveText('A set named "Emerg" already exists.');
+  await expect(page.locator('#view-set-msg')).toHaveClass(/error/);
+  page.once('dialog', (d) => d.accept('Airliners'));
+  await viewSetMenu(page, 'rename');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'Airliners', 'Emerg']);
+  await viewSetMenu(page, 'down');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'Emerg', 'Airliners']);
+  expect(await setSelectedText(page)).toBe('Airliners');
+  page.once('dialog', (d) => { question = d.message(); d.accept(); });
+  await page.click('#view-set-delete');
+  expect(question).toBe('Delete the filter set "Airliners"?');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'Emerg']);
+  await expect(page.locator('#view-set-select')).toHaveValue('');
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets.map((x) => x.name)).toEqual(['Emerg']);
+  await page.evaluate(() => { window.skycueApp.resetViewFilters(); window.skycueApp.setHideFiltered(false); });
+});
+test('view_sets_row_fits_panel', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('skycue.viewSets', JSON.stringify({ version: 1, sets: [{ name: 'W'.repeat(40), view: {}, hideFiltered: false }] }));
+  });
+  await openPage(page);
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'W'.repeat(40)]);
+  await page.selectOption('#view-set-select', '0');
+  const tops = await page.evaluate(() => ['view-set-select', 'view-set-save', 'view-set-delete', 'view-set-more']
+    .map((id) => document.getElementById(id).getBoundingClientRect().top));
+  tops.forEach((t) => expect(Math.abs(t - tops[0])).toBeLessThanOrEqual(2));
+  expect(await page.evaluate(() => { const f = document.getElementById('filters'); return f.scrollWidth - f.clientWidth; })).toBe(0);
+  await page.click('#view-set-more');
+  await expect(page.locator('#view-set-menu')).toBeVisible();
+  expect(await page.evaluate(() => { const f = document.getElementById('filters'); return f.scrollWidth - f.clientWidth; })).toBe(0);
+  await page.keyboard.press('Escape');
+});
+
+// Settings export and import (spec §4.4, §11 "Import merge"): one JSON file
+// with the filter sets and the alert config, replaced or merged; never sent
+// to skycued.
+async function saveSetAs(page, name) {
+  page.once('dialog', (d) => d.accept(name));
+  await page.click('#view-set-save');
+}
+async function deleteSets(page, names) {
+  for (const name of names) {
+    await page.selectOption('#view-set-select', { label: name });
+    page.once('dialog', (d) => d.accept());
+    await page.click('#view-set-delete');
+  }
+  expect(await setOptionTexts(page)).toEqual(['— current —']);
+  await page.evaluate(() => { window.skycueApp.resetViewFilters(); window.skycueApp.setHideFiltered(false); });
+}
+async function importFile(page, file) {
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), viewSetMenu(page, 'import')]);
+  expect(chooser.isMultiple()).toBe(false);
+  await page.setInputFiles('#settings-file', file);
+}
+test('settings_export_then_import_restores_sets', async ({ page }) => {
+  const writes = [];                                         // import never touches skycued
+  page.on('request', (r) => { if (r.method() !== 'GET') writes.push(r.method() + ' ' + r.url()); });
+  await openPage(page);
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'ual' }));
+  await saveSetAs(page, 'A');
+  await page.evaluate(() => { window.skycueApp.resetViewFilters(); window.skycueApp.setViewFilters({ emergency: true }); });
+  await saveSetAs(page, 'B');
+  const [download] = await Promise.all([page.waitForEvent('download'), viewSetMenu(page, 'export')]);
+  expect(download.suggestedFilename()).toMatch(/^skycue-settings-\d{4}-\d{2}-\d{2}\.json$/);
+  const file = await download.path();
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  expect(data.skycue_settings).toBe(1);
+  expect(data.sets.map((s) => s.name)).toEqual(['A', 'B']);
+  expect(data.alerts.rules.emergency.enabled).toBe(true);
+  expect(Object.prototype.hasOwnProperty.call(data.alerts, 'hidden')).toBe(false);
+  const ual = await page.evaluate(() => window.skycuePure.normalizeView({ search: 'ual' }));
+  expect(data.sets[0]).toEqual({ name: 'A', view: ual, hideFiltered: false });
+
+  await deleteSets(page, ['A', 'B']);
+  await importFile(page, file);
+  await expect(page.locator('#settings-import')).toBeVisible();
+  await expect(page.locator('#settings-import-text')).toContainText('2 filter sets and the alert settings');
+  await expect(page.locator('#settings-import-text')).not.toContainText('Merge replaces');
+  await page.click('#settings-import-replace');
+  await expect(page.locator('#settings-import')).toBeHidden();
+  await expect(page.locator('#view-set-msg')).toHaveText('Imported 2 filter sets.');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'A', 'B']);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets.map((x) => x.name)).toEqual(['A', 'B']);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.alerts'))).rules.emergency.enabled).toBe(true);
+
+  await page.selectOption('#view-set-select', { label: 'A' });
+  page.once('dialog', (d) => d.accept('C'));
+  await viewSetMenu(page, 'rename');
+  await importFile(page, file);
+  await expect(page.locator('#settings-import-text')).toContainText('Merge replaces: B');
+  await page.click('#settings-import-merge');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'C', 'B', 'A']);
+  await expect(page.locator('#view-set-msg')).toHaveText('Imported 2 filter sets.');
+  expect(writes).toEqual([]);
+  await deleteSets(page, ['C', 'B', 'A']);
+});
+test('settings_import_bad_and_hostile_files', async ({ page }) => {
+  await openPage(page);
+  const msg = page.locator('#view-set-msg');
+  await page.setInputFiles('#settings-file', { name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('{"x":1}') });
+  await expect(msg).toHaveText('Cannot import: not a skycue settings file.');
+  await expect(msg).toHaveClass(/error/);
+  await expect(page.locator('#settings-import')).toBeHidden();
+  await page.setInputFiles('#settings-file', { name: 'big.json', mimeType: 'application/json',
+    buffer: Buffer.alloc(1536 * 1024, ' ') });
+  await expect(msg).toHaveText('File too large (over 1 MB).');
+  await expect(page.locator('#settings-import')).toBeHidden();
+  const hostile = '<img src=x onerror="window.__xss=3">';
+  await page.setInputFiles('#settings-file', { name: '<b>h</b>.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ skycue_settings: 1, sets: [{ name: hostile, view: { search: hostile } }] })) });
+  await expect(page.locator('#settings-import-text')).toHaveText('<b>h</b>.json: 1 filter sets. Replace yours, or merge?');
+  await page.click('#settings-import-replace');
+  expect(await setOptionTexts(page)).toEqual(['— current —', hostile]);
+  await page.selectOption('#view-set-select', { label: hostile });
+  await expect(page.locator('#view-search')).toHaveValue(hostile);
+  expect(await page.locator('#view img').count()).toBe(0);
+  expect(await page.locator('#settings-import b').count()).toBe(0);
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+  await deleteSets(page, [hostile]);
 });
 
 // The map (spec §5). RPA4521 (ac5e81) times out for ~3 s of each ~122 s
@@ -2412,20 +3108,27 @@ test.describe('stats weather (FIS-B daemon)', () => {
     await expect(sec).toBeVisible();
     await expect.poll(async () => (await statsState(page)).cards.filter((c) => c.id === 'weather-uat' && c.canvas).length,
       { timeout: 15000 }).toBe(1);
-    const o = await cardOption(page, 'weather-uat');
-    expect(o.series.map((s) => [s.id, s.type])).toEqual([['uplink', 'line'], ['downlink', 'line'], ['products', 'line']]);
-    o.series.forEach((s) => expect(isPairs(s.data), s.id).toBe(true));
     // One point per bucket of the range's series, from its uat_uplink,
     // uat_downlink and fisb_products columns; the caption gives their sums.
     // The decoded products are counted (the unpaced replay decodes every
     // uplink before the store's first tick); the UAT frame columns are the
     // dump978 input's counters, which a replay has not, so they read zero.
-    const se = (await apiAt(FISB_BASE, '/api/stats/series')).body;
-    o.series.forEach((s) => expect(s.data.length, s.id).toBe(se.t.length));
+    // The chart and the API are read apart, so a minute bucket can land in
+    // between: read both again (after a refresh) until they agree.
+    let o, se, cap;
+    await expect.poll(async () => {
+      o = await cardOption(page, 'weather-uat');
+      cap = await cardCaption(page, 'weather-uat');
+      se = (await apiAt(FISB_BASE, '/api/stats/series')).body;
+      if (o.series.every((s) => s.data.length === se.t.length)) return true;
+      await page.evaluate(() => window.skycueApp.statsRefresh());
+      return false;
+    }, { timeout: 15000 }).toBe(true);
+    expect(o.series.map((s) => [s.id, s.type])).toEqual([['uplink', 'line'], ['downlink', 'line'], ['products', 'line']]);
+    o.series.forEach((s) => expect(isPairs(s.data), s.id).toBe(true));
     const sums = o.series.map((s) => sumPairs(s.data));
     expect(sums[2]).toBeGreaterThan(0);
     expect(sums[2]).toBe(se.fisb_products.reduce((a, b) => a + b, 0));
-    const cap = await cardCaption(page, 'weather-uat');
     const th = (n) => n.toLocaleString('en-US');
     expect(cap).toBe(th(sums[0]) + ' uplink · ' + th(sums[1]) + ' downlink frames · ' + th(sums[2]) + ' products');
     // A summary without UAT activity (as after a reset) hides the section.
@@ -3091,6 +3794,104 @@ test('stats_charts_disposed_when_hidden_and_recreated', async ({ page }) => {
   await clickItem(page, 'fleet-category', 'donut', 0, 0.5);
   await expect.poll(() => page.evaluate(() => window.skycueApp.mainView())).toBe('map');
   expect(await page.evaluate(() => window.skycueApp.getViewFilters().category)).toBe(filter);
+  await restoreMap(page);
+});
+
+// ---- Stats: CSV and PNG export (operator tools spec 5) -------------------------
+// A click that downloads a file: its name, text and CRLF records (the last
+// element, after the final CRLF, is the empty string).
+async function csvDownload(page, selector) {
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.locator(selector).click()]);
+  const text = fs.readFileSync(await dl.path(), 'utf8');
+  const lines = text.split('\r\n');
+  return { name: dl.suggestedFilename(), text, lines, records: lines.length - 2,
+    keys: lines.slice(1, -1).map((l) => l.split(',')[0]) };
+}
+const LEDGER_CSV_HEADER = 'key,hex,addr_type,first_seen,last_seen,observations,positions,sessions,sent_updates,drops,' +
+  'emergencies,max_range_nm,max_range_time,max_range_lat_deg,max_range_lon_deg,max_range_bearing_deg,min_alt_ft,' +
+  'max_alt_ft,max_gs_kt,min_rssi_dbfs,max_rssi_dbfs,callsigns,squawks,inputs,registration,category,source,class,country';
+
+test('stats_csv_downloads_three_cards', async ({ page }) => {
+  await openAircraftSection(page);
+  await page.locator('#stats-live').uncheck();
+  const AC = '#stats-aircraft-csv';
+  await expect(page.locator(AC)).toHaveText('CSV');
+  await expect(page.locator(AC)).toBeEnabled();
+  // The whole ledger: the header with units, one record per entry.
+  const before = (await api('/api/stats/aircraft?limit=1000')).body.total;
+  const all = await csvDownload(page, AC);
+  const after = (await api('/api/stats/aircraft?limit=1000')).body.total;
+  expect(all.name).toMatch(/^skycue-aircraft-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(all.lines[0]).toBe(LEDGER_CSV_HEADER);
+  expect(all.text.charCodeAt(0)).not.toBe(0xfeff);                 // no BOM
+  // The 20x replay keeps adding entries: the export lands between the reads.
+  expect(before <= all.records && all.records <= after,
+    'CSV records ' + all.records + ' between the ledger totals ' + before + ' and ' + after).toBe(true);
+  expect(new Set(all.keys).size).toBe(all.keys.length);
+  await expect(page.locator('#stats-aircraft-caption')).not.toHaveText(/Exporting/);
+  // In the table's sort: the export and an API read taken at once agree
+  // (live data can reorder between them: the pair is read again).
+  await page.locator('#stats-aircraft-table th[data-sort="max_range_nm"]').click();
+  await expect.poll(async () => (await acState(page)).sort).toBe('max_range_nm');
+  await expect.poll(async () => {
+    const f = await csvDownload(page, AC);
+    const a = (await api('/api/stats/aircraft?sort=max_range_nm&dir=desc&limit=12')).body.rows.map((r) => r.key);
+    return f.keys.slice(0, 12).join() === a.join();
+  }, { timeout: 20000 }).toBe(true);
+  // And the search: one record, the target's.
+  await page.fill('#stats-aircraft-search', 'a4f2');
+  await expect.poll(async () => (await acState(page)).rows).toEqual([TARGET_KEY]);
+  const one = await csvDownload(page, AC);
+  expect(one.records).toBe(1);
+  expect(one.lines[1].startsWith(TARGET_KEY + ',')).toBe(true);
+
+  // The range's series: a record per bucket.
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  const TI = '[data-card="traffic-inputs"] .card-action';
+  await expect(page.locator(TI)).toHaveText('CSV');
+  await expect(page.locator(TI)).toBeEnabled();
+  const ser = await csvDownload(page, TI);
+  expect(ser.name).toMatch(/^skycue-observations-by-input-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(ser.lines[0].startsWith('time,observations,positions,aircraft')).toBe(true);
+  expect(ser.records).toBe((await statsState(page)).seriesBuckets);
+  expect(ser.records).toBeGreaterThan(0);
+
+  // The coverage table: 72 sectors x 8 bands.
+  const CP = '[data-card="coverage-polar"] .card-action';
+  await expect(page.locator(CP)).toHaveText('CSV');
+  await expect(page.locator(CP)).toBeEnabled({ timeout: 15000 });
+  const cov = await csvDownload(page, CP);
+  expect(cov.name).toMatch(/^skycue-coverage-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(cov.lines[0]).toBe('sector_start_deg,band,max_range_nm,holder,time,n');
+  expect(cov.records).toBe(72 * 8);                                // 577 lines with the header
+  await restoreMap(page);
+});
+
+// Every card chart has the toolbox's PNG save on the page's dark
+// background, named after its card; its icon sits at the chart's top right.
+test('stats_cards_save_as_image', async ({ page }) => {
+  await openStats(page);
+  const want = allCards((await api('/api/stats/summary')).body);
+  await expect.poll(() => drawnCards(page), { timeout: 15000 }).toEqual(want);
+  const saves = await page.evaluate(() => Array.from(document.querySelectorAll('#stats-view .card .card-chart'))
+    .map((el) => {
+      const inst = window.echarts.getInstanceByDom(el);
+      if (!inst) return null;
+      const f = inst.getOption().toolbox[0].feature.saveAsImage;
+      return { id: el.closest('.card').getAttribute('data-card'), bg: f.backgroundColor, name: f.name };
+    }).filter((x) => x));
+  expect(saves.map((s) => s.id).sort()).toEqual(want);
+  for (const s of saves) {
+    expect(s.bg, s.id).toBe('#0d1117');
+    expect(s.name.startsWith('skycue-' + s.id + '-'), s.id).toBe(true);
+  }
+  await page.locator('#stats-live').uncheck();
+  const chart = page.locator('[data-card="traffic-inputs"] .card-chart');
+  await chart.scrollIntoViewIfNeeded();
+  const box = await chart.boundingBox();
+  const [dl] = await Promise.all([page.waitForEvent('download'),
+    page.mouse.click(box.x + box.width - 10, box.y + 10)]);
+  expect(dl.suggestedFilename()).toMatch(/^skycue-traffic-inputs-\d{4}-\d{2}-\d{2}\.png$/);
   await restoreMap(page);
 });
 

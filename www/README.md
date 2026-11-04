@@ -2,8 +2,12 @@
 
 The page skycued serves on `WEB_PORT` (see `docs/web-api.md`): `index.html`,
 `app_pure.js` (pure helpers, `window.skycuePure`, also loaded by the node
-test), `app.js` (the page) and `style.css`. Plain ES2017, no framework, no
-build step, and no request to any host but skycued itself.
+test), `alerts_pure.js` (the alert rules engine, `window.skycueAlertsPure`,
+node-tested by `tests/js/alerts_pure.test.js`), `alerts_view.js` (the alert
+strip, built from a host object `app.js` passes in, like `stats_view.js`),
+`app.js` (the page) and `style.css`, with the Stats view's scripts
+([Stats view](#stats-view)). Plain ES2017, no framework, no build step, and
+no request to any host but skycued itself.
 
 ## Leaflet
 
@@ -75,7 +79,28 @@ refresh with the newest `summary` and `series`; the hourly series,
 refresh. The Fleet clicks and the aircraft detail's buttons reach the map
 through the host object `app.js` builds (`setViewFilter`, `select`,
 `showMain`). What the view shows, for operators, is in
-`docs/operating.md` (Stats view, Statistics file).
+`docs/operating.md` (Stats view, Statistics file). The CSV shapes
+(`csvText`, `ledgerCsvRows`, `seriesCsvRows`, `coverageCsvRows`,
+`csvFileName`) are in `stats_pure.js`; the file is handed to the host's
+`download`.
+
+The alert strip (`#alerts`, over the map, the table and this view) is the
+same pattern: `alerts_pure.js` holds the rules (`RULES`), the
+edge-triggered engine (`createEngine`: dedupe, 5-minute quiet period,
+10 s input hold-off, the snapshot baseline), the normalisers of
+localStorage `skycue.alerts` and `skycue.alertLog` and the settings file
+of the filter sets' Export…/Import… (`settingsFile`, `parseSettings`,
+`mergeSettings`); under node it loads `./app_pure.js` itself, in the page
+it uses `window.skycuePure`. `alerts_view.js` draws the strip, the drawer
+and `#alerts-config` and plays the tones, from the host object `app.js`
+builds (`dataNow`, `storeGet`/`storeSet`, `request`, `selectTrack`,
+`openReceiver`, `openStatsAircraft` and the rest, listed at its top). What
+the strip does, for operators, is in `docs/operating.md` (Alerts).
+
+`index.html` loads the scripts in this order: Leaflet, ECharts,
+`app_pure.js`, `alerts_pure.js`, `stats_pure.js`, `chart_theme.js`,
+`stats_view.js`, `alerts_view.js`, `app.js`: each pure file after
+`app_pure.js`, each view before `app.js`, which creates them.
 
 ## Map tiles
 

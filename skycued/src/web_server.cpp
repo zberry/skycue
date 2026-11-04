@@ -5,6 +5,7 @@
 #include "runtime_config.hpp"
 #include "web_api.hpp"
 #include "web_inputs.hpp"
+#include "web_stats.hpp"
 
 // Boost.Beast as of Boost 1.66 (the oldest supported): http::async_read with
 // a request_parser, http::async_write, websocket::stream<tcp::socket> with

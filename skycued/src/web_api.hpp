@@ -8,7 +8,6 @@
 // written as null; times are ISO-8601 UTC with milliseconds.
 
 #include "engine_events.hpp"
-#include "web_stats.hpp"
 
 #include <skycue/types.hpp>
 
@@ -25,6 +24,8 @@ class RuntimeConfig;
 struct DaemonInfo;
 
 namespace webapi {
+
+struct StatsApiState;  // web_stats.hpp
 
 // Each of these is one JSON object. stateJson includes "fisb", the FIS-B
 // status object (web_fisb.hpp), and "inputs", the inputs (web_inputs.hpp). `type`, when given, is written first as

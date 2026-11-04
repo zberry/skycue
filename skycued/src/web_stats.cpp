@@ -89,6 +89,8 @@ std::optional<int64_t> parseInt(const std::string& s)
     const char* e = b + s.size();
     if (b != e && *b == '+')
         ++b;
+    if (b != e && (*b == '+' || *b == '-') && b != s.data())
+        return std::nullopt;  // "+-5", "++5"
     int64_t v = 0;
     const auto r = std::from_chars(b, e, v);
     if (b == e || r.ec != std::errc() || r.ptr != e)
@@ -560,7 +562,15 @@ const std::map<std::string, SortValue>& sortFields()
     auto ranged = [](std::function<double(A)> f) {
         return SortValue([f](A a) { return a.max_range_nm ? std::optional<double>(f(a)) : std::nullopt; });
     };
-    static const std::map<std::string, SortValue> fields{
+    // A non-finite value (never stored; defensive) sorts as no value.
+    auto finite = [](SortValue f) {
+        return SortValue([f](A a) {
+            const std::optional<double> v = f(a);
+            return v && std::isfinite(*v) ? v : std::nullopt;
+        });
+    };
+    static const std::map<std::string, SortValue> fields = [&] {
+        std::map<std::string, SortValue> m{
         {"first_seen", [](A a) { return std::optional<double>(double(a.first_seen_s)); }},
         {"last_seen", [](A a) { return std::optional<double>(double(a.last_seen_s)); }},
         {"observations", u(&AircraftStats::observations)},
@@ -579,7 +589,11 @@ const std::map<std::string, SortValue>& sortFields()
         {"max_gs_kt", [](A a) { return a.max_gs_kt; }},
         {"min_rssi", [](A a) { return a.min_rssi; }},
         {"max_rssi", [](A a) { return a.max_rssi; }},
-    };
+        };
+        for (auto& kv : m)
+            kv.second = finite(kv.second);
+        return m;
+    }();
     return fields;
 }
 

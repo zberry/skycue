@@ -3,10 +3,13 @@
 
 #include "engine_test_support.hpp"
 
+#include "icao_class.hpp"
 #include "runtime_config.hpp"
+#include "stats_store.hpp"
 #include "time_util.hpp"
 #include "web_api.hpp"
 #include "web_server.hpp"
+#include "web_stats.hpp"
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -1637,7 +1640,9 @@ BOOST_AUTO_TEST_CASE(stats_aircraft_sort_and_q)
 
     for (const char* bad : {"/api/stats/aircraft?sort=bogus", "/api/stats/aircraft?sort=callsigns",
                             "/api/stats/aircraft?dir=up", "/api/stats/aircraft?limit=x",
-                            "/api/stats/aircraft?offset=-1", "/api/stats/aircraft?offset=1.5"}) {
+                            "/api/stats/aircraft?offset=-1", "/api/stats/aircraft?offset=1.5",
+                            "/api/stats/aircraft?limit=%2B-5", "/api/stats/aircraft?offset=%2B%2B1",
+                            "/api/stats/aircraft?limit="}) {
         r = get(f.port, bad);
         BOOST_TEST(r.status == 400u, bad);
         BOOST_TEST(has(r.body, "\"error\":"), bad);
@@ -1658,6 +1663,7 @@ BOOST_AUTO_TEST_CASE(stats_aircraft_sort_and_q)
 
     s = parseJson(get(f.port, "/api/stats/aircraft?limit=5000").body);
     BOOST_TEST(s.get<int>("limit") == 1000);
+    BOOST_TEST(parseJson(get(f.port, "/api/stats/aircraft?limit=%2B2").body).get<int>("limit") == 2);
     s = parseJson(get(f.port, "/api/stats/aircraft?limit=0").body);
     BOOST_TEST(s.get<int>("limit") == 1);
     BOOST_TEST(s.get_child("rows").size() == 1u);
@@ -1729,14 +1735,15 @@ BOOST_AUTO_TEST_CASE(stats_reset_guarded)
     BOOST_TEST(r.status == 400u);
     BOOST_TEST(parseJson(get(f.port, "/api/stats/summary").body).get<int>("aircraft_total") == 1);
 
-    std::this_thread::sleep_for(1100ms);  // since moves to a later second
+    const int obs_before = parseJson(get(f.port, "/api/stats/summary").body).get<int>("range.observations");
+    BOOST_TEST(obs_before == 1);
     r = request(f.port, http::verb::post, "/api/stats/reset", "{}");
     BOOST_TEST(r.status == 200u);
     BOOST_TEST(r.body == "{\"ok\":true}");
     const pt::ptree s = parseJson(get(f.port, "/api/stats/summary").body);
     BOOST_TEST(s.get<int>("aircraft_total") == 0);
     BOOST_TEST(s.get<int>("range.observations") == 0);
-    BOOST_TEST(s.get<std::string>("since") > since);
+    BOOST_TEST(s.get<std::string>("since") >= since);
     // At most one reset every 5 s.
     r = request(f.port, http::verb::post, "/api/stats/reset", "{}");
     BOOST_TEST(r.status == 429u);
@@ -1747,6 +1754,33 @@ BOOST_AUTO_TEST_CASE(stats_reset_guarded)
         BOOST_TEST(r.status == 405u);
         BOOST_TEST(r.allow == "POST");
     }
+}
+
+BOOST_AUTO_TEST_CASE(stats_reset_rate_limit)
+{
+    // handleStatsApi directly, with the last reset set by the test.
+    WebFx f;
+    const auto req = skycued::webapi::makeApiRequest("POST", "/api/stats/reset",
+                                                     {{"Content-Type", "application/json"}}, "{}", "127.0.0.1:1");
+    skycued::webapi::StatsApiState state;
+    auto reset = [&] {
+        return f.fx->t.call([&] { return skycued::webapi::handleStatsApi(req, *f.fx->engine, &state); });
+    };
+    state.last_reset = std::chrono::steady_clock::now() - 6s;
+    auto r = reset();
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "{\"ok\":true}");
+    BOOST_REQUIRE(state.last_reset.has_value());
+    BOOST_TEST((std::chrono::steady_clock::now() - *state.last_reset < 2s));  // moved to this reset
+    state.last_reset = std::chrono::steady_clock::now() - 1s;
+    const auto before = *state.last_reset;
+    r = reset();
+    BOOST_TEST(r.status == 429u);
+    BOOST_TEST(r.body == "{\"error\":\"the statistics were reset less than 5 s ago\"}");
+    BOOST_TEST((*state.last_reset == before));  // a refused reset does not move it
+    // Without a state (no WebServer): never limited.
+    r = f.fx->t.call([&] { return skycued::webapi::handleStatsApi(req, *f.fx->engine, nullptr); });
+    BOOST_TEST(r.status == 200u);
 }
 
 BOOST_AUTO_TEST_CASE(stats_unknown_path_404)
@@ -1769,4 +1803,130 @@ BOOST_AUTO_TEST_CASE(stats_unknown_path_404)
     const pt::ptree s = parseJson(get(f.port, "/api/stats").body);
     BOOST_TEST(s.get<int>("observations") == 1);
     BOOST_TEST(s.get<int>("tracks_total") == 1);
+}
+
+// ---- statsReadRoute on a hand-built store ----
+
+namespace {
+
+using skycued::StatsStore;
+const int64_t kStatsT0 = 1793707200;  // 2026-11-03T12:00:00Z
+
+std::chrono::system_clock::time_point statsAt(int64_t s)
+{
+    return std::chrono::system_clock::time_point(std::chrono::seconds(s));
+}
+
+// One positioned observation of `address` at data time `t_s`.
+void observeAt(StatsStore& st, uint32_t address, int64_t t_s, const std::string& callsign = "",
+               const std::string& category = "")
+{
+    TrackObservation o;
+    o.id = TrackId{address, AddressType::icao};
+    o.source = skycue::Source::adsb_1090;
+    o.received_time = statsAt(t_s);
+    o.position_time = o.received_time;
+    o.lat = 39.0;
+    o.lon = -77.0;
+    o.alt_baro_ft = 12000;
+    o.input_id = "readsb";
+    if (!callsign.empty())
+        o.callsign = callsign;
+    if (!category.empty())
+        o.category = category;
+    skycued::TrackState s;
+    s.id = o.id;
+    s.source = o.source;
+    s.latest = o;
+    s.last_input = o.input_id;
+    s.first_seen = s.last_seen = o.received_time;
+    st.observe(o, s, skycued::FilterResult{skycued::Decision::send, 6.0, 1.0, false});
+}
+
+pt::ptree summaryOf(const StatsStore& st, const std::string& query, int64_t now_s)
+{
+    const auto r = skycued::webapi::statsReadRoute(
+        skycued::webapi::makeApiRequest("GET", "/api/stats/summary" + query, {}, ""), st, statsAt(now_s));
+    BOOST_REQUIRE(r.status == 200u);
+    return parseJson(r.body);
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(stats_summary_class_country_follow_range)
+{
+    StatsStore st(skycued::ReceiverPosition{38.9, -77.0, 100.0});
+    const int64_t t1 = kStatsT0, t2 = kStatsT0 + 2 * 3600;
+    observeAt(st, 0xa40001, t1, "UAL11");      // United States, airline
+    observeAt(st, 0xc00001, t2, "", "A1");     // Canada, private
+    const std::string range2 = "?from=" + skycued::formatIso8601Ms(statsAt(t2 - 60)) +
+                               "&to=" + skycued::formatIso8601Ms(statsAt(t2 + 60));
+    pt::ptree s = summaryOf(st, range2, t2 + 60);
+    BOOST_TEST(s.get<int>("aircraft_total") == 2);
+    BOOST_TEST(s.get<int>("range.aircraft") == 1);
+    BOOST_TEST(s.get<int>("range.observations") == 1);
+    BOOST_TEST(s.get<int>("range.by_class.private") == 1);
+    BOOST_TEST(s.get<int>("range.by_class.airline") == 0);
+    BOOST_REQUIRE(s.get_child("range.by_country").size() == 1u);
+    BOOST_TEST(s.get<std::string>("range.by_country..name") == "Canada");
+    BOOST_TEST(s.get<int>("range.by_country..n") == 1);
+    // The whole history (default range): both.
+    s = summaryOf(st, "", t2 + 60);
+    BOOST_TEST(s.get<int>("range.aircraft") == 2);
+    BOOST_TEST(s.get<int>("range.by_class.airline") == 1);
+    BOOST_TEST(s.get<int>("range.by_class.private") == 1);
+    BOOST_TEST(s.get_child("range.by_country").size() == 2u);
+    // A range before both: none.
+    s = summaryOf(st, "?to=" + skycued::formatIso8601Ms(statsAt(t1 - 1)), t2 + 60);
+    BOOST_TEST(s.get<int>("range.aircraft") == 0);
+    BOOST_TEST(s.get_child("range.by_country").empty());
+}
+
+BOOST_AUTO_TEST_CASE(stats_summary_by_country_top20_and_other)
+{
+    // 22 countries: the first address of each with 3 addresses of one State,
+    // found by scanning the address space in 1024-address steps.
+    std::vector<std::pair<std::string, uint32_t>> countries;
+    std::set<std::string> seen;
+    for (uint32_t a = 0; a < 0x1000000u && countries.size() < 22; a += 0x400) {
+        const auto c = skycued::icaoCountry(skycued::hexAddress(a));
+        if (!c || seen.count(*c) || skycued::icaoCountry(skycued::hexAddress(a + 2)) != c)
+            continue;
+        seen.insert(*c);
+        countries.emplace_back(*c, a);
+    }
+    BOOST_REQUIRE(countries.size() == 22u);
+    // 8 countries with 3 aircraft, 8 with 2, 6 with 1: ties at every count.
+    StatsStore st(skycued::ReceiverPosition{38.9, -77.0, 100.0});
+    std::map<std::string, int> expected;
+    for (std::size_t i = 0; i < countries.size(); ++i) {
+        const int n = 3 - int(i / 8);
+        for (int k = 0; k < n; ++k)
+            observeAt(st, countries[i].second + uint32_t(k), kStatsT0 + int64_t(i));
+        expected[countries[i].first] = n;
+    }
+    std::vector<std::pair<std::string, int>> order(expected.begin(), expected.end());
+    std::stable_sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    int other = 0;
+    for (std::size_t i = 20; i < order.size(); ++i)
+        other += order[i].second;
+    BOOST_REQUIRE(other == 2);
+
+    const pt::ptree s = summaryOf(st, "", kStatsT0 + 60);
+    BOOST_TEST(s.get<int>("range.aircraft") == 8 * 3 + 8 * 2 + 6);
+    const pt::ptree& by = s.get_child("range.by_country");
+    BOOST_REQUIRE(by.size() == 21u);
+    std::size_t i = 0;
+    for (const auto& kv : by) {
+        const std::string name = kv.second.get<std::string>("name");
+        const int n = kv.second.get<int>("n");
+        if (i < 20) {
+            BOOST_TEST(name == order[i].first, i);
+            BOOST_TEST(n == order[i].second, i);
+        } else {
+            BOOST_TEST(name == "other");
+            BOOST_TEST(n == other);
+        }
+        ++i;
+    }
 }

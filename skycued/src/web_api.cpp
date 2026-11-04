@@ -35,19 +35,6 @@ using recording::addressTypeName;
 using recording::dropReasonName;
 using recording::sourceName;
 
-const char* decisionName(Decision d)
-{
-    switch (d) {
-    case Decision::send: return "send";
-    case Decision::blocked: return "blocked";
-    case Decision::allow_listed: return "allow_listed";
-    case Decision::out_of_range: return "out_of_range";
-    case Decision::below_elevation: return "below_elevation";
-    case Decision::no_position: return "no_position";
-    }
-    return "no_position";
-}
-
 JsonWriter start(const char* type)
 {
     JsonWriter w;

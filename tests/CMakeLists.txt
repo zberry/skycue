@@ -40,6 +40,12 @@ target_compile_definitions(test_geo PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_geo)
 add_test(NAME geo COMMAND test_geo)
 
+add_executable(test_stats_store test_stats_store.cpp)
+target_link_libraries(test_stats_store PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_stats_store PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_stats_store)
+add_test(NAME stats_store COMMAND test_stats_store)
+
 add_executable(test_registration test_registration.cpp)
 target_link_libraries(test_registration PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_registration PRIVATE BOOST_TEST_DYN_LINK)

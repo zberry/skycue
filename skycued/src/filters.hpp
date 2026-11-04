@@ -84,6 +84,10 @@ struct FilterResult {
 
 inline bool isSend(Decision d) { return d == Decision::send || d == Decision::allow_listed; }
 
+// The decision's name in the web API and the stats: "send", "blocked",
+// "allow_listed", "out_of_range", "below_elevation", "no_position".
+const char* decisionName(Decision d);
+
 // Decides whether a track is forwarded. No I/O.
 //
 // Order of evaluation: no_position -> block list -> allow list -> range ->

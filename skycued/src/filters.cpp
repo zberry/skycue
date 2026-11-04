@@ -65,6 +65,19 @@ std::string stripComment(const std::string& line)
 
 } // namespace
 
+const char* decisionName(Decision d)
+{
+    switch (d) {
+    case Decision::send: return "send";
+    case Decision::blocked: return "blocked";
+    case Decision::allow_listed: return "allow_listed";
+    case Decision::out_of_range: return "out_of_range";
+    case Decision::below_elevation: return "below_elevation";
+    case Decision::no_position: return "no_position";
+    }
+    return "no_position";
+}
+
 IdList IdList::loadFile(const std::string& path)
 {
     std::ifstream in(path, std::ios::binary);

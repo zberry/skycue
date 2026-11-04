@@ -47,6 +47,32 @@ struct EngineStats {
     std::vector<InputStatsLine> inputs;
 };
 
+// Counts one drop in counters named as in EngineStats: drops_timeout,
+// drops_filtered or drops_source_lost by reason (shutdown and stale have no
+// counter of their own) and, for filtered, drops_blocked, drops_out_of_range,
+// drops_below_elevation or drops_no_position by the decision that dropped it
+// (send and allow_listed are never a drop). The one mapping
+// Engine::countDrop and StatsStore::dropped share.
+template <class Counters>
+void countDropIn(Counters& c, skycue::DropReason reason, std::optional<Decision> decision)
+{
+    switch (reason) {
+    case skycue::DropReason::timeout: ++c.drops_timeout; break;
+    case skycue::DropReason::filtered: ++c.drops_filtered; break;
+    case skycue::DropReason::source_lost: ++c.drops_source_lost; break;
+    default: break;
+    }
+    if (reason != skycue::DropReason::filtered || !decision)
+        return;
+    switch (*decision) {
+    case Decision::blocked: ++c.drops_blocked; break;
+    case Decision::out_of_range: ++c.drops_out_of_range; break;
+    case Decision::below_elevation: ++c.drops_below_elevation; break;
+    case Decision::no_position: ++c.drops_no_position; break;
+    default: break;  // send, allow_listed: never a drop
+    }
+}
+
 // One filter change (Engine::filterHistory): the new state only, never a
 // diff. The list changes are not recorded here.
 struct FilterChange {

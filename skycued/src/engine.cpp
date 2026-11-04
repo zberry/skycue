@@ -498,21 +498,7 @@ void Engine::emitDrop(skycue::TrackId id, const std::optional<std::string>& call
 void Engine::countDrop(skycue::DropReason reason, std::optional<Decision> decision)
 {
     ++sent_drops_;
-    switch (reason) {
-    case skycue::DropReason::timeout: ++drops_timeout_; break;
-    case skycue::DropReason::filtered: ++drops_filtered_; break;
-    case skycue::DropReason::source_lost: ++drops_source_lost_; break;
-    default: break;
-    }
-    if (reason != skycue::DropReason::filtered || !decision)
-        return;
-    switch (*decision) {
-    case Decision::blocked: ++drops_blocked_; break;
-    case Decision::out_of_range: ++drops_out_of_range_; break;
-    case Decision::below_elevation: ++drops_below_elevation_; break;
-    case Decision::no_position: ++drops_no_position_; break;
-    default: break;  // send, allow_listed: never a drop
-    }
+    countDropIn(drops_, reason, decision);
 }
 
 void Engine::emit(const EngineEvent& event)
@@ -765,13 +751,13 @@ EngineStats Engine::stats() const
     s.fisb_uplink_duplicates = uplink_duplicates_;
     s.tcp_clients = forwarder_.tcpClientCount();
     s.udp_targets = forwarder_.udpTargetCount();
-    s.drops_timeout = drops_timeout_;
-    s.drops_filtered = drops_filtered_;
-    s.drops_source_lost = drops_source_lost_;
-    s.drops_blocked = drops_blocked_;
-    s.drops_out_of_range = drops_out_of_range_;
-    s.drops_below_elevation = drops_below_elevation_;
-    s.drops_no_position = drops_no_position_;
+    s.drops_timeout = drops_.drops_timeout;
+    s.drops_filtered = drops_.drops_filtered;
+    s.drops_source_lost = drops_.drops_source_lost;
+    s.drops_blocked = drops_.drops_blocked;
+    s.drops_out_of_range = drops_.drops_out_of_range;
+    s.drops_below_elevation = drops_.drops_below_elevation;
+    s.drops_no_position = drops_.drops_no_position;
     s.recorder_dropped_received = received_ ? received_->droppedRecords() : 0;
     s.recorder_dropped_sent = sent_ ? sent_->droppedRecords() : 0;
     s.web_clients = web_clients_;

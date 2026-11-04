@@ -235,7 +235,11 @@ input.invalid { border-color: var(--blocked); }
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
   display: flex; flex-direction: column; min-width: 0;
 }
+.card-head { display: flex; align-items: center; gap: 8px; min-height: 20px; }
 .card-title { margin: 0; font-size: 13px; font-weight: 600; }
+/* A card's small buttons (CSV) at the right of its title; the ledger's sits in its bar. */
+.card-action, #stats-aircraft-csv { padding: 0 8px; font-size: 12px; line-height: 18px; }
+.card-head .card-action { margin-left: auto; }
 .card-caption { margin: 2px 0 6px; font-size: 12px; color: var(--muted); min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-chart { height: 260px; min-width: 0; }
 @media (min-width: 1700px) {

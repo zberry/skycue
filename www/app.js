@@ -3161,7 +3161,8 @@
       statsView = window.skycueStatsView.create({
         request: request, select: select, hasTrack: function (key) { return tracks.has(key); },
         setViewFilter: function (partial) { setViewFilters(partial); }, showMain: showMain,
-        thousands: P.thousands, formatNum: P.formatNum, storeGet: storeGet, storeSet: storeSet, dataNow: dataNow
+        thousands: P.thousands, formatNum: P.formatNum, storeGet: storeGet, storeSet: storeSet, dataNow: dataNow,
+        download: downloadText
       });
     } else $('stats-toggle').hidden = true;
     $('stats-toggle').addEventListener('click', function () { showMain(mainView === 'stats' ? 'map' : 'stats'); });

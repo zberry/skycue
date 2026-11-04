@@ -630,5 +630,78 @@ test('keyHex: the hex of a ledger key', () => {
   assert.strictEqual(S.keyHex(null), '');
 });
 
+// ---- CSV export ------------------------------------------------------------------
+test('csvText: RFC 4180 quoting', () => {
+  assert.strictEqual(S.csvText([['a', 'b,c', 'd"e', 'f\ng', null, 3, ''], ['x']]), 'a,"b,c","d""e","f\ng",,3,\r\nx\r\n');
+  assert.strictEqual(S.csvText([['a\rb', undefined]]), '"a\rb",\r\n');
+  assert.strictEqual(S.csvText([]), '');
+});
+
+const LEDGER_HEADER = 'key,hex,addr_type,first_seen,last_seen,observations,positions,sessions,sent_updates,drops,' +
+  'emergencies,max_range_nm,max_range_time,max_range_lat_deg,max_range_lon_deg,max_range_bearing_deg,min_alt_ft,' +
+  'max_alt_ft,max_gs_kt,min_rssi_dbfs,max_rssi_dbfs,callsigns,squawks,inputs,registration,category,source,class,country';
+
+// Review Focus 5: the ledger grows while the export pages through it, so a
+// row can come twice; the file holds it once.
+test('ledgerCsvRows: header, cells, repeated keys dropped', () => {
+  const r1 = ledgerRow();
+  const r2 = { key: 'c0ffee|icao', hex: 'c0ffee', addr_type: 'icao', observations: 1 };
+  const out = S.ledgerCsvRows([r1, r2, ledgerRow()]);
+  assert.strictEqual(out[0].join(','), LEDGER_HEADER);
+  assert.deepStrictEqual(S.LEDGER_CSV_COLS.map((c) => c.key), ROW_FIELDS);
+  assert.strictEqual(out.length, 3);
+  const col = (name) => out[0].indexOf(name);
+  assert.strictEqual(out[1][col('callsigns')], 'UAL123 UAL9');
+  assert.strictEqual(out[1][col('max_range_nm')], 143.8);
+  assert.strictEqual(out[1][col('country')], 'United States');
+  assert.strictEqual(out[1][col('max_range_time')], '2026-11-03T13:02:11.000Z');
+  assert.strictEqual(out[1][col('min_rssi_dbfs')], -31.2);
+  assert.strictEqual(out[2][col('key')], 'c0ffee|icao');
+  assert.strictEqual(out[2][col('max_range_nm')], '');
+  assert.strictEqual(out[2][col('callsigns')], '');
+  assert.strictEqual(out[2][col('observations')], 1);
+  assert.strictEqual(S.ledgerCsvRows([]).length, 1);
+});
+
+test('ledgerExportQuery: the table sort and search, 1000 a page', () => {
+  assert.strictEqual(S.ledgerExportQuery({ q: 'ual', sort: 'max_range_nm', dir: 'asc' }, 2000),
+    'api/stats/aircraft?sort=max_range_nm&dir=asc&limit=1000&offset=2000&q=ual');
+  assert.strictEqual(S.ledgerExportQuery({ q: '', sort: 'bogus', dir: 'x', page: 3 }, 0),
+    'api/stats/aircraft?sort=last_seen&dir=desc&limit=1000&offset=0');
+  assert.strictEqual(S.LEDGER_EXPORT_PAGE, 1000);
+});
+
+test('seriesCsvRows: every column, one row per bucket', () => {
+  const out = S.seriesCsvRows(series4());
+  assert.deepStrictEqual(out[0], ['time', 'observations', 'aircraft', 'sent_updates', 'drops_timeout', 'drops_filtered',
+    'drops_source_lost', 'drops_blocked', 'emergencies', 'max_range_nm', 'max_range_key', 'obs_readsb', 'obs_uat']);
+  assert.strictEqual(out.length, 5);
+  assert.deepStrictEqual(out[2], [T1, 20, 2, 1, 0, 3, 0, 9, 0, 51.5, 'a4f2c1|icao', 15, 5]);
+  const s = series4();
+  s.zz_new = [1, 2, 3, 4];
+  s.short = [1, 2];          // not a bucket column
+  const h = S.seriesCsvRows(s)[0];
+  assert.strictEqual(h.indexOf('zz_new'), h.indexOf('obs_readsb') - 1);
+  assert.strictEqual(h.indexOf('short'), -1);
+  assert.strictEqual(h.indexOf('t'), -1);
+  assert.deepStrictEqual(S.seriesCsvRows(null), [['time']]);
+});
+
+test('coverageCsvRows: 72 x 8 rows', () => {
+  const cov = { sector_deg: 5, bands: BAND_NAMES.slice(),
+    cells: [{ sector: 1, band: 4, max_range_nm: 143.8, key: 'a1b2c3|icao', time: T0, n: 2210 }] };
+  const out = S.coverageCsvRows(cov);
+  assert.deepStrictEqual(out[0], ['sector_start_deg', 'band', 'max_range_nm', 'holder', 'time', 'n']);
+  assert.strictEqual(out.length, 577);
+  assert.deepStrictEqual(out[1], [0, '0-2.5k', '', '', '', 0]);
+  assert.deepStrictEqual(out[1 + 8 + 4], [5, '20-30k', 143.8, 'a1b2c3|icao', T0, 2210]);
+  assert.deepStrictEqual(out[576], [355, 'unknown', '', '', '', 0]);
+});
+
+test('csvFileName: skycue-<what>-<UTC date>.csv', () => {
+  assert.strictEqual(S.csvFileName('coverage', Date.parse('2026-11-04T08:00:00Z')), 'skycue-coverage-2026-11-04.csv');
+  assert.strictEqual(S.csvFileName('aircraft', Date.parse('2026-11-04T23:59:59Z')), 'skycue-aircraft-2026-11-04.csv');
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

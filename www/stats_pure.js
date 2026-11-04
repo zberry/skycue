@@ -251,15 +251,16 @@
 
   // The page request: sort (an API name, else last_seen), dir (asc|desc,
   // else desc), page (0-based) and the search text (trimmed; left out when
-  // blank), URI-encoded.
-  function aircraftQuery(o) {
+  // blank), URI-encoded. limit: the rows per page (AIRCRAFT_PAGE when absent).
+  function aircraftQuery(o, limit) {
     o = o || {};
+    var per = isNum(limit) && limit > 0 ? Math.floor(limit) : AIRCRAFT_PAGE;
     var sort = AIRCRAFT_SORTS.indexOf(o.sort) >= 0 ? o.sort : 'last_seen';
     var dir = o.dir === 'asc' ? 'asc' : 'desc';
     var page = isNum(o.page) && o.page > 0 ? Math.floor(o.page) : 0;
     var q = typeof o.q === 'string' ? o.q.trim() : '';
-    return 'api/stats/aircraft?sort=' + sort + '&dir=' + dir + '&limit=' + AIRCRAFT_PAGE +
-      '&offset=' + page * AIRCRAFT_PAGE + (q ? '&q=' + encodeURIComponent(q) : '');
+    return 'api/stats/aircraft?sort=' + sort + '&dir=' + dir + '&limit=' + per +
+      '&offset=' + page * per + (q ? '&q=' + encodeURIComponent(q) : '');
   }
 
   // One table cell's text (a dash when the row has no value).
@@ -512,6 +513,97 @@
   // A ledger key '<hex>|<addr_type>' -> its hex.
   function keyHex(key) { return key ? String(key).split('|')[0] : ''; }
 
+  // ---- CSV export (operator tools spec 5) ---------------------------------------
+  // RFC 4180 text of rows (arrays of cells): a cell holding '"', ',', CR or
+  // LF is quoted with its '"' doubled; null/undefined are empty; every
+  // record ends with CRLF. The page makes the Blob from this string (UTF-8,
+  // no BOM).
+  function csvCell(v) {
+    if (v === null || v === undefined) return '';
+    var s = String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function csvText(rows) {
+    return (rows || []).map(function (r) { return r.map(csvCell).join(',') + '\r\n'; }).join('');
+  }
+
+  // Every field of a ledger row (docs/web-api.md), the header with its unit
+  // where the name has none.
+  var LEDGER_CSV_COLS = ['key', 'hex', 'addr_type', 'first_seen', 'last_seen', 'observations', 'positions', 'sessions',
+    'sent_updates', 'drops', 'emergencies', 'max_range_nm', 'max_range_time', ['max_range_lat', 'max_range_lat_deg'],
+    ['max_range_lon', 'max_range_lon_deg'], 'max_range_bearing_deg', 'min_alt_ft', 'max_alt_ft', 'max_gs_kt',
+    ['min_rssi', 'min_rssi_dbfs'], ['max_rssi', 'max_rssi_dbfs'], 'callsigns', 'squawks', 'inputs', 'registration',
+    'category', 'source', 'class', 'country'].map(function (c) {
+    return Array.isArray(c) ? { key: c[0], head: c[1] } : { key: c, head: c };
+  });
+  var LEDGER_EXPORT_PAGE = 1000;
+  // The header, then a record per ledger row: lists joined with a space,
+  // an absent field empty. A key already seen is left out (the ledger can
+  // grow while the export pages through it, shifting a row into the next page).
+  function ledgerCsvRows(rows) {
+    var out = [LEDGER_CSV_COLS.map(function (c) { return c.head; })];
+    var seen = {};
+    (rows || []).forEach(function (r) {
+      if (!r || Object.prototype.hasOwnProperty.call(seen, r.key)) return;
+      seen[r.key] = true;
+      out.push(LEDGER_CSV_COLS.map(function (c) {
+        var v = r[c.key];
+        if (Array.isArray(v)) return v.join(' ');
+        return v === null || v === undefined ? '' : v;
+      }));
+    });
+    return out;
+  }
+  // The export's page at offset (a multiple of LEDGER_EXPORT_PAGE) in the
+  // table's sort, direction and search.
+  function ledgerExportQuery(o, offset) {
+    o = o || {};
+    return aircraftQuery({ sort: o.sort, dir: o.dir, q: o.q, page: Math.floor((offset || 0) / LEDGER_EXPORT_PAGE) },
+      LEDGER_EXPORT_PAGE);
+  }
+
+  // The series columns in reading order (GET api/stats/series).
+  var SERIES_CSV_COLS = ['observations', 'positions', 'aircraft', 'new_aircraft', 'sent_updates', 'drops_timeout',
+    'drops_filtered', 'drops_source_lost', 'drops_blocked', 'drops_out_of_range', 'drops_below_elevation',
+    'drops_no_position', 'uat_downlink', 'uat_uplink', 'fisb_products', 'emergencies', 'tcp_clients', 'web_clients',
+    'max_range_nm', 'max_range_key'];
+  // A record per bucket: time, the listed columns the series has, any
+  // other bucket column (an array as long as t) by name, then
+  // obs_<input> per by_input key by name.
+  function seriesCsvRows(series) {
+    var s = series && typeof series === 'object' ? series : {};
+    var t = Array.isArray(s.t) ? s.t : [];
+    var isCol = function (k) { return k !== 't' && Array.isArray(s[k]) && s[k].length === t.length; };
+    var cols = SERIES_CSV_COLS.filter(isCol);
+    cols = cols.concat(Object.keys(s).filter(function (k) { return isCol(k) && cols.indexOf(k) < 0; }).sort());
+    var by = s.by_input && typeof s.by_input === 'object' ? s.by_input : {};
+    var inputs = Object.keys(by).sort();
+    var out = [['time'].concat(cols, inputs.map(function (id) { return 'obs_' + id; }))];
+    t.forEach(function (time, i) {
+      out.push([time].concat(cols.map(function (k) { return s[k][i]; }),
+        inputs.map(function (id) { return Array.isArray(by[id]) ? by[id][i] : null; })));
+    });
+    return out;
+  }
+
+  // The coverage table: a record per sector and band (sector-major), its
+  // start bearing, the band's name, and the cell's range, holder, time and
+  // observations (empty, 0 observations, where the cell has none).
+  function coverageCsvRows(coverage) {
+    var p = polarSeries(coverage);
+    var out = [['sector_start_deg', 'band', 'max_range_nm', 'holder', 'time', 'n']];
+    p.angles.forEach(function (a, sector) {
+      p.bands.forEach(function (b, band) {
+        var h = p.holder(sector, band);
+        out.push(h ? [a, b.name, h.max_range_nm, h.key, h.time, h.n] : [a, b.name, '', '', '', 0]);
+      });
+    });
+    return out;
+  }
+
+  // 'skycue-<what>-YYYY-MM-DD.csv' (the UTC date of nowMs).
+  function csvFileName(what, nowMs) { return 'skycue-' + what + '-' + P.utcDate(nowMs) + '.csv'; }
+
   var api = {
     RANGES: RANGES, DEFAULT_RANGE: DEFAULT_RANGE, rangeKey: rangeKey, rangeQuery: rangeQuery,
     seriesTimes: seriesTimes, sliceSeries: sliceSeries, spark: spark, DROP_FIELDS: DROP_FIELDS,
@@ -524,7 +616,10 @@
     aircraftLastPage: aircraftLastPage, detailRows: detailRows, detailPolar: detailPolar, isoTime: isoTime,
     COVERAGE_BANDS: COVERAGE_BANDS, polarSeries: polarSeries, histBars: histBars, rssiHeatmap: rssiHeatmap,
     donut: donut, topCountries: topCountries, gridView: gridView, rangeRing: rangeRing, ringRadii: ringRadii,
-    categoryFilter: categoryFilter, classFilter: classFilter, countryFilter: countryFilter, keyHex: keyHex
+    categoryFilter: categoryFilter, classFilter: classFilter, countryFilter: countryFilter, keyHex: keyHex,
+    csvText: csvText, LEDGER_CSV_COLS: LEDGER_CSV_COLS, LEDGER_EXPORT_PAGE: LEDGER_EXPORT_PAGE,
+    ledgerCsvRows: ledgerCsvRows, ledgerExportQuery: ledgerExportQuery, SERIES_CSV_COLS: SERIES_CSV_COLS,
+    seriesCsvRows: seriesCsvRows, coverageCsvRows: coverageCsvRows, csvFileName: csvFileName
   };
   if (root) root.skycueStatsPure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

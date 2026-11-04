@@ -3745,6 +3745,102 @@ test('stats_charts_disposed_when_hidden_and_recreated', async ({ page }) => {
   await restoreMap(page);
 });
 
+// ---- Stats: CSV and PNG export (operator tools spec 5) -------------------------
+// A click that downloads a file: its name, text and CRLF records (the last
+// element, after the final CRLF, is the empty string).
+async function csvDownload(page, selector) {
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.locator(selector).click()]);
+  const text = fs.readFileSync(await dl.path(), 'utf8');
+  const lines = text.split('\r\n');
+  return { name: dl.suggestedFilename(), text, lines, records: lines.length - 2,
+    keys: lines.slice(1, -1).map((l) => l.split(',')[0]) };
+}
+const LEDGER_CSV_HEADER = 'key,hex,addr_type,first_seen,last_seen,observations,positions,sessions,sent_updates,drops,' +
+  'emergencies,max_range_nm,max_range_time,max_range_lat_deg,max_range_lon_deg,max_range_bearing_deg,min_alt_ft,' +
+  'max_alt_ft,max_gs_kt,min_rssi_dbfs,max_rssi_dbfs,callsigns,squawks,inputs,registration,category,source,class,country';
+
+test('stats_csv_downloads_three_cards', async ({ page }) => {
+  await openAircraftSection(page);
+  await page.locator('#stats-live').uncheck();
+  const AC = '#stats-aircraft-csv';
+  await expect(page.locator(AC)).toHaveText('CSV');
+  await expect(page.locator(AC)).toBeEnabled();
+  // The whole ledger: the header with units, one record per entry.
+  const before = (await api('/api/stats/aircraft?limit=1000')).body.total;
+  const all = await csvDownload(page, AC);
+  const after = (await api('/api/stats/aircraft?limit=1000')).body.total;
+  expect(all.name).toMatch(/^skycue-aircraft-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(all.lines[0]).toBe(LEDGER_CSV_HEADER);
+  expect(all.text.charCodeAt(0)).not.toBe(0xfeff);                 // no BOM
+  expect([before, after]).toContain(all.records);
+  expect(new Set(all.keys).size).toBe(all.keys.length);
+  await expect(page.locator('#stats-aircraft-caption')).not.toHaveText(/Exporting/);
+  // In the table's sort: the export and an API read taken at once agree
+  // (live data can reorder between them: the pair is read again).
+  await page.locator('#stats-aircraft-table th[data-sort="max_range_nm"]').click();
+  await expect.poll(async () => (await acState(page)).sort).toBe('max_range_nm');
+  await expect.poll(async () => {
+    const f = await csvDownload(page, AC);
+    const a = (await api('/api/stats/aircraft?sort=max_range_nm&dir=desc&limit=12')).body.rows.map((r) => r.key);
+    return f.keys.slice(0, 12).join() === a.join();
+  }, { timeout: 20000 }).toBe(true);
+  // And the search: one record, the target's.
+  await page.fill('#stats-aircraft-search', 'a4f2');
+  await expect.poll(async () => (await acState(page)).rows).toEqual([TARGET_KEY]);
+  const one = await csvDownload(page, AC);
+  expect(one.records).toBe(1);
+  expect(one.lines[1].startsWith(TARGET_KEY + ',')).toBe(true);
+
+  // The range's series: a record per bucket.
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  const TI = '[data-card="traffic-inputs"] .card-action';
+  await expect(page.locator(TI)).toHaveText('CSV');
+  await expect(page.locator(TI)).toBeEnabled();
+  const ser = await csvDownload(page, TI);
+  expect(ser.name).toMatch(/^skycue-observations-by-input-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(ser.lines[0].startsWith('time,observations,positions,aircraft')).toBe(true);
+  expect(ser.records).toBe((await statsState(page)).seriesBuckets);
+  expect(ser.records).toBeGreaterThan(0);
+
+  // The coverage table: 72 sectors x 8 bands.
+  const CP = '[data-card="coverage-polar"] .card-action';
+  await expect(page.locator(CP)).toHaveText('CSV');
+  await expect(page.locator(CP)).toBeEnabled({ timeout: 15000 });
+  const cov = await csvDownload(page, CP);
+  expect(cov.name).toMatch(/^skycue-coverage-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(cov.lines[0]).toBe('sector_start_deg,band,max_range_nm,holder,time,n');
+  expect(cov.records).toBe(72 * 8);                                // 577 lines with the header
+  await restoreMap(page);
+});
+
+// Every card chart has the toolbox's PNG save on the page's dark
+// background, named after its card; its icon sits at the chart's top right.
+test('stats_cards_save_as_image', async ({ page }) => {
+  await openStats(page);
+  const want = allCards((await api('/api/stats/summary')).body);
+  await expect.poll(() => drawnCards(page), { timeout: 15000 }).toEqual(want);
+  const saves = await page.evaluate(() => Array.from(document.querySelectorAll('#stats-view .card .card-chart'))
+    .map((el) => {
+      const inst = window.echarts.getInstanceByDom(el);
+      if (!inst) return null;
+      const f = inst.getOption().toolbox[0].feature.saveAsImage;
+      return { id: el.closest('.card').getAttribute('data-card'), bg: f.backgroundColor, name: f.name };
+    }).filter((x) => x));
+  expect(saves.map((s) => s.id).sort()).toEqual(want);
+  for (const s of saves) {
+    expect(s.bg, s.id).toBe('#0d1117');
+    expect(s.name.startsWith('skycue-' + s.id + '-'), s.id).toBe(true);
+  }
+  await page.locator('#stats-live').uncheck();
+  const chart = page.locator('[data-card="traffic-inputs"] .card-chart');
+  await chart.scrollIntoViewIfNeeded();
+  const box = await chart.boundingBox();
+  const [dl] = await Promise.all([page.waitForEvent('download'),
+    page.mouse.click(box.x + box.width - 10, box.y + 10)]);
+  expect(dl.suggestedFilename()).toMatch(/^skycue-traffic-inputs-\d{4}-\d{2}-\d{2}\.png$/);
+  await restoreMap(page);
+});
+
 // The "stats" skycued (run.sh) replays the fixture at 20x and saves its
 // statistics to stats.json. Stopped and started again, it reloads the
 // ledger (every entry kept, `since` the same), while the replay's clock

@@ -7,7 +7,8 @@
 // window.skycueStatsView.create(host) -> {open, close, isOpen, state, refreshNow}
 // host = {request(method, path, body), select(key), hasTrack(key),
 //         setViewFilter(partial), showMain(which), thousands, formatNum,
-//         storeGet(k), storeSet(k, v), dataNow()}  (app.js builds it).
+//         storeGet(k), storeSet(k, v), dataNow(), download(name, text, mime)}
+//         (app.js builds it).
 //
 // A section is a function registerSection(fn): fn(data) runs after every
 // refresh with data = {summary, series, hours, coverage, rssi} (the newest
@@ -20,11 +21,15 @@
 // so the same code serves a chart that was just created or recreated after
 // a dispose). It may return a Promise (its own requests); refreshNow waits
 // for it. card.chart() is null while ECharts is missing or the view is
-// closed. Plain ES2017 (functions and var, like app.js).
+// closed. card.addAction(label, fn) puts a small button beside the title
+// (once per label; later calls return it). Every card chart has the
+// toolbox's PNG save. Plain ES2017 (functions and var, like app.js).
 (function () {
   'use strict';
 
   var S = window.skycueStatsPure;
+  var P = window.skycuePure;
+  var CSV_MIME = 'text/csv;charset=utf-8';
   var LIVE_MS = 10000;          // live refresh period while the view is shown
   var DISPOSE_MS = 60000;       // charts are disposed once hidden this long
   var SLOW_EVERY = 6;           // hours, coverage and rssi: on open and every 6th refresh
@@ -67,6 +72,12 @@
       if (s.inst) return s.inst;
       if (!window.echarts || !st.open) return null;
       s.inst = window.echarts.init(s.el, 'skycue');
+      // A card chart saves itself as a PNG on the page's background (the
+      // theme's is transparent); a small icon at its top right.
+      if (s.kind === 'card') {
+        s.inst.setOption({ toolbox: { right: 0, top: 0, itemSize: 12, feature: { saveAsImage: { title: 'Save as PNG',
+          name: 'skycue-' + s.id + '-' + P.utcDate(host.dataNow()), backgroundColor: theme.tokens.bg, pixelRatio: 2 } } } });
+      }
       if (typeof ResizeObserver === 'function') {
         s.ro = new ResizeObserver(function () { if (s.inst) s.inst.resize(); });
         s.ro.observe(s.el);
@@ -91,17 +102,30 @@
       var el = document.createElement('section');
       el.className = 'card';
       el.setAttribute('data-card', id);
-      el.innerHTML = '<h3 class="card-title"></h3><p class="card-caption"></p><div class="card-chart"></div>';
+      el.innerHTML = '<div class="card-head"><h3 class="card-title"></h3></div><p class="card-caption"></p>' +
+        '<div class="card-chart"></div>';
       el.querySelector('.card-title').textContent = title;
       sectionGrid.appendChild(el);
       var sec = sectionGrid.closest('.stats-section');
       if (sec) sec.hidden = false;
       var s = addSlot(id, 'card', el.querySelector('.card-chart'));
       var caption = el.querySelector('.card-caption');
+      var actions = {};
       cards[id] = {
         el: el,
         chart: function () { return slotChart(s); },
-        setCaption: function (text) { caption.textContent = text || ''; }
+        setCaption: function (text) { caption.textContent = text || ''; },
+        addAction: function (label, fn) {
+          if (actions[label]) return actions[label];
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'card-action';
+          b.textContent = label;
+          b.addEventListener('click', function () { if (!b.disabled) fn(); });
+          el.querySelector('.card-head').appendChild(b);
+          actions[label] = b;
+          return b;
+        }
       };
       return cards[id];
     }
@@ -281,7 +305,8 @@
           .map(function (s) { return { id: s.id, canvas: hasCanvas(s) }; }),
         sparks: slots.filter(function (s) { return s.kind === 'spark'; })
           .map(function (s) { return { id: s.id, canvas: hasCanvas(s) }; }),
-        tiles: tiles, detailKey: st.detailKey, aircraft: aircraftHooks.state ? aircraftHooks.state() : null
+        tiles: tiles, detailKey: st.detailKey, aircraft: aircraftHooks.state ? aircraftHooks.state() : null,
+        seriesBuckets: data.series && Array.isArray(data.series.t) ? data.series.t.length : 0
       };
     }
 
@@ -312,9 +337,12 @@
     function countAxis() {
       return { type: 'value', min: 0, minInterval: 1, axisLabel: { formatter: function (v) { return fmt(v); } } };
     }
-    var LEGEND = { type: 'scroll', top: 0, left: 0, right: 0, itemWidth: 12, itemHeight: 8, textStyle: { fontSize: 11 } };
-    var LEGEND_WRAP = { type: 'plain', top: 0, left: 0, right: 0, itemGap: 8, itemWidth: 12, itemHeight: 8,
+    // right: 24 keeps the legends clear of the toolbox's PNG icon.
+    var LEGEND = { type: 'scroll', top: 0, left: 0, right: 24, itemWidth: 12, itemHeight: 8, textStyle: { fontSize: 11 } };
+    var LEGEND_WRAP = { type: 'plain', top: 0, left: 0, right: 24, itemGap: 8, itemWidth: 12, itemHeight: 8,
       textStyle: { fontSize: 11 } };
+    // A CSV file of rows, named skycue-<what>-<date>.csv.
+    function downloadCsv(what, rows) { host.download(S.csvFileName(what, host.dataNow()), S.csvText(rows), CSV_MIME); }
 
     // ---- Traffic (spec 6 item 2) -----------------------------------------------
     var SENT_DROP_LABEL = { sent: 'sent', timeout: 'timeout', source_lost: 'source lost', blocked: 'blocked',
@@ -439,7 +467,11 @@
 
     registerSection(function (d) {
       var grid = sectionEl('traffic');
-      drawInputs(addCard(grid, 'traffic-inputs', 'Observations by input'), d);
+      var inputs = addCard(grid, 'traffic-inputs', 'Observations by input');
+      inputs.addAction('CSV', function () {
+        if (data.series) downloadCsv('observations-by-input', S.seriesCsvRows(data.series));
+      }).disabled = !d.series;
+      drawInputs(inputs, d);
       drawAircraft(addCard(grid, 'traffic-aircraft', 'Aircraft per bucket'), d);
       drawSent(addCard(grid, 'traffic-sent', 'Sent vs drops'), d);
       drawWeek(addCard(grid, 'traffic-week', 'Busy hours of the week (UTC)'), d);
@@ -681,7 +713,12 @@
     }
     registerSection(function (d) {
       var grid = sectionEl('coverage');
-      drawPolar(addCard(grid, 'coverage-polar', 'Range by bearing and altitude'), d);
+      var polarCard = addCard(grid, 'coverage-polar', 'Range by bearing and altitude');
+      var covOk = function () { return !!(data.coverage && hasReceiver(data.summary)); };
+      polarCard.addAction('CSV', function () {
+        if (covOk()) downloadCsv('coverage', S.coverageCsvRows(data.coverage));
+      }).disabled = !covOk();
+      drawPolar(polarCard, d);
       drawRange(addCard(grid, 'coverage-range', 'Range'), d, 'range', 'nm', tk.accent);
       drawRange(addCard(grid, 'coverage-elevation', 'Elevation'), d, 'elevation', '°', dec.elev);
       drawDensity(addCard(grid, 'coverage-density', 'Position density'), d);
@@ -804,7 +841,7 @@
     // Every API string goes in through textContent.
     var SEARCH_DEBOUNCE_MS = 300;
     var ac = { q: '', sort: 'last_seen', dir: 'desc', page: 0, total: 0, evicted: 0, rows: [], seq: 0,
-      built: false, searchTimer: null, detail: null, detailSeq: 0, bodySig: null };
+      built: false, searchTimer: null, detail: null, detailSeq: 0, bodySig: null, loaded: false, exporting: null };
     var acEls = {};
     function mk(tag, attrs, text) {
       var el = document.createElement(tag);
@@ -830,6 +867,8 @@
       acEls.prev = pager.appendChild(mk('button', { type: 'button', 'data-page': 'prev', 'aria-label': 'Previous page' }, '‹ prev'));
       acEls.pageText = pager.appendChild(mk('span', { 'class': 'stats-pager-text', 'aria-live': 'polite' }));
       acEls.next = pager.appendChild(mk('button', { type: 'button', 'data-page': 'next', 'aria-label': 'Next page' }, 'next ›'));
+      acEls.csv = bar.appendChild(mk('button', { type: 'button', id: 'stats-aircraft-csv', disabled: '',
+        title: 'Download every row matching the search, in this order, as CSV' }, 'CSV'));
       var wrap = card.appendChild(mk('div', { 'class': 'stats-table-wrap' }));
       var table = wrap.appendChild(mk('table', { id: 'stats-aircraft-table' }));
       var tr = table.appendChild(mk('thead')).appendChild(mk('tr'));
@@ -917,6 +956,7 @@
         host.showMain('map');
       });
       acEls.closeDetail.addEventListener('click', closeAircraft);
+      acEls.csv.addEventListener('click', exportAircraft);
       syncHeaders();
     }
     function syncHeaders() {
@@ -965,7 +1005,39 @@
       acEls.evicted.textContent = ac.evicted > 0 ? 'and ' + fmt(ac.evicted) + ' older aircraft' +
         ' (dropped from the ledger when it was full)' : '';
       acEls.caption.classList.remove('error');
-      acEls.caption.textContent = fmt(ac.total) + (ac.q ? ' matching' : ' in the ledger') + ' · since the last reset';
+      acEls.caption.textContent = ac.exporting !== null ? 'Exporting… ' + fmt(ac.exporting) + ' rows'
+        : fmt(ac.total) + (ac.q ? ' matching' : ' in the ledger') + ' · since the last reset';
+      acEls.csv.disabled = !ac.loaded || ac.exporting !== null;
+    }
+    // The CSV of every row matching the table's search in its sort, read
+    // 1000 a page until a short page or the total; a row the growing
+    // ledger moved into a later page is in the file once (ledgerCsvRows).
+    function exportAircraft() {
+      if (ac.exporting !== null) return;
+      var o = { q: ac.q, sort: ac.sort, dir: ac.dir };
+      var rows = [];
+      ac.exporting = 0;
+      renderAircraftTable();
+      var page = function (k) {
+        return get(S.ledgerExportQuery(o, k * S.LEDGER_EXPORT_PAGE)).then(function (r) {
+          var got = r && Array.isArray(r.rows) ? r.rows : [];
+          Array.prototype.push.apply(rows, got);
+          ac.exporting = rows.length;
+          acEls.caption.textContent = 'Exporting… ' + fmt(rows.length) + ' rows';
+          var total = r && typeof r.total === 'number' ? r.total : 0;
+          return got.length < S.LEDGER_EXPORT_PAGE || rows.length >= total ? rows : page(k + 1);
+        });
+      };
+      return page(0).then(function () {
+        ac.exporting = null;
+        downloadCsv('aircraft', S.ledgerCsvRows(rows));
+        renderAircraftTable();
+      }, function (err) {
+        ac.exporting = null;
+        renderAircraftTable();
+        acEls.caption.textContent = 'CSV export failed: ' + (err && err.message);
+        acEls.caption.classList.add('error');
+      });
     }
     // The current page (a newer request wins over an older answer). A
     // page past the end (the ledger shrank, e.g. after a reset) moves to
@@ -977,6 +1049,7 @@
         ac.total = r && typeof r.total === 'number' ? r.total : 0;
         ac.evicted = r && typeof r.evicted === 'number' ? r.evicted : 0;
         ac.rows = r && Array.isArray(r.rows) ? r.rows : [];
+        ac.loaded = true;
         if (!ac.rows.length && ac.page > S.aircraftLastPage(ac.total)) {
           ac.page = S.aircraftLastPage(ac.total);
           return loadAircraft();

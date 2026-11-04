@@ -36,6 +36,12 @@
   // render. (`view`, further down, is the map style and overlays.)
   var VIEW_FILTER_KEY = 'skycue.view';
   var viewFilter = P.normalizeView(storeGet(VIEW_FILTER_KEY));
+  // Saved filter sets (P.normalizeViewSets; spec 4): named View states with
+  // their Hide filtered, kept in localStorage. `activeSet` is the index of
+  // the set last applied or saved (null: "— current —").
+  var VIEW_SETS_KEY = 'skycue.viewSets';
+  var viewSets = P.normalizeViewSets(storeGet(VIEW_SETS_KEY));
+  var activeSet = null;
 
   var $ = function (id) { return document.getElementById(id); };
   function dataNow() { return Date.now() + clockOffsetMs; }
@@ -568,6 +574,7 @@
     try { window.localStorage.setItem('skycue.hideFiltered', hideFiltered ? '1' : '0'); } catch (err) { /* private window */ }
     renderAllEntries();
     updateHiddenCount();
+    syncViewSetSelect();
   }
 
   // ---- View section --------------------------------------------------------------
@@ -634,6 +641,7 @@
     saveView();
     tableDirty = true;
     scheduleViewRender();
+    syncViewSetSelect();
   }
   // One map/status/table pass per frame however many input events arrive
   // (typing in the search fires one per key).
@@ -693,15 +701,149 @@
       if (viewFilter.search !== '') setViewFilters({ search: '' });
     });
   }
+  // Whether the key goes to a field that takes typing (a page shortcut
+  // must leave it alone).
+  function typingTarget(ev) {
+    var tag = ev.target && ev.target.tagName;
+    return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || !!(ev.target && ev.target.isContentEditable);
+  }
   // `/` focuses the search unless the key goes to a control or has a modifier.
   function slashFocusesSearch(ev) {
     if (ev.key !== '/' || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
-    var tag = ev.target && ev.target.tagName;
-    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON' ||
-        (ev.target && ev.target.isContentEditable)) return false;
+    if (typingTarget(ev) || (ev.target && ev.target.tagName === 'BUTTON')) return false;
     ev.preventDefault();
     $('view-search').focus();
     return true;
+  }
+
+  // ---- Saved filter sets -------------------------------------------------------
+  function saveViewSets() { storeSet(VIEW_SETS_KEY, JSON.stringify(viewSets)); }
+  // The select's options, the "(modified)" marker and which buttons apply.
+  function syncViewSetSelect() {
+    var sel = $('view-set-select');
+    if (!sel) return;
+    var n = viewSets.sets.length;
+    if (activeSet !== null && activeSet >= n) activeSet = null;
+    while (sel.options.length) sel.remove(0);
+    sel.appendChild(new Option('— current —', ''));
+    viewSets.sets.forEach(function (set, i) {
+      var modified = i === activeSet && !P.viewSetMatches(set, viewFilter, hideFiltered);
+      sel.appendChild(new Option(modified ? set.name + ' (modified)' : set.name, String(i)));
+    });
+    sel.value = activeSet === null ? '' : String(activeSet);
+    $('view-set-delete').disabled = activeSet === null;
+    var item = function (act) { return document.querySelector('#view-set-menu [data-act="' + act + '"]'); };
+    item('rename').disabled = activeSet === null;
+    item('up').disabled = activeSet === null || activeSet === 0;
+    item('down').disabled = activeSet === null || activeSet === n - 1;
+  }
+  // The whole set: every View field and Hide filtered.
+  function applyViewSet(i) {
+    var set = viewSets.sets[i];
+    if (!set) return;
+    activeSet = i;
+    setViewFilters(set.view);
+    setHideFiltered(set.hideFiltered);
+  }
+  function viewSetMsg(text, isError) { showMsg($('view-set-msg'), text, isError); }
+  function saveViewSet() {
+    var current = activeSet === null ? '' : viewSets.sets[activeSet].name;
+    var raw = window.prompt('Name for this filter set', current);
+    if (raw === null) return;
+    var name = P.viewSetName(raw);
+    if (name === '') return;
+    var taken = viewSets.sets.some(function (s) { return s.name === name; });
+    if (taken && !window.confirm('Replace the filter set "' + name + '"?')) return;
+    var r = P.putViewSet(viewSets, name, viewFilter, hideFiltered);
+    if (r.error) { viewSetMsg(r.error, true); return; }
+    viewSets = r.store;
+    activeSet = r.index;
+    saveViewSets();
+    viewSetMsg('');
+    syncViewSetSelect();
+  }
+  function deleteViewSet() {
+    if (activeSet === null) return;
+    if (!window.confirm('Delete the filter set "' + viewSets.sets[activeSet].name + '"?')) return;
+    viewSets.sets.splice(activeSet, 1);
+    activeSet = null;
+    saveViewSets();
+    viewSetMsg('');
+    syncViewSetSelect();
+  }
+  function renameViewSet() {
+    if (activeSet === null) return;
+    var set = viewSets.sets[activeSet];
+    var raw = window.prompt('Name for this filter set', set.name);
+    if (raw === null) return;
+    var name = P.viewSetName(raw);
+    if (name === '' || name === set.name) return;
+    if (viewSets.sets.some(function (s) { return s.name === name; })) {
+      viewSetMsg('A set named "' + name + '" already exists.', true);
+      return;
+    }
+    set.name = name;
+    saveViewSets();
+    viewSetMsg('');
+    syncViewSetSelect();
+  }
+  function moveViewSet(by) {
+    var to = activeSet === null ? -1 : activeSet + by;
+    if (to < 0 || to >= viewSets.sets.length) return;
+    var set = viewSets.sets.splice(activeSet, 1)[0];
+    viewSets.sets.splice(to, 0, set);
+    activeSet = to;
+    saveViewSets();
+    syncViewSetSelect();
+  }
+  function setViewSetMenu(open) {
+    $('view-set-menu').hidden = !open;
+    $('view-set-more').setAttribute('aria-expanded', String(open));
+    if (open) {
+      var first = document.querySelector('#view-set-menu button:not([disabled])');
+      if (first) first.focus();
+    } else if ($('view-set-menu').contains(document.activeElement)) $('view-set-more').focus();
+  }
+  // Keys 1–9 apply that set, 0 clears to the defaults; not with a modifier
+  // or while a field takes typing.
+  function digitAppliesSet(ev) {
+    if (!/^[0-9]$/.test(ev.key) || ev.ctrlKey || ev.metaKey || ev.altKey || typingTarget(ev)) return false;
+    if (ev.key === '0') {
+      activeSet = null;
+      resetViewFilters();
+    } else {
+      var i = Number(ev.key) - 1;
+      if (i >= viewSets.sets.length) return false;
+      applyViewSet(i);
+    }
+    ev.preventDefault();
+    return true;
+  }
+  function wireViewSets() {
+    var sel = $('view-set-select');
+    sel.addEventListener('change', function () {
+      if (sel.value === '') { activeSet = null; syncViewSetSelect(); } else applyViewSet(Number(sel.value));
+    });
+    $('view-set-save').addEventListener('click', saveViewSet);
+    $('view-set-delete').addEventListener('click', deleteViewSet);
+    $('view-set-more').addEventListener('click', function () { setViewSetMenu($('view-set-menu').hidden); });
+    var acts = { rename: renameViewSet, up: function () { moveViewSet(-1); }, down: function () { moveViewSet(1); } };
+    $('view-set-menu').addEventListener('click', function (ev) {
+      var b = ev.target.closest('button[data-act]');
+      if (!b || b.disabled || !acts[b.getAttribute('data-act')]) return; // Export… and Import…: not wired yet
+      setViewSetMenu(false);
+      acts[b.getAttribute('data-act')]();
+    });
+    // Escape closes the menu only, not the side panel too.
+    $('view-set-menu').addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+      ev.stopPropagation();
+      setViewSetMenu(false);
+    });
+    document.addEventListener('click', function (ev) {
+      if (!$('view-set-menu').hidden && !ev.target.closest('#view-set-menu, #view-set-more')) setViewSetMenu(false);
+    });
+    syncViewSetSelect();
   }
 
   function pruneTrail(e) {
@@ -2826,6 +2968,7 @@
     try { stored = window.localStorage.getItem('skycue.hideFiltered'); } catch (err) { /* no storage */ }
     if (stored === '1') setHideFiltered(true);
     wireView();
+    wireViewSets();
     $('hide-filtered').addEventListener('change', function () { setHideFiltered($('hide-filtered').checked); });
     var sel = $('ring-alt');
     RING_ALTS_FT.forEach(function (ft) {
@@ -2960,8 +3103,8 @@
       if (tr) select(tr.getAttribute('data-key'));
     });
     document.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape') closePanel();
-      else slashFocusesSearch(ev);
+      if (ev.key === 'Escape') { setViewSetMenu(false); closePanel(); }
+      else if (!slashFocusesSearch(ev)) digitAppliesSet(ev);
     });
     setInterval(prune, 2000);
     setInterval(watchdog, 1000);
@@ -3040,6 +3183,9 @@
     })(),
     statsRefresh: function () { return statsView ? statsView.refreshNow() : Promise.resolve(false); },
     resetViewFilters: resetViewFilters,
+    // Saved filter sets: the store (a copy) and the active set's index or null.
+    viewSets: function () { return JSON.parse(JSON.stringify(viewSets)); },
+    activeViewSet: function () { return activeSet; },
     shownCount: viewShownCount,
     // The 2-s trail and stale-track prune, run now.
     prune: function () { prune(); },

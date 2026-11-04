@@ -76,6 +76,22 @@
     <section id="view" aria-labelledby="view-heading">
       <h2 id="view-heading">Display filters <span id="view-badge"></span></h2>
       <p class="view-sub">this browser only</p>
+      <label for="view-set-select">Sets</label>
+      <div class="row view-sets">
+        <select id="view-set-select" title="Saved filter sets: keys 1–9 apply one, 0 clears"></select>
+        <button id="view-set-save" type="button" title="Save the current Display filters as a set">Save</button>
+        <button id="view-set-delete" type="button" title="Delete the chosen set" disabled>Delete</button>
+        <button id="view-set-more" type="button" title="More set actions" aria-label="More set actions"
+          aria-haspopup="menu" aria-expanded="false" aria-controls="view-set-menu">⋯</button>
+        <div id="view-set-menu" role="menu" aria-label="Filter set actions" hidden>
+          <button type="button" role="menuitem" data-act="rename">Rename</button>
+          <button type="button" role="menuitem" data-act="up">Move up</button>
+          <button type="button" role="menuitem" data-act="down">Move down</button>
+          <button type="button" role="menuitem" data-act="export" disabled>Export…</button>
+          <button type="button" role="menuitem" data-act="import" disabled>Import…</button>
+        </div>
+      </div>
+      <p id="view-set-msg" class="msg" role="status"></p>
       <label class="check" for="hide-filtered"><input id="hide-filtered" type="checkbox"> Hide filtered</label>
       <p id="hidden-count" class="msg" role="status"></p>
       <label for="view-search">Search</label>

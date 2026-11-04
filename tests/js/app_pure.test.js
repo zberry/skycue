@@ -1100,6 +1100,56 @@ test('viewActiveCount', () => {
   assert.strictEqual(P.viewActiveCount(P.normalizeView({ search: 'a', altMin: 1, altMax: 2, ground: false, emergency: true })), 3);
   assert.strictEqual(P.viewActiveCount(P.normalizeView({ decisions: ['sent'], classes: ['airline'], category: 'A1', country: 'Canada', gsMax: 100, rangeMin: 5 })), 6);
 });
+test('normalizeViewSets: field by field and caps', () => {
+  assert.strictEqual(P.VIEW_SETS_MAX, 20);
+  assert.strictEqual(P.VIEW_SET_NAME_MAX, 40);
+  assert.deepStrictEqual(P.normalizeViewSets('x'), { version: 1, sets: [] });
+  assert.deepStrictEqual(P.normalizeViewSets(null), { version: 1, sets: [] });
+  assert.deepStrictEqual(P.normalizeViewSets({ sets: 'nope' }), { version: 1, sets: [] });
+  const s = P.normalizeViewSets({ version: 1, sets: [
+    { name: ' A ', view: { search: 'ual', mapMode: 'bogus' }, hideFiltered: 1 },
+    { name: 'A', view: {} }, { name: '', view: {} }, { name: 7 },
+    { name: 'L'.repeat(50), view: null, hideFiltered: 'yes' }
+  ] });
+  assert.strictEqual(s.version, 1);
+  assert.deepStrictEqual(s.sets.map((x) => x.name), ['A', 'L'.repeat(40)]);
+  assert.deepStrictEqual(s.sets[0].view, P.normalizeView({ search: 'ual' }));
+  assert.strictEqual(s.sets[0].hideFiltered, true);
+  assert.deepStrictEqual(s.sets[1].view, P.normalizeView(null));
+  assert.strictEqual(s.sets[1].hideFiltered, false);
+  assert.strictEqual(P.normalizeViewSets(JSON.stringify(s)).sets[1].name, 'L'.repeat(40), 'accepts a JSON string');
+  const many = [];
+  for (let i = 0; i < 500; i++) many.push({ name: 'S' + i, view: {}, hideFiltered: false });
+  const capped = P.normalizeViewSets({ sets: many });
+  assert.strictEqual(capped.sets.length, 20);
+  assert.strictEqual(capped.sets[19].name, 'S19');
+});
+test('viewSetMatches', () => {
+  const set = P.normalizeViewSets({ sets: [{ name: 'A', view: { search: 'ual' }, hideFiltered: true }] }).sets[0];
+  assert.strictEqual(P.viewSetMatches(set, P.normalizeView({ search: 'ual' }), true), true);
+  assert.strictEqual(P.viewSetMatches(set, P.normalizeView({ search: 'dal' }), true), false);
+  assert.strictEqual(P.viewSetMatches(set, P.normalizeView({ search: 'ual' }), false), false);
+});
+test('putViewSet: add, replace, cap', () => {
+  let r = P.putViewSet(P.normalizeViewSets(null), 'A', P.normalizeView({ search: 'ual' }), false);
+  assert.strictEqual(r.replaced, false);
+  assert.strictEqual(r.store.sets.length, 1);
+  assert.strictEqual(r.store.sets[0].name, 'A');
+  r = P.putViewSet(r.store, 'B', P.normalizeView(null), true);
+  assert.strictEqual(r.replaced, false);
+  assert.deepStrictEqual(r.store.sets.map((x) => x.name), ['A', 'B']);
+  r = P.putViewSet(r.store, 'A', P.normalizeView({ emergency: true }), true);
+  assert.strictEqual(r.replaced, true);
+  assert.deepStrictEqual(r.store.sets.map((x) => x.name), ['A', 'B'], 'same index');
+  assert.strictEqual(r.store.sets[0].view.emergency, true);
+  assert.strictEqual(r.store.sets[0].view.search, '');
+  assert.strictEqual(r.store.sets[0].hideFiltered, true);
+  const full = { version: 1, sets: [] };
+  for (let i = 0; i < 20; i++) full.sets.push({ name: 'S' + i, view: P.normalizeView(null), hideFiltered: false });
+  assert.deepStrictEqual(P.putViewSet(full, 'New', P.normalizeView(null), false), { error: 'At most 20 filter sets: delete one first.' });
+  assert.strictEqual(P.putViewSet(full, 'S3', P.normalizeView(null), true).replaced, true, 'replacing at the cap is allowed');
+  assert.strictEqual(full.sets.length, 20);
+});
 test('trackAlt', () => {
   assert.strictEqual(P.trackAlt({ on_ground: true, alt_baro_ft: 500 }), 0);
   assert.strictEqual(P.trackAlt({ alt_baro_ft: 500, alt_geom_ft: 600 }), 500);

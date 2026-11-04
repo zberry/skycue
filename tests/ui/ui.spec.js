@@ -2355,6 +2355,133 @@ test('view_section_fits_panel_and_details_show_class_and_country', async ({ page
   await expect(panel.locator('[data-field="country"]')).toHaveText('United States');
 });
 
+// Saved filter sets (spec §4): named Display-filter states in this browser,
+// recalled from the select or with the number keys.
+const setOptionTexts = (page) => page.$$eval('#view-set-select option', (os) => os.map((o) => o.text));
+const setSelectedText = (page) => page.$eval('#view-set-select', (s) => s.options[s.selectedIndex].text);
+const activeViewSet = (page) => page.evaluate(() => window.skycueApp.activeViewSet());
+async function viewSetMenu(page, act) {
+  await page.click('#view-set-more');
+  await expect(page.locator('#view-set-menu')).toBeVisible();
+  await page.click(`#view-set-menu [data-act="${act}"]`);
+}
+test('view_sets_save_apply_modified_rename_delete_keys', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 1);
+  await expect(page.locator('#view-set-delete')).toBeDisabled();
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'ual' }));
+  let question = null;
+  page.once('dialog', (d) => { question = d.message(); d.accept('Airlines'); });
+  await page.click('#view-set-save');
+  expect(question).toBe('Name for this filter set');
+  expect(await setSelectedText(page)).toBe('Airlines');
+  await expect(page.locator('#view-set-delete')).toBeEnabled();
+  const ual = await page.evaluate(() => window.skycuePure.normalizeView({ search: 'ual' }));
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))))
+    .toEqual({ version: 1, sets: [{ name: 'Airlines', view: ual, hideFiltered: false }] });
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'dal' }));
+  expect(await setSelectedText(page)).toBe('Airlines (modified)');
+  await page.evaluate(() => {
+    window.skycueApp.resetViewFilters();
+    window.skycueApp.setViewFilters({ emergency: true });
+    window.skycueApp.setHideFiltered(true);
+  });
+  page.once('dialog', (d) => { question = d.defaultValue(); d.accept('Emerg'); });
+  await page.click('#view-set-save');
+  expect(question).toBe('Airlines');                                     // the prompt offers the active set's name
+  expect(await setSelectedText(page)).toBe('Emerg');
+  expect(await activeViewSet(page)).toBe(1);
+
+  await page.locator('body').press('1');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().search)).toBe('ual');
+  expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(false);
+  expect(await setSelectedText(page)).toBe('Airlines');
+  await page.locator('body').press('2');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().emergency)).toBe(true);
+  expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(true);
+  await expect(page.locator('#hide-filtered')).toBeChecked();
+  await page.locator('body').press('0');
+  const defaults = await page.evaluate(() => window.skycuePure.VIEW_DEFAULTS);
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters())).toEqual(defaults);
+  await expect(page.locator('#view-set-select')).toHaveValue('');
+  expect(await activeViewSet(page)).toBe(null);
+  await page.locator('body').press('9');                                   // no ninth set: nothing
+  expect(await activeViewSet(page)).toBe(null);
+
+  // A digit typed into a text field is text, never a set.
+  await page.locator('#view-search').focus();
+  await page.keyboard.type('1');
+  await expect(page.locator('#view-search')).toHaveValue('1');
+  expect(await activeViewSet(page)).toBe(null);
+  await page.fill('#view-search', '');
+  await page.locator('#alerts-gear').click();
+  await expect(page.locator('#alerts-config')).toBeVisible();
+  const watch = page.locator('#alerts-watch');
+  const watchBefore = await watch.inputValue();
+  await watch.fill('');
+  await watch.focus();
+  await page.keyboard.type('1');
+  await expect(watch).toHaveValue('1');
+  expect(await activeViewSet(page)).toBe(null);
+  await watch.fill(watchBefore);
+  await watch.blur();
+  await page.click('#alerts-config-close');
+  await expect(page.locator('#alerts-config')).toBeHidden();
+  await page.locator('#stats-toggle').click();
+  await expect(page.locator('#stats-aircraft-search')).toBeVisible();
+  await page.locator('#stats-aircraft-search').focus();
+  await page.keyboard.type('1');
+  await expect(page.locator('#stats-aircraft-search')).toHaveValue('1');
+  expect(await activeViewSet(page)).toBe(null);
+  await page.fill('#stats-aircraft-search', '');
+  await page.evaluate(() => window.skycueApp.showMain('map'));
+
+  await page.selectOption('#view-set-select', { label: 'Airlines' });
+  expect(await activeViewSet(page)).toBe(0);
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().search)).toBe('ual');
+  await page.click('#view-set-more');
+  await expect(page.locator('#view-set-more')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#view-set-menu [data-act="up"]')).toBeDisabled();
+  await expect(page.locator('#view-set-menu [data-act="down"]')).toBeEnabled();
+  await page.locator('#view-set-menu [data-act="rename"]').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#view-set-menu')).toBeHidden();
+  await expect(page.locator('#view-set-more')).toHaveAttribute('aria-expanded', 'false');
+  page.once('dialog', (d) => { question = d.defaultValue(); d.accept('Emerg'); });
+  await viewSetMenu(page, 'rename');
+  expect(question).toBe('Airlines');
+  await expect(page.locator('#view-set-msg')).toHaveText('A set named "Emerg" already exists.');
+  await expect(page.locator('#view-set-msg')).toHaveClass(/error/);
+  page.once('dialog', (d) => d.accept('Airliners'));
+  await viewSetMenu(page, 'rename');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'Airliners', 'Emerg']);
+  await viewSetMenu(page, 'down');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'Emerg', 'Airliners']);
+  expect(await setSelectedText(page)).toBe('Airliners');
+  page.once('dialog', (d) => { question = d.message(); d.accept(); });
+  await page.click('#view-set-delete');
+  expect(question).toBe('Delete the filter set "Airliners"?');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'Emerg']);
+  await expect(page.locator('#view-set-select')).toHaveValue('');
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets.map((x) => x.name)).toEqual(['Emerg']);
+  await page.evaluate(() => { window.skycueApp.resetViewFilters(); window.skycueApp.setHideFiltered(false); });
+});
+test('view_sets_row_fits_panel', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('skycue.viewSets', JSON.stringify({ version: 1, sets: [{ name: 'W'.repeat(40), view: {}, hideFiltered: false }] }));
+  });
+  await openPage(page);
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'W'.repeat(40)]);
+  await page.selectOption('#view-set-select', '0');
+  const tops = await page.evaluate(() => ['view-set-select', 'view-set-save', 'view-set-delete', 'view-set-more']
+    .map((id) => document.getElementById(id).getBoundingClientRect().top));
+  tops.forEach((t) => expect(Math.abs(t - tops[0])).toBeLessThanOrEqual(2));
+  expect(await page.evaluate(() => { const f = document.getElementById('filters'); return f.scrollWidth - f.clientWidth; })).toBe(0);
+  await page.click('#view-set-more');
+  await expect(page.locator('#view-set-menu')).toBeVisible();
+  expect(await page.evaluate(() => { const f = document.getElementById('filters'); return f.scrollWidth - f.clientWidth; })).toBe(0);
+  await page.keyboard.press('Escape');
+});
+
 // The map (spec §5). RPA4521 (ac5e81) times out for ~3 s of each ~122 s
 // fixture loop, so marker totals are compared with a tolerance of one.
 const near = (a, b) => Math.abs(a - b) <= 1;

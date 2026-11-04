@@ -1409,6 +1409,51 @@
     };
   }
 
+  // Saved filter sets (spec 4): skycue.viewSets is {version: 1, sets:
+  // [{name, view, hideFiltered}]}, at most VIEW_SETS_MAX named Display-filter
+  // states. A name is trimmed and cut to VIEW_SET_NAME_MAX; '' is no name.
+  var VIEW_SETS_MAX = 20;
+  var VIEW_SET_NAME_MAX = 40;
+  function viewSetName(v) {
+    return typeof v === 'string' ? v.trim().slice(0, VIEW_SET_NAME_MAX).trim() : '';
+  }
+  // Any input (an object, a JSON string, garbage) to a store. Each set's
+  // fields fall back on their own; a set without a name, or with the name of
+  // an earlier set, is dropped; sets past the cap are dropped.
+  function normalizeViewSets(obj) {
+    if (typeof obj === 'string') {
+      try { obj = JSON.parse(obj); } catch (e) { obj = null; }
+    }
+    var src = obj && typeof obj === 'object' && Array.isArray(obj.sets) ? obj.sets : [];
+    var sets = [], seen = {};
+    for (var i = 0; i < src.length && sets.length < VIEW_SETS_MAX; i++) {
+      var s = src[i];
+      if (!s || typeof s !== 'object') continue;
+      var name = viewSetName(s.name);
+      if (name === '' || Object.prototype.hasOwnProperty.call(seen, name)) continue;
+      seen[name] = true;
+      sets.push({ name: name, view: normalizeView(s.view), hideFiltered: viewBool(s.hideFiltered, false) });
+    }
+    return { version: 1, sets: sets };
+  }
+  // Whether the current state (a view and the Hide filtered flag) is the set's.
+  function viewSetMatches(set, view, hideFiltered) {
+    return JSON.stringify(normalizeView(set.view)) === JSON.stringify(normalizeView(view)) &&
+      !!set.hideFiltered === !!hideFiltered;
+  }
+  // A new store with the set `name` holding this state: a set of the same
+  // name is replaced in place, else the set is added at the end. `index` is
+  // where it is; {error} when the name is empty or the store is full.
+  function putViewSet(store, name, view, hideFiltered) {
+    name = viewSetName(name);
+    if (name === '') return { error: 'A filter set needs a name.' };
+    var sets = store.sets.slice(), set = { name: name, view: normalizeView(view), hideFiltered: !!hideFiltered };
+    var i = sets.map(function (s) { return s.name; }).indexOf(name);
+    if (i < 0 && sets.length >= VIEW_SETS_MAX) return { error: 'At most ' + VIEW_SETS_MAX + ' filter sets: delete one first.' };
+    if (i >= 0) sets[i] = set; else sets.push(set);
+    return { store: { version: 1, sets: sets }, replaced: i >= 0, index: i >= 0 ? i : sets.length - 1 };
+  }
+
   // How many controls differ from the default (the heading badge). The
   // altitude band and its ground box count as one; the map mode never counts.
   function viewActiveCount(v) {
@@ -1522,6 +1567,8 @@
     MILITARY_CALLSIGN_PREFIXES: MILITARY_CALLSIGN_PREFIXES, callsignKind: callsignKind,
     CLASSES: CLASSES, CATEGORY_LABELS: CATEGORY_LABELS, trackClass: trackClass, isEmergency: isEmergency, trackCountry: trackCountry,
     VIEW_DEFAULTS: VIEW_DEFAULTS, normalizeView: normalizeView, viewActiveCount: viewActiveCount,
+    VIEW_SETS_MAX: VIEW_SETS_MAX, VIEW_SET_NAME_MAX: VIEW_SET_NAME_MAX, viewSetName: viewSetName,
+    normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet,
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches
   };
   root.skycuePure = api;

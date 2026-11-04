@@ -179,5 +179,111 @@ test('sinceText: UTC date and time to the minute', () => {
   assert.strictEqual(S.sinceText('garbage'), '');
 });
 
+// ---- Traffic and Weather (Task 8) -------------------------------------------
+const M0 = Date.parse(T0);
+const M1 = Date.parse(T1);
+const M2 = Date.parse(T2);
+const M3 = Date.parse(T3);
+
+test('hourOfWeek: 168 cells, UTC Monday first', () => {
+  // 2026-11-02 is a Monday; 2026-11-08 a Sunday; 2026-11-09 the next Monday.
+  const hours = {
+    res: 'hour', bucket_s: 3600,
+    t: ['2026-11-02T00:00:00.000Z', '2026-11-08T23:00:00.000Z', '2026-11-09T00:00:00.000Z'],
+    observations: [5, 7, 1]
+  };
+  const cells = S.hourOfWeek(hours);
+  assert.strictEqual(cells.length, 168);
+  const at = (h, d) => cells.filter((c) => c[0] === h && c[1] === d);
+  for (let d = 0; d < 7; d++) {
+    for (let h = 0; h < 24; h++) {
+      const c = at(h, d);
+      assert.strictEqual(c.length, 1, 'one cell for ' + h + ',' + d);
+      const want = h === 0 && d === 0 ? 6 : (h === 23 && d === 6 ? 7 : 0);
+      assert.strictEqual(c[0][2], want, 'cell ' + h + ',' + d);
+    }
+  }
+  // Ordered day by day, hour by hour.
+  assert.deepStrictEqual(cells[0], [0, 0, 6]);
+  assert.deepStrictEqual(cells[167], [23, 6, 7]);
+  assert.deepStrictEqual(cells[25], [1, 1, 0]);
+  // No series: still 168 zero cells.
+  const empty = S.hourOfWeek(null);
+  assert.strictEqual(empty.length, 168);
+  assert.strictEqual(empty.reduce((a, c) => a + c[2], 0), 0);
+  assert.strictEqual(S.hourOfWeekMax(cells), 7);
+  assert.strictEqual(S.hourOfWeekMax(empty), 0);
+});
+
+test('inputSeries: order by total, other last', () => {
+  const s = series4();
+  s.by_input = {
+    other: [50, 50, 50, 50],        // the largest, still last
+    uat: [0, 5, 10, 15],            // 30
+    readsb: [10, 15, 20, 25],       // 70
+    beast2: [1, 1, 1, 1],           // 4
+    beast1: [1, 1, 1, 1]            // 4, tie: by name
+  };
+  const out = S.inputSeries(s);
+  assert.deepStrictEqual(out.map((x) => x.name), ['readsb', 'uat', 'beast1', 'beast2', 'other']);
+  assert.deepStrictEqual(out[0].data, [[M0, 10], [M1, 15], [M2, 20], [M3, 25]]);
+  assert.deepStrictEqual(out[4].data, [[M0, 50], [M1, 50], [M2, 50], [M3, 50]]);
+  assert.deepStrictEqual(S.inputSeries(null), []);
+  assert.deepStrictEqual(S.inputSeries({ t: [T0], observations: [1] }), []);
+});
+
+test('aircraftSeries: distinct and new per bucket', () => {
+  const s = series4();
+  s.new_aircraft = [1, 0, 2, 0];
+  const out = S.aircraftSeries(s);
+  assert.deepStrictEqual(out.distinct, [[M0, 1], [M1, 2], [M2, 3], [M3, 4]]);
+  assert.deepStrictEqual(out.fresh, [[M0, 1], [M1, 0], [M2, 2], [M3, 0]]);
+  assert.deepStrictEqual(S.aircraftSeries(null), { distinct: [], fresh: [] });
+});
+
+test('sentDropSeries: names and sources', () => {
+  const s = series4();
+  s.drops_out_of_range = [0, 2, 0, 1];
+  // no drops_below_elevation / drops_no_position columns: zeros
+  const out = S.sentDropSeries(s);
+  assert.deepStrictEqual(out.map((x) => x.name),
+    ['sent', 'timeout', 'source_lost', 'blocked', 'out_of_range', 'below_elevation', 'no_position']);
+  assert.deepStrictEqual(out[0].data, [[M0, 0], [M1, 1], [M2, 2], [M3, 3]]);       // sent_updates
+  assert.deepStrictEqual(out[1].data, [[M0, 1], [M1, 0], [M2, 0], [M3, 2]]);       // drops_timeout
+  assert.deepStrictEqual(out[2].data, [[M0, 0], [M1, 0], [M2, 5], [M3, 0]]);       // drops_source_lost
+  assert.deepStrictEqual(out[3].data, [[M0, 9], [M1, 9], [M2, 9], [M3, 9]]);       // drops_blocked
+  assert.deepStrictEqual(out[4].data, [[M0, 0], [M1, 2], [M2, 0], [M3, 1]]);       // drops_out_of_range
+  assert.deepStrictEqual(out[5].data, [[M0, 0], [M1, 0], [M2, 0], [M3, 0]]);
+  assert.deepStrictEqual(out[6].data, [[M0, 0], [M1, 0], [M2, 0], [M3, 0]]);
+  assert.deepStrictEqual(S.sentDropSeries(null).map((x) => x.data), [[], [], [], [], [], [], []]);
+});
+
+test('uatSeries: three lines', () => {
+  const s = series4();
+  s.uat_downlink = [3, 0, 4, 1];
+  s.uat_uplink = [60, 61, 59, 60];
+  s.fisb_products = [12, 0, 7, 9];
+  const out = S.uatSeries(s);
+  assert.deepStrictEqual(Object.keys(out), ['downlink', 'uplink', 'products']);
+  assert.deepStrictEqual(out.downlink, [[M0, 3], [M1, 0], [M2, 4], [M3, 1]]);
+  assert.deepStrictEqual(out.uplink, [[M0, 60], [M1, 61], [M2, 59], [M3, 60]]);
+  assert.deepStrictEqual(out.products, [[M0, 12], [M1, 0], [M2, 7], [M3, 9]]);
+  assert.deepStrictEqual(S.uatSeries(null), { downlink: [], uplink: [], products: [] });
+});
+
+test('total: a column summed', () => {
+  assert.strictEqual(S.total(series4(), 'observations'), 100);
+  assert.strictEqual(S.total(series4(), ['drops_timeout', 'drops_source_lost']), 8);
+  assert.strictEqual(S.total(series4(), 'uat_uplink'), 0);
+  assert.strictEqual(S.total(null, 'observations'), 0);
+});
+
+test('uatShown: from summary.uat_seen, null without a summary', () => {
+  assert.strictEqual(S.uatShown({ uat_seen: true }), true);
+  assert.strictEqual(S.uatShown({ uat_seen: false }), false);
+  assert.strictEqual(S.uatShown({}), false);
+  assert.strictEqual(S.uatShown(null), null);
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

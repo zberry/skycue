@@ -284,7 +284,200 @@
     }
 
     // The sections register here, each with registerSection(fn), using
-    // sectionEl(name) and addCard (see the head of this file).
+    // sectionEl(name) and addCard (see the head of this file). A null field
+    // of the data (a slow fetch not made yet or failed) leaves the cards
+    // that draw from it as they are.
+
+    // ---- shared chart pieces ---------------------------------------------------
+    var tk = theme.tokens || {};
+    var dec = theme.decision || {};
+    var pal = theme.color || [];
+    var fmt = function (v) { return typeof v === 'number' && isFinite(v) ? host.thousands(v) : '—'; };
+    var rangeOf = function (summary) { return summary && summary.range ? summary.range : null; };
+    var perBucket = function (series) { return series && series.res === 'hour' ? '/h' : '/min'; };
+    // A tooltip value formatter with the unit after the number.
+    var unitFmt = function (unit) { return function (v) { return fmt(v) + ' ' + unit; }; };
+    // A time axis from half a bucket before the first bucket to half one
+    // after the last (each point sits at its bucket's start), so one bucket
+    // is not drawn on an axis of days, and bars are not cut at the edges.
+    function timeAxis(series) {
+      var times = S.seriesTimes(series);
+      var half = (series && series.bucket_s ? series.bucket_s : 60) * 500;
+      var n = times.length;
+      return { type: 'time', axisLabel: { hideOverlap: true },
+        min: n ? times[0] - half : null, max: n ? times[n - 1] + half : null };
+    }
+    function countAxis() {
+      return { type: 'value', min: 0, minInterval: 1, axisLabel: { formatter: function (v) { return fmt(v); } } };
+    }
+    var LEGEND = { type: 'scroll', top: 0, left: 0, right: 0, itemWidth: 12, itemHeight: 8, textStyle: { fontSize: 11 } };
+
+    // ---- Traffic (spec 6 item 2) -----------------------------------------------
+    var SENT_DROP_LABEL = { sent: 'sent', timeout: 'timeout', source_lost: 'source lost', blocked: 'blocked',
+      out_of_range: 'out of range', below_elevation: 'below elevation', no_position: 'no position' };
+    // Decision colours for the decision series; the two drops of a track's
+    // life take two theme hues the decisions do not use.
+    var SENT_DROP_COLOUR = { sent: dec.sent, timeout: pal[5] || '#e3b341', source_lost: pal[6] || '#56d4dd',
+      blocked: dec.blocked, out_of_range: dec.range, below_elevation: dec.elev, no_position: dec.unknown };
+    var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    var HOURS = [];
+    for (var hh = 0; hh < 24; hh++) HOURS.push((hh < 10 ? '0' : '') + hh);
+
+    function drawInputs(card, d) {
+      if (!d.series) return;
+      var list = S.inputSeries(d.series);
+      var r = rangeOf(d.summary);
+      card.setCaption((r ? fmt(r.observations) : fmt(S.total(d.series, 'observations'))) + ' observations · ' +
+        list.length + (list.length === 1 ? ' input' : ' inputs'));
+      var ch = card.chart();
+      if (!ch) return;
+      var unit = 'obs' + perBucket(d.series);
+      ch.setOption({
+        animation: false,
+        useUTC: true,   // UTC like the toolbar's since and the hour-of-week heatmap
+        legend: LEGEND,
+        tooltip: { trigger: 'axis', valueFormatter: unitFmt(unit) },
+        grid: { left: 48, right: 24, top: 26, bottom: 54 },
+        xAxis: timeAxis(d.series),
+        yAxis: countAxis(),
+        // No start/end here: a merge keeps the window the user zoomed to.
+        dataZoom: [{ id: 'in', type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+          { id: 'slide', type: 'slider', xAxisIndex: 0, height: 18, bottom: 6, filterMode: 'none' }],
+        // replaceMerge: an input gone from the range loses its series.
+        series: list.map(function (x) {
+          return { id: 'in:' + x.name, name: x.name, type: 'line', stack: 'obs', data: x.data,
+            symbol: 'circle', showSymbol: x.data.length < 3, symbolSize: 4, lineStyle: { width: 1 }, areaStyle: { opacity: 0.35 } };
+        })
+      }, { replaceMerge: ['series'] });
+    }
+
+    function drawAircraft(card, d) {
+      if (!d.series) return;
+      var a = S.aircraftSeries(d.series);
+      var r = rangeOf(d.summary);
+      card.setCaption(r ? fmt(r.aircraft) + ' aircraft · ' + fmt(r.new_aircraft) + ' new' : '');
+      var ch = card.chart();
+      if (!ch) return;
+      ch.setOption({
+        animation: false,
+        useUTC: true,   // UTC like the toolbar's since and the hour-of-week heatmap
+        legend: LEGEND,
+        tooltip: { trigger: 'axis', valueFormatter: unitFmt('aircraft' + perBucket(d.series)) },
+        grid: { left: 40, right: 24, top: 26, bottom: 24 },
+        xAxis: timeAxis(d.series),
+        yAxis: countAxis(),
+        series: [
+          { id: 'distinct', name: 'distinct', type: 'bar', data: a.distinct, barMaxWidth: 12,
+            itemStyle: { color: tk.accent } },
+          { id: 'new', name: 'new', type: 'line', data: a.fresh, symbol: 'circle', showSymbol: a.fresh.length < 3, symbolSize: 4,
+            lineStyle: { width: 1.5, color: dec.sent }, itemStyle: { color: dec.sent } }
+        ]
+      });
+    }
+
+    function drawSent(card, d) {
+      if (!d.series) return;
+      var list = S.sentDropSeries(d.series);
+      var r = rangeOf(d.summary);
+      card.setCaption(r ? fmt(r.sent_updates) + ' sent · ' + fmt(r.drops) + ' drops' : '');
+      var ch = card.chart();
+      if (!ch) return;
+      ch.setOption({
+        animation: false,
+        useUTC: true,   // UTC like the toolbar's since and the hour-of-week heatmap
+        legend: LEGEND,
+        tooltip: { trigger: 'axis', valueFormatter: unitFmt(d.series.res === 'hour' ? 'per hour' : 'per minute') },
+        grid: { left: 40, right: 24, top: 26, bottom: 24 },
+        xAxis: timeAxis(d.series),
+        yAxis: countAxis(),
+        // Two bars per bucket: the updates sent, and the drops stacked by reason.
+        series: list.map(function (x) {
+          return { id: x.name, name: SENT_DROP_LABEL[x.name], type: 'bar', stack: x.name === 'sent' ? 'sent' : 'drops',
+            data: x.data, barMaxWidth: 10, itemStyle: { color: SENT_DROP_COLOUR[x.name] } };
+        })
+      });
+    }
+
+    function drawWeek(card, d) {
+      if (!d.hours) return;   // not fetched yet, or its fetch failed: keep the last one
+      var cells = S.hourOfWeek(d.hours);
+      var max = S.hourOfWeekMax(cells);
+      var busiest = null;
+      cells.forEach(function (c) { if (c[2] > 0 && (!busiest || c[2] > busiest[2])) busiest = c; });
+      card.setCaption(fmt(S.total(d.hours, 'observations')) + ' observations' +
+        (busiest ? ' · busiest ' + DAYS[busiest[1]] + ' ' + HOURS[busiest[0]] + ':00' : '') + ' · UTC');
+      var ch = card.chart();
+      if (!ch) return;
+      ch.setOption({
+        animation: false,
+        tooltip: {
+          formatter: function (p) {
+            var h = p.value[0];
+            return DAYS[p.value[1]] + ' ' + HOURS[h] + ':00–' + (h === 23 ? '24' : HOURS[h + 1]) + ':00 UTC<br>' +
+              fmt(p.value[2]) + ' observations';
+          }
+        },
+        grid: { left: 36, right: 30, top: 4, bottom: 46 },
+        xAxis: { type: 'category', data: HOURS, axisTick: { show: false }, axisLabel: { interval: 2 },
+          name: 'UTC', nameLocation: 'end', nameGap: 4 },
+        yAxis: { type: 'category', data: DAYS, inverse: true, axisTick: { show: false } },
+        visualMap: { type: 'continuous', min: 0, max: max || 1, calculable: false, orient: 'horizontal',
+          left: 'center', bottom: 0, itemWidth: 10, itemHeight: 140, text: [fmt(max), '0'],
+          inRange: { color: [tk.line || '#30363d', tk.accent || '#58a6ff'] } },
+        series: [{ id: 'week', name: 'observations', type: 'heatmap', data: cells,
+          itemStyle: { borderColor: tk.panel, borderWidth: 1 }, emphasis: { itemStyle: { borderColor: tk.text } } }]
+      });
+    }
+
+    registerSection(function (d) {
+      var grid = sectionEl('traffic');
+      drawInputs(addCard(grid, 'traffic-inputs', 'Observations by input'), d);
+      drawAircraft(addCard(grid, 'traffic-aircraft', 'Aircraft per bucket'), d);
+      drawSent(addCard(grid, 'traffic-sent', 'Sent vs drops'), d);
+      drawWeek(addCard(grid, 'traffic-week', 'Busy hours of the week (UTC)'), d);
+    });
+
+    // ---- Weather (FIS-B, spec 6 item 6) ----------------------------------------
+    // Shown while summary.uat_seen (a UAT observation, frame or FIS-B product
+    // counted since the last reset); its card is made the first time.
+    registerSection(function (d) {
+      var shown = S.uatShown(d.summary);
+      if (shown === null) return;   // no summary: leave it as it is
+      var grid = sectionEl('weather');
+      var sec = grid.closest('.stats-section');
+      if (!shown) {
+        if (sec) sec.hidden = true;
+        return;
+      }
+      var card = addCard(grid, 'weather-uat', 'UAT frames and FIS-B products');
+      if (sec) sec.hidden = false;
+      if (!d.series) return;
+      var u = S.uatSeries(d.series);
+      card.setCaption(fmt(S.total(d.series, 'uat_uplink')) + ' uplink · ' + fmt(S.total(d.series, 'uat_downlink')) +
+        ' downlink frames · ' + fmt(S.total(d.series, 'fisb_products')) + ' products');
+      var ch = card.chart();
+      if (!ch) return;
+      var per = perBucket(d.series);
+      var line = function (id, data, col, unit) {
+        return { id: id, name: id, type: 'line', data: data, symbol: 'circle', showSymbol: data.length < 3, symbolSize: 4,
+          lineStyle: { width: 1.5, color: col }, itemStyle: { color: col },
+          tooltip: { valueFormatter: unitFmt(unit + per) } };
+      };
+      ch.setOption({
+        animation: false,
+        useUTC: true,   // UTC like the toolbar's since and the hour-of-week heatmap
+        legend: LEGEND,
+        tooltip: { trigger: 'axis' },
+        grid: { left: 40, right: 24, top: 26, bottom: 24 },
+        xAxis: timeAxis(d.series),
+        yAxis: countAxis(),
+        series: [
+          line('uplink', u.uplink, tk.accent, 'frames'),
+          line('downlink', u.downlink, dec.sent, 'frames'),
+          line('products', u.products, dec.elev, 'products')
+        ]
+      });
+    });
 
     // setDisposeMs: the dispose delay for the next close() (tests).
     return { open: open, close: close, isOpen: function () { return st.open; }, state: state, refreshNow: refreshNow,

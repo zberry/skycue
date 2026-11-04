@@ -119,10 +119,90 @@
     return 'since ' + s.substr(0, 10) + ' ' + s.substr(11, 5) + 'Z';
   }
 
+  // ---- Traffic and Weather ---------------------------------------------------
+
+  // The sum of a column (or of several) over the series' buckets.
+  function total(series, field) {
+    return spark(series, field).reduce(function (a, p) { return a + p[1]; }, 0);
+  }
+
+  // Observations per bucket by input: [{name, data: [[ms, n]]}], one per
+  // by_input key, the largest total first (ties by name), 'other' last.
+  function inputSeries(series) {
+    var by = series && series.by_input && typeof series.by_input === 'object' ? series.by_input : {};
+    var times = seriesTimes(series);
+    var out = Object.keys(by).map(function (name) {
+      var col = Array.isArray(by[name]) ? by[name] : [];
+      var sum = 0;
+      var data = times.map(function (ms, i) { var v = num(col[i]); sum += v; return [ms, v]; });
+      return { name: name, data: data, sum: sum };
+    });
+    out.sort(function (a, b) {
+      if ((a.name === 'other') !== (b.name === 'other')) return a.name === 'other' ? 1 : -1;
+      if (a.sum !== b.sum) return b.sum - a.sum;
+      return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+    });
+    return out.map(function (x) { return { name: x.name, data: x.data }; });
+  }
+
+  // Distinct and new aircraft per bucket.
+  function aircraftSeries(series) {
+    return { distinct: spark(series, 'aircraft'), fresh: spark(series, 'new_aircraft') };
+  }
+
+  // Sent vs drops by reason, in the order of the stacked bar: the updates
+  // sent, the drops of a track's life (timeout, source lost) and the
+  // filtered drops by the decision that caused them (their sum is
+  // drops_filtered, which is therefore not a series of its own).
+  var SENT_DROPS = [
+    ['sent', 'sent_updates'], ['timeout', 'drops_timeout'], ['source_lost', 'drops_source_lost'],
+    ['blocked', 'drops_blocked'], ['out_of_range', 'drops_out_of_range'],
+    ['below_elevation', 'drops_below_elevation'], ['no_position', 'drops_no_position']
+  ];
+  function sentDropSeries(series) {
+    return SENT_DROPS.map(function (p) { return { name: p[0], data: spark(series, p[1]) }; });
+  }
+
+  // The 7 x 24 hour-of-week cells of an hour series' observations (UTC),
+  // summed over the weeks it holds: [[hour 0..23, day 0..6 (Mon = 0), n]],
+  // all 168, day by day then hour by hour.
+  function hourOfWeek(hourSeries, field) {
+    var f = field || 'observations';
+    var sums = [];
+    for (var k = 0; k < 168; k++) sums.push(0);
+    var col = hourSeries && Array.isArray(hourSeries[f]) ? hourSeries[f] : [];
+    seriesTimes(hourSeries).forEach(function (ms, i) {
+      if (isNaN(ms)) return;
+      var d = new Date(ms);
+      sums[((d.getUTCDay() + 6) % 7) * 24 + d.getUTCHours()] += num(col[i]);
+    });
+    return sums.map(function (n, k) { return [k % 24, Math.floor(k / 24), n]; });
+  }
+  function hourOfWeekMax(cells) {
+    return (cells || []).reduce(function (a, c) { return Math.max(a, c[2]); }, 0);
+  }
+
+  // UAT frames (downlink, uplink) and FIS-B products per bucket.
+  function uatSeries(series) {
+    return { downlink: spark(series, 'uat_downlink'), uplink: spark(series, 'uat_uplink'),
+      products: spark(series, 'fisb_products') };
+  }
+
+  // Whether the Weather (FIS-B) section shows: summary.uat_seen (a UAT
+  // observation, frame or FIS-B product has ever been counted since the
+  // last reset). null without a summary: keep what is shown.
+  function uatShown(summary) {
+    if (!summary || typeof summary !== 'object') return null;
+    return summary.uat_seen === true;
+  }
+
   var api = {
     RANGES: RANGES, DEFAULT_RANGE: DEFAULT_RANGE, rangeKey: rangeKey, rangeQuery: rangeQuery,
     seriesTimes: seriesTimes, sliceSeries: sliceSeries, spark: spark, DROP_FIELDS: DROP_FIELDS,
-    tiles: tiles, sinceText: sinceText
+    tiles: tiles, sinceText: sinceText,
+    total: total, inputSeries: inputSeries, aircraftSeries: aircraftSeries, SENT_DROPS: SENT_DROPS,
+    sentDropSeries: sentDropSeries, hourOfWeek: hourOfWeek, hourOfWeekMax: hourOfWeekMax,
+    uatSeries: uatSeries, uatShown: uatShown
   };
   if (root) root.skycueStatsPure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

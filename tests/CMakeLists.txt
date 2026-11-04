@@ -273,7 +273,7 @@ if(SKYCUE_UI_TESTS)
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/ui/run.sh
       $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
       $<TARGET_FILE:skycue-pingsim>)
-  set_tests_properties(ui_playwright PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+  set_tests_properties(ui_playwright PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77)
 endif()
 
 # FIS-B uplink frame, APDU header and DLAC parsers on hand-built vectors and

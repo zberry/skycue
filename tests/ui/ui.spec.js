@@ -2187,3 +2187,197 @@ test('stats_receiver_link_opens_receiver_tab', async ({ page }) => {
   await page.locator('#stats-receiver-link').click();
   await expect(page.locator('#details')).toBeHidden();
 });
+
+// ---- Stats: Traffic and Weather (spec 6 items 2 and 6) ------------------------
+// A card's live ECharts option (null before its chart is made).
+const cardOption = (page, id) => page.evaluate((cid) => {
+  const el = document.querySelector('[data-card="' + cid + '"] .card-chart');
+  const inst = el && window.echarts.getInstanceByDom(el);
+  return inst ? JSON.parse(JSON.stringify(inst.getOption())) : null;
+}, id);
+const cardCaption = (page, id) => page.locator(`[data-card="${id}"] .card-caption`).textContent();
+const isPairs = (data) => Array.isArray(data) && data.every((p) => Array.isArray(p) && p.length === 2 &&
+  typeof p[0] === 'number' && typeof p[1] === 'number');
+const sumPairs = (data) => data.reduce((b, p) => b + p[1], 0);
+const TRAFFIC_CARDS = ['traffic-inputs', 'traffic-aircraft', 'traffic-sent', 'traffic-week'];
+const sectionOf = (page, grid) => page.locator(grid).locator('xpath=ancestor::section[contains(@class,"stats-section")]');
+
+async function openTraffic(page) {
+  await openStats(page);
+  await expect.poll(async () => (await statsState(page)).cards.filter((c) => TRAFFIC_CARDS.includes(c.id) && c.canvas)
+    .map((c) => c.id), { timeout: 15000 }).toEqual(TRAFFIC_CARDS);
+}
+
+test('stats_traffic_inputs_stacked_by_input_with_zoom', async ({ page }, testInfo) => {
+  await openTraffic(page);
+  await expect.poll(async () => (await cardOption(page, 'traffic-inputs')).series
+    .reduce((a, s) => a + sumPairs(s.data), 0), { timeout: 15000 }).toBeGreaterThan(0);
+  const o = await cardOption(page, 'traffic-inputs');
+  const inputs = Object.keys((await api('/api/stats/series')).body.by_input);
+  expect(inputs.length).toBeGreaterThan(0);
+  // One stacked area per input, ordered by total with 'other' last.
+  expect(o.series.map((s) => s.name).sort()).toEqual(inputs.slice().sort());
+  const sums = o.series.map((s) => sumPairs(s.data));
+  for (let i = 1; i < sums.length; i++) {
+    if (o.series[i].name !== 'other') expect(sums[i - 1]).toBeGreaterThanOrEqual(sums[i]);
+  }
+  if (inputs.includes('other')) expect(o.series[o.series.length - 1].name).toBe('other');
+  for (const s of o.series) {
+    expect(s.type).toBe('line');
+    expect(s.stack).toBe('obs');
+    expect(s.areaStyle).toBeTruthy();
+    expect(isPairs(s.data), s.name).toBe(true);
+  }
+  expect(o.xAxis[0].type).toBe('time');
+  // The axis spans the buckets drawn, half a bucket either side, in UTC.
+  const ts = o.series[0].data.map((p) => p[0]);
+  expect(o.xAxis[0].min).toBe(ts[0] - 30000);
+  expect(o.xAxis[0].max).toBe(ts[ts.length - 1] + 30000);
+  expect(o.useUTC).toBe(true);
+  expect(o.dataZoom.map((z) => z.type).sort()).toEqual(['inside', 'slider']);
+  expect(await cardCaption(page, 'traffic-inputs'))
+    .toMatch(new RegExp('^\\d{1,3}(,\\d{3})* observations · ' + inputs.length + ' inputs?$'));
+  // The window the user zoomed to survives a refresh (setOption merges).
+  const zoom = (start, end) => page.evaluate(([s, e]) => {
+    const el = document.querySelector('[data-card="traffic-inputs"] .card-chart');
+    window.echarts.getInstanceByDom(el).dispatchAction({ type: 'dataZoom', start: s, end: e });
+  }, [start, end]);
+  await zoom(40, 90);
+  const r0 = (await statsState(page)).refreshes;
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  expect((await statsState(page)).refreshes).toBeGreaterThan(r0);
+  for (const dz of (await cardOption(page, 'traffic-inputs')).dataZoom) {
+    expect(dz.start).toBe(40);
+    expect(dz.end).toBe(90);
+  }
+  await zoom(0, 100);
+  const sec = sectionOf(page, '#stats-traffic');
+  await sec.scrollIntoViewIfNeeded();
+  await sec.screenshot({ path: testInfo.outputPath(`skycue-stats-traffic-${testInfo.project.name}.png`) });
+});
+
+test('stats_traffic_aircraft_and_sent_vs_drops', async ({ page }) => {
+  await openTraffic(page);
+  const a = await cardOption(page, 'traffic-aircraft');
+  expect(a.series.map((s) => [s.id, s.type])).toEqual([['distinct', 'bar'], ['new', 'line']]);
+  a.series.forEach((s) => expect(isPairs(s.data), s.id).toBe(true));
+  await expect.poll(async () => sumPairs((await cardOption(page, 'traffic-aircraft')).series[0].data),
+    { timeout: 15000 }).toBeGreaterThan(0);
+  expect(await cardCaption(page, 'traffic-aircraft')).toMatch(/^\d{1,3}(,\d{3})* aircraft · \d{1,3}(,\d{3})* new$/);
+  const o = await cardOption(page, 'traffic-sent');
+  expect(o.series.map((s) => s.id))
+    .toEqual(['sent', 'timeout', 'source_lost', 'blocked', 'out_of_range', 'below_elevation', 'no_position']);
+  expect(o.series.map((s) => s.name))
+    .toEqual(['sent', 'timeout', 'source lost', 'blocked', 'out of range', 'below elevation', 'no position']);
+  expect(o.series.map((s) => s.stack)).toEqual(['sent', 'drops', 'drops', 'drops', 'drops', 'drops', 'drops']);
+  o.series.forEach((s) => { expect(s.type).toBe('bar'); expect(isPairs(s.data), s.id).toBe(true); });
+  // The decision series in the page's decision colours (style.css tokens).
+  const col = {};
+  o.series.forEach((s) => { col[s.id] = s.itemStyle.color; });
+  expect(col).toMatchObject({ sent: '#3fb950', blocked: '#f85149', out_of_range: '#8b949e',
+    below_elevation: '#f0883e', no_position: '#d2a8ff' });
+  // The replay sends updates: the sent bars are not all zero.
+  await expect.poll(async () => sumPairs((await cardOption(page, 'traffic-sent')).series[0].data),
+    { timeout: 15000 }).toBeGreaterThan(0);
+  expect(await cardCaption(page, 'traffic-sent')).toMatch(/^\d{1,3}(,\d{3})* sent · \d{1,3}(,\d{3})* drops$/);
+});
+
+test('stats_traffic_hour_of_week_heatmap_utc', async ({ page }) => {
+  await openTraffic(page);
+  await expect.poll(async () => (await cardOption(page, 'traffic-week')).series[0].data
+    .reduce((b, c) => b + c[2], 0), { timeout: 15000 }).toBeGreaterThan(0);
+  const o = await cardOption(page, 'traffic-week');
+  const cells = o.series[0].data;
+  expect(o.series[0].type).toBe('heatmap');
+  expect(cells.length).toBe(168);
+  expect(o.xAxis[0].data).toEqual(Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0')));
+  expect(o.yAxis[0].data).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+  // Built from the hour series: every non-zero cell is the UTC weekday and
+  // hour of one of its buckets.
+  const hours = (await api('/api/stats/series?res=hour')).body;
+  const slots = new Set(hours.t.map((t) => { const d = new Date(t); return d.getUTCHours() + ',' + (d.getUTCDay() + 6) % 7; }));
+  expect(slots.size).toBeGreaterThan(0);
+  for (const c of cells) if (c[2] > 0) expect(slots.has(c[0] + ',' + c[1]), c.join(',')).toBe(true);
+  const total = cells.reduce((b, c) => b + c[2], 0);
+  const caption = await cardCaption(page, 'traffic-week');
+  expect(caption).toMatch(/ · busiest (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d:00 · UTC$/);
+  expect(Number(caption.split(' ')[0].replace(/,/g, ''))).toBe(total);
+});
+
+// A failed slow fetch (the hour series here) gives null: the heatmap keeps
+// what it drew, and nothing throws.
+test('stats_traffic_failed_hour_fetch_keeps_heatmap', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await openTraffic(page);
+  await expect.poll(async () => (await cardOption(page, 'traffic-week')).series[0].data
+    .reduce((b, c) => b + c[2], 0), { timeout: 15000 }).toBeGreaterThan(0);
+  const before = (await cardOption(page, 'traffic-week')).series[0].data;
+  const capBefore = await cardCaption(page, 'traffic-week');
+  let failedHour = 0;
+  await page.route(/\/api\/stats\/series\?res=hour$/, (route) => {
+    failedHour++;
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"test"}' });
+  });
+  // Closing and opening makes the next refresh a slow one.
+  const r0 = (await statsState(page)).refreshes;
+  await page.locator('#stats-toggle').click();
+  await page.locator('#stats-toggle').click();
+  await expect.poll(async () => (await statsState(page)).refreshes, { timeout: 10000 }).toBeGreaterThan(r0);
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  expect(failedHour).toBeGreaterThan(0);
+  expect((await cardOption(page, 'traffic-week')).series[0].data).toEqual(before);
+  expect(await cardCaption(page, 'traffic-week')).toBe(capBefore);
+  await expect(page.locator('#stats-msg')).not.toHaveClass(/error/);
+  expect(errors).toEqual([]);
+  await page.unroute(/\/api\/stats\/series\?res=hour$/);
+});
+
+// Weather: the main daemon's section follows its summary.uat_seen.
+test('stats_weather_follows_uat_seen', async ({ page }) => {
+  await openTraffic(page);
+  const seen = (await api('/api/stats/summary')).body.uat_seen;
+  const sec = sectionOf(page, '#stats-weather');
+  if (seen) await expect(sec).toBeVisible();
+  else {
+    await expect(sec).toBeHidden();
+    expect((await statsState(page)).cards.map((c) => c.id)).not.toContain('weather-uat');
+  }
+});
+
+test.describe('stats weather (FIS-B daemon)', () => {
+  test.use({ baseURL: FISB_BASE });
+  test('stats_weather_uat_lines_shown_then_hidden', async ({ page }) => {
+    expect((await apiAt(FISB_BASE, '/api/stats/summary')).body.uat_seen).toBe(true);
+    await openStats(page);
+    const sec = sectionOf(page, '#stats-weather');
+    await expect(sec).toBeVisible();
+    await expect.poll(async () => (await statsState(page)).cards.filter((c) => c.id === 'weather-uat' && c.canvas).length,
+      { timeout: 15000 }).toBe(1);
+    const o = await cardOption(page, 'weather-uat');
+    expect(o.series.map((s) => [s.id, s.type])).toEqual([['uplink', 'line'], ['downlink', 'line'], ['products', 'line']]);
+    o.series.forEach((s) => expect(isPairs(s.data), s.id).toBe(true));
+    // One point per bucket of the range's series, from its uat_uplink,
+    // uat_downlink and fisb_products columns; the caption gives their sums.
+    // (Here uat_seen comes from the recording's UAT observations; the
+    // series' UAT columns read zero in this replay, so no sum > 0 is asked.)
+    const se = (await apiAt(FISB_BASE, '/api/stats/series')).body;
+    o.series.forEach((s) => expect(s.data.length, s.id).toBe(se.t.length));
+    const sums = o.series.map((s) => sumPairs(s.data));
+    const cap = await cardCaption(page, 'weather-uat');
+    const th = (n) => n.toLocaleString('en-US');
+    expect(cap).toBe(th(sums[0]) + ' uplink · ' + th(sums[1]) + ' downlink frames · ' + th(sums[2]) + ' products');
+    // A summary without UAT activity (as after a reset) hides the section.
+    await page.route(/\/api\/stats\/summary\?/, async (route) => {
+      const r = await route.fetch();
+      const body = await r.json();
+      body.uat_seen = false;
+      await route.fulfill({ response: r, json: body });
+    });
+    await page.evaluate(() => window.skycueApp.statsRefresh());
+    await expect(sec).toBeHidden();
+    await page.unroute(/\/api\/stats\/summary\?/);
+    await page.evaluate(() => window.skycueApp.statsRefresh());
+    await expect(sec).toBeVisible();
+  });
+});

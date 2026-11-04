@@ -91,7 +91,12 @@ WEB_PORT=$web_port
 MAX_RANGE_NM=150
 MIN_ELEVATION_DEG=0
 TRAIL_SECONDS=120
+STATS_FILE=
 EOF
+# STATS_FILE empty: the statistics live in memory only, so the reconnect
+# case's restart starts them again with the replay's clock (a ledger
+# reloaded from a file is ahead of that clock, and the Stats view's
+# "aircraft in range" reads 0 until the replay catches up).
 
 # The spec restarts skycued (reconnect case) with this same command; `exec`
 # keeps the PID the one of skycued itself, written to $pidfile.

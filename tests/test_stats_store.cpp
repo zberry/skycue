@@ -156,7 +156,9 @@ BOOST_AUTO_TEST_CASE(one_bucket_late_accepted)
     BOOST_REQUIRE(one.series(StatsRes::minute).size() == 2u);
     BOOST_TEST(one.series(StatsRes::minute).front().start_s == b - 60);
     BOOST_TEST(one.series(StatsRes::minute).front().observations == 1u);
-    BOOST_TEST(one.seriesSinceS().value() == b);
+    // The series now begins at the late time; since stays the first stored value.
+    BOOST_TEST(one.seriesSinceS().value() == b - 30);
+    BOOST_TEST(one.sinceS().value() == b);
 }
 
 BOOST_AUTO_TEST_CASE(older_restarts_series)
@@ -569,6 +571,96 @@ BOOST_AUTO_TEST_CASE(eviction_at_cap)
     BOOST_TEST(small.aircraftCount() == 3u);
     BOOST_TEST(small.evicted() == 1u);
     BOOST_TEST(small.aircraft(icao(1)) == nullptr);
+}
+
+BOOST_AUTO_TEST_CASE(eviction_keeps_observed_aircraft)
+{
+    StatsLimits lim;
+    lim.aircraft_max = 100;
+    StatsStore st(kRx, lim);
+    for (uint32_t i = 0; i < 100; ++i)
+        feed(st, obsAt(i + 1, kT0 + 1000 + i, 39.0, -77.0));
+    // The data clock behind the ledger: older than every entry's last_seen.
+    feed(st, obsAt(999, kT0, 39.0, -77.0));
+    BOOST_TEST(st.aircraftCount() == 96u);
+    BOOST_TEST(st.evicted() == 5u);
+    BOOST_REQUIRE(st.aircraft(icao(999)) != nullptr);
+    for (uint32_t i = 1; i <= 5; ++i)
+        BOOST_TEST(st.aircraft(icao(i)) == nullptr);
+    BOOST_TEST(st.series(StatsRes::minute).back().new_aircraft == 1u);
+    // The next sighting is not new again.
+    feed(st, obsAt(999, kT0 + 1, 39.0, -77.0));
+    BOOST_TEST(st.series(StatsRes::minute).back().new_aircraft == 1u);
+    BOOST_TEST(st.series(StatsRes::minute).back().aircraft == 1u);
+    BOOST_TEST(st.aircraft(icao(999))->observations == 2u);
+    BOOST_TEST(st.evicted() == 5u);
+}
+
+BOOST_AUTO_TEST_CASE(huge_values_are_clamped)
+{
+    StatsStore st(kRx);
+    // Off the globe or absurd: no position anywhere (grid, coverage, range).
+    for (double bad : {1e300, -1e300, 91.0}) {
+        feed(st, obsAt(1, kT0, bad, -77.0), resultFor(10.0, 1.0, Decision::send));
+        feed(st, obsAt(1, kT0, 39.0, bad * 2.0), resultFor(10.0, 1.0, Decision::send));
+    }
+    BOOST_TEST(st.gridCells().empty());
+    BOOST_TEST(st.series(StatsRes::minute).back().positions == 0u);
+    BOOST_TEST(st.series(StatsRes::minute).back().observations == 6u);
+    BOOST_TEST(histTotal(st, StatsHist::range) == 0u);
+    BOOST_TEST(st.aircraft(icao(1))->positions == 0u);
+    BOOST_TEST(!st.aircraft(icao(1))->max_range_nm.has_value());
+
+    // Huge finite range and rssi land in the edge bins.
+    Obs o = obsAt(2, kT0 + 1, 39.5, -77.0);
+    o.obs.rssi = 1e300;
+    o.obs.gs_kt = 1e30f;
+    sync(o);
+    feed(st, o, resultFor(1e300, 1e300, Decision::send));
+    BOOST_TEST(st.rssiByRange(kStatsRssiRangeBins - 1, kStatsRssiBins - 1) == 1u);
+    BOOST_TEST(st.histogram(StatsHist::range).counts.back() == 1u);
+    BOOST_TEST(st.histogram(StatsHist::elevation).counts.back() == 1u);
+    BOOST_TEST(st.histogram(StatsHist::rssi).counts.back() == 1u);
+    BOOST_TEST(st.histogram(StatsHist::speed).counts.back() == 1u);
+    o.obs.rssi = -1e300;
+    sync(o);
+    feed(st, o, resultFor(-1e300, -1e300, Decision::send));
+    BOOST_TEST(st.rssiByRange(0, 0) == 1u);
+    BOOST_TEST(st.histogram(StatsHist::range).counts.front() == 1u);
+    BOOST_TEST(st.histogram(StatsHist::rssi).counts.front() == 1u);
+    BOOST_TEST(st.gridCells().size() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(nan_fields_are_ignored)
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    StatsStore st(kRx);
+    Obs o = obsAt(5, kT0, 39.5, -77.0);
+    o.obs.rssi = nan;
+    o.obs.gs_kt = std::numeric_limits<float>::quiet_NaN();
+    o.obs.baro_rate_fpm = std::numeric_limits<float>::quiet_NaN();
+    // An integer altitude cannot be NaN: the altitude is simply absent.
+    o.obs.alt_baro_ft.reset();
+    o.obs.alt_geom_ft.reset();
+    sync(o);
+    BOOST_CHECK_NO_THROW(feed(st, o, resultFor(nan, nan, Decision::send)));
+    for (StatsHist h : {StatsHist::range, StatsHist::altitude, StatsHist::speed, StatsHist::vertical_rate,
+                        StatsHist::elevation, StatsHist::rssi})
+        BOOST_TEST(histTotal(st, h) == 0u);
+    for (int s = 0; s < kStatsSectors; ++s)
+        for (int b = 0; b < kStatsBands; ++b)
+            BOOST_TEST(st.coverage(s, b).n == 0u);
+    const AircraftStats* a = st.aircraft(icao(5));
+    BOOST_REQUIRE(a != nullptr);
+    BOOST_TEST(a->observations == 1u);
+    BOOST_TEST(a->positions == 1u);
+    BOOST_TEST(!a->min_rssi.has_value());
+    BOOST_TEST(!a->max_gs_kt.has_value());
+    BOOST_TEST(!a->max_range_nm.has_value());
+    BOOST_TEST(!a->min_alt_ft.has_value());
+    BOOST_TEST(st.series(StatsRes::minute).back().observations == 1u);
+    BOOST_TEST(st.series(StatsRes::minute).back().max_range_nm == 0.0);
+    BOOST_TEST(st.gridCells().size() == 1u);
 }
 
 BOOST_AUTO_TEST_CASE(tick_deltas_and_samples)

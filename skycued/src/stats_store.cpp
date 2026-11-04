@@ -89,6 +89,24 @@ int64_t gridKey(int32_t lat_i, int32_t lon_i)
                                 static_cast<uint32_t>(lon_i));
 }
 
+// floor(x) as a bin index in [0, n): clamped in double before the cast, so
+// a huge or non-finite x is never converted out of int's range.
+int clampedBin(double x, int n)
+{
+    if (!(x >= 0))
+        return 0;
+    if (x >= double(n))
+        return n - 1;
+    return static_cast<int>(x);
+}
+
+// A position the store uses: finite and on the globe.
+bool usablePosition(const TrackObservation& obs)
+{
+    return obs.lat && obs.lon && std::isfinite(*obs.lat) && std::isfinite(*obs.lon) && std::fabs(*obs.lat) <= 90.0 &&
+           std::fabs(*obs.lon) <= 180.0;
+}
+
 // The positive change of a counter since `base`, which becomes v (a counter
 // that went down is a new base; the first call only sets it).
 uint64_t counterDelta(std::optional<uint64_t>& base, uint64_t v)
@@ -224,6 +242,11 @@ StatsStore::Placed StatsStore::place(int64_t t_s, Older older)
         else if (bucketStart(t_s, minute_.len) < newest - minute_.len)
             restartSeries(t_s);
     }
+    // A late time can make a bucket before the first one (placeIn's front
+    // case): the series then begins there. (since stays the first stored
+    // value: it is when accumulation began, not the oldest data time.)
+    if (older == Older::restart && series_since_s_ && t_s < *series_since_s_)
+        series_since_s_ = t_s;
     Placed p;
     p.minute = placeIn(minute_, t_s);
     p.hour = placeIn(hour_, t_s);
@@ -267,7 +290,8 @@ void StatsStore::observe(const TrackObservation& obs, const TrackState& state, c
 
     auto entry = ledger_.find(obs.id);
     const bool is_new = entry == ledger_.end();
-    const bool has_pos = obs.lat && obs.lon;
+    // A position off the globe (|lat| > 90, |lon| > 180) or not finite counts as none.
+    const bool has_pos = usablePosition(obs);
     const bool ranged = has_pos && receiver_ && std::isfinite(result.range_nm);
     const double range = result.range_nm;
     const TrackObservation& id_fields = state.latest;
@@ -329,15 +353,14 @@ void StatsStore::observe(const TrackObservation& obs, const TrackState& state, c
             c.time_s = t;
         }
         if (obs.rssi && std::isfinite(*obs.rssi)) {
-            const int rb = std::min(std::max(static_cast<int>(std::floor(range / 10.0)), 0), kStatsRssiRangeBins - 1);
-            const int sb =
-                std::min(std::max(static_cast<int>(std::floor((*obs.rssi + 50.0) / 2.0)), 0), kStatsRssiBins - 1);
+            const int rb = clampedBin(range / 10.0, kStatsRssiRangeBins);
+            const int sb = clampedBin((*obs.rssi + 50.0) / 2.0, kStatsRssiBins);
             ++rssi_by_range_[std::size_t(rb) * kStatsRssiBins + std::size_t(sb)];
         }
     }
 
     // The position grid.
-    if (has_pos && std::isfinite(*obs.lat) && std::isfinite(*obs.lon)) {
+    if (has_pos) {  // |lat| <= 90, |lon| <= 180: the cell indices fit int32_t
         const auto lat_i = static_cast<int32_t>(std::floor(*obs.lat / kStatsGridCellDeg));
         const auto lon_i = static_cast<int32_t>(std::floor(*obs.lon / kStatsGridCellDeg));
         const int64_t key = gridKey(lat_i, lon_i);
@@ -413,16 +436,21 @@ void StatsStore::observe(const TrackObservation& obs, const TrackState& state, c
     a.source = obs.source;
 
     if (is_new && ledger_.size() > limits_.aircraft_max)
-        evictOldest();
+        evictOldest(obs.id);
 }
 
-void StatsStore::evictOldest()
+void StatsStore::evictOldest(skycue::TrackId keep)
 {
-    const std::size_t k = std::min(std::max<std::size_t>(1, limits_.aircraft_max / 20), ledger_.size());
+    // The aircraft being observed is never a candidate, even when the data
+    // clock is behind every other entry's last_seen.
     std::vector<std::pair<int64_t, skycue::TrackId>> by_age;
     by_age.reserve(ledger_.size());
     for (const auto& kv : ledger_)
-        by_age.emplace_back(kv.second.last_seen_s, kv.first);
+        if (kv.first != keep)
+            by_age.emplace_back(kv.second.last_seen_s, kv.first);
+    const std::size_t k = std::min(std::max<std::size_t>(1, limits_.aircraft_max / 20), by_age.size());
+    if (k == 0)
+        return;
     auto older = [](const std::pair<int64_t, skycue::TrackId>& x, const std::pair<int64_t, skycue::TrackId>& y) {
         return x.first < y.first;
     };

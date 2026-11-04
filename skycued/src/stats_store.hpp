@@ -19,7 +19,7 @@
 //     bucket is appended, the oldest popped past the cap; a gap of a whole
 //     ring or more empties the ring first and keeps only t's bucket;
 //   - t in the bucket just before the newest: that bucket (made, at the front,
-//     when only the newest exists);
+//     when only the newest exists, and series_since moves back to t);
 //   - anything older: observe() restarts the series (both rings emptied,
 //     seriesSinceS() = t, one INFO "stats: the data clock moved backwards to
 //     <iso>; the series restart", at most once a minute); sent(), dropped()
@@ -34,7 +34,8 @@
 //
 // observe(): bucket observations, by_input[input id or "unknown"] (at most
 // kStatsInputsMax ids, the rest under "other"; counts(input) the same),
-// positions (the observation has lat/lon), emergencies (state.latest's
+// positions (the observation has a finite lat/lon on the globe, |lat| <= 90
+// and |lon| <= 180; anything else counts as no position everywhere), emergencies (state.latest's
 // emergency set and not "none", or squawk 7500/7600/7700), max_range_nm and
 // its id. The numeric histograms use the observation's own fields: altitude
 // = alt_baro_ft else alt_geom_ft, 0 on the ground; speed gs_kt; vertical
@@ -59,7 +60,8 @@
 // kStatsListMax distinct callsigns, squawks and inputs (newest last, a repeat
 // moves to the end), registration, category, source. When an insert makes it
 // exceed aircraft_max, the max(1, aircraft_max / 20) entries with the oldest
-// last_seen_s are erased and counted in evicted().
+// last_seen_s, never the aircraft being observed, are erased and counted in
+// evicted().
 //
 // sent() / dropped(): the bucket counters (drops by reason and, filtered, by
 // decision, through countDropIn as Engine::countDrop) and the ledger entry
@@ -71,7 +73,8 @@
 // positive delta (which starts the series).
 //
 // since: when accumulation began (the first stored value on an empty store,
-// or reset()). dirty(): set by any stored change (observe, sent, dropped,
+// or reset()); a later, older observation does not move it back (only
+// series_since follows a late bucket made before the first one). dirty(): set by any stored change (observe, sent, dropped,
 // reset; a tick only when a value changes, never for placing empty buckets),
 // cleared by markSaved().
 
@@ -252,7 +255,7 @@ private:
     static Slot placeIn(Ring& ring, int64_t t_s);
     void restartSeries(int64_t t_s);
     void countInput(std::map<std::string, uint64_t>& m, const std::string& key);
-    void evictOldest();
+    void evictOldest(skycue::TrackId keep);  // never evicts `keep`
     void clearAll();
 
     std::optional<ReceiverPosition> receiver_;

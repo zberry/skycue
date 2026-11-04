@@ -313,16 +313,40 @@ test('input_lost: seed, hold-off, recovery', () => {
   s.endBaseline([]);
   assert.deepStrictEqual(s.inputs(inp(false), T0 + 60000, W0 + 60000), []);
   assert.deepStrictEqual(s.tick(T0 + 120000, W0 + 120000), []);
-  // A seed call re-records a known input too: one down there (here inside
-  // its hold-off) starts none.
+});
+
+test('input_lost: a seed keeps a pending hold-off and a known input seen down on a seed starts one', () => {
+  // Down at W0 + 1000, still down on the reconnect seed: the hold-off runs on.
   const k = A.createEngine(cfg({ input_lost: { enabled: true } }), null);
   k.inputs(inp(true), T0, W0);
-  k.inputs(inp(false), T0 + 1000, W0 + 1000);
+  assert.deepStrictEqual(k.inputs(inp(false), T0 + 1000, W0 + 1000), []);
   k.beginBaseline();
-  k.inputs(inp(false), T0 + 2000, W0 + 2000);
+  assert.deepStrictEqual(k.inputs(inp(false), T0 + 2000, W0 + 2000), []);
   k.endBaseline([]);
-  assert.deepStrictEqual(k.tick(T0 + 60000, W0 + 60000), []);
-  assert.deepStrictEqual(k.inputs(inp(false), T0 + 61000, W0 + 61000), []);
+  assert.deepStrictEqual(k.tick(T0 + 10999, W0 + 10999), []);
+  like(one(k.tick(T0 + 11000, W0 + 11000)), { rule: 'input_lost', input: 'ps-1', detail: 'disconnected' });
+  // Last seen connected, first seen down on a seed at W0 + 5000.
+  const seededDown = () => {
+    const e = A.createEngine(cfg({ input_lost: { enabled: true } }), null);
+    e.beginBaseline();
+    e.inputs(inp(true), T0, W0);
+    e.endBaseline([]);
+    e.beginBaseline();
+    assert.deepStrictEqual(e.inputs(inp(false), T0 + 5000, W0 + 5000), []);
+    e.endBaseline([]);
+    return e;
+  };
+  const q = seededDown();
+  assert.deepStrictEqual(q.tick(T0 + 14999, W0 + 14999), []);
+  const r = one(q.tick(T0 + 15000, W0 + 15000));
+  like(r, { rule: 'input_lost', input: 'ps-1', label: 'North', detail: 'disconnected', acked: false });
+  assert.deepStrictEqual(q.inputs(inp(true), T0 + 20000, W0 + 20000), []);
+  like(q.rows()[0], { id: r.id, acked: true, recovered: 'recovered after 15 s' });
+  // Back before the hold-off is over: cancelled silently.
+  const c = seededDown();
+  assert.deepStrictEqual(c.inputs(inp(true), T0 + 8000, W0 + 8000), []);
+  assert.deepStrictEqual(c.tick(T0 + 30000, W0 + 30000), []);
+  assert.strictEqual(c.rows().length, 0);
 });
 
 test('input_lost: back early, disabled, removed', () => {

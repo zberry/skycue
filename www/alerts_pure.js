@@ -425,9 +425,11 @@
     }
 
     // The inputs status list ({id, name, enabled, state: {connected}}).
-    // Only enabled inputs count; a first sighting, or any sighting in a
-    // seed call, records the state silently (an input already down starts
-    // no hold-off).
+    // Only enabled inputs count; a first sighting records the state
+    // silently (an input already down starts no hold-off), in a seed call
+    // or not. A known input last seen connected and now down starts its
+    // hold-off, in a seed call too, and a seed never cancels a pending one;
+    // a seed call only defers the firing to the next call or tick.
     function inputs(list, nowMs, wallMs) {
       clock(nowMs);
       var out = [], present = {}, disabled = {}, order = [];
@@ -455,8 +457,6 @@
         s.name = name;
         if (connected) {
           if (!s.connected) endOutage(id, s, nowMs, wallMs, null);
-        } else if (seedInputs) {
-          if (!s.fired) s.downSince = null;
         } else if (s.connected) {
           s.downSince = wallMs;
         }

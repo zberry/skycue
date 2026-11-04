@@ -241,6 +241,20 @@
     };
   }
 
+  // A pairs table cut to PAIRS_MAX in place: open pairs first, then the most
+  // recently fired or acknowledged, then by key.
+  function trimPairs(pairs) {
+    var pks = Object.keys(pairs);
+    if (pks.length <= PAIRS_MAX) return;
+    var recent = function (p) { return Math.max(p.fired === null ? -Infinity : p.fired, p.ack === null ? -Infinity : p.ack); };
+    pks.sort(function (a, b) {
+      var pa = pairs[a], pb = pairs[b];
+      if ((pa.open === null) !== (pb.open === null)) return pa.open === null ? 1 : -1;
+      return recent(pb) - recent(pa) || (a < b ? -1 : 1);
+    });
+    pks.slice(PAIRS_MAX).forEach(function (pk) { delete pairs[pk]; });
+  }
+
   // Any input (an object, a JSON string, garbage) to a log: rows without a
   // whole-number id, a known rule or a parsable time dropped, ids unique,
   // oldest first, the newest LOG_MAX kept; pairs of known rules, at most
@@ -274,18 +288,7 @@
       if (!own(pairs, pk)) pairs[pk] = { active: false, fired: Date.parse(r.time), ack: null, open: null };
       pairs[pk].open = r.id;
     });
-    var pks = Object.keys(pairs);
-    if (pks.length > PAIRS_MAX) {
-      var recent = function (p) { return Math.max(p.fired === null ? -Infinity : p.fired, p.ack === null ? -Infinity : p.ack); };
-      pks.sort(function (a, b) {
-        var pa = pairs[a], pb = pairs[b];
-        if ((pa.open === null) !== (pb.open === null)) return pa.open === null ? 1 : -1;
-        return recent(pb) - recent(pa) || (a < b ? -1 : 1);
-      });
-      var kept = {};
-      pks.slice(0, PAIRS_MAX).forEach(function (pk) { kept[pk] = pairs[pk]; });
-      pairs = kept;
-    }
+    trimPairs(pairs);
     var nextId = isWhole(obj.nextId) && obj.nextId > 0 ? obj.nextId : 1;
     rows.forEach(function (r) { if (r.id >= nextId) nextId = r.id + 1; });
     return { version: 1, nextId: nextId, rows: rows, pairs: pairs };
@@ -558,12 +561,17 @@
       return out;
     }
 
-    // The hold-off timers, run once a second by the page.
+    // The hold-off timers, run once a second by the page. Also sweeps the
+    // pairs table: a pair acknowledged shortly before its track left, or
+    // whose open row the log cap evicted, is never revisited by setActive,
+    // so it is pruned here once quiet, and the table is held to PAIRS_MAX.
     function tick(nowMs, wallMs) {
       clock(nowMs);
       var out = [];
       Object.keys(inputState).forEach(function (id) { checkInput(id, inputState[id], nowMs, wallMs, out); });
       checkDaemon(nowMs, wallMs, out);
+      Object.keys(lg.pairs).forEach(prune);
+      trimPairs(lg.pairs);
       return out;
     }
 

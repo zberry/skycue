@@ -108,7 +108,10 @@
       if (tones.length > TONES_KEPT) tones.shift();
       if (!audio) return;
       try {
-        if (audio.state === 'suspended') audio.resume();
+        if (audio.state === 'suspended') {
+          var resumed = audio.resume();
+          if (resumed && typeof resumed.catch === 'function') resumed.catch(function () {});
+        }
         var t0 = audio.currentTime;
         A.tonePlan(pattern).forEach(function (beep) {
           var osc = audio.createOscillator(), gain = audio.createGain();

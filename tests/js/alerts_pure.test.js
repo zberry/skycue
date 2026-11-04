@@ -603,6 +603,41 @@ test('normalizeLog: caps and garbage', () => {
   assert.deepStrictEqual(A.normalizeLog('nope'), { version: 1, nextId: 1, rows: [], pairs: {} });
 });
 
+test('pairs: bounded at run time', () => {
+  const hex = (i) => ('00000' + i.toString(16)).slice(-6);
+  const pairCount = (e) => Object.keys(e.toStore().pairs).length;
+  // 1200 aircraft fire sent_new, are acknowledged and leave inside their
+  // quiet period: the sweep keeps PAIRS_MAX of them, then none once quiet.
+  const e = fresh({ sent_new: { enabled: true } });
+  for (let i = 0; i < 1200; i++) {
+    const key = hex(i) + '|icao';
+    const r = one(e.track(tr({ hex: hex(i) }), T0 + i));
+    e.ack(r.id, T0 + i + 1);
+    e.trackGone(key);
+  }
+  assert.strictEqual(A.PAIRS_MAX, 1000);
+  e.tick(T0 + 2000, W0 + 2000);
+  assert.strictEqual(pairCount(e), 1000, 'trimmed to PAIRS_MAX');
+  // The most recent acknowledgements are the ones kept.
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(e.toStore().pairs, 'sent_new|' + hex(1199) + '|icao'), true);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(e.toStore().pairs, 'sent_new|' + hex(199) + '|icao'), false);
+  e.tick(T0 + 1200 + A.QUIET_MS, W0 + 1200 + A.QUIET_MS);
+  assert.strictEqual(pairCount(e), 0, 'fully quiet');
+  // 1500 aircraft fire and leave unacknowledged: capLog evicts all but the
+  // newest LOG_MAX open rows, and the sweep drops the evicted pairs.
+  const u = fresh({ sent_new: { enabled: true } });
+  for (let i = 0; i < 1500; i++) {
+    one(u.track(tr({ hex: hex(i) }), T0 + i));
+    u.trackGone(hex(i) + '|icao');
+  }
+  u.tick(T0 + 2000, W0 + 2000);
+  assert.strictEqual(pairCount(u), A.LOG_MAX, 'only the open pairs');
+  assert.strictEqual(u.unacked().length, 200);
+  u.ackAll(T0 + 3000);
+  u.tick(T0 + 3000 + A.QUIET_MS, W0 + 3000 + A.QUIET_MS);
+  assert.strictEqual(pairCount(u), 0, 'fully quiet');
+});
+
 test('ackAll: acknowledges every open row', () => {
   const e = fresh({ emergency: { enabled: true } });
   one(e.track(tr({ squawk: '7700' }), T0));

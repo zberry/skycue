@@ -735,9 +735,11 @@
     viewSets.sets.forEach(function (set, i) { sel.appendChild(new Option(set.name, String(i))); });
     var active = activeSet === null ? null : viewSets.sets[activeSet];
     if (active && !P.viewSetMatches(active, viewFilter, hideFiltered)) {
+      // Right after the active set's own option, so the arrow keys on the
+      // closed select step from the set's place in the list.
       var marker = new Option(active.name + ' (modified)', 'modified');
       marker.hidden = true;
-      sel.appendChild(marker);
+      sel.insertBefore(marker, sel.options[activeSet + 2] || null);
       sel.value = 'modified';
     } else sel.value = activeSet === null ? '' : String(activeSet);
     $('view-set-delete').disabled = activeSet === null;

@@ -3824,7 +3824,9 @@ test('stats_csv_downloads_three_cards', async ({ page }) => {
   expect(all.name).toMatch(/^skycue-aircraft-\d{4}-\d{2}-\d{2}\.csv$/);
   expect(all.lines[0]).toBe(LEDGER_CSV_HEADER);
   expect(all.text.charCodeAt(0)).not.toBe(0xfeff);                 // no BOM
-  expect([before, after]).toContain(all.records);
+  // The 20x replay keeps adding entries: the export lands between the reads.
+  expect(before <= all.records && all.records <= after,
+    'CSV records ' + all.records + ' between the ledger totals ' + before + ' and ' + after).toBe(true);
   expect(new Set(all.keys).size).toBe(all.keys.length);
   await expect(page.locator('#stats-aircraft-caption')).not.toHaveText(/Exporting/);
   // In the table's sort: the export and an API read taken at once agree

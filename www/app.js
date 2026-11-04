@@ -1149,14 +1149,30 @@
     tableSort = { key: key, dir: tableSort.key === key ? -tableSort.dir : 1 };
     renderTable();
   }
-  function toggleTable() {
-    var tv = $('table-view');
-    tv.hidden = !tv.hidden;
-    $('table-toggle').setAttribute('aria-pressed', String(!tv.hidden));
-    $('table-toggle').textContent = tv.hidden ? 'Table' : 'Map';
-    if (tv.hidden) map.invalidateSize({ pan: false });
-    else renderTable();
+  // The main area shows exactly one of the map, the table and the Stats
+  // view (the last two overlay the map, which stays as it is). Table and
+  // Stats are pressed and read "Map" while their view is shown; pressing
+  // the active one goes back to the map.
+  var mainView = 'map';
+  var statsView = null;             // stats_view.js, made in wire()
+  function showMain(which) {
+    if (which !== 'table' && (which !== 'stats' || !statsView)) which = 'map';
+    var prev = mainView;
+    mainView = which;
+    $('table-view').hidden = which !== 'table';
+    $('stats-view').hidden = which !== 'stats';
+    [['table-toggle', 'table', 'Table'], ['stats-toggle', 'stats', 'Stats']].forEach(function (b) {
+      $(b[0]).setAttribute('aria-pressed', String(which === b[1]));
+      $(b[0]).textContent = which === b[1] ? 'Map' : b[2];
+    });
+    if (which === 'table') renderTable();
+    if (statsView) {
+      if (which === 'stats') statsView.open();
+      else statsView.close();
+    }
+    if (which === 'map' && prev !== 'map' && map) map.invalidateSize({ pan: false });
   }
+  function toggleTable() { showMain(mainView === 'table' ? 'map' : 'table'); }
 
   // ---- FIS-B: radar, rasters, airspace, weather ---------------------------------
   // docs/web-api.md, FIS-B. The snapshot carries only the status object; the
@@ -2887,6 +2903,14 @@
       li.querySelector('.wx-text').hidden = !open;
     });
     $('table-toggle').addEventListener('click', toggleTable);
+    if (window.skycueStatsView && window.skycueStatsPure) {
+      statsView = window.skycueStatsView.create({
+        request: request, select: select, hasTrack: function (key) { return tracks.has(key); },
+        setViewFilter: function (partial) { setViewFilters(partial); }, showMain: showMain,
+        thousands: P.thousands, formatNum: P.formatNum, storeGet: storeGet, storeSet: storeSet, dataNow: dataNow
+      });
+    } else $('stats-toggle').hidden = true;
+    $('stats-toggle').addEventListener('click', function () { showMain(mainView === 'stats' ? 'map' : 'stats'); });
     Array.prototype.forEach.call(document.querySelectorAll('#table-view th'), function (th) {
       th.addEventListener('click', function () { sortBy(th.getAttribute('data-key')); });
       th.addEventListener('keydown', function (ev) {
@@ -2960,6 +2984,12 @@
     // to the defaults, and N of "showing N of M".
     getViewFilters: function () { return JSON.parse(JSON.stringify(viewFilter)); },
     setViewFilters: function (partial) { setViewFilters(partial); },
+    // The main view ('map' | 'table' | 'stats') and the Stats view's state
+    // (stats_view.js state()) and a refresh now (a Promise).
+    showMain: showMain,
+    mainView: function () { return mainView; },
+    stats: function () { return statsView ? statsView.state() : null; },
+    statsRefresh: function () { return statsView ? statsView.refreshNow() : Promise.resolve(false); },
     resetViewFilters: resetViewFilters,
     shownCount: viewShownCount,
     // The 2-s trail and stale-track prune, run now.

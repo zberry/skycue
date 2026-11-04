@@ -505,14 +505,14 @@ test('cues_recent_drops_only_kept_in_this_browser', async ({ page }) => {
 // sample's describe). A plain stat too long for its share is cut with an
 // ellipsis by design (style.css), so a cut is not checked here; see
 // header_long_stat_is_ellipsised_on_one_row for that.
-// headerRowOffsets: how far the vertical middles of the panel buttons, Table and every
+// headerRowOffsets: how far the vertical middles of the panel buttons, Table, Stats and every
 // shown stat sit from the brand's (a wrapped control is a whole row, about
 // 20 px, off).
 async function headerRowOffsets(page) {
   return page.evaluate(() => {
     const mid = (e) => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
     const brand = mid(document.querySelector('#stats .brand'));
-    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle'))
+    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle'))
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
     return els.map((e) => Math.abs(mid(e) - brand));
   });
@@ -541,7 +541,7 @@ test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
     const stat = b.closest('.stat');
     const mid = (e) => { const q = e.getBoundingClientRect(); return q.top + q.height / 2; };
     const brand = mid(document.querySelector('#stats .brand'));
-    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle'))
+    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle'))
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
     const cut = stat.scrollWidth > stat.clientWidth;
     const overflow = getComputedStyle(stat).textOverflow;
@@ -2015,4 +2015,175 @@ test('view_composes_with_hide_filtered', async ({ page }) => {
   expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(true);
   await page.evaluate(() => window.skycueApp.resetViewFilters());
   await page.evaluate(() => window.skycueApp.setHideFiltered(false));
+});
+
+// ---- Stats view ------------------------------------------------------------------
+// The third main view (spec 6): /api/stats/* polled while it is shown.
+const statsState = (page) => page.evaluate(() => window.skycueApp.stats());
+async function openStats(page) {
+  await openPage(page);
+  await page.locator('#stats-toggle').click();
+  await expect(page.locator('#stats-view')).toBeVisible();
+  await expect.poll(async () => (await statsState(page)).refreshes, { timeout: 10000 }).toBeGreaterThan(0);
+}
+const tileText = (page, id) => page.locator(`#stats-tiles .tile[data-tile="${id}"] .tile-value`).textContent();
+const tileNumber = async (page, id) => Number((await tileText(page, id)).replace(/,/g, ''));
+
+// Exactly one of map, table and stats; Table and Stats read "Map" while
+// their view is shown, and pressing the active one goes back to the map.
+test('stats_toggle_switches_main_view', async ({ page }) => {
+  await openPage(page);
+  const tv = page.locator('#table-view'), sv = page.locator('#stats-view');
+  const tt = page.locator('#table-toggle'), stg = page.locator('#stats-toggle');
+  const expectMain = async (which) => {
+    expect(await page.evaluate(() => window.skycueApp.mainView())).toBe(which);
+    await (which === 'table' ? expect(tv).toBeVisible() : expect(tv).toBeHidden());
+    await (which === 'stats' ? expect(sv).toBeVisible() : expect(sv).toBeHidden());
+    await expect(tt).toHaveText(which === 'table' ? 'Map' : 'Table');
+    await expect(tt).toHaveAttribute('aria-pressed', String(which === 'table'));
+    await expect(stg).toHaveText(which === 'stats' ? 'Map' : 'Stats');
+    await expect(stg).toHaveAttribute('aria-pressed', String(which === 'stats'));
+    expect((await statsState(page)).open).toBe(which === 'stats');
+  };
+  await expectMain('map');
+  await stg.click();
+  await expectMain('stats');
+  // The view covers the map.
+  const covered = await page.evaluate(() => {
+    const b = document.getElementById('map').getBoundingClientRect();
+    const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return !!e && !!e.closest('#stats-view');
+  });
+  expect(covered).toBe(true);
+  await tt.click();
+  await expectMain('table');
+  await stg.click();
+  await expectMain('stats');
+  await stg.click();
+  await expectMain('map');
+  await page.evaluate(() => window.skycueApp.showMain('stats'));
+  await expectMain('stats');
+  await tt.click();
+  await tt.click();
+  await expectMain('map');
+});
+
+// The range buttons: one pressed, minute series up to 24 h and hour series
+// beyond, the choice kept in this browser.
+test('stats_range_switches_resolution_and_persists', async ({ page }) => {
+  const seriesUrls = [];
+  page.on('request', (r) => { if (r.url().includes('/api/stats/series?')) seriesUrls.push(r.url()); });
+  await openStats(page);
+  const pressed = () => page.locator('#stats-range button').evaluateAll((bs) =>
+    bs.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-range')));
+  let s = await statsState(page);
+  expect(s.range).toBe('24h');
+  expect(s.res).toBe('minute');
+  expect(await pressed()).toEqual(['24h']);
+  // On open: the range's minute series and the whole hour series.
+  expect(seriesUrls.some((u) => /series\?res=minute&from=/.test(u))).toBe(true);
+  expect(seriesUrls.some((u) => /series\?res=hour$/.test(u))).toBe(true);
+  const n = (await statsState(page)).refreshes;
+  await page.locator('#stats-range button[data-range="7d"]').click();
+  await expect.poll(async () => (await statsState(page)).refreshes).toBeGreaterThan(n);
+  s = await statsState(page);
+  expect(s.range).toBe('7d');
+  expect(s.res).toBe('hour');
+  expect(await pressed()).toEqual(['7d']);
+  expect(seriesUrls.some((u) => /series\?res=hour&from=/.test(u))).toBe(true);
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await page.locator('#stats-toggle').click();
+  await expect.poll(async () => (await statsState(page)).refreshes, { timeout: 10000 }).toBeGreaterThan(0);
+  s = await statsState(page);
+  expect(s.range).toBe('7d');
+  expect(s.res).toBe('hour');
+  await page.locator('#stats-range button[data-range="1h"]').click();
+  await expect.poll(async () => (await statsState(page)).res).toBe('minute');
+  expect(await pressed()).toEqual(['1h']);
+});
+
+// Six headline tiles with numbers and a drawn sparkline each; a refresh
+// moves the observations as the replay goes on.
+test('stats_tiles_show_totals_with_sparklines', async ({ page }, testInfo) => {
+  await openStats(page);
+  const s = await statsState(page);
+  expect(Object.keys(s.tiles)).toEqual(['aircraft', 'observations', 'sent', 'drops', 'max_range', 'emergencies']);
+  await expect.poll(() => tileNumber(page, 'observations'), { timeout: 15000 }).toBeGreaterThan(0);
+  // Aircraft = ledger entries last seen in the range, which ends at the
+  // daemon's data clock. (Not "all 12": after the reconnect case restarts
+  // skycued the replay's clock starts over behind the reloaded ledger.)
+  await expect.poll(() => tileNumber(page, 'aircraft'), { timeout: 15000 }).toBeGreaterThan(0);
+  for (const id of ['aircraft', 'observations', 'sent', 'drops', 'emergencies']) {
+    expect(await tileText(page, id), id).toMatch(/^\d{1,3}(,\d{3})*$/);
+  }
+  await expect.poll(() => tileText(page, 'max_range'), { timeout: 15000 }).toMatch(/^\d+\.\d nm$/);
+  await expect(page.locator('#stats-tiles .tile[data-tile="max_range"] .tile-sub')).toHaveText(/^[0-9a-f]{6}$/);
+  await expect(page.locator('#stats-since')).toHaveText(/^since \d{4}-\d\d-\d\d \d\d:\d\dZ$/);
+  await expect.poll(async () => (await statsState(page)).sparks.filter((x) => x.canvas).length).toBe(6);
+  expect((await statsState(page)).sparks.map((x) => x.id)).toEqual(Object.keys(s.tiles));
+  // The tiles follow the daemon's range totals.
+  const before = await tileNumber(page, 'observations');
+  await expect.poll(async () => {
+    await page.evaluate(() => window.skycueApp.statsRefresh());
+    return tileNumber(page, 'observations');
+  }, { timeout: 15000 }).toBeGreaterThan(before);
+  expect((await statsState(page)).tiles.observations).toBe(await tileText(page, 'observations'));
+  await page.screenshot({ path: testInfo.outputPath(`skycue-stats-${testInfo.project.name}.png`), fullPage: true });
+});
+
+// Live: a refresh every 10 s while the view is shown; once it is hidden,
+// or live is off, no timer is left and nothing is requested.
+test('stats_live_polls_only_while_shown', async ({ page }) => {
+  await openStats(page);
+  await expect(page.locator('#stats-live')).toBeChecked();
+  const r0 = (await statsState(page)).refreshes;
+  await expect.poll(async () => (await statsState(page)).refreshes, { timeout: 15000 }).toBeGreaterThan(r0);
+  await expect.poll(async () => (await statsState(page)).liveTimer).toBe(true);
+  let statsRequests = 0;
+  page.on('request', (r) => { if (r.url().includes('/api/stats/')) statsRequests++; });
+  await page.locator('#stats-toggle').click();
+  await expect(page.locator('#stats-view')).toBeHidden();
+  const r1 = (await statsState(page)).refreshes;
+  expect((await statsState(page)).liveTimer).toBe(false);
+  await page.waitForTimeout(2000);
+  expect((await statsState(page)).refreshes).toBe(r1);
+  expect(statsRequests).toBe(0);
+  // Shown again with live off: one refresh, no timer.
+  await page.locator('#stats-toggle').click();
+  await expect.poll(async () => (await statsState(page)).refreshes, { timeout: 10000 }).toBeGreaterThan(r1);
+  await page.locator('#stats-live').uncheck();
+  await expect.poll(async () => (await statsState(page)).liveTimer).toBe(false);
+});
+
+// Reset asks first: dismissed, nothing happens; accepted, the statistics
+// start again (a newer "since").
+test('stats_reset_asks_first', async ({ page }) => {
+  await openStats(page);
+  const since0 = (await api('/api/stats/summary')).body.since;
+  let question = null;
+  page.once('dialog', (d) => { question = d.message(); d.dismiss(); });
+  await page.locator('#stats-reset').click();
+  await expect.poll(() => question).not.toBe(null);
+  expect(question).toMatch(/^Reset all statistics\?/);
+  await page.waitForTimeout(500);
+  expect((await api('/api/stats/summary')).body.since).toBe(since0);
+  page.once('dialog', (d) => d.accept());
+  await page.locator('#stats-reset').click();
+  await expect(page.locator('#stats-msg')).toHaveText('Statistics reset.', { timeout: 10000 });
+  const since1 = (await api('/api/stats/summary')).body.since;
+  expect(Date.parse(since1)).toBeGreaterThan(Date.parse(since0));
+});
+
+// Input health lives in the Receiver tab (spec 2): the toolbar opens it
+// beside the view.
+test('stats_receiver_link_opens_receiver_tab', async ({ page }) => {
+  await openStats(page);
+  await page.locator('#stats-receiver-link').click();
+  await expect(page.locator('#details')).toBeVisible();
+  await expect(page.locator('#tab-receiver')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#stats-receiver-link')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#stats-view')).toBeVisible();
+  await page.locator('#stats-receiver-link').click();
+  await expect(page.locator('#details')).toBeHidden();
 });

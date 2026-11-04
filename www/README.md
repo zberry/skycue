@@ -51,6 +51,23 @@ through npm). It is not committed: the page loads it from
   (with `-DSKYCUE_LEAFLET_DIR` as above). Without `SKYCUE_ECHARTS_DIR` the
   page has no chart library and the tests that need it say SKIP.
 
+## Stats view
+
+The "Stats" header button shows `#stats-view`, the third main view beside
+the map and the table (`showMain` in `app.js`). `stats_view.js` polls
+`/api/stats/*` while it is shown (every 10 s with "live"), `stats_pure.js`
+shapes the JSON (node-tested in `tests/js/stats_pure.test.js`; under node
+it loads `./app_pure.js` itself, in the page it uses `window.skycuePure`),
+and `chart_theme.js` registers the ECharts theme `skycue` from the `:root`
+colour tokens. `skycueChartTheme()` also returns `decision` (the decision
+colours) and `bands`, the eight altitude-band colours of the coverage
+charts in `/api/stats/coverage`'s band order, warm low to cool high:
+`0-2.5k` #ff7b72, `2.5-5k` #f0883e, `5-10k` #e3b341, `10-20k` #7ee787,
+`20-30k` #56d4dd, `30-40k` #58a6ff, `40k+` #d2a8ff, `unknown` #6e7681.
+The chosen range is kept in localStorage `skycue.stats.range`. Charts are
+created once and updated with `setOption`; they are disposed after the
+view has been hidden for a minute.
+
 ## Map tiles
 
 When `www/tiles/<z>/<x>/<y>.png` exist (see `/api/tiles-available`) the page

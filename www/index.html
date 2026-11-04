@@ -31,7 +31,10 @@
     <button id="cues-toggle" type="button" data-opens-tab="cues" aria-pressed="false">Cues</button>
     <button id="cfg-toggle" type="button" data-opens-tab="config" aria-pressed="false">Config</button>
   </span>
-  <button id="table-toggle" type="button" aria-pressed="false">Table</button>
+  <span id="main-buttons" role="group" aria-label="Main view">
+    <button id="table-toggle" type="button" aria-pressed="false">Table</button>
+    <button id="stats-toggle" type="button" aria-pressed="false">Stats</button>
+  </span>
 </header>
 <div id="conn-banner" role="alert" hidden>Disconnected from skycued, reconnecting…</div>
 <main id="layout">
@@ -153,6 +156,48 @@
         </tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+    <div id="stats-view" aria-label="Statistics view" hidden>
+      <div class="stats-toolbar">
+        <span id="stats-range" role="group" aria-label="Time range">
+          <button type="button" data-range="1h" aria-pressed="false">1 h</button>
+          <button type="button" data-range="6h" aria-pressed="false">6 h</button>
+          <button type="button" data-range="24h" aria-pressed="false">24 h</button>
+          <button type="button" data-range="7d" aria-pressed="false">7 d</button>
+          <button type="button" data-range="30d" aria-pressed="false">30 d</button>
+        </span>
+        <label class="check" for="stats-live"><input id="stats-live" type="checkbox" checked> live</label>
+        <span id="stats-since" class="stats-since"></span>
+        <span id="stats-msg" class="msg" role="status"></span>
+        <button id="stats-receiver-link" type="button" data-opens-tab="receiver" aria-pressed="false"
+          title="Input health: open the Receiver tab">Input health</button>
+        <button id="stats-reset" type="button">Reset statistics</button>
+      </div>
+      <div id="stats-tiles" class="stats-tiles"></div>
+      <section class="stats-section" aria-labelledby="stats-h-traffic" hidden>
+        <h2 id="stats-h-traffic">Traffic</h2>
+        <div id="stats-traffic" class="stats-grid"></div>
+      </section>
+      <section class="stats-section" aria-labelledby="stats-h-coverage" hidden>
+        <h2 id="stats-h-coverage">Coverage</h2>
+        <div id="stats-coverage" class="stats-grid"></div>
+      </section>
+      <section class="stats-section" aria-labelledby="stats-h-fleet" hidden>
+        <h2 id="stats-h-fleet">Fleet</h2>
+        <div id="stats-fleet" class="stats-grid"></div>
+      </section>
+      <section class="stats-section" aria-labelledby="stats-h-signal" hidden>
+        <h2 id="stats-h-signal">Signal</h2>
+        <div id="stats-signal" class="stats-grid"></div>
+      </section>
+      <section class="stats-section" aria-labelledby="stats-h-weather" hidden>
+        <h2 id="stats-h-weather">Weather (FIS-B)</h2>
+        <div id="stats-weather" class="stats-grid"></div>
+      </section>
+      <section class="stats-section" aria-labelledby="stats-h-aircraft" hidden>
+        <h2 id="stats-h-aircraft">Aircraft</h2>
+        <div id="stats-aircraft" class="stats-grid"></div>
+      </section>
     </div>
   </div>
   <aside id="details" tabindex="-1" aria-label="Side panel" hidden>
@@ -295,7 +340,11 @@
   </aside>
 </main>
 <script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/echarts/echarts.min.js"></script>
 <script src="app_pure.js"></script>
+<script src="stats_pure.js"></script>
+<script src="chart_theme.js"></script>
+<script src="stats_view.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

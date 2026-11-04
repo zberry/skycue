@@ -2663,20 +2663,27 @@ test.describe('stats weather (FIS-B daemon)', () => {
     await expect(sec).toBeVisible();
     await expect.poll(async () => (await statsState(page)).cards.filter((c) => c.id === 'weather-uat' && c.canvas).length,
       { timeout: 15000 }).toBe(1);
-    const o = await cardOption(page, 'weather-uat');
-    expect(o.series.map((s) => [s.id, s.type])).toEqual([['uplink', 'line'], ['downlink', 'line'], ['products', 'line']]);
-    o.series.forEach((s) => expect(isPairs(s.data), s.id).toBe(true));
     // One point per bucket of the range's series, from its uat_uplink,
     // uat_downlink and fisb_products columns; the caption gives their sums.
     // The decoded products are counted (the unpaced replay decodes every
     // uplink before the store's first tick); the UAT frame columns are the
     // dump978 input's counters, which a replay has not, so they read zero.
-    const se = (await apiAt(FISB_BASE, '/api/stats/series')).body;
-    o.series.forEach((s) => expect(s.data.length, s.id).toBe(se.t.length));
+    // The chart and the API are read apart, so a minute bucket can land in
+    // between: read both again (after a refresh) until they agree.
+    let o, se, cap;
+    await expect.poll(async () => {
+      o = await cardOption(page, 'weather-uat');
+      cap = await cardCaption(page, 'weather-uat');
+      se = (await apiAt(FISB_BASE, '/api/stats/series')).body;
+      if (o.series.every((s) => s.data.length === se.t.length)) return true;
+      await page.evaluate(() => window.skycueApp.statsRefresh());
+      return false;
+    }, { timeout: 15000 }).toBe(true);
+    expect(o.series.map((s) => [s.id, s.type])).toEqual([['uplink', 'line'], ['downlink', 'line'], ['products', 'line']]);
+    o.series.forEach((s) => expect(isPairs(s.data), s.id).toBe(true));
     const sums = o.series.map((s) => sumPairs(s.data));
     expect(sums[2]).toBeGreaterThan(0);
     expect(sums[2]).toBe(se.fisb_products.reduce((a, b) => a + b, 0));
-    const cap = await cardCaption(page, 'weather-uat');
     const th = (n) => n.toLocaleString('en-US');
     expect(cap).toBe(th(sums[0]) + ' uplink · ' + th(sums[1]) + ' downlink frames · ' + th(sums[2]) + ' products');
     // A summary without UAT activity (as after a reset) hides the section.

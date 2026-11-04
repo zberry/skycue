@@ -103,7 +103,7 @@ input.invalid { border-color: var(--blocked); }
 #map-wrap { flex: 1; position: relative; min-width: 0; }
 #map { position: absolute; inset: 0; }
 .leaflet-container { background: #0b1520; font: inherit; }
-.leaflet-control-scale-line { background: rgba(13, 17, 23, .8); color: var(--text); border-color: var(--muted); }
+.leaflet-control-scale-line { background: rgba(13, 17, 23, .8); color: var(--text); border-color: var(--muted); text-shadow: none; }
 .leaflet-control-attribution { background: rgba(13, 17, 23, .7) !important; color: var(--muted); }
 .leaflet-control-attribution a { color: var(--accent); }
 .leaflet-bar a { background: var(--panel); color: var(--text); border-color: var(--line); }

@@ -409,7 +409,13 @@ label.check input { width: auto; margin: 0; }
   border: 1px solid var(--line); background: none; color: var(--muted); font-size: 12px; line-height: 1;
 }
 .pills button .sw { margin-right: 4px; }
-.pills button[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+.pills button[aria-pressed="true"] { color: var(--text); }
+/* A pressed decision pill is outlined in its decision colour (spec 7). */
+#view-decisions button[data-decision="sent"][aria-pressed="true"] { border-color: var(--sent); }
+#view-decisions button[data-decision="allow_listed"][aria-pressed="true"] { border-color: var(--allow); }
+#view-decisions button[data-decision="out_of_range"][aria-pressed="true"] { border-color: var(--range); }
+#view-decisions button[data-decision="below_elevation"][aria-pressed="true"] { border-color: var(--elev); }
+#view-decisions button[data-decision="blocked"][aria-pressed="true"] { border-color: var(--blocked); }
 .pills button[aria-pressed="false"] .sw { opacity: .35; }
 .view-map-mode { gap: 14px; }
 .view-map-mode label.check { color: var(--text); font-size: 13px; }

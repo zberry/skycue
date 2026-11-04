@@ -1745,14 +1745,15 @@ const TISB = '2c4a1f|non_icao';
 const hexes = (keys) => keys.map((k) => k.split('|')[0]).sort();
 test('view_search_narrows_table_and_shows_count', async ({ page }) => {
   await openTable(page);
-  const total = (await tableRows(page)).length;
   await page.fill('#view-search', 'ual');
   await expect.poll(async () => (await tableRows(page)).length).toBe(2);           // UAL1423, UAL455
-  await expect(page.locator('#view-count')).toHaveText(`showing 2 of ${total}`);
+  // M (all tracks) moves while RPA4521 times out, so it is not pinned here.
+  await expect(page.locator('#view-count')).toHaveText(/^showing 2 of \d+$/);
   await expect(page.locator('#view-badge')).toHaveText('· 1');
   await expect(page.locator('#view-clear')).toBeEnabled();
   await page.click('#view-clear');
-  await expect.poll(async () => (await tableRows(page)).length).toBe(total);
+  await expect.poll(() => page.evaluate(() => document.querySelectorAll('#table-view tbody tr').length === window.skycueApp.shownCount())).toBe(true);
+  expect(await page.evaluate(() => window.skycueApp.shownCount())).toBeGreaterThanOrEqual(10);
   await expect(page.locator('#view-count')).toHaveText('');
   await expect(page.locator('#view-badge')).toHaveText('');
   await expect(page.locator('#view-clear')).toBeDisabled();
@@ -1774,14 +1775,16 @@ test('view_altitude_band_and_ground', async ({ page }) => {
   // AAL2291 12,000-15,600, and ac5e81 RPA4521 18,000: 6 (5 while RPA4521
   // is timed out, see above).
   const ALWAYS = ['a2f7b9', 'a4f2c1', 'a6e9d2', 'a8c3e5', 'ab12f0'];
-  await expect.poll(async () => hexes(await tableRows(page)).filter((h) => h !== 'ac5e81')).toEqual(ALWAYS);
-  expect([5, 6]).toContain((await tableRows(page)).length);
+  const WITH_RPA = ALWAYS.concat(['ac5e81']).sort();
+  await expect.poll(async () => {
+    const h = hexes(await tableRows(page)).join();
+    return h === ALWAYS.join() || h === WITH_RPA.join();
+  }).toBe(true);
   await page.fill('#view-alt-min', '');
   await page.uncheck('#view-ground');
   // The fixture's on-ground aircraft is UAL455 (a7d3e6); inject one more.
   await page.evaluate(() => window.skycueApp.injectTestMarker({ hex: 'abcdef', decision: 'send', on_ground: true, alt_baro_ft: 0, lat: 38.9, lon: -77.0, position_time: new Date().toISOString() }));
-  await expect.poll(async () => (await tableRows(page)).some((k) => k.indexOf('abcdef') >= 0)).toBe(false);
-  expect((await tableRows(page)).some((k) => k.indexOf('a7d3e6') >= 0)).toBe(false);
+  await expect.poll(async () => hexes(await tableRows(page)).filter((h) => h === 'abcdef' || h === 'a7d3e6')).toEqual([]);
   await expect(page.locator('#view-badge')).toHaveText('· 1');
   await page.check('#view-ground');
   await expect.poll(async () => (await tableRows(page)).some((k) => k.indexOf('abcdef') >= 0)).toBe(true);
@@ -1809,18 +1812,23 @@ test('view_class_emergency_category_country', async ({ page }) => {
   await page.selectOption('#view-country', '');
   await page.evaluate(() => window.skycueApp.injectTestMarker({ hex: 'ae0001', decision: 'send', squawk: '7700', alt_baro_ft: 5000, lat: 38.9, lon: -77.0, position_time: new Date().toISOString() }));
   await page.check('#view-emergency');
-  await expect.poll(async () => await tableRows(page)).toEqual(expect.arrayContaining([expect.stringContaining('ae0001')]));
-  expect((await tableRows(page)).length).toBe(1);
+  await expect.poll(async () => hexes(await tableRows(page))).toEqual(['ae0001']);
   await page.evaluate(() => window.skycueApp.resetViewFilters());
 });
 test('view_decision_pill_narrows_table', async ({ page }) => {
   await openTable(page);
+  // A known non-sent track, so the check below cannot pass on an empty table.
+  await page.evaluate(() => window.skycueApp.injectTestMarker({ hex: 'abc001', decision: 'blocked', alt_baro_ft: 5000, lat: 38.9, lon: -77.0, position_time: new Date().toISOString() }));
   const pill = page.locator('#view-decisions button[data-decision="sent"]');
   await expect(pill).toHaveAttribute('aria-pressed', 'true');
   await pill.click();
   await expect(pill).toHaveAttribute('aria-pressed', 'false');
-  await expect.poll(async () => (await page.$$eval('#table-view tbody td[data-key="decision"]',
-    (tds) => tds.filter((td) => td.querySelector('.decision-sent')).length))).toBe(0);
+  await expect.poll(() => page.$$eval('#table-view tbody tr', (trs) => ({
+    rows: trs.length,
+    sent: trs.filter((tr) => tr.querySelector('td[data-key="decision"] .decision-sent')).length,
+    blocked: trs.some((tr) => tr.getAttribute('data-key').indexOf('abc001') === 0)
+  }))).toEqual({ rows: expect.any(Number), sent: 0, blocked: true });
+  expect((await tableRows(page)).length).toBeGreaterThan(0);
   expect(await page.evaluate(() => window.skycueApp.getViewFilters().decisions)).not.toContain('sent');
   await page.evaluate(() => window.skycueApp.resetViewFilters());
   await expect(pill).toHaveAttribute('aria-pressed', 'true');

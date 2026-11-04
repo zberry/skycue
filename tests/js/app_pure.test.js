@@ -1252,5 +1252,64 @@ test('class cases fixture', () => {
   C.track_class.forEach((c) => assert.strictEqual(P.trackClass(c), want(c), name(c)));
 });
 
+// Signal-coloured trail: the fixed scale and the run builder.
+test('signalColor: bounds, clamping, steps weak to strong', () => {
+  const C = P.SIGNAL_COLORS;
+  assert.ok(C.length >= 5 && C.length <= 7, 'steps ' + C.length);
+  assert.strictEqual(P.signalColor(P.SIGNAL_MIN_DB), C[0]);
+  assert.strictEqual(P.signalColor(-80), C[0]);
+  assert.strictEqual(P.signalColor(P.SIGNAL_MAX_DB), C[C.length - 1]);
+  assert.strictEqual(P.signalColor(0), C[C.length - 1]);
+  assert.strictEqual(P.signalColor(P.SIGNAL_MAX_DB - 0.01), C[C.length - 1]);
+  const step = (P.SIGNAL_MAX_DB - P.SIGNAL_MIN_DB) / C.length;
+  for (let i = 0; i < C.length; i++) {
+    assert.strictEqual(P.signalStep(P.SIGNAL_MIN_DB + i * step), i, 'lower edge of step ' + i);
+    assert.strictEqual(P.signalStep(P.SIGNAL_MIN_DB + (i + 0.5) * step), i, 'middle of step ' + i);
+  }
+  assert.strictEqual(new Set(C).size, C.length, 'distinct colours');
+});
+test('signalColor: no signal is null', () => {
+  [undefined, null, NaN, Infinity, '-20', {}].forEach((v) => {
+    assert.strictEqual(P.signalColor(v), null, String(v));
+    assert.strictEqual(P.signalStep(v), -1, String(v));
+  });
+});
+test('signalLegend covers the scale contiguously', () => {
+  const L = P.signalLegend();
+  assert.strictEqual(L.length, P.SIGNAL_COLORS.length);
+  assert.strictEqual(L[0].from, P.SIGNAL_MIN_DB);
+  assert.strictEqual(L[L.length - 1].to, P.SIGNAL_MAX_DB);
+  for (let i = 1; i < L.length; i++) assert.strictEqual(L[i].from, L[i - 1].to);
+  L.forEach((s, i) => assert.strictEqual(s.color, P.SIGNAL_COLORS[i]));
+});
+test('signalRuns: empty, single point, missing signal', () => {
+  assert.deepStrictEqual(P.signalRuns([]), []);
+  assert.deepStrictEqual(P.signalRuns(null), []);
+  assert.deepStrictEqual(P.signalRuns([{ lat: 1, lon: 2, sig: -20 }]),
+    [{ points: [[1, 2]], color: P.signalColor(-20) }]);
+  assert.deepStrictEqual(P.signalRuns([{ lat: 1, lon: 2 }]), [{ points: [[1, 2]], color: null }]);
+  assert.deepStrictEqual(P.signalRuns([{ lat: 0, lon: 0 }, { lat: 1, lon: 1, sig: null }, { lat: 2, lon: 2 }]),
+    [{ points: [[0, 0], [1, 1], [2, 2]], color: null }]);
+});
+test('signalRuns: runs coalesce and share their boundary points', () => {
+  const weak = P.signalColor(-34), strong = P.signalColor(-6);
+  const pts = [
+    { lat: 0, lon: 0, sig: -6 },    // the first point only starts the line
+    { lat: 0, lon: 1, sig: -34 }, { lat: 0, lon: 2, sig: -33 },
+    { lat: 0, lon: 3, sig: -6 }, { lat: 0, lon: 4, sig: -5 },
+    { lat: 0, lon: 5 },
+    { lat: 0, lon: 6, sig: -34 }
+  ];
+  const runs = P.signalRuns(pts);
+  assert.deepStrictEqual(runs, [
+    { points: [[0, 0], [0, 1], [0, 2]], color: weak },
+    { points: [[0, 2], [0, 3], [0, 4]], color: strong },
+    { points: [[0, 4], [0, 5]], color: null },
+    { points: [[0, 5], [0, 6]], color: weak }
+  ]);
+  // Every segment is drawn exactly once.
+  assert.strictEqual(runs.reduce((n, r) => n + r.points.length - 1, 0), pts.length - 1);
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

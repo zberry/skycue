@@ -1533,6 +1533,52 @@
     return true;
   }
 
+  // ---- signal-coloured trail ("Colour trail by signal") ----------------------
+  // A track's RSSI (dBFS, `rssi`) on a fixed scale of SIGNAL_COLORS.length
+  // steps of SIGNAL_STEP_DB from SIGNAL_MIN_DB (weak: cool and dim) to
+  // SIGNAL_MAX_DB (strong: warm and bright); values outside are clamped to the
+  // end steps. Mid-saturation colours, drawn opaque, readable on the Light
+  // and Dark map styles alike.
+  var SIGNAL_MIN_DB = -35;
+  var SIGNAL_MAX_DB = -5;
+  var SIGNAL_COLORS = ['#5b6bb5', '#2f8fd8', '#1aa89a', '#8ab92d', '#f0a020', '#f2552c'];
+  var SIGNAL_STEP_DB = (SIGNAL_MAX_DB - SIGNAL_MIN_DB) / SIGNAL_COLORS.length;
+
+  // The step index of a signal, or -1 when it is not a finite number.
+  function signalStep(db) {
+    if (typeof db !== 'number' || !isFinite(db)) return -1;
+    var i = Math.floor((db - SIGNAL_MIN_DB) / SIGNAL_STEP_DB);
+    return Math.max(0, Math.min(SIGNAL_COLORS.length - 1, i));
+  }
+  function signalColor(db) {
+    var i = signalStep(db);
+    return i < 0 ? null : SIGNAL_COLORS[i];
+  }
+  // The legend: one {color, from, to} per step, dB bounds, weak first.
+  function signalLegend() {
+    return SIGNAL_COLORS.map(function (c, i) {
+      return { color: c, from: SIGNAL_MIN_DB + i * SIGNAL_STEP_DB, to: SIGNAL_MIN_DB + (i + 1) * SIGNAL_STEP_DB };
+    });
+  }
+  // [{lat, lon, sig}] (oldest first) as polyline runs [{points: [[lat, lon], ...],
+  // color}]: the segment into each point takes that point's colour (the
+  // signal it was received at), consecutive segments of one colour make one
+  // run, and adjacent runs share their boundary point so the line is
+  // unbroken. color is null for a point without a signal (the caller draws
+  // those in the normal trail colour). One point: one run of one point.
+  function signalRuns(pts) {
+    var out = [];
+    if (!Array.isArray(pts) || !pts.length) return out;
+    var ll = function (p) { return [p.lat, p.lon]; };
+    if (pts.length === 1) return [{ points: [ll(pts[0])], color: signalColor(pts[0].sig) }];
+    for (var i = 1; i < pts.length; i++) {
+      var c = signalColor(pts[i].sig), last = out[out.length - 1];
+      if (last && last.color === c) last.points.push(ll(pts[i]));
+      else out.push({ points: [ll(pts[i - 1]), ll(pts[i])], color: c });
+    }
+    return out;
+  }
+
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
@@ -1578,7 +1624,9 @@
     VIEW_DEFAULTS: VIEW_DEFAULTS, normalizeView: normalizeView, viewActiveCount: viewActiveCount,
     VIEW_SETS_MAX: VIEW_SETS_MAX, VIEW_SET_NAME_MAX: VIEW_SET_NAME_MAX, viewSetName: viewSetName,
     normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,
-    trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches
+    trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches,
+    SIGNAL_MIN_DB: SIGNAL_MIN_DB, SIGNAL_MAX_DB: SIGNAL_MAX_DB, SIGNAL_COLORS: SIGNAL_COLORS,
+    signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

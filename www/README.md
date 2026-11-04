@@ -193,6 +193,13 @@ block lists and Save as baseline: what is sent to cue clients), then `#view`
 per-browser view settings (`normalizeView`, localStorage `skycue.view`);
 `viewMatches` decides a track, `trackClass` and `trackCountry` estimate its class and
 country, and `viewShows` in `app.js` exempts the selected track.
+"Colour trail by signal" (`#trail-signal`, localStorage
+`skycue.trailSignal`, not part of `skycue.view` or the filter sets) keeps
+each trail point's `rssi`; `drawTrail` in `app.js` lays `P.signalRuns` (runs
+of one `P.signalColor` step, `SIGNAL_COLORS` from `SIGNAL_MIN_DB` to
+`SIGNAL_MAX_DB`) as `path.trail-sig` polylines over the decision-coloured
+`path.trail`, which is then transparent; `#trail-signal-legend` is
+`P.signalLegend`.
 
 ## Cues tab
 

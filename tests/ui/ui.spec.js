@@ -1064,6 +1064,69 @@ async function clickableIndex(page, selector) {
   }, selector);
 }
 
+// "Colour trail by signal": an injected aircraft flying east with its
+// signal rising from weak to strong, positions a second apart.
+const SIG_HEX = 'fff0a1';
+async function injectSignalTrack(page) {
+  await page.evaluate((hex) => {
+    const now = window.skycueApp.dataNow();
+    for (let i = 0; i < 12; i++) {
+      window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.6 + i * 0.05, decision: 'send',
+        track_deg: 90, rssi: -34 + i * 2.6, position_time: new Date(now - (12 - i) * 1000).toISOString() });
+    }
+  }, SIG_HEX);
+}
+test('trail_signal_colours_trail_and_persists', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 10);
+  await expect(page.locator('#trail-signal')).not.toBeChecked();
+  await expect(page.locator('#trail-signal-legend')).toBeHidden();
+  await injectSignalTrack(page);
+  await page.locator(`.ac-marker[data-hex="${SIG_HEX}"] .ac-glyph`).click();
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(SIG_HEX);
+  const trail = () => page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX);
+  const off = await trail();
+  expect(off.points).toBe(12);
+  expect(off.runs).toEqual([]);
+  expect(off.opacity).toBe(0.6);
+  expect(await page.locator('path.trail-sig').count()).toBe(0);
+
+  await page.locator('#trail-signal').check();
+  await expect(page.locator('#trail-signal-legend')).toBeVisible();
+  await expect(page.locator('#trail-signal-legend .sig-scale i')).toHaveCount(6);
+  await expect(page.locator('#trail-signal-legend')).toContainText('-35 dBFS');
+  const on = await trail();
+  expect(new Set(on.runs.map((r) => r.color)).size).toBeGreaterThan(1);
+  // Every segment drawn once, the decision-coloured polyline transparent under the runs.
+  expect(on.runs.reduce((n, r) => n + r.n - 1, 0)).toBe(11);
+  expect(on.opacity).toBe(0);
+  expect(await page.locator('path.trail-sig').count()).toBeGreaterThanOrEqual(on.runs.length);
+  expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe('1');
+
+  // A new position redraws the runs; off restores the one colour.
+  await page.evaluate((hex) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.0,
+    decision: 'send', track_deg: 90, rssi: -40, position_time: new Date(window.skycueApp.dataNow()).toISOString() }), SIG_HEX);
+  expect((await trail()).runs.reduce((n, r) => n + r.n - 1, 0)).toBe(12);
+  await page.locator('#trail-signal').uncheck();
+  const back = await trail();
+  expect(back.runs).toEqual([]);
+  expect(back.opacity).toBe(0.6);
+  expect(await page.locator('path.trail-sig').count()).toBe(0);
+  await expect(page.locator('#trail-signal-legend')).toBeHidden();
+
+  // Kept in this browser across a reload, then cleared again.
+  await page.locator('#trail-signal').check();
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await expect(page.locator('#trail-signal')).toBeChecked();
+  await expect(page.locator('#trail-signal-legend')).toBeVisible();
+  expect(await page.evaluate(() => window.skycueApp.getTrailSignal())).toBe(true);
+  // The fixture's own tracks are drawn in runs too (their updates carry rssi).
+  await expect.poll(() => page.locator('path.trail-sig').count(), { timeout: 20000 }).toBeGreaterThan(0);
+  await page.locator('#trail-signal').uncheck();
+  expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe('0');
+});
+
 // The main daemon has no radar or raster: the opacity slider has nothing to
 // act on, so it is disabled and its row dimmed.
 test('radar_opacity_disabled_without_products', async ({ page }) => {

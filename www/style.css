@@ -577,6 +577,11 @@ label.check input { width: auto; margin: 0; }
 .band input { flex: 1 1 0; width: 0; min-width: 0; }
 .band span { color: var(--muted); flex: none; }
 #view label.check { display: flex; margin: 6px 0 0; }
+/* "Colour trail by signal": the scale under the option, weak to strong. */
+.sig-legend { margin: 4px 0 0 22px; font-size: 11px; color: var(--muted); }
+.sig-scale { display: flex; height: 8px; border-radius: 2px; overflow: hidden; }
+.sig-scale i { flex: 1 1 0; }
+.sig-ends { display: flex; justify-content: space-between; gap: 4px; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .pills { display: flex; flex-wrap: wrap; gap: 4px; }
 .pills button {
   display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 2px;

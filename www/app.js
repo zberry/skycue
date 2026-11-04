@@ -504,7 +504,7 @@
     var label = el.querySelector('.ac-label');
     var text = P.markerLabel(t);
     if (label.textContent !== text) label.textContent = text;
-    if (e.trail) e.trail.setStyle({ color: P.DECISION_COLORS[cls], weight: e.key === selectedKey ? 3 : 1.5 });
+    styleTrail(e);
   }
 
   function ensureMarker(e) {
@@ -529,10 +529,87 @@
 
   function dropLayers(e) {
     if (e.marker) map.removeLayer(e.marker);
-    if (e.trail) map.removeLayer(e.trail);
+    removeTrail(e);
     e.marker = null;
-    e.trail = null;
     e.dimmed = false;
+  }
+
+  // ---- trails ----------------------------------------------------------------
+  // e.trail is the polyline of e.pts in the decision colour. With the view
+  // option "Colour trail by signal" (localStorage skycue.trailSignal) a
+  // group of runs, e.sigTrail, is drawn over it instead (the polyline is
+  // then transparent but kept): each run coloured by the RSSI its points
+  // were received at (P.signalRuns), a run without one in the decision
+  // colour. A dimmed entry draws no trail.
+  var TRAIL_SIGNAL_KEY = 'skycue.trailSignal';
+  var trailSignal = false;
+
+  function trailColor(e) { return P.DECISION_COLORS[P.decisionColor(e.t.decision) || 'unknown']; }
+  function trailWeight(e) { return e.key === selectedKey ? 3 : 1.5; }
+
+  function styleTrail(e) {
+    if (!e.trail) return;
+    var color = trailColor(e), weight = trailWeight(e);
+    e.trail.setStyle({ color: color, weight: weight, opacity: e.sigTrail ? 0 : 0.6 });
+    if (e.sigTrail) {
+      e.sigTrail.eachLayer(function (l) { l.setStyle({ color: l.sigColor || color, weight: weight }); });
+    }
+  }
+
+  function drawTrail(e) {
+    if (!e.trail) return;
+    var pts = e.dimmed ? [] : e.pts;
+    e.trail.setLatLngs(pts.map(function (p) { return p.ll; }));
+    if (trailSignal && pts.length > 1) {
+      if (!e.sigTrail) e.sigTrail = L.layerGroup().addTo(map);
+      else e.sigTrail.clearLayers();
+      var runs = P.signalRuns(pts.map(function (p) { return { lat: p.ll[0], lon: p.ll[1], sig: p.sig }; }));
+      runs.forEach(function (r) {
+        var l = L.polyline(r.points, { className: 'trail-sig', opacity: 0.9, interactive: false });
+        l.sigColor = r.color;
+        e.sigTrail.addLayer(l);
+      });
+    } else if (e.sigTrail) {
+      map.removeLayer(e.sigTrail);
+      e.sigTrail = null;
+    }
+    styleTrail(e);
+  }
+
+  function removeTrail(e) {
+    if (e.trail) map.removeLayer(e.trail);
+    if (e.sigTrail) map.removeLayer(e.sigTrail);
+    e.trail = null;
+    e.sigTrail = null;
+  }
+
+  function setTrailSignal(on, initial) {
+    trailSignal = !!on;
+    $('trail-signal').checked = trailSignal;
+    $('trail-signal-legend').hidden = !trailSignal;
+    if (!initial) storeSet(TRAIL_SIGNAL_KEY, trailSignal ? '1' : '0');
+    if (map) tracks.forEach(drawTrail);
+  }
+
+  function initTrailSignal() {
+    var legend = $('trail-signal-legend');
+    var scale = P.signalLegend();
+    var bar = el('div', 'sig-scale');
+    scale.forEach(function (s) {
+      var sw = el('i', null);
+      sw.style.background = s.color;
+      sw.title = s.from + ' to ' + s.to + ' dBFS';
+      bar.appendChild(sw);
+    });
+    var ends = el('div', 'sig-ends');
+    ends.appendChild(el('span', null, '≤ ' + P.SIGNAL_MIN_DB + ' dBFS'));
+    ends.appendChild(el('span', null, 'weak · strong'));
+    ends.appendChild(el('span', null, '≥ ' + P.SIGNAL_MAX_DB));
+    legend.textContent = '';
+    legend.appendChild(bar);
+    legend.appendChild(ends);
+    $('trail-signal').addEventListener('change', function () { setTrailSignal($('trail-signal').checked); });
+    setTrailSignal(storeGet(TRAIL_SIGNAL_KEY) === '1', true);
   }
 
   // Draws or removes one entry's marker and trail according to its drawability,
@@ -545,7 +622,7 @@
     if (!drawable || !map) return;
     if (observed) {
       var ts = Date.parse(t.position_time);
-      e.pts.push({ ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon] });
+      e.pts.push({ ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon], sig: typeof t.rssi === 'number' ? t.rssi : null });
       pruneTrail(e);
     }
     if (!P.trackVisible(t.decision, hideFiltered)) {
@@ -558,11 +635,7 @@
     var fresh = !e.marker, wasDimmed = !!e.dimmed;
     ensureMarker(e);
     e.dimmed = !shows;
-    if (e.dimmed) {
-      if (fresh || !wasDimmed) e.trail.setLatLngs([]);
-    } else if (observed || fresh || wasDimmed) {
-      e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
-    }
+    if (e.dimmed ? fresh || !wasDimmed : observed || fresh || wasDimmed) drawTrail(e);
     styleMarker(e);
   }
 
@@ -955,7 +1028,7 @@
     var e = tracks.get(key);
     if (!e) return;
     if (e.marker) map.removeLayer(e.marker);
-    if (e.trail) map.removeLayer(e.trail);
+    removeTrail(e);
     tracks.delete(key);
     if (alertsView) alertsView.trackGone(key);
     if (key === selectedKey) deselect();
@@ -966,7 +1039,7 @@
     Array.from(tracks.keys()).forEach(function (k) {
       var e = tracks.get(k);
       if (e.marker) map.removeLayer(e.marker);
-      if (e.trail) map.removeLayer(e.trail);
+      removeTrail(e);
     });
     tracks.clear();
     tableDirty = true;
@@ -1032,7 +1105,7 @@
         var n = e.pts.length;
         pruneTrail(e);
         // A dimmed entry's polyline stays empty (renderEntry refills it on un-dimming).
-        if (e.pts.length !== n && !e.dimmed) e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
+        if (e.pts.length !== n && !e.dimmed) drawTrail(e);
       }
     });
   }
@@ -3217,6 +3290,7 @@
     });
     $('cues-drops-only').addEventListener('change', function () { setCuesDropsOnly($('cues-drops-only').checked); });
     setCuesDropsOnly(storeGet(CUES_DROPS_ONLY_KEY) === '1');
+    initTrailSignal();
     $('cues-recent').tBodies[0].addEventListener('click', function (ev) {
       var tr = ev.target.closest('tr[data-key]');
       if (tr) select(tr.getAttribute('data-key'));
@@ -3259,6 +3333,20 @@
       return out;
     },
     rangeRingRadius: function () { return rangeRing ? rangeRing.getRadius() : null; },
+    // "Colour trail by signal": the option, and one aircraft's trail as drawn
+    // (its points, and the stroke colour of each signal run; [] when off).
+    setTrailSignal: function (on) { setTrailSignal(on); },
+    getTrailSignal: function () { return trailSignal; },
+    trail: function (hex) {
+      var out = null;
+      tracks.forEach(function (e) {
+        if (e.t.hex !== hex || !e.trail) return;
+        var runs = [];
+        if (e.sigTrail) e.sigTrail.eachLayer(function (l) { runs.push({ n: l.getLatLngs().length, color: l.options.color }); });
+        out = { points: e.trail.getLatLngs().length, color: e.trail.options.color, opacity: e.trail.options.opacity, runs: runs };
+      });
+      return out;
+    },
     // The map centre, to 4 decimals (the Receiver tab's "show").
     center: function () {
       var c = map.getCenter();

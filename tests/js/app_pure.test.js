@@ -992,5 +992,85 @@ test('capSymbols keeps the shown report', () => {
   assert.strictEqual(s.length, 401);
 });
 
+test('icaoCountry: allocation blocks and edges', () => {
+  assert.strictEqual(P.icaoCountry('a4f2c1'), 'United States');
+  assert.strictEqual(P.icaoCountry('A00000'), 'United States');
+  assert.strictEqual(P.icaoCountry('afffff'), 'United States');
+  assert.strictEqual(P.icaoCountry('4ca61c'), 'Ireland');
+  assert.strictEqual(P.icaoCountry('406a0b'), 'United Kingdom');
+  assert.strictEqual(P.icaoCountry('3c6444'), 'Germany');
+  assert.strictEqual(P.icaoCountry('484b6e'), 'Netherlands');
+  assert.strictEqual(P.icaoCountry('c01234'), 'Canada');
+  assert.strictEqual(P.icaoCountry('7c6b2a'), 'Australia');
+  assert.strictEqual(P.icaoCountry('~2c4a1f'), null);   // TIS-B, unallocated block
+  assert.strictEqual(P.icaoCountry('zz'), null);
+  assert.strictEqual(P.icaoCountry(undefined), null);
+  assert.ok(P.ICAO_COUNTRIES.indexOf('United States') >= 0 && P.ICAO_COUNTRIES.length > 150);
+  for (let i = 1; i < P.ICAO_COUNTRIES.length; i++) assert.ok(P.ICAO_COUNTRIES[i - 1] < P.ICAO_COUNTRIES[i], 'sorted');
+});
+test('icaoMilitary: US and UK military blocks and their neighbours', () => {
+  assert.strictEqual(P.icaoMilitary('adf7c8'), true);
+  assert.strictEqual(P.icaoMilitary('ae1234'), true);
+  assert.strictEqual(P.icaoMilitary('afffff'), true);
+  assert.strictEqual(P.icaoMilitary('adf7c7'), false);
+  assert.strictEqual(P.icaoMilitary('43c000'), true);
+  assert.strictEqual(P.icaoMilitary('43cfff'), true);
+  assert.strictEqual(P.icaoMilitary('43d000'), false);
+  assert.strictEqual(P.icaoMilitary('a4f2c1'), false);
+  assert.strictEqual(P.icaoMilitary(null), false);
+});
+test('callsignKind', () => {
+  assert.strictEqual(P.callsignKind('RYR9085'), 'airline');
+  assert.strictEqual(P.callsignKind('BAW99'), 'airline');
+  assert.strictEqual(P.callsignKind('UAL1423 '), 'airline');
+  assert.strictEqual(P.callsignKind('CTN82R'), 'airline');
+  assert.strictEqual(P.callsignKind('N512RG'), 'registration');
+  assert.strictEqual(P.callsignKind('N3157K'), 'registration');
+  assert.strictEqual(P.callsignKind('GABCD'), 'registration');
+  assert.strictEqual(P.callsignKind('PHBXA'), 'registration');
+  assert.strictEqual(P.callsignKind('RCH4521'), 'military');
+  assert.strictEqual(P.callsignKind('EVAC123'), 'military');
+  assert.strictEqual(P.callsignKind('RRR1234'), 'military');
+  assert.strictEqual(P.callsignKind('12345'), 'other');
+  assert.strictEqual(P.callsignKind(''), null);
+  assert.strictEqual(P.callsignKind(undefined), null);
+});
+test('trackClass', () => {
+  assert.strictEqual(P.trackClass({ hex: 'ae1234', callsign: 'ABC123', category: 'A3' }), 'military');
+  assert.strictEqual(P.trackClass({ hex: 'a4f2c1', callsign: 'RCH123', category: 'A5' }), 'military');
+  assert.strictEqual(P.trackClass({ hex: 'a4f2c1', callsign: 'UAL1423', category: 'A3' }), 'airline');
+  assert.strictEqual(P.trackClass({ hex: 'a4f2c1', callsign: 'UAL1423' }), 'airline');
+  assert.strictEqual(P.trackClass({ hex: 'a4f2c1', callsign: 'XYZ', category: 'A5' }), 'airline'); // heavy with a callsign
+  assert.strictEqual(P.trackClass({ hex: 'a5b06d', callsign: 'N512RG', category: 'A1' }), 'private');
+  assert.strictEqual(P.trackClass({ hex: 'a5b06d', category: 'A1' }), 'private');
+  assert.strictEqual(P.trackClass({ hex: 'a91c42', callsign: 'N72HX', category: 'A7' }), 'private');
+  assert.strictEqual(P.trackClass({ hex: 'a5b06d', registration: 'N512RG' }), 'private');
+  assert.strictEqual(P.trackClass({ hex: 'a4f2c1', category: 'A3' }), 'unknown');   // large, no callsign
+  assert.strictEqual(P.trackClass({ hex: '4b0de1' }), 'unknown');
+});
+test('isEmergency', () => {
+  assert.strictEqual(P.isEmergency({ squawk: '7700' }), true);
+  assert.strictEqual(P.isEmergency({ squawk: '7600', emergency: 'none' }), true);
+  assert.strictEqual(P.isEmergency({ squawk: '7500' }), true);
+  assert.strictEqual(P.isEmergency({ squawk: '1200', emergency: 'general' }), true);
+  assert.strictEqual(P.isEmergency({ squawk: '1200', emergency: 'none' }), false);
+  assert.strictEqual(P.isEmergency({}), false);
+});
+test('address tables: sorted, each first <= last, no overlaps', () => {
+  [P.ICAO_BLOCKS, P.MILITARY_BLOCKS].forEach((tbl) => {
+    assert.ok(tbl.length > 0);
+    for (let i = 0; i < tbl.length; i++) {
+      const b = tbl[i];
+      assert.ok(b[0] >= 0 && b[1] <= 0xffffff && b[0] <= b[1], 'block ' + i + ' first <= last');
+      if (i > 0) assert.ok(tbl[i - 1][1] < b[0], 'block ' + i + ' after block ' + (i - 1));
+    }
+  });
+  // Every military block lies inside a national block.
+  P.MILITARY_BLOCKS.forEach((m) => {
+    const hex = m[0].toString(16).padStart(6, '0');
+    assert.ok(P.icaoCountry(hex) !== null, 'military block ' + hex + ' inside a national block');
+  });
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

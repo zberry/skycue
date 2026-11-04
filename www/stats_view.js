@@ -269,6 +269,7 @@
       st.liveTimer = null;
       clearTimeout(st.disposeTimer);
       st.disposeTimer = setTimeout(disposeCharts, st.disposeMs);
+      if (aircraftHooks.close) aircraftHooks.close();
     }
     function hasCanvas(s) { return !!s.el.querySelector('canvas'); }
     function state() {
@@ -492,7 +493,7 @@
     // Every API string goes in through textContent.
     var SEARCH_DEBOUNCE_MS = 300;
     var ac = { q: '', sort: 'last_seen', dir: 'desc', page: 0, total: 0, evicted: 0, rows: [], seq: 0,
-      built: false, searchTimer: null, detail: null, detailSeq: 0 };
+      built: false, searchTimer: null, detail: null, detailSeq: 0, bodySig: null };
     var acEls = {};
     function mk(tag, attrs, text) {
       var el = document.createElement(tag);
@@ -615,18 +616,34 @@
         th.setAttribute('aria-sort', on ? (ac.dir === 'desc' ? 'descending' : 'ascending') : 'none');
       });
     }
+    // The rows are rebuilt only when their text changed (a live refresh
+    // mostly does not); a rebuild gives the focus back to the row that had it.
     function renderAircraftTable() {
       var body = acEls.body;
-      while (body.firstChild) body.removeChild(body.firstChild);
-      ac.rows.forEach(function (r) {
-        var tr = mk('tr', { 'data-key': String(r.key), tabindex: '0' });
-        if (r.key === st.detailKey) tr.className = 'selected';
-        S.AIRCRAFT_COLS.forEach(function (c) {
-          var a = { 'data-key': c.key };
-          if (c.num) a['class'] = 'num';
-          tr.appendChild(mk('td', a, S.aircraftCell(r, c.key)));
+      var cells = ac.rows.map(function (r) {
+        return [String(r.key)].concat(S.AIRCRAFT_COLS.map(function (c) { return S.aircraftCell(r, c.key); }));
+      });
+      var sig = JSON.stringify(cells);
+      if (sig !== ac.bodySig) {
+        ac.bodySig = sig;
+        var act = document.activeElement;
+        var focusRow = act && body.contains(act) ? act.closest('tr[data-key]') : null;
+        var focusKey = focusRow ? focusRow.getAttribute('data-key') : null;
+        while (body.firstChild) body.removeChild(body.firstChild);
+        ac.rows.forEach(function (r, i) {
+          var tr = mk('tr', { 'data-key': String(r.key), tabindex: '0' });
+          S.AIRCRAFT_COLS.forEach(function (c, j) {
+            var a = { 'data-key': c.key };
+            if (c.num) a['class'] = 'num';
+            if (c.key === 'first_seen' || c.key === 'last_seen') a.title = S.isoTime(r[c.key]);
+            tr.appendChild(mk('td', a, cells[i][j + 1]));
+          });
+          body.appendChild(tr);
+          if (focusKey !== null && String(r.key) === focusKey) tr.focus({ preventScroll: true });
         });
-        body.appendChild(tr);
+      }
+      Array.prototype.forEach.call(body.querySelectorAll('tr[data-key]'), function (tr) {
+        tr.classList.toggle('selected', tr.getAttribute('data-key') === st.detailKey);
       });
       var pg = S.aircraftPager(ac.total, ac.page, ac.rows.length);
       acEls.pageText.textContent = pg.text;
@@ -755,6 +772,15 @@
         rows: ac.rows.map(function (r) { return r.key; }) };
     };
     aircraftHooks.open = openAircraft;
+    // Hidden: a search still waiting for its debounce is taken as typed,
+    // so the next open shows it.
+    aircraftHooks.close = function () {
+      if (ac.searchTimer === null) return;
+      clearTimeout(ac.searchTimer);
+      ac.searchTimer = null;
+      var q = acEls.search.value.trim();
+      if (q !== ac.q) { ac.q = q; ac.page = 0; }
+    };
 
     // setDisposeMs: the dispose delay for the next close() (tests).
     return { open: open, close: close, isOpen: function () { return st.open; }, state: state, refreshNow: refreshNow,

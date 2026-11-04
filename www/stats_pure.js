@@ -236,12 +236,13 @@
   function str(v) { return typeof v === 'string' && v !== '' ? v : DASH; }
   function list(v, sep) { return Array.isArray(v) && v.length ? v.join(sep) : DASH; }
   function count(v) { return isNum(v) ? P.thousands(v) : DASH; }
-  // 'YYYY-MM-DD HH:MMZ' (the table), or the full ISO time (the detail).
+  // 'MM-DD HH:MMZ' (the table, no year so the measures fit; the cell's
+  // title and the detail have the full time), or the full ISO time.
   function shortTime(iso) {
     var ms = Date.parse(iso);
     if (typeof iso !== 'string' || isNaN(ms)) return DASH;
     var s = new Date(ms).toISOString();
-    return s.substr(0, 10) + ' ' + s.substr(11, 5) + 'Z';
+    return s.substr(5, 5) + ' ' + s.substr(11, 5) + 'Z';
   }
   function isoTime(iso) {
     var ms = Date.parse(iso);
@@ -336,7 +337,7 @@
     uatSeries: uatSeries, uatShown: uatShown,
     AIRCRAFT_PAGE: AIRCRAFT_PAGE, AIRCRAFT_SORTS: AIRCRAFT_SORTS, AIRCRAFT_COLS: AIRCRAFT_COLS,
     aircraftQuery: aircraftQuery, aircraftCell: aircraftCell, aircraftPager: aircraftPager,
-    aircraftLastPage: aircraftLastPage, detailRows: detailRows, detailPolar: detailPolar
+    aircraftLastPage: aircraftLastPage, detailRows: detailRows, detailPolar: detailPolar, isoTime: isoTime
   };
   if (root) root.skycueStatsPure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -358,8 +358,8 @@ test('aircraftCell: table text per column, dash when absent', () => {
   assert.strictEqual(cell('category'), 'A3');
   assert.strictEqual(cell('class'), 'airline');
   assert.strictEqual(cell('country'), 'United States');
-  assert.strictEqual(cell('first_seen'), '2026-11-03 12:01Z');
-  assert.strictEqual(cell('last_seen'), '2026-11-03 14:09Z');
+  assert.strictEqual(cell('first_seen'), '11-03 12:01Z');   // no year: the measures fit at 1280
+  assert.strictEqual(cell('last_seen'), '11-03 14:09Z');
   assert.strictEqual(cell('sessions'), '2');
   assert.strictEqual(cell('observations'), '5,120');
   assert.strictEqual(cell('sent_updates'), '1,022');

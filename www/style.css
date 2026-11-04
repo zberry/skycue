@@ -199,18 +199,27 @@ input.invalid { border-color: var(--blocked); }
 #stats-aircraft-pager { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font-variant-numeric: tabular-nums; }
 .stats-pager-text { color: var(--muted); font-size: 12px; min-width: 9em; text-align: center; }
 .stats-table-wrap { max-height: 480px; overflow: auto; border-top: 1px solid var(--line); }
-#stats-aircraft-table th { top: 0; z-index: 1; }
+/* Headers may wrap ("max range / (nm)") so all the measures fit at 1280. */
+#stats-aircraft-table th { top: 0; z-index: 1; white-space: normal; vertical-align: bottom; }
 #stats-aircraft-table th.nosort { cursor: default; }
-#stats-aircraft-table tbody tr:hover { background: var(--panel-2); }
+/* Up to four callsigns wrap rather than widen the table. */
+#stats-aircraft-table td[data-key="callsigns"] { white-space: normal; }
+#stats-aircraft-table tbody tr:not(.selected):hover { background: var(--panel-2); }
+/* Below 1700 px the first-seen and sessions columns give way (both stay in
+   the detail), so the measures fit at 1280. */
+@media (max-width: 1699.98px) {
+  #stats-aircraft-table [data-key="first_seen"], #stats-aircraft-table [data-key="sessions"] { display: none; }
+}
 #stats-evicted { margin: 6px 0 0; }
 .stats-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 #stats-detail-close { margin-left: auto; }
 .stats-detail-body { display: flex; gap: 16px; align-items: flex-start; }
-.stats-detail-fields {
-  flex: 1 1 auto; min-width: 0; margin: 0; display: grid; gap: 2px 18px;
-  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); font-size: 12px;
+/* Column by column (CSS columns), so related fields stay together. */
+.stats-detail-fields { flex: 1 1 auto; min-width: 0; margin: 0; columns: 270px; column-gap: 18px; font-size: 12px; }
+.stats-detail-fields > div {
+  display: flex; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); padding: 2px 0;
+  break-inside: avoid; margin-bottom: 2px;
 }
-.stats-detail-fields > div { display: flex; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); padding: 2px 0; }
 .stats-detail-fields dt { color: var(--muted); flex: 0 0 11em; }
 .stats-detail-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 #stats-detail-polar { flex: 0 0 260px; width: 260px; height: 260px; }

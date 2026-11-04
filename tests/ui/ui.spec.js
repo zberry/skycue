@@ -2445,6 +2445,17 @@ test('stats_aircraft_table_search_and_pager', async ({ page }, testInfo) => {
     .toHaveText(new RegExp('^1–' + (await acRows(page).count()) + ' of \\d+$'));
   await expect(page.locator('#stats-aircraft-pager button[data-page="prev"]')).toBeDisabled();
   await expect(page.locator('#stats-aircraft-pager button[data-page="next"]')).toBeDisabled();
+  // Below 1700 px first seen and sessions give way and the measures fit;
+  // the time cells carry no year (the full time is in their title).
+  const narrow = testInfo.project.use.viewport.width < 1700;
+  for (const k of ['first_seen', 'sessions']) {
+    await (narrow ? expect(page.locator(`#stats-aircraft-table th[data-key="${k}"]`)).toBeHidden()
+      : expect(page.locator(`#stats-aircraft-table th[data-key="${k}"]`)).toBeVisible());
+  }
+  const fits = await page.$eval('.stats-table-wrap', (w) => w.scrollWidth <= w.clientWidth);
+  expect(fits).toBe(true);
+  await expect(tr.locator('td[data-key="last_seen"]')).toHaveText(/^\d\d-\d\d \d\d:\d\dZ$/);
+  await expect(tr.locator('td[data-key="last_seen"]')).toHaveAttribute('title', /^\d{4}-\d\d-\d\dT/);
   // No evicted entries here: the line is hidden.
   expect(ledger.evicted).toBe(0);
   await expect(page.locator('#stats-evicted')).toBeHidden();
@@ -2453,11 +2464,14 @@ test('stats_aircraft_table_search_and_pager', async ({ page }, testInfo) => {
   await sec.screenshot({ path: testInfo.outputPath(`skycue-stats-aircraft-${testInfo.project.name}.png`) });
   // The search (callsign, either case) finds the target only, 300 ms
   // after the last key; one request for the whole word.
+  // Live paused, so no refresh lands in the window (one in flight could
+  // still repeat the whole word: deduped; a partial word never goes out).
+  await page.locator('#stats-live').uncheck();
   const asked = [];
   page.on('request', (r) => { if (r.url().includes('/api/stats/aircraft?')) asked.push(new URL(r.url()).searchParams.get('q')); });
   await page.locator('#stats-aircraft-search').pressSequentially('ual1423', { delay: 40 });
   await expect.poll(async () => (await acState(page)).rows, { timeout: 5000 }).toEqual([TARGET_KEY]);
-  expect(asked.filter((q) => q !== null)).toEqual(['ual1423']);
+  expect(Array.from(new Set(asked.filter((q) => q !== null)))).toEqual(['ual1423']);
   await expect(page.locator('#stats-aircraft-pager .stats-pager-text')).toHaveText('1–1 of 1');
   await expect(page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"] td[data-key="callsigns"]`))
     .toContainText('UAL1423');
@@ -2586,5 +2600,40 @@ test('stats_aircraft_filter_the_map_to_it', async ({ page }) => {
   await expect(page.locator('#view-search')).toHaveValue(TARGET);
   await expect.poll(() => page.evaluate(() => window.skycueApp.markers().map((m) => m.hex)), { timeout: 10000 })
     .toEqual([TARGET]);
+  await restoreMap(page);
+});
+
+// An entry gone from the ledger (404, as after a reset) closes the detail
+// on the next refresh.
+test('stats_aircraft_detail_closes_on_404', async ({ page }) => {
+  await openAircraftSection(page);
+  await searchAircraft(page, TARGET);
+  await page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"]`).click();
+  await expect(page.locator('#stats-detail')).toBeVisible();
+  const entry = new RegExp('/api/stats/aircraft/' + TARGET);
+  await page.route(entry, (route) => route.fulfill({ status: 404, json: { error: 'no such aircraft' } }));
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  await expect(page.locator('#stats-detail')).toBeHidden();
+  expect((await statsState(page)).detailKey).toBe(null);
+  await expect(page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"]`)).not.toHaveClass(/selected/);
+  await page.unroute(entry);
+  await restoreMap(page);
+});
+
+// Keyboard focus on a row survives the live rebuild; a search still in its
+// debounce when the view is hidden is kept for the next open.
+test('stats_aircraft_focus_and_pending_search', async ({ page }) => {
+  await openAircraftSection(page);
+  const key = (await acState(page)).rows[0];
+  await page.locator(`#stats-aircraft-table tbody tr[data-key="${key}"]`).focus();
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  expect(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute('data-key')))
+    .toBe(key);
+  await page.fill('#stats-aircraft-search', 'ual1423');
+  await page.evaluate(() => window.skycueApp.showMain('map'));   // within the 300 ms
+  expect((await acState(page)).q).toBe('ual1423');
+  await page.evaluate(() => window.skycueApp.showMain('stats'));
+  await expect.poll(async () => (await acState(page)).rows, { timeout: 10000 }).toEqual([TARGET_KEY]);
   await restoreMap(page);
 });

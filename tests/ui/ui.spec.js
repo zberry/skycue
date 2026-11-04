@@ -2391,3 +2391,200 @@ test.describe('stats weather (FIS-B daemon)', () => {
     await expect(sec).toBeVisible();
   });
 });
+
+// ---- Stats: Aircraft (spec 6 item 7) -------------------------------------------
+// The ledger table (GET /api/stats/aircraft), its search, sort and pager,
+// and the detail card with its two ways back to the map.
+const acState = async (page) => (await statsState(page)).aircraft;
+const acRows = (page) => page.locator('#stats-aircraft-table tbody tr');
+async function openAircraftSection(page) {
+  await openStats(page);
+  await expect(page.locator('#stats-aircraft-table')).toBeVisible();
+  await expect.poll(() => acRows(page).count(), { timeout: 15000 }).toBeGreaterThan(0);
+  await page.locator('#stats-aircraft-table').scrollIntoViewIfNeeded();
+}
+async function searchAircraft(page, text) {
+  await page.fill('#stats-aircraft-search', text);
+  await expect.poll(async () => (await acState(page)).q).toBe(text);
+  await expect.poll(async () => (await acState(page)).rows).toEqual([TARGET_KEY]);
+}
+async function restoreMap(page) {
+  await page.evaluate(() => { window.skycueApp.resetViewFilters(); window.skycueApp.showMain('map'); });
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().search)).toBe('');
+}
+// The numeric cells of one column, in table order.
+const columnNumbers = (page, key) => page.$$eval(`#stats-aircraft-table tbody td[data-key="${key}"]`,
+  (tds) => tds.map((td) => td.textContent === '—' ? null : Number(td.textContent.replace(/,/g, ''))));
+
+test('stats_aircraft_table_search_and_pager', async ({ page }, testInfo) => {
+  await openAircraftSection(page);
+  const ledger = (await api('/api/stats/aircraft?limit=1000')).body;
+  // The table's look is the track table's: the same header row styles,
+  // numeric headers and cells right-aligned, the default sort marked.
+  const heads = await page.$$eval('#stats-aircraft-table thead th', (ths) => ths.map((th) => ({
+    key: th.getAttribute('data-key'), sort: th.getAttribute('data-sort'), num: th.classList.contains('num'),
+    align: getComputedStyle(th).textAlign, pos: getComputedStyle(th).position })));
+  expect(heads.map((h) => h.key)).toEqual(['hex', 'callsigns', 'registration', 'category', 'class', 'country',
+    'first_seen', 'last_seen', 'sessions', 'observations', 'sent_updates', 'max_range_nm', 'max_alt_ft', 'max_gs_kt']);
+  heads.forEach((h) => {
+    expect(h.align, h.key).toBe(h.num ? 'right' : 'left');
+    expect(h.pos, h.key).toBe('sticky');
+  });
+  await expect(page.locator('#stats-aircraft-table th[data-sort="last_seen"]')).toHaveClass(/sorted desc/);
+  const tdAlign = await page.$eval('#stats-aircraft-table tbody td[data-key="observations"]', (td) => getComputedStyle(td).textAlign);
+  expect(tdAlign).toBe('right');
+  // Class and country as the API gives them.
+  const first = (await acState(page)).rows[0];
+  const row = ledger.rows.find((r) => r.key === first);
+  const tr = page.locator(`#stats-aircraft-table tbody tr[data-key="${first}"]`);
+  await expect(tr.locator('td[data-key="class"]')).toHaveText(row.class);
+  await expect(tr.locator('td[data-key="country"]')).toHaveText(row.country || '—');
+  // At most 12 aircraft: one page, both pager buttons disabled.
+  expect(ledger.total).toBeLessThanOrEqual(12);
+  await expect(page.locator('#stats-aircraft-pager .stats-pager-text'))
+    .toHaveText(new RegExp('^1–' + (await acRows(page).count()) + ' of \\d+$'));
+  await expect(page.locator('#stats-aircraft-pager button[data-page="prev"]')).toBeDisabled();
+  await expect(page.locator('#stats-aircraft-pager button[data-page="next"]')).toBeDisabled();
+  // No evicted entries here: the line is hidden.
+  expect(ledger.evicted).toBe(0);
+  await expect(page.locator('#stats-evicted')).toBeHidden();
+  const sec = sectionOf(page, '#stats-aircraft');
+  await sec.scrollIntoViewIfNeeded();
+  await sec.screenshot({ path: testInfo.outputPath(`skycue-stats-aircraft-${testInfo.project.name}.png`) });
+  // The search (callsign, either case) finds the target only, 300 ms
+  // after the last key; one request for the whole word.
+  const asked = [];
+  page.on('request', (r) => { if (r.url().includes('/api/stats/aircraft?')) asked.push(new URL(r.url()).searchParams.get('q')); });
+  await page.locator('#stats-aircraft-search').pressSequentially('ual1423', { delay: 40 });
+  await expect.poll(async () => (await acState(page)).rows, { timeout: 5000 }).toEqual([TARGET_KEY]);
+  expect(asked.filter((q) => q !== null)).toEqual(['ual1423']);
+  await expect(page.locator('#stats-aircraft-pager .stats-pager-text')).toHaveText('1–1 of 1');
+  await expect(page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"] td[data-key="callsigns"]`))
+    .toContainText('UAL1423');
+  // The hex finds it too; a miss shows none.
+  await page.fill('#stats-aircraft-search', 'A4F2');
+  await expect.poll(async () => (await acState(page)).rows).toEqual([TARGET_KEY]);
+  await page.fill('#stats-aircraft-search', 'zzzzzz');
+  await expect.poll(async () => (await acState(page)).total).toBe(0);
+  await expect(page.locator('#stats-aircraft-pager .stats-pager-text')).toHaveText('no aircraft');
+  await restoreMap(page);
+});
+
+test('stats_aircraft_sort_by_numeric_header', async ({ page }) => {
+  await openAircraftSection(page);
+  const th = page.locator('#stats-aircraft-table th[data-sort="observations"]');
+  await th.click();
+  await expect.poll(async () => { const s = await acState(page); return s.sort + ' ' + s.dir; }).toBe('observations desc');
+  await expect(th).toHaveClass(/sorted desc/);
+  await expect(page.locator('#stats-aircraft-table th[data-sort="last_seen"]')).not.toHaveClass(/sorted/);
+  const sorted = (xs, dir) => xs.every((v, i) => i === 0 || (dir < 0 ? xs[i - 1] >= v : xs[i - 1] <= v));
+  await expect.poll(async () => sorted(await columnNumbers(page, 'observations'), -1)).toBe(true);
+  // The order is the API's for the same sort (ties in key order).
+  const desc = (await acState(page)).rows;
+  // Again: low to high, the reverse order.
+  await th.click();
+  await expect.poll(async () => (await acState(page)).dir).toBe('asc');
+  await expect(th).toHaveClass(/sorted/);
+  await expect(th).not.toHaveClass(/desc/);
+  await expect.poll(async () => sorted(await columnNumbers(page, 'observations'), 1)).toBe(true);
+  const asc = (await acState(page)).rows;
+  expect(asc.length).toBe(desc.length);
+  expect(asc).not.toEqual(desc);
+  // A text column is not sortable (the API cannot): nothing changes.
+  await page.locator('#stats-aircraft-table th[data-key="callsigns"]').click();
+  expect((await acState(page)).sort).toBe('observations');
+  await restoreMap(page);
+});
+
+test('stats_aircraft_detail_fields_and_polar', async ({ page }, testInfo) => {
+  await openAircraftSection(page);
+  await searchAircraft(page, TARGET);
+  await page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"]`).click();
+  const det = page.locator('#stats-detail');
+  await expect(det).toBeVisible();
+  expect((await statsState(page)).detailKey).toBe(TARGET_KEY);
+  await expect(page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"]`)).toHaveClass(/selected/);
+  await expect(det.locator('.card-title')).toContainText(TARGET);
+  const row = (await api('/api/stats/aircraft/' + TARGET + '?addr_type=icao')).body;
+  // Every ledger field once.
+  const fields = await det.locator('.stats-detail-fields [data-field]').evaluateAll((els) => els.map((e) => e.getAttribute('data-field')));
+  expect(fields.slice().sort()).toEqual(['addr_type', 'callsigns', 'category', 'class', 'country', 'drops', 'emergencies',
+    'first_seen', 'hex', 'inputs', 'key', 'last_seen', 'max_alt_ft', 'max_gs_kt', 'max_range_bearing_deg', 'max_range_lat',
+    'max_range_lon', 'max_range_nm', 'max_range_time', 'max_rssi', 'min_alt_ft', 'min_rssi', 'observations', 'positions',
+    'registration', 'sent_updates', 'sessions', 'source', 'squawks']);
+  const dd = (f) => det.locator(`[data-field="${f}"] dd`);
+  await expect(dd('hex')).toHaveText(TARGET);
+  await expect(dd('registration')).toHaveText(row.registration);
+  await expect(dd('class')).toHaveText(row.class);
+  await expect(dd('callsigns')).toContainText('UAL1423');
+  await expect(dd('first_seen')).toHaveText(row.first_seen);
+  await expect(dd('max_range_nm')).toHaveText(/^\d+\.\d nm$/);
+  await expect(dd('max_alt_ft')).toHaveText(/ ft/);
+  await expect(dd('max_gs_kt')).toHaveText(/ kt$/);
+  // The mini polar: its max-range point at the row's bearing and range.
+  await expect.poll(async () => (await statsState(page)).cards.find((c) => c.id === 'aircraft-detail').canvas).toBe(true);
+  const o = await cardOption(page, 'aircraft-detail');
+  expect(o.polar).toBeTruthy();
+  const pt = o.series.find((s) => s.id === 'max');
+  expect(pt.type).toBe('scatter');
+  expect(pt.coordinateSystem).toBe('polar');
+  expect(pt.data.length).toBe(1);
+  const cur = (await api('/api/stats/aircraft/' + TARGET)).body;
+  expect(Math.abs(pt.data[0][1] - cur.max_range_bearing_deg)).toBeLessThan(5);
+  expect(pt.data[0][0]).toBeGreaterThan(0);
+  expect(pt.data[0][0]).toBeLessThanOrEqual(o.radiusAxis[0].max);
+  await det.scrollIntoViewIfNeeded();
+  await det.screenshot({ path: testInfo.outputPath(`skycue-stats-aircraft-detail-${testInfo.project.name}.png`) });
+  // Close hides it.
+  await page.locator('#stats-detail-close').click();
+  await expect(det).toBeHidden();
+  expect((await statsState(page)).detailKey).toBe(null);
+  await restoreMap(page);
+});
+
+test('stats_aircraft_show_on_map_selects_it', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 10);
+  await page.locator('#stats-toggle').click();
+  await expect.poll(() => acRows(page).count(), { timeout: 15000 }).toBeGreaterThan(0);
+  await searchAircraft(page, 'ual1423');
+  await page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"]`).click();
+  // Live in the track table: the button shows.
+  const btn = page.locator('#stats-show-on-map');
+  await expect(btn).toBeVisible();
+  await btn.click();
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('map');
+  await expect(page.locator('#stats-view')).toBeHidden();
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe(TARGET);
+  await expect(page.locator('#details [data-field="hex"]')).toHaveText(TARGET);
+  // An entry with no live track (a ledger row routed in): no button, and
+  // the detail shows the row.
+  await page.route(/\/api\/stats\/aircraft\/abcdef/, (route) => route.fulfill({ json: {
+    key: 'abcdef|icao', hex: 'abcdef', addr_type: 'icao', first_seen: '2026-11-03T12:00:00.000Z',
+    last_seen: '2026-11-03T12:05:00.000Z', observations: 3, positions: 0, sessions: 1, sent_updates: 0, drops: 0,
+    emergencies: 0, callsigns: ['<b>X</b>'], squawks: [], inputs: [], source: 'adsb_1090', class: 'unknown' } }));
+  await page.evaluate(() => window.skycueApp.showMain('stats'));
+  await page.evaluate(() => window.skycueApp.stats.openAircraft('abcdef|icao'));
+  await expect(page.locator('#stats-detail [data-field="hex"] dd')).toHaveText('abcdef');
+  // API strings are text, never markup.
+  await expect(page.locator('#stats-detail [data-field="callsigns"] dd')).toHaveText('<b>X</b>');
+  await expect(page.locator('#stats-detail b')).toHaveCount(0);
+  await expect(btn).toBeHidden();
+  await expect(page.locator('#stats-filter-map')).toBeVisible();
+  await page.unroute(/\/api\/stats\/aircraft\/abcdef/);
+  await restoreMap(page);
+});
+
+test('stats_aircraft_filter_the_map_to_it', async ({ page }) => {
+  await openAircraftSection(page);
+  await searchAircraft(page, TARGET);
+  await page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"]`).click();
+  await expect(page.locator('#stats-detail')).toBeVisible();
+  await page.locator('#stats-filter-map').click();
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('map');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().search)).toBe(TARGET);
+  await expect(page.locator('#view-search')).toHaveValue(TARGET);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.markers().map((m) => m.hex)), { timeout: 10000 })
+    .toEqual([TARGET]);
+  await restoreMap(page);
+});

@@ -46,6 +46,7 @@
     var slots = [];               // every chart: {id, kind: 'card'|'spark', el, inst, ro}
     var cards = {};               // card id -> its handle
     var sections = [];
+    var aircraftHooks = {};       // the Aircraft section's state() and open (made below)
     var theme = window.skycueChartTheme ? window.skycueChartTheme() : { decision: {}, tokens: {} };
 
     function showMsg(text, isError) {
@@ -279,7 +280,7 @@
           .map(function (s) { return { id: s.id, canvas: hasCanvas(s) }; }),
         sparks: slots.filter(function (s) { return s.kind === 'spark'; })
           .map(function (s) { return { id: s.id, canvas: hasCanvas(s) }; }),
-        tiles: tiles, detailKey: st.detailKey
+        tiles: tiles, detailKey: st.detailKey, aircraft: aircraftHooks.state ? aircraftHooks.state() : null
       };
     }
 
@@ -485,9 +486,280 @@
       });
     });
 
+    // ---- Aircraft (the ledger, spec 6 item 7) ----------------------------------
+    // A table of GET api/stats/aircraft (search, header sort, 100 a page;
+    // the whole ledger, not the range), and a detail card of one entry.
+    // Every API string goes in through textContent.
+    var SEARCH_DEBOUNCE_MS = 300;
+    var ac = { q: '', sort: 'last_seen', dir: 'desc', page: 0, total: 0, evicted: 0, rows: [], seq: 0,
+      built: false, searchTimer: null, detail: null, detailSeq: 0 };
+    var acEls = {};
+    function mk(tag, attrs, text) {
+      var el = document.createElement(tag);
+      Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+      if (text !== undefined) el.textContent = text;
+      return el;
+    }
+    // The section's two cards, made on its first refresh: the table (with
+    // the search, the pager and the evicted count) and the detail (hidden
+    // until a row is opened; its chart is a card chart, so it is disposed
+    // and recreated like the others).
+    function buildAircraft() {
+      if (ac.built) return;
+      ac.built = true;
+      var grid = sectionEl('aircraft');
+      var card = mk('section', { 'class': 'card stats-wide', 'data-card': 'aircraft-table' });
+      card.appendChild(mk('h3', { 'class': 'card-title' }, 'Aircraft ledger'));
+      acEls.caption = card.appendChild(mk('p', { 'class': 'card-caption', id: 'stats-aircraft-caption' }));
+      var bar = card.appendChild(mk('div', { 'class': 'stats-aircraft-bar' }));
+      acEls.search = bar.appendChild(mk('input', { type: 'search', id: 'stats-aircraft-search', autocomplete: 'off',
+        spellcheck: 'false', placeholder: 'hex, callsign or registration', 'aria-label': 'Search the aircraft ledger' }));
+      var pager = bar.appendChild(mk('div', { id: 'stats-aircraft-pager', role: 'group', 'aria-label': 'Pages' }));
+      acEls.prev = pager.appendChild(mk('button', { type: 'button', 'data-page': 'prev', 'aria-label': 'Previous page' }, '‹ prev'));
+      acEls.pageText = pager.appendChild(mk('span', { 'class': 'stats-pager-text', 'aria-live': 'polite' }));
+      acEls.next = pager.appendChild(mk('button', { type: 'button', 'data-page': 'next', 'aria-label': 'Next page' }, 'next ›'));
+      var wrap = card.appendChild(mk('div', { 'class': 'stats-table-wrap' }));
+      var table = wrap.appendChild(mk('table', { id: 'stats-aircraft-table' }));
+      var tr = table.appendChild(mk('thead')).appendChild(mk('tr'));
+      S.AIRCRAFT_COLS.forEach(function (c) {
+        var a = { 'data-key': c.key };
+        if (c.num) a['class'] = 'num';
+        if (c.sort) { a['data-sort'] = c.sort; a.tabindex = '0'; a['aria-sort'] = 'none'; } else a['class'] = (c.num ? 'num ' : '') + 'nosort';
+        tr.appendChild(mk('th', a, c.label));
+      });
+      acEls.headers = tr;
+      acEls.body = table.appendChild(mk('tbody'));
+      acEls.evicted = card.appendChild(mk('p', { id: 'stats-evicted', 'class': 'card-caption' }));
+      acEls.evicted.hidden = true;
+      grid.appendChild(card);
+
+      var det = addCard(grid, 'aircraft-detail', 'Aircraft');
+      det.el.id = 'stats-detail';
+      det.el.classList.add('stats-wide');
+      det.el.hidden = true;
+      var head = mk('div', { 'class': 'stats-detail-actions' });
+      acEls.showOnMap = head.appendChild(mk('button', { type: 'button', id: 'stats-show-on-map' }, 'Show on map'));
+      acEls.filterMap = head.appendChild(mk('button', { type: 'button', id: 'stats-filter-map' }, 'Filter the map to it'));
+      acEls.closeDetail = head.appendChild(mk('button', { type: 'button', id: 'stats-detail-close', 'aria-label': 'Close the detail' }, 'Close'));
+      var chartEl = det.el.querySelector('.card-chart');
+      chartEl.id = 'stats-detail-polar';
+      var body = mk('div', { 'class': 'stats-detail-body' });
+      acEls.fields = body.appendChild(mk('dl', { 'class': 'stats-detail-fields' }));
+      det.el.insertBefore(head, chartEl);
+      det.el.insertBefore(body, chartEl);
+      body.appendChild(chartEl);
+      acEls.detailCard = det;
+      var sec = grid.closest('.stats-section');
+      if (sec) sec.hidden = false;
+
+      acEls.search.addEventListener('input', function () {
+        clearTimeout(ac.searchTimer);
+        ac.searchTimer = setTimeout(function () {
+          ac.searchTimer = null;
+          if (acEls.search.value.trim() === ac.q) return;
+          ac.q = acEls.search.value.trim();
+          ac.page = 0;
+          loadAircraft();
+        }, SEARCH_DEBOUNCE_MS);
+      });
+      var sortOn = function (th) {
+        var name = th && th.getAttribute('data-sort');
+        if (!name) return;
+        // The same header again flips the order; another starts high to low.
+        ac.dir = ac.sort === name ? (ac.dir === 'desc' ? 'asc' : 'desc') : 'desc';
+        ac.sort = name;
+        ac.page = 0;
+        syncHeaders();
+        loadAircraft();
+      };
+      tr.addEventListener('click', function (ev) { sortOn(ev.target.closest('th[data-sort]')); });
+      tr.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        var th = ev.target.closest('th[data-sort]');
+        if (th) { ev.preventDefault(); sortOn(th); }
+      });
+      pager.addEventListener('click', function (ev) {
+        var b = ev.target.closest('button[data-page]');
+        if (!b || b.disabled) return;
+        ac.page = Math.max(0, ac.page + (b.getAttribute('data-page') === 'next' ? 1 : -1));
+        loadAircraft();
+      });
+      acEls.body.addEventListener('click', function (ev) {
+        var row = ev.target.closest('tr[data-key]');
+        if (row) openAircraft(row.getAttribute('data-key'));
+      });
+      acEls.body.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Enter') return;
+        var row = ev.target.closest('tr[data-key]');
+        if (row) { ev.preventDefault(); openAircraft(row.getAttribute('data-key')); }
+      });
+      acEls.showOnMap.addEventListener('click', function () {
+        var key = st.detailKey;
+        if (!key || !host.hasTrack(key)) return;
+        host.showMain('map');
+        host.select(key);
+      });
+      acEls.filterMap.addEventListener('click', function () {
+        if (!ac.detail) return;
+        host.setViewFilter({ search: ac.detail.hex });
+        host.showMain('map');
+      });
+      acEls.closeDetail.addEventListener('click', closeAircraft);
+      syncHeaders();
+    }
+    function syncHeaders() {
+      Array.prototype.forEach.call(acEls.headers.querySelectorAll('th[data-sort]'), function (th) {
+        var on = th.getAttribute('data-sort') === ac.sort;
+        th.classList.toggle('sorted', on);
+        th.classList.toggle('desc', on && ac.dir === 'desc');
+        th.setAttribute('aria-sort', on ? (ac.dir === 'desc' ? 'descending' : 'ascending') : 'none');
+      });
+    }
+    function renderAircraftTable() {
+      var body = acEls.body;
+      while (body.firstChild) body.removeChild(body.firstChild);
+      ac.rows.forEach(function (r) {
+        var tr = mk('tr', { 'data-key': String(r.key), tabindex: '0' });
+        if (r.key === st.detailKey) tr.className = 'selected';
+        S.AIRCRAFT_COLS.forEach(function (c) {
+          var a = { 'data-key': c.key };
+          if (c.num) a['class'] = 'num';
+          tr.appendChild(mk('td', a, S.aircraftCell(r, c.key)));
+        });
+        body.appendChild(tr);
+      });
+      var pg = S.aircraftPager(ac.total, ac.page, ac.rows.length);
+      acEls.pageText.textContent = pg.text;
+      acEls.prev.disabled = !pg.prev;
+      acEls.next.disabled = !pg.next;
+      acEls.evicted.hidden = !(ac.evicted > 0);
+      acEls.evicted.textContent = ac.evicted > 0 ? 'and ' + fmt(ac.evicted) + ' older aircraft' +
+        ' (dropped from the ledger when it was full)' : '';
+      acEls.caption.classList.remove('error');
+      acEls.caption.textContent = fmt(ac.total) + (ac.q ? ' matching' : ' in the ledger') + ' · since the last reset';
+    }
+    // The current page (a newer request wins over an older answer). A
+    // page past the end (the ledger shrank, e.g. after a reset) moves to
+    // the last page.
+    function loadAircraft() {
+      var seq = ++ac.seq;
+      return get(S.aircraftQuery({ q: ac.q, sort: ac.sort, dir: ac.dir, page: ac.page })).then(function (r) {
+        if (seq !== ac.seq) return;
+        ac.total = r && typeof r.total === 'number' ? r.total : 0;
+        ac.evicted = r && typeof r.evicted === 'number' ? r.evicted : 0;
+        ac.rows = r && Array.isArray(r.rows) ? r.rows : [];
+        if (!ac.rows.length && ac.page > S.aircraftLastPage(ac.total)) {
+          ac.page = S.aircraftLastPage(ac.total);
+          return loadAircraft();
+        }
+        renderAircraftTable();
+      }, function (err) {
+        if (seq !== ac.seq) return;
+        acEls.caption.textContent = 'Aircraft list unavailable: ' + (err && err.message);
+        acEls.caption.classList.add('error');
+      });
+    }
+
+    // ---- the detail card ---------------------------------------------------------
+    function detailPath(key) {
+      var k = String(key).split('|');
+      return 'api/stats/aircraft/' + encodeURIComponent(k[0]) + (k[1] ? '?addr_type=' + encodeURIComponent(k[1]) : '');
+    }
+    function syncShowOnMap() {
+      if (acEls.showOnMap) acEls.showOnMap.hidden = !(st.detailKey && host.hasTrack(st.detailKey));
+    }
+    function renderDetail() {
+      var row = ac.detail, card = acEls.detailCard;
+      if (!row || !card) return;
+      var call = Array.isArray(row.callsigns) && row.callsigns.length ? ' · ' + row.callsigns[row.callsigns.length - 1] : '';
+      card.el.querySelector('.card-title').textContent = 'Aircraft ' + row.hex + call;
+      var p = S.detailPolar(row);
+      card.setCaption(p ? 'farthest ' + host.formatNum(p.range_nm, 1, ' nm') + ' at ' + host.formatNum(p.bearing_deg, 0, '°') +
+        ' true' : 'no range yet (needs receiver coordinates and a position)');
+      var dl = acEls.fields;
+      while (dl.firstChild) dl.removeChild(dl.firstChild);
+      S.detailRows(row).forEach(function (f) {
+        var div = dl.appendChild(mk('div', { 'data-field': f[2] }));
+        div.appendChild(mk('dt', {}, f[0]));
+        div.appendChild(mk('dd', {}, f[1]));
+      });
+      syncShowOnMap();
+      Array.prototype.forEach.call(acEls.body.querySelectorAll('tr[data-key]'), function (tr) {
+        tr.classList.toggle('selected', tr.getAttribute('data-key') === st.detailKey);
+      });
+      var ch = card.chart();
+      if (!ch) return;
+      var max = p ? p.max_nm : 50;
+      ch.setOption({
+        animation: false,
+        tooltip: { trigger: 'item', formatter: function () {
+          return p ? 'max range ' + host.formatNum(p.range_nm, 1, ' nm') + '<br>bearing ' + host.formatNum(p.bearing_deg, 1, '°') : '';
+        } },
+        polar: { radius: '78%' },
+        angleAxis: { type: 'value', min: 0, max: 360, startAngle: 90, clockwise: true, interval: 45,
+          axisLabel: { formatter: function (v) { return { 0: 'N', 90: 'E', 180: 'S', 270: 'W' }[v] || ''; } },
+          splitLine: { show: true } },
+        radiusAxis: { type: 'value', min: 0, max: max, interval: max / 2,
+          axisLabel: { formatter: function (v) { return v ? v + ' nm' : ''; }, fontSize: 10 } },
+        series: [
+          { id: 'ray', type: 'line', coordinateSystem: 'polar', silent: true, symbol: 'none',
+            lineStyle: { color: tk.accent, width: 1.5, opacity: 0.6 }, data: p ? [[0, p.bearing_deg], [p.range_nm, p.bearing_deg]] : [] },
+          { id: 'max', name: 'max range', type: 'scatter', coordinateSystem: 'polar', symbolSize: 10,
+            itemStyle: { color: tk.accent }, data: p ? [[p.range_nm, p.bearing_deg]] : [] }
+        ]
+      });
+    }
+    // Opens the detail of ledger entry `key` ('<hex>|<addr_type>'): at once
+    // from the table's row when it is on the page, then from the entry route.
+    function openAircraft(key) {
+      buildAircraft();
+      st.detailKey = String(key);
+      var cached = null;
+      ac.rows.forEach(function (r) { if (r.key === st.detailKey) cached = r; });
+      acEls.detailCard.el.hidden = false;
+      if (cached) { ac.detail = cached; renderDetail(); }
+      acEls.detailCard.el.scrollIntoView({ block: 'nearest' });
+      return loadDetail();
+    }
+    function loadDetail() {
+      var key = st.detailKey;
+      if (!key) return Promise.resolve();
+      var seq = ++ac.detailSeq;
+      return get(detailPath(key)).then(function (row) {
+        if (seq !== ac.detailSeq || key !== st.detailKey) return;
+        ac.detail = row;
+        renderDetail();
+      }, function (err) {
+        if (seq !== ac.detailSeq || key !== st.detailKey) return;
+        // Gone (a reset) or never there: close it; another failure keeps the last.
+        if (err && err.status === 404) closeAircraft();
+        else console.error('stats aircraft ' + key, err);
+      });
+    }
+    function closeAircraft() {
+      st.detailKey = null;
+      ac.detail = null;
+      ac.detailSeq++;
+      if (acEls.detailCard) acEls.detailCard.el.hidden = true;
+      if (acEls.body) Array.prototype.forEach.call(acEls.body.querySelectorAll('tr.selected'), function (tr) {
+        tr.classList.remove('selected');
+      });
+    }
+
+    registerSection(function () {
+      buildAircraft();
+      return Promise.all([loadAircraft(), loadDetail()]);
+    });
+    aircraftHooks.state = function () {
+      return { q: ac.q, sort: ac.sort, dir: ac.dir, page: ac.page, total: ac.total, evicted: ac.evicted,
+        rows: ac.rows.map(function (r) { return r.key; }) };
+    };
+    aircraftHooks.open = openAircraft;
+
     // setDisposeMs: the dispose delay for the next close() (tests).
     return { open: open, close: close, isOpen: function () { return st.open; }, state: state, refreshNow: refreshNow,
-      setDisposeMs: function (ms) { st.disposeMs = ms >= 0 ? ms : DISPOSE_MS; } };
+      setDisposeMs: function (ms) { st.disposeMs = ms >= 0 ? ms : DISPOSE_MS; },
+      openAircraft: function (key) { return aircraftHooks.open(key); } };
   }
 
   window.skycueStatsView = { create: create };

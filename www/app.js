@@ -62,7 +62,11 @@
     return fetch(path, init).then(function (r) {
       if (r.status === 204) return null;
       return r.json().catch(function () { return {}; }).then(function (j) {
-        if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+        if (!r.ok) {
+          var err = new Error(j.error || ('HTTP ' + r.status));
+          err.status = r.status;   // e.g. the Stats detail closes on a 404
+          throw err;
+        }
         return j;
       });
     });
@@ -2992,6 +2996,8 @@
       var f = function () { return statsView ? statsView.state() : null; };
       // The delay before a hidden Stats view disposes its charts (default 60 s).
       f.setDisposeMs = function (ms) { if (statsView) statsView.setDisposeMs(ms); };
+      // Opens the Aircraft detail of ledger entry '<hex>|<addr_type>' (a Promise).
+      f.openAircraft = function (key) { return statsView ? statsView.openAircraft(key) : Promise.resolve(); };
       return f;
     })(),
     statsRefresh: function () { return statsView ? statsView.refreshNow() : Promise.resolve(false); },

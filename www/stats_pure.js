@@ -206,13 +206,137 @@
     return summary.uat_seen === true;
   }
 
+  // ---- Aircraft (the ledger table and detail) --------------------------------
+
+  var AIRCRAFT_PAGE = 100;      // rows per page of the table
+  // The sort names GET /api/stats/aircraft accepts.
+  var AIRCRAFT_SORTS = ['first_seen', 'last_seen', 'observations', 'positions', 'sessions', 'sent_updates', 'drops',
+    'emergencies', 'max_range_nm', 'max_range_time', 'max_range_lat', 'max_range_lon', 'max_range_bearing_deg',
+    'min_alt_ft', 'max_alt_ft', 'max_gs_kt', 'min_rssi', 'max_rssi'];
+  // The table's columns: row field, header, right-aligned, the API sort
+  // name (null: the API cannot sort by it).
+  var AIRCRAFT_COLS = [
+    { key: 'hex', label: 'hex', num: false, sort: null },
+    { key: 'callsigns', label: 'callsigns', num: false, sort: null },
+    { key: 'registration', label: 'reg', num: false, sort: null },
+    { key: 'category', label: 'cat', num: false, sort: null },
+    { key: 'class', label: 'class', num: false, sort: null },
+    { key: 'country', label: 'country', num: false, sort: null },
+    { key: 'first_seen', label: 'first seen', num: false, sort: 'first_seen' },
+    { key: 'last_seen', label: 'last seen', num: false, sort: 'last_seen' },
+    { key: 'sessions', label: 'sessions', num: true, sort: 'sessions' },
+    { key: 'observations', label: 'obs', num: true, sort: 'observations' },
+    { key: 'sent_updates', label: 'sent', num: true, sort: 'sent_updates' },
+    { key: 'max_range_nm', label: 'max range (nm)', num: true, sort: 'max_range_nm' },
+    { key: 'max_alt_ft', label: 'max alt (ft)', num: true, sort: 'max_alt_ft' },
+    { key: 'max_gs_kt', label: 'max gs (kt)', num: true, sort: 'max_gs_kt' }
+  ];
+  var DASH = '—';
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+  function str(v) { return typeof v === 'string' && v !== '' ? v : DASH; }
+  function list(v, sep) { return Array.isArray(v) && v.length ? v.join(sep) : DASH; }
+  function count(v) { return isNum(v) ? P.thousands(v) : DASH; }
+  // 'YYYY-MM-DD HH:MMZ' (the table), or the full ISO time (the detail).
+  function shortTime(iso) {
+    var ms = Date.parse(iso);
+    if (typeof iso !== 'string' || isNaN(ms)) return DASH;
+    var s = new Date(ms).toISOString();
+    return s.substr(0, 10) + ' ' + s.substr(11, 5) + 'Z';
+  }
+  function isoTime(iso) {
+    var ms = Date.parse(iso);
+    return typeof iso !== 'string' || isNaN(ms) ? DASH : new Date(ms).toISOString();
+  }
+
+  // The page request: sort (an API name, else last_seen), dir (asc|desc,
+  // else desc), page (0-based) and the search text (trimmed; left out when
+  // blank), URI-encoded.
+  function aircraftQuery(o) {
+    o = o || {};
+    var sort = AIRCRAFT_SORTS.indexOf(o.sort) >= 0 ? o.sort : 'last_seen';
+    var dir = o.dir === 'asc' ? 'asc' : 'desc';
+    var page = isNum(o.page) && o.page > 0 ? Math.floor(o.page) : 0;
+    var q = typeof o.q === 'string' ? o.q.trim() : '';
+    return 'api/stats/aircraft?sort=' + sort + '&dir=' + dir + '&limit=' + AIRCRAFT_PAGE +
+      '&offset=' + page * AIRCRAFT_PAGE + (q ? '&q=' + encodeURIComponent(q) : '');
+  }
+
+  // One table cell's text (a dash when the row has no value).
+  function aircraftCell(row, key) {
+    if (!row) return DASH;
+    var v = row[key];
+    switch (key) {
+      case 'callsigns': return list(v, ' ');
+      case 'first_seen': case 'last_seen': return shortTime(v);
+      case 'sessions': case 'observations': case 'sent_updates': case 'max_alt_ft': return count(v);
+      case 'max_range_nm': return P.formatNum(v, 1);
+      case 'max_gs_kt': return P.formatNum(v, 0);
+      default: return str(v);
+    }
+  }
+
+  // The pager of page `page` (0-based) holding nRows of `total`:
+  // {text: 'N–M of T', prev, next}.
+  function aircraftPager(total, page, nRows) {
+    total = isNum(total) ? total : 0;
+    var off = page * AIRCRAFT_PAGE;
+    var text = total === 0 ? 'no aircraft'
+      : nRows > 0 ? P.thousands(off + 1) + '–' + P.thousands(off + nRows) + ' of ' + P.thousands(total)
+        : '0 of ' + P.thousands(total);
+    return { text: text, prev: page > 0, next: off + AIRCRAFT_PAGE < total };
+  }
+  // The last page index holding rows of `total` (0 when none).
+  function aircraftLastPage(total) {
+    return isNum(total) && total > 0 ? Math.floor((total - 1) / AIRCRAFT_PAGE) : 0;
+  }
+
+  // The detail card: [label, text, field] for every field of a ledger
+  // row (docs/web-api.md), in reading order, with units; times in ISO.
+  function alt(v) { return isNum(v) ? P.thousands(v) + ' ft' + (v === 0 ? ' (ground)' : '') : DASH; }
+  var DETAIL_FIELDS = [
+    ['hex', 'address', str], ['addr_type', 'address type', str], ['key', 'track key', str],
+    ['callsigns', 'callsigns', function (v) { return list(v, ', '); }], ['registration', 'registration', str],
+    ['category', 'category', str], ['class', 'class', str], ['country', 'country', str],
+    ['squawks', 'squawks', function (v) { return list(v, ', '); }], ['source', 'source', str],
+    ['inputs', 'inputs', function (v) { return list(v, ', '); }],
+    ['first_seen', 'first seen', isoTime], ['last_seen', 'last seen', isoTime],
+    ['sessions', 'sessions', count], ['observations', 'observations', count], ['positions', 'positions', count],
+    ['sent_updates', 'updates sent', count], ['drops', 'drops', count], ['emergencies', 'emergencies', count],
+    ['max_range_nm', 'max range', function (v) { return P.formatNum(v, 1, ' nm'); }],
+    ['max_range_bearing_deg', 'max range bearing', function (v) { return P.formatNum(v, 1, '°'); }],
+    ['max_range_time', 'max range time', isoTime],
+    ['max_range_lat', 'max range lat', function (v) { return P.formatNum(v, 4, '°'); }],
+    ['max_range_lon', 'max range lon', function (v) { return P.formatNum(v, 4, '°'); }],
+    ['min_alt_ft', 'min altitude', alt], ['max_alt_ft', 'max altitude', alt],
+    ['max_gs_kt', 'max ground speed', function (v) { return P.formatNum(v, 1, ' kt'); }],
+    ['min_rssi', 'min signal', function (v) { return P.formatNum(v, 1, ' dBFS'); }],
+    ['max_rssi', 'max signal', function (v) { return P.formatNum(v, 1, ' dBFS'); }]
+  ];
+  function detailRows(row) {
+    if (!row || typeof row !== 'object') return [];
+    return DETAIL_FIELDS.map(function (f) { return [f[1], f[2](row[f[0]]), f[0]]; });
+  }
+
+  // The detail's mini polar: the max-range point and a round outer ring
+  // (nm), null without a bearing and range.
+  var POLAR_RINGS = [5, 10, 20, 50, 100, 150, 200, 300, 400, 500];   // halves are round too
+  function detailPolar(row) {
+    if (!row || !isNum(row.max_range_nm) || !isNum(row.max_range_bearing_deg)) return null;
+    var r = row.max_range_nm, max = Math.ceil(r / 100) * 100 || 5;
+    for (var i = 0; i < POLAR_RINGS.length; i++) if (POLAR_RINGS[i] >= r) { max = POLAR_RINGS[i]; break; }
+    return { range_nm: r, bearing_deg: row.max_range_bearing_deg, max_nm: max };
+  }
+
   var api = {
     RANGES: RANGES, DEFAULT_RANGE: DEFAULT_RANGE, rangeKey: rangeKey, rangeQuery: rangeQuery,
     seriesTimes: seriesTimes, sliceSeries: sliceSeries, spark: spark, DROP_FIELDS: DROP_FIELDS,
     tiles: tiles, sinceText: sinceText,
     total: total, inputSeries: inputSeries, aircraftSeries: aircraftSeries, SENT_DROPS: SENT_DROPS,
     sentDropSeries: sentDropSeries, hourOfWeek: hourOfWeek, hourOfWeekMax: hourOfWeekMax,
-    uatSeries: uatSeries, uatShown: uatShown
+    uatSeries: uatSeries, uatShown: uatShown,
+    AIRCRAFT_PAGE: AIRCRAFT_PAGE, AIRCRAFT_SORTS: AIRCRAFT_SORTS, AIRCRAFT_COLS: AIRCRAFT_COLS,
+    aircraftQuery: aircraftQuery, aircraftCell: aircraftCell, aircraftPager: aircraftPager,
+    aircraftLastPage: aircraftLastPage, detailRows: detailRows, detailPolar: detailPolar
   };
   if (root) root.skycueStatsPure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

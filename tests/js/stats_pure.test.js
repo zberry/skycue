@@ -297,5 +297,157 @@ test('uatShown: from summary.uat_seen, null without a summary', () => {
   assert.strictEqual(S.uatShown(null), null);
 });
 
+// ---- Aircraft (spec 6 item 7) ----------------------------------------------
+// The sort names GET /api/stats/aircraft accepts (docs/web-api.md, `sort`).
+const API_SORTS = ['first_seen', 'last_seen', 'observations', 'positions', 'sessions', 'sent_updates', 'drops',
+  'emergencies', 'max_range_nm', 'max_range_time', 'max_range_lat', 'max_range_lon', 'max_range_bearing_deg',
+  'min_alt_ft', 'max_alt_ft', 'max_gs_kt', 'min_rssi', 'max_rssi'];
+// Every field of a ledger row (docs/web-api.md, the row table).
+const ROW_FIELDS = ['key', 'hex', 'addr_type', 'first_seen', 'last_seen', 'observations', 'positions', 'sessions',
+  'sent_updates', 'drops', 'emergencies', 'max_range_nm', 'max_range_time', 'max_range_lat', 'max_range_lon',
+  'max_range_bearing_deg', 'min_alt_ft', 'max_alt_ft', 'max_gs_kt', 'min_rssi', 'max_rssi', 'callsigns', 'squawks',
+  'inputs', 'registration', 'category', 'source', 'class', 'country'];
+// The docs' example row.
+function ledgerRow() {
+  return { key: 'a1b2c3|icao', hex: 'a1b2c3', addr_type: 'icao', first_seen: '2026-11-03T12:01:07.000Z',
+    last_seen: '2026-11-03T14:09:58.000Z', observations: 5120, positions: 4980, sessions: 2, sent_updates: 1022,
+    drops: 2, emergencies: 0, max_range_nm: 143.8, max_range_time: '2026-11-03T13:02:11.000Z',
+    max_range_lat: 40.81, max_range_lon: -75.62, max_range_bearing_deg: 28.6, min_alt_ft: 1200,
+    max_alt_ft: 36000, max_gs_kt: 481.5, min_rssi: -31.2, max_rssi: -4.5, callsigns: ['UAL123', 'UAL9'],
+    squawks: ['3301'], inputs: ['readsb'], registration: 'N123AB', category: 'A3', source: 'adsb_1090',
+    class: 'airline', country: 'United States' };
+}
+
+test('aircraftQuery: paging, sort, search encoding', () => {
+  assert.strictEqual(S.aircraftQuery({ q: '', sort: 'last_seen', dir: 'desc', page: 0 }),
+    'api/stats/aircraft?sort=last_seen&dir=desc&limit=100&offset=0');
+  assert.ok(S.aircraftQuery({ q: 'n 1', sort: 'observations', dir: 'asc', page: 2 }).endsWith('&offset=200&q=n%201'));
+  assert.strictEqual(S.aircraftQuery({ q: '  ual&1 ', sort: 'max_gs_kt', dir: 'asc', page: 1 }),
+    'api/stats/aircraft?sort=max_gs_kt&dir=asc&limit=100&offset=100&q=ual%261');
+  // Blank search left out; defaults for a missing sort, dir or page.
+  assert.strictEqual(S.aircraftQuery({ q: '   ' }), 'api/stats/aircraft?sort=last_seen&dir=desc&limit=100&offset=0');
+  assert.strictEqual(S.aircraftQuery({ sort: 'bogus', dir: 'up', page: -3 }),
+    'api/stats/aircraft?sort=last_seen&dir=desc&limit=100&offset=0');
+  assert.strictEqual(S.AIRCRAFT_PAGE, 100);
+});
+
+test('AIRCRAFT_COLS: sortable columns use API names', () => {
+  assert.deepStrictEqual(S.AIRCRAFT_COLS.map((c) => c.key), ['hex', 'callsigns', 'registration', 'category', 'class',
+    'country', 'first_seen', 'last_seen', 'sessions', 'observations', 'sent_updates', 'max_range_nm', 'max_alt_ft',
+    'max_gs_kt']);
+  const sortable = S.AIRCRAFT_COLS.filter((c) => c.sort !== null).map((c) => c.sort);
+  sortable.forEach((n) => assert.ok(API_SORTS.indexOf(n) >= 0, n + ' is not an API sort name'));
+  assert.deepStrictEqual(sortable, ['first_seen', 'last_seen', 'sessions', 'observations', 'sent_updates',
+    'max_range_nm', 'max_alt_ft', 'max_gs_kt']);
+  // The text columns cannot be sorted by the API.
+  ['hex', 'callsigns', 'registration', 'category', 'class', 'country'].forEach((k) => {
+    assert.strictEqual(S.AIRCRAFT_COLS.find((c) => c.key === k).sort, null, k);
+  });
+  // Right-aligned: the counts and measures.
+  assert.deepStrictEqual(S.AIRCRAFT_COLS.filter((c) => c.num).map((c) => c.key),
+    ['sessions', 'observations', 'sent_updates', 'max_range_nm', 'max_alt_ft', 'max_gs_kt']);
+  S.AIRCRAFT_COLS.forEach((c) => assert.ok(typeof c.label === 'string' && c.label.length > 0, c.key));
+});
+
+test('aircraftCell: table text per column, dash when absent', () => {
+  const r = ledgerRow();
+  const cell = (k) => S.aircraftCell(r, k);
+  assert.strictEqual(cell('hex'), 'a1b2c3');
+  assert.strictEqual(cell('callsigns'), 'UAL123 UAL9');
+  assert.strictEqual(cell('registration'), 'N123AB');
+  assert.strictEqual(cell('category'), 'A3');
+  assert.strictEqual(cell('class'), 'airline');
+  assert.strictEqual(cell('country'), 'United States');
+  assert.strictEqual(cell('first_seen'), '2026-11-03 12:01Z');
+  assert.strictEqual(cell('last_seen'), '2026-11-03 14:09Z');
+  assert.strictEqual(cell('sessions'), '2');
+  assert.strictEqual(cell('observations'), '5,120');
+  assert.strictEqual(cell('sent_updates'), '1,022');
+  assert.strictEqual(cell('max_range_nm'), '143.8');
+  assert.strictEqual(cell('max_alt_ft'), '36,000');
+  assert.strictEqual(cell('max_gs_kt'), '482');
+  const bare = { key: 'abcdef|non_icao', hex: 'abcdef', addr_type: 'non_icao', callsigns: [], class: 'unknown',
+    first_seen: 'garbage' };
+  ['callsigns', 'registration', 'category', 'country', 'first_seen', 'last_seen', 'sessions', 'max_range_nm',
+    'max_alt_ft', 'max_gs_kt'].forEach((k) => assert.strictEqual(S.aircraftCell(bare, k), '—', k));
+  assert.strictEqual(S.aircraftCell(bare, 'class'), 'unknown');
+  assert.strictEqual(S.aircraftCell(null, 'hex'), '—');
+});
+
+test('aircraftPager: N–M of total, prev/next', () => {
+  assert.deepStrictEqual(S.aircraftPager(12, 0, 12), { text: '1–12 of 12', prev: false, next: false });
+  assert.deepStrictEqual(S.aircraftPager(1234, 0, 100), { text: '1–100 of 1,234', prev: false, next: true });
+  assert.deepStrictEqual(S.aircraftPager(1234, 12, 34), { text: '1,201–1,234 of 1,234', prev: true, next: false });
+  assert.deepStrictEqual(S.aircraftPager(250, 1, 100), { text: '101–200 of 250', prev: true, next: true });
+  assert.deepStrictEqual(S.aircraftPager(0, 0, 0), { text: 'no aircraft', prev: false, next: false });
+  // A page past the end (the ledger shrank): no rows, back is possible.
+  assert.deepStrictEqual(S.aircraftPager(5, 3, 0), { text: '0 of 5', prev: true, next: false });
+  assert.strictEqual(S.aircraftLastPage(0), 0);
+  assert.strictEqual(S.aircraftLastPage(100), 0);
+  assert.strictEqual(S.aircraftLastPage(101), 1);
+});
+
+test('detailRows: every field once, units', () => {
+  const rows = S.detailRows(ledgerRow());
+  rows.forEach((r) => assert.ok(Array.isArray(r) && typeof r[0] === 'string' && typeof r[1] === 'string', r[0]));
+  // [label, text, field]: each ledger field exactly once.
+  const fields = rows.map((r) => r[2]);
+  assert.deepStrictEqual(fields.slice().sort(), ROW_FIELDS.slice().sort());
+  assert.strictEqual(new Set(rows.map((r) => r[0])).size, rows.length, 'labels unique');
+  const by = {};
+  rows.forEach((r) => { by[r[2]] = r[1]; });
+  assert.strictEqual(by.key, 'a1b2c3|icao');
+  assert.strictEqual(by.hex, 'a1b2c3');
+  assert.strictEqual(by.addr_type, 'icao');
+  assert.strictEqual(by.first_seen, '2026-11-03T12:01:07.000Z');
+  assert.strictEqual(by.last_seen, '2026-11-03T14:09:58.000Z');
+  assert.strictEqual(by.max_range_time, '2026-11-03T13:02:11.000Z');
+  assert.strictEqual(by.observations, '5,120');
+  assert.strictEqual(by.positions, '4,980');
+  assert.strictEqual(by.sessions, '2');
+  assert.strictEqual(by.sent_updates, '1,022');
+  assert.strictEqual(by.drops, '2');
+  assert.strictEqual(by.emergencies, '0');
+  assert.strictEqual(by.max_range_nm, '143.8 nm');
+  assert.strictEqual(by.max_range_lat, '40.8100°');
+  assert.strictEqual(by.max_range_lon, '-75.6200°');
+  assert.strictEqual(by.max_range_bearing_deg, '28.6°');
+  assert.strictEqual(by.min_alt_ft, '1,200 ft');
+  assert.strictEqual(by.max_alt_ft, '36,000 ft');
+  assert.strictEqual(by.max_gs_kt, '481.5 kt');
+  assert.strictEqual(by.min_rssi, '-31.2 dBFS');
+  assert.strictEqual(by.max_rssi, '-4.5 dBFS');
+  assert.strictEqual(by.callsigns, 'UAL123, UAL9');
+  assert.strictEqual(by.squawks, '3301');
+  assert.strictEqual(by.inputs, 'readsb');
+  assert.strictEqual(by.registration, 'N123AB');
+  assert.strictEqual(by.category, 'A3');
+  assert.strictEqual(by.source, 'adsb_1090');
+  assert.strictEqual(by.class, 'airline');
+  assert.strictEqual(by.country, 'United States');
+  // Absent values: the field still listed once, as a dash; an altitude of 0 is "ground".
+  const bare = S.detailRows({ key: 'abcdef|other', hex: 'abcdef', addr_type: 'other', callsigns: [], squawks: [],
+    inputs: [], min_alt_ft: 0 });
+  assert.deepStrictEqual(bare.map((r) => r[2]).sort(), ROW_FIELDS.slice().sort());
+  const b = {};
+  bare.forEach((r) => { b[r[2]] = r[1]; });
+  ['first_seen', 'max_range_nm', 'max_range_time', 'max_rssi', 'callsigns', 'registration', 'country', 'observations']
+    .forEach((k) => assert.strictEqual(b[k], '—', k));
+  assert.strictEqual(b.min_alt_ft, '0 ft (ground)');
+  assert.deepStrictEqual(S.detailRows(null), []);
+});
+
+test('detailPolar: the max-range point, null without one', () => {
+  assert.deepStrictEqual(S.detailPolar(ledgerRow()), { range_nm: 143.8, bearing_deg: 28.6, max_nm: 150 });
+  const r = ledgerRow();
+  r.max_range_nm = 8.2;
+  r.max_range_bearing_deg = 359.9;
+  assert.deepStrictEqual(S.detailPolar(r), { range_nm: 8.2, bearing_deg: 359.9, max_nm: 10 });
+  r.max_range_nm = 260;
+  assert.strictEqual(S.detailPolar(r).max_nm, 300);
+  assert.strictEqual(S.detailPolar({ max_range_nm: 12 }), null);
+  assert.strictEqual(S.detailPolar(null), null);
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

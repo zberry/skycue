@@ -2463,9 +2463,6 @@ async function restoreMap(page) {
   await page.evaluate(() => { window.skycueApp.resetViewFilters(); window.skycueApp.showMain('map'); });
   expect(await page.evaluate(() => window.skycueApp.getViewFilters().search)).toBe('');
 }
-// The numeric cells of one column, in table order.
-const columnNumbers = (page, key) => page.$$eval(`#stats-aircraft-table tbody td[data-key="${key}"]`,
-  (tds) => tds.map((td) => td.textContent === '—' ? null : Number(td.textContent.replace(/,/g, ''))));
 
 test('stats_aircraft_table_search_and_pager', async ({ page }, testInfo) => {
   await openAircraftSection(page);
@@ -2535,29 +2532,49 @@ test('stats_aircraft_table_search_and_pager', async ({ page }, testInfo) => {
   await restoreMap(page);
 });
 
+// Sorted by max range, which differs across the fixture's aircraft (the
+// observation counts can all tie early on, and then both orders are the key
+// order). Each order is read from the table in one go: the row keys and the
+// column, so the two always belong to the same render.
 test('stats_aircraft_sort_by_numeric_header', async ({ page }) => {
   await openAircraftSection(page);
-  const th = page.locator('#stats-aircraft-table th[data-sort="observations"]');
+  const KEY = 'max_range_nm';
+  const th = page.locator(`#stats-aircraft-table th[data-sort="${KEY}"]`);
+  const snapshot = () => page.$$eval('#stats-aircraft-table tbody tr[data-key]', (trs, key) => trs.map((tr) => {
+    const t = tr.querySelector(`td[data-key="${key}"]`).textContent;
+    return { key: tr.getAttribute('data-key'), v: t === '\u2014' ? null : Number(t.replace(/,/g, '')) };
+  }), KEY);
+  // Non-increasing (dir < 0) or non-decreasing (dir > 0) over the known values.
+  const sorted = (rows, dir) => {
+    const xs = rows.map((r) => r.v).filter((v) => v !== null);
+    return xs.length > 0 && xs.every((v, i) => i === 0 || (dir < 0 ? xs[i - 1] >= v : xs[i - 1] <= v));
+  };
+  const settled = async (dir) => {
+    let rows = [];
+    await expect.poll(async () => {
+      const s = await acState(page);
+      rows = await snapshot();
+      return s.sort === KEY && s.dir === (dir < 0 ? 'desc' : 'asc') &&
+        rows.map((r) => r.key).join() === s.rows.join() && sorted(rows, dir);
+    }).toBe(true);
+    return rows;
+  };
   await th.click();
-  await expect.poll(async () => { const s = await acState(page); return s.sort + ' ' + s.dir; }).toBe('observations desc');
   await expect(th).toHaveClass(/sorted desc/);
   await expect(page.locator('#stats-aircraft-table th[data-sort="last_seen"]')).not.toHaveClass(/sorted/);
-  const sorted = (xs, dir) => xs.every((v, i) => i === 0 || (dir < 0 ? xs[i - 1] >= v : xs[i - 1] <= v));
-  await expect.poll(async () => sorted(await columnNumbers(page, 'observations'), -1)).toBe(true);
-  // The order is the API's for the same sort (ties in key order).
-  const desc = (await acState(page)).rows;
-  // Again: low to high, the reverse order.
+  const desc = await settled(-1);
+  // Again: low to high.
   await th.click();
-  await expect.poll(async () => (await acState(page)).dir).toBe('asc');
   await expect(th).toHaveClass(/sorted/);
   await expect(th).not.toHaveClass(/desc/);
-  await expect.poll(async () => sorted(await columnNumbers(page, 'observations'), 1)).toBe(true);
-  const asc = (await acState(page)).rows;
+  const asc = await settled(1);
   expect(asc.length).toBe(desc.length);
-  expect(asc).not.toEqual(desc);
+  // The orders differ whenever the values do (all equal: both are key order).
+  const known = desc.map((r) => r.v).filter((v) => v !== null);
+  if (new Set(known).size > 1) expect(asc.map((r) => r.key)).not.toEqual(desc.map((r) => r.key));
   // A text column is not sortable (the API cannot): nothing changes.
   await page.locator('#stats-aircraft-table th[data-key="callsigns"]').click();
-  expect((await acState(page)).sort).toBe('observations');
+  expect((await acState(page)).sort).toBe(KEY);
   await restoreMap(page);
 });
 

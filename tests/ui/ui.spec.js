@@ -407,6 +407,18 @@ test('screenshots', async ({ page }, testInfo) => {
   await page.screenshot({ path: testInfo.outputPath(`skycue-config-${testInfo.project.name}.png`), fullPage: true });
 });
 
+// Numeric columns are right-aligned, and so are their headers, so each
+// value sits under its own header rather than the next one.
+test('table numeric headers align with their cells', async ({ page }) => {
+  await openPage(page);
+  await page.locator('#table-toggle').click();
+  await expect(page.locator('#table-view')).toBeVisible();
+  const align = (key) => page.locator(`#table-view th[data-key="${key}"]`)
+    .evaluate((th) => getComputedStyle(th).textAlign);
+  for (const key of ['alt', 'gs_kt', 'range_nm', 'elevation_deg']) expect(await align(key), key).toBe('right');
+  for (const key of ['hex', 'callsign', 'registration', 'decision']) expect(await align(key), key).toBe('left');
+});
+
 // ---- Cues tab ------------------------------------------------------------------
 const net = require('net');
 const TARGET_KEY = `${TARGET}|icao`;

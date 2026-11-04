@@ -126,6 +126,7 @@ input.invalid { border-color: var(--blocked); }
 #table-view tbody tr:hover { background: var(--panel); }
 #table-view tbody tr.selected { background: #1f3350; }
 #table-view td.num { text-align: right; }
+#table-view th.num { text-align: right; }
 #table-view td .sw { margin-right: 6px; }
 
 /* selection panel */

@@ -101,6 +101,11 @@ input.invalid { border-color: var(--blocked); }
 .ac-marker.selected .ac-glyph { filter: drop-shadow(0 0 4px #fff); }
 .ac-marker.selected .ac-glyph path { stroke: #fff; stroke-width: 1.6; }
 .ac-marker.selected .ac-label { font-weight: 700; }
+/* View "dim" mode (spec §5): context only, not clickable or hoverable. The
+   leaflet-interactive form outranks Leaflet's own pointer-events rule. */
+.leaflet-marker-icon.ac-marker.dimmed, .leaflet-marker-icon.ac-marker.dimmed.leaflet-interactive { opacity: .25; pointer-events: none; }
+.ac-marker.dimmed .ac-glyph { cursor: default; }
+.ac-marker.dimmed .ac-label { display: none; }
 .decision-sent { color: var(--sent); }
 .decision-allow_listed { color: var(--allow); }
 .decision-out_of_range { color: var(--range); }

@@ -481,6 +481,7 @@
     var cls = P.decisionColor(t.decision) || 'unknown';
     el.className = el.className.replace(/\bdecision-\S+/g, '').replace(/\s+/g, ' ').trim() + ' decision-' + cls;
     el.classList.toggle('selected', e.key === selectedKey);
+    el.classList.toggle('dimmed', !!e.dimmed);
     el.setAttribute('data-hex', t.hex);
     el.setAttribute('data-decision', cls);
     var glyph = el.querySelector('.ac-glyph');
@@ -517,10 +518,13 @@
     if (e.trail) map.removeLayer(e.trail);
     e.marker = null;
     e.trail = null;
+    e.dimmed = false;
   }
 
-  // Draws or removes one entry's marker and trail according to its drawability
-  // and the "Hide filtered" option. `observed`: add the position to the trail.
+  // Draws or removes one entry's marker and trail according to its drawability,
+  // the "Hide filtered" option and the View (spec §5: a non-match has no
+  // layers in "hide" mode, a dimmed marker without trail in "dim" mode; the
+  // selected entry always matches). `observed`: add the position to the trail.
   function renderEntry(e, observed) {
     var t = e.t;
     var drawable = typeof t.lat === 'number' && typeof t.lon === 'number' && P.decisionColor(t.decision) !== null;
@@ -535,9 +539,16 @@
       if (e.key === selectedKey) deselect();
       return;
     }
-    var fresh = !e.marker;
+    var shows = viewShows(e);
+    if (!shows && viewFilter.mapMode === 'hide') { dropLayers(e); return; } // never deselects
+    var fresh = !e.marker, wasDimmed = !!e.dimmed;
     ensureMarker(e);
-    if (observed || fresh) e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
+    e.dimmed = !shows;
+    if (e.dimmed) {
+      if (fresh || !wasDimmed) e.trail.setLatLngs([]);
+    } else if (observed || fresh || wasDimmed) {
+      e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
+    }
     styleMarker(e);
   }
 
@@ -551,14 +562,14 @@
     hideFiltered = !!on;
     $('hide-filtered').checked = hideFiltered;
     try { window.localStorage.setItem('skycue.hideFiltered', hideFiltered ? '1' : '0'); } catch (err) { /* private window */ }
-    tracks.forEach(function (e) { renderEntry(e, false); });
+    renderAllEntries();
     updateHiddenCount();
   }
 
   // ---- View section --------------------------------------------------------------
-  // Narrows the table (and the map: Task 3) to the tracks that match every
-  // active control. The selected aircraft is exempt, so a filter change never
-  // drops or deselects it.
+  // Narrows the table and the map to the tracks that match every active
+  // control. The selected aircraft is exempt, so a filter change never drops
+  // or deselects it.
   function viewShows(e) { return e.key === selectedKey || P.viewMatches(e.t, viewFilter); }
   function renderAllEntries() { tracks.forEach(function (e) { renderEntry(e, false); }); }
   function saveView() { storeSet(VIEW_FILTER_KEY, JSON.stringify(viewFilter)); }
@@ -617,6 +628,19 @@
     if (!fromControls) applyViewToControls();
     saveView();
     tableDirty = true;
+    scheduleViewRender();
+  }
+  // One map/status/table pass per frame however many input events arrive
+  // (typing in the search fires one per key).
+  var viewRenderPending = false;
+  function scheduleViewRender() {
+    if (viewRenderPending) return;
+    viewRenderPending = true;
+    window.requestAnimationFrame(flushViewRender);
+  }
+  function flushViewRender() {
+    if (!viewRenderPending) return;
+    viewRenderPending = false;
     renderAllEntries();
     updateViewStatus();
     renderTable();
@@ -815,9 +839,11 @@
     if (te && !P.trackVisible(te.t.decision, hideFiltered)) return; // no marker to select
     var prev = selectedKey;
     selectedKey = key;
+    // renderEntry, not only styleMarker: the previous one may no longer
+    // match the View (drops or dims), the new one always does.
     [prev, key].forEach(function (k) {
       var e = k && tracks.get(k);
-      if (e) styleMarker(e);
+      if (e) renderEntry(e, false);
     });
     actionsSig = '';
     openPanel('track');
@@ -832,7 +858,7 @@
     if (selectedKey === null) return;
     var e = tracks.get(selectedKey);
     selectedKey = null;
-    if (e) styleMarker(e);
+    if (e) renderEntry(e, false); // a non-match now drops (hide) or dims
     renderDetails();
     if (activeTab === 'track' && !$('details').hidden) {
       $('details').hidden = true;
@@ -2888,6 +2914,7 @@
     setInterval(function () {
       if (selectedKey) renderDetails(); // ages
       updateHiddenCount();
+      if (viewRenderPending) flushViewRender(); // no animation frames in a hidden tab
       if (tableDirty) { updateViewStatus(); renderTable(); }
       if (map) radarAgeTick();
       if (tabShown('receiver')) renderReceiver(); // ages, rates
@@ -2906,7 +2933,7 @@
         if (!e.marker) return;
         var ll = e.marker.getLatLng();
         out.push({ hex: e.t.hex, addr_type: e.t.addr_type, decision: P.decisionColor(e.t.decision) || 'unknown',
-          lat: ll.lat, lon: ll.lng });
+          lat: ll.lat, lon: ll.lng, dimmed: markerEl(e) ? markerEl(e).classList.contains('dimmed') : false, trail: e.trail ? e.trail.getLatLngs().length : 0 });
       });
       return out;
     },
@@ -2933,6 +2960,8 @@
     setViewFilters: function (partial) { setViewFilters(partial); },
     resetViewFilters: resetViewFilters,
     shownCount: viewShownCount,
+    // Runs a pending View render now (it is otherwise one animation frame away).
+    renderAll: function () { viewRenderPending = true; flushViewRender(); },
     // Adds a marker skycued does not know (the reconnect test checks it goes).
     injectTestMarker: function (t) { onTrack(t, true); },
     dataNow: dataNow,

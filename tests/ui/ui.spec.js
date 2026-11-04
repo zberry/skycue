@@ -1861,3 +1861,98 @@ test('view_section_fits_panel_and_details_show_class_and_country', async ({ page
   await expect(panel.locator('[data-field="class"]')).toHaveText('airline');
   await expect(panel.locator('[data-field="country"]')).toHaveText('United States');
 });
+
+// The map (spec §5). RPA4521 (ac5e81) times out for ~3 s of each ~122 s
+// fixture loop, so marker totals are compared with a tolerance of one.
+const near = (a, b) => Math.abs(a - b) <= 1;
+test('view_hide_mode_removes_non_matching_markers', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  const total = await page.evaluate(() => window.skycueApp.markers().length);
+  await page.fill('#view-search', TARGET);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.markers().map((m) => m.hex))).toEqual([TARGET]);
+  // No marker and no trail for the others (dropLayers), in the DOM too.
+  expect(await page.evaluate(() => ({ markers: document.querySelectorAll('.ac-marker').length,
+    trails: document.querySelectorAll('path.trail').length }))).toEqual({ markers: 1, trails: 1 });
+  await page.click('#view-clear');
+  await expect.poll(async () => near(await page.evaluate(() => window.skycueApp.markers().length), total)).toBe(true);
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+});
+test('view_dim_mode_ghosts_non_matches', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  const trailsBefore = await page.evaluate(() => window.skycueApp.markers().filter((m) => m.trail > 0).map((m) => m.hex));
+  await page.check('input[name="view-map-mode"][value="dim"]');
+  await page.fill('#view-search', TARGET);
+  // Every marker stays; all but the target are dimmed and have no trail.
+  await expect.poll(() => page.evaluate(() => {
+    const ms = window.skycueApp.markers();
+    return { many: ms.length >= 10, undimmed: ms.filter((m) => !m.dimmed).map((m) => m.hex),
+      dimmedTrails: ms.filter((m) => m.dimmed && m.trail > 0).length };
+  })).toEqual({ many: true, undimmed: [TARGET], dimmedTrails: 0 });
+  const dimmed = page.locator('.ac-marker.dimmed').first();
+  await expect(dimmed).toHaveCSS('opacity', '0.25');
+  await expect(dimmed).toHaveCSS('pointer-events', 'none');
+  await expect(dimmed.locator('.ac-glyph')).toHaveCSS('pointer-events', 'none');
+  await expect(dimmed.locator('.ac-label')).toBeHidden();
+  await expect(page.locator(`.ac-marker[data-hex="${TARGET}"]`)).not.toHaveClass(/dimmed/);
+  await expect(page.locator(`.ac-marker[data-hex="${TARGET}"] .ac-label`)).toBeVisible();
+  expect((await markerOf(page, TARGET)).trail).toBeGreaterThan(0);      // the target's trail stays
+  // A dimmed marker keeps its place and heading (the glyph's rotation).
+  const pos = await page.evaluate((h) => {
+    const m = window.skycueApp.markers().find((x) => x.dimmed && x.hex !== h);
+    const el = document.querySelector(`.ac-marker[data-hex="${m.hex}"] .ac-glyph`);
+    return { lat: typeof m.lat, rotate: /rotate\(/.test(el.style.transform) };
+  }, TARGET);
+  expect(pos).toEqual({ lat: 'number', rotate: true });
+  // Un-dimming gives the trails back at once (not only on the next update).
+  const back = await page.evaluate(() => {
+    window.skycueApp.setViewFilters({ search: '' });
+    window.skycueApp.renderAll();
+    return window.skycueApp.markers().filter((m) => m.trail > 0).map((m) => m.hex);
+  });
+  expect(trailsBefore.filter((h) => back.indexOf(h) < 0)).toEqual([]);
+  await page.fill('#view-search', TARGET);
+  await page.check('input[name="view-map-mode"][value="hide"]');
+  await expect.poll(() => page.evaluate(() => window.skycueApp.markers().length)).toBe(1);
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+});
+test('view_selected_track_survives_filter', async ({ page }) => {
+  await openPage(page);
+  await selectTarget(page);
+  await page.fill('#view-search', 'zzz');                       // matches nothing
+  await expect.poll(() => page.evaluate(() => window.skycueApp.markers().map((m) => m.hex))).toEqual([TARGET]);
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe(TARGET);
+  await page.click('#table-toggle');
+  await expect.poll(async () => hexes(await tableRows(page))).toEqual([TARGET]);
+  await expect(page.locator('#view-count')).toHaveText(/^showing 1 of \d+$/);
+  await page.keyboard.press('Escape');                          // deselect: now nothing shows
+  await expect.poll(() => page.evaluate(() => window.skycueApp.markers().length)).toBe(0);
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe(null);
+  await expect.poll(async () => (await tableRows(page)).length).toBe(0);
+  await expect(page.locator('#view-count')).toHaveText(/^showing 0 of \d+$/);
+  // In dim mode the same filter ghosts every marker instead.
+  await page.check('input[name="view-map-mode"][value="dim"]');
+  await expect.poll(() => page.evaluate(() => {
+    const ms = window.skycueApp.markers();
+    return ms.length >= 10 && ms.every((m) => m.dimmed);
+  })).toBe(true);
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+});
+test('view_composes_with_hide_filtered', async ({ page }) => {
+  await openPage(page); await waitMarkers(page, 10);
+  await page.evaluate(() => window.skycueApp.setHideFiltered(true));
+  const hiddenOnly = await page.evaluate(() => window.skycueApp.markers().length);
+  const hiddenText = await page.locator('#hidden-count').textContent();
+  await page.fill('#view-search', 'ual');
+  // UAL1423 (sent) and UAL455 (sent or filtered, as the fixture has it).
+  await expect.poll(() => page.evaluate(() => {
+    const ms = window.skycueApp.markers();
+    return ms.length >= 1 && ms.length <= 2 && ms.every((m) => m.decision === 'sent' || m.decision === 'allow_listed');
+  })).toBe(true);
+  // hidden-count keeps meaning what "Hide filtered" hides.
+  expect(near(parseInt(await page.locator('#hidden-count').textContent(), 10), parseInt(hiddenText, 10))).toBe(true);
+  await page.click('#view-clear');
+  await expect.poll(async () => near(await page.evaluate(() => window.skycueApp.markers().length), hiddenOnly)).toBe(true);
+  expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(true);
+  await page.evaluate(() => window.skycueApp.resetViewFilters());
+  await page.evaluate(() => window.skycueApp.setHideFiltered(false));
+});

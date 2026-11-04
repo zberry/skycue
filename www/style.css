@@ -83,6 +83,10 @@ input.invalid { border-color: var(--blocked); }
 .list li button { padding: 0 6px; border: none; background: none; color: var(--muted); }
 .list li button:hover { color: var(--blocked); }
 .list .empty { color: var(--muted); font-family: inherit; border: none; }
+/* Output filters: the allow and block lists are sub-groups, labelled like
+   the fields above them. */
+#filters h3 { color: var(--muted); font-size: 12px; font-weight: normal; margin: 8px 0 4px; }
+#output-filters .list-add { margin-bottom: 14px; }
 #overlay-indicator { margin: 0 0 8px; color: var(--elev); font-size: 12px; }
 #overlay-indicator[hidden] { display: none; }
 #save-baseline { width: 100%; }

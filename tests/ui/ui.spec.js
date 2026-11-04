@@ -1763,6 +1763,38 @@ test('no_overlay_meta_request_without_overlays', async ({ page }) => {
   expect(asked).toEqual([]);
 });
 
+// The left panel: Output filters (what is sent to cue clients, with the allow
+// and block lists), then Display filters (this browser only), then the legend.
+// It scrolls on its own and nothing in it is wider than the panel.
+test('left_panel_groups_output_then_display_filters', async ({ page }, testInfo) => {
+  await openPage(page);
+  await page.locator('#filters').screenshot({ path: testInfo.outputPath(`skycue-panel-${testInfo.project.name}.png`) });
+  const sections = await page.$$eval('#filters > section', (ss) => ss.map((s) => ({
+    id: s.id, cls: s.className,
+    h2: s.querySelector(':scope > h2') ? s.querySelector(':scope > h2').firstChild.textContent.trim() : null,
+  })));
+  expect(sections).toEqual([
+    { id: 'output-filters', cls: '', h2: 'Output filters' },
+    { id: 'view', cls: '', h2: 'Display filters' },
+    { id: '', cls: 'legend', h2: null },
+  ]);
+  await expect(page.locator('#output-filters form.list-add[data-list="allow"]')).toHaveCount(1);
+  await expect(page.locator('#output-filters form.list-add[data-list="block"]')).toHaveCount(1);
+  await expect(page.locator('#output-filters #save-baseline')).toHaveCount(1);
+  await expect(page.locator('#view #hide-filtered')).toHaveCount(1);
+  await expect(page.locator('#view #hidden-count')).toHaveCount(1);
+  const fit = await page.$eval('#filters', (f) => ({
+    overflowX: f.scrollWidth - f.clientWidth,
+    scrollable: f.scrollHeight > f.clientHeight ? getComputedStyle(f).overflowY : 'fits',
+  }));
+  expect(fit.overflowX).toBeLessThanOrEqual(0);
+  expect(['auto', 'scroll', 'fits']).toContain(fit.scrollable);
+  // Scrolled to the end, the legend comes into view.
+  await page.$eval('#filters', (f) => { f.scrollTop = f.scrollHeight; });
+  await expect(page.locator('#filters .legend')).toBeInViewport();
+  await page.locator('#filters').screenshot({ path: testInfo.outputPath(`skycue-panel-end-${testInfo.project.name}.png`) });
+});
+
 // ---- View section (this browser only): narrows the table ---------------------
 // Fixture facts (tests/fixtures/readsb-sample.jsonl, looped every ~122 s):
 // 12 aircraft, all at US addresses except the TIS-B track ~2c4a1f, which

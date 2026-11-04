@@ -39,8 +39,9 @@
 <div id="conn-banner" role="alert" hidden>Disconnected from skycued, reconnecting…</div>
 <main id="layout">
   <aside id="filters" aria-label="Filters and lists">
-    <section>
-      <h2>Filters</h2>
+    <section id="output-filters" aria-labelledby="output-filters-heading">
+      <h2 id="output-filters-heading">Output filters</h2>
+      <p class="view-sub">what is sent to cue clients</p>
       <label for="max-range">Max range (nm)</label>
       <div class="row">
         <input id="max-range" type="number" min="0.1" step="any" inputmode="decimal">
@@ -54,12 +55,27 @@
       <label for="ring-alt">Elevation-mask ring for aircraft at</label>
       <select id="ring-alt"></select>
       <p id="filter-msg" class="msg" role="status"></p>
-      <label class="check" for="hide-filtered"><input id="hide-filtered" type="checkbox"> Hide filtered</label>
-      <p id="hidden-count" class="msg" role="status"></p>
+      <h3>Allow list</h3>
+      <ul id="list-allow" class="list"></ul>
+      <form class="row list-add" data-list="allow">
+        <input type="text" placeholder="hex or registration" aria-label="Add to allow list" maxlength="10">
+        <button type="submit">Add</button>
+      </form>
+      <h3>Block list</h3>
+      <ul id="list-block" class="list"></ul>
+      <form class="row list-add" data-list="block">
+        <input type="text" placeholder="hex or registration" aria-label="Add to block list" maxlength="10">
+        <button type="submit">Add</button>
+      </form>
+      <p id="overlay-indicator" hidden>Unsaved changes: the running filters differ from skycue.conf and the list files.</p>
+      <button id="save-baseline" type="button" disabled>Save as baseline</button>
+      <p id="save-msg" class="msg" role="status"></p>
     </section>
     <section id="view" aria-labelledby="view-heading">
-      <h2 id="view-heading">View <span id="view-badge"></span></h2>
+      <h2 id="view-heading">Display filters <span id="view-badge"></span></h2>
       <p class="view-sub">this browser only</p>
+      <label class="check" for="hide-filtered"><input id="hide-filtered" type="checkbox"> Hide filtered</label>
+      <p id="hidden-count" class="msg" role="status"></p>
       <label for="view-search">Search</label>
       <input id="view-search" type="text" placeholder="hex, callsign or reg" autocomplete="off" spellcheck="false" title="Press / to search">
       <label for="view-alt-min">Altitude (ft)</label>
@@ -110,27 +126,6 @@
         <p id="view-count" class="msg" role="status"></p>
         <button id="view-clear" type="button" disabled>Clear</button>
       </div>
-    </section>
-    <section>
-      <h2>Allow list</h2>
-      <ul id="list-allow" class="list"></ul>
-      <form class="row list-add" data-list="allow">
-        <input type="text" placeholder="hex or registration" aria-label="Add to allow list" maxlength="10">
-        <button type="submit">Add</button>
-      </form>
-    </section>
-    <section>
-      <h2>Block list</h2>
-      <ul id="list-block" class="list"></ul>
-      <form class="row list-add" data-list="block">
-        <input type="text" placeholder="hex or registration" aria-label="Add to block list" maxlength="10">
-        <button type="submit">Add</button>
-      </form>
-    </section>
-    <section>
-      <p id="overlay-indicator" hidden>Unsaved changes: the running filters differ from skycue.conf and the list files.</p>
-      <button id="save-baseline" type="button" disabled>Save as baseline</button>
-      <p id="save-msg" class="msg" role="status"></p>
     </section>
     <section class="legend" aria-label="Legend">
       <span><i class="sw decision-sent"></i>sent</span>

@@ -160,11 +160,13 @@ Device positions are `.device-marker` markers, FIS-B ground stations
 `.station-marker`. Everything from an input's definition, the device or a
 server error is set with `textContent`, never as markup.
 
-## View section
+## Display filters
 
-`#view` (between Filters and the Allow list) holds the per-browser view
-settings (`normalizeView`, localStorage `skycue.view`); `viewMatches`
-decides a track, `trackClass` and `trackCountry` estimate its class and
+The left panel is `#output-filters` (range, elevation, ring, the allow and
+block lists and Save as baseline: what is sent to cue clients), then `#view`
+("Display filters"), then the legend. `#view` holds "Hide filtered" and the
+per-browser view settings (`normalizeView`, localStorage `skycue.view`);
+`viewMatches` decides a track, `trackClass` and `trackCountry` estimate its class and
 country, and `viewShows` in `app.js` exempts the selected track.
 
 ## Cues tab

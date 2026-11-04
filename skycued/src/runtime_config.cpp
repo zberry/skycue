@@ -244,6 +244,9 @@ constexpr RestartKey kRestartKeys[] = {
     SKYCUED_RESTART_KEY("FISB_EXPERIMENTAL", fisb_experimental),
     SKYCUED_RESTART_KEY("INPUTS_FILE", inputs_file),
     SKYCUED_RESTART_KEY("LOCATIONS_FILE", locations_file),
+    SKYCUED_RESTART_KEY("STATS_FILE", stats_file),
+    SKYCUED_RESTART_KEY("STATS_AIRCRAFT_MAX", stats_aircraft_max),
+    SKYCUED_RESTART_KEY("STATS_SAVE_S", stats_save_s),
 };
 
 #undef SKYCUED_RESTART_KEY

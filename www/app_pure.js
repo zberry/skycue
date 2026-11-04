@@ -327,6 +327,7 @@
     ['Recording', ['RECORD_DIR', 'RECORD_FORMATS', 'RECORD_MAX_GB', 'RECORD_RAW']],
     ['Filters', ['MAX_RANGE_NM', 'MIN_ELEVATION_DEG', 'ALLOW_LIST_FILE', 'BLOCK_LIST_FILE']],
     ['Web', ['WEB_BIND', 'WEB_PORT', 'TRAIL_SECONDS']],
+    ['Statistics', ['STATS_FILE', 'STATS_AIRCRAFT_MAX', 'STATS_SAVE_S']],
     ['FIS-B', ['FISB_ENABLE', 'FISB_EXPERIMENTAL', 'LOCATIONS_FILE']]];
 
   // [{group, rows}] in CONFIG_GROUPS order, each group's rows in its key

@@ -328,8 +328,9 @@ public:
         return out;
     }
 
-    // Capped at INT64_MAX: the file's integers are written as int64, so a
-    // larger count would not survive the next save.
+    // Capped at INT64_MAX: `evicted` and the counts maps are written through
+    // JsonWriter's int64, so a larger count would not survive the next save
+    // (the columns, written as uint64, take the same cap: one rule).
     uint64_t count(const std::string& text, const std::string& field)
     {
         const std::optional<uint64_t> v = parseInteger<uint64_t>(text);

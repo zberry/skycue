@@ -73,6 +73,20 @@
 // kLocationsSaveInterval has passed since the last attempt, and by stop();
 // a failed save logs one WARN per run of failures and is retried.
 //
+// Statistics (spec §4, StatsStore): every observation is fed to
+// StatsStore::observe with its filter result, evaluated once after
+// table.apply and before the send/drop decision (so the sent()/dropped()
+// that decision causes finds the aircraft's ledger entry); every update sent
+// to sent(), every timeout, filtered and source_lost drop to dropped() (the
+// shutdown drops of stop() are not counted); the 1 s tick passes its
+// EngineStats (UAT frame counters, FIS-B products, clients) to tick() once
+// the data clock has started. Every time is the data clock. loadStats names
+// the file: it is saved (atomicWrite, on the io thread: toJson of a full
+// store takes a noticeable fraction of a second, accepted at one save per
+// STATS_SAVE_S) on the tick when it changed and the save interval has passed
+// since the last attempt, by resetStats at once, and by stop(); a failed save
+// logs one WARN per run of failures and is retried.
+//
 // Threading: lives on the caller's io_context; call everything (including
 // every method below) from its thread. The Forwarder and the recorders must
 // outlive the Engine.
@@ -84,6 +98,7 @@
 #include "inputs/input_manager.hpp"
 #include "observation.hpp"
 #include "recorder.hpp"
+#include "stats_store.hpp"
 #include "track_table.hpp"
 
 #include "change_detector.hpp"
@@ -171,6 +186,21 @@ public:
     // The tick's save interval (kLocationsSaveInterval unless set; tests shorten it). 0: every tick while changed.
     void setLocationsSaveInterval(std::chrono::seconds interval) { locations_save_interval_ = interval; }
 
+    // Statistics (see the top of this file). loadStats: "" keeps them in
+    // memory only; otherwise loadStatsFile(path) (missing: the store is
+    // kept; rejected: renamed "<path>.bad", the store is kept), and saved
+    // there every `save_interval` while changed (0: every tick). Callable
+    // before or after start(); a loaded file replaces the store.
+    void loadStats(const std::string& path, std::chrono::seconds save_interval);
+    const StatsStore& statsStore() const { return stats_store_; }
+    const std::string& statsPath() const { return stats_path_; }  // "" when not saved
+    // StatsStore::reset at the data clock, saved at once when there is a
+    // file, logged at INFO "stats: reset by <origin>". Ignored after stop().
+    void resetStats(const std::string& origin);
+    // The data clock (the newest observation or uplink time plus the steady
+    // time since; the wall clock until the first one).
+    std::chrono::system_clock::time_point dataClock() const { return dataNow(); }
+
     // Live changes (see the top of this file). `origin` names who made the
     // change in the record ("ui", say). Ignored after stop().
     // Throws std::invalid_argument, changing nothing, unless max_range_nm is
@@ -212,9 +242,14 @@ private:
     std::optional<EngineEvent> learnLocation(const fisb::TwgoRecord& record);
     // Writes the learned locations now (the caller checks dirty()).
     void saveLocations();
-    // `positioned`: the observation carried a position (an observed event follows).
-    void process(TrackState& state, std::chrono::steady_clock::time_point now, bool positioned);
-    void decide(TrackState& state, std::chrono::steady_clock::time_point now);
+    // Writes the statistics now (the caller checks dirty()).
+    void saveStats();
+    // `obs` was just applied to `state`; `positioned`: it carried a position
+    // (an observed event follows).
+    void process(const TrackObservation& obs, TrackState& state, std::chrono::steady_clock::time_point now,
+                 bool positioned);
+    // `result` is filters_.evaluate(state), made by the caller.
+    void decide(TrackState& state, const FilterResult& result, std::chrono::steady_clock::time_point now);
     void forward(TrackState& state, const FilterResult& result, std::chrono::steady_clock::time_point now);
     void drop(TrackState& state, skycue::DropReason reason, std::optional<Decision> decision = std::nullopt);
     void countDrop(skycue::DropReason reason, std::optional<Decision> decision = std::nullopt);
@@ -258,6 +293,11 @@ private:
     Thresholds thresholds_;
     std::chrono::seconds track_timeout_;
     TrackTable table_;
+    StatsStore stats_store_;                      // after filters_ (the receiver) and config_
+    std::string stats_path_;                      // "" : not saved
+    std::chrono::seconds stats_save_interval_{300};
+    std::chrono::steady_clock::time_point last_stats_save_{};  // the last save attempt (or start/loadStats)
+    bool stats_save_failing_ = false;                          // the last save attempt failed
 
     boost::asio::steady_timer tick_timer_, stats_timer_, lost_timer_;
     bool started_ = false, stopped_ = false;

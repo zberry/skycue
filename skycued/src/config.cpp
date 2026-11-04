@@ -32,6 +32,7 @@ const std::vector<std::string>& knownConfigKeys()
         "RECORD_RAW",
         "WEB_BIND",        "RECORD_MAX_GB",     "TRAIL_SECONDS",
         "FISB_ENABLE",     "FISB_EXPERIMENTAL", "INPUTS_FILE",       "LOCATIONS_FILE",
+        "STATS_FILE",      "STATS_AIRCRAFT_MAX", "STATS_SAVE_S",
     };
     return keys;
 }
@@ -266,12 +267,23 @@ Config parseConfigText(const std::string& text, const std::string& name)
                                            conv.find("TRAIL_SECONDS")->value + "'");
         c.trail_seconds = static_cast<int>(trail);
     }
+    // A whole number in [min, max], like TRAIL_SECONDS.
+    auto wholeNumber = [&](const char* key, int& field, double min, double max) {
+        double v = field;
+        conv.num(key, v, min, max);
+        if (v != std::floor(v))
+            conv.fail(key, std::string(key) + " must be a whole number, got '" + conv.find(key)->value + "'");
+        field = static_cast<int>(v);
+    };
+    wholeNumber("STATS_AIRCRAFT_MAX", c.stats_aircraft_max, 100, 1000000);
+    wholeNumber("STATS_SAVE_S", c.stats_save_s, 10, 86400);
 
     conv.yesNo("RECORD_RAW", c.record_raw);
     conv.yesNo("FISB_ENABLE", c.fisb_enable);
     conv.yesNo("FISB_EXPERIMENTAL", c.fisb_experimental);
     conv.str("INPUTS_FILE", c.inputs_file);
     conv.str("LOCATIONS_FILE", c.locations_file);
+    conv.str("STATS_FILE", c.stats_file);
 
     conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
     conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);
@@ -363,6 +375,9 @@ std::string configValueText(const Config& c, const std::string& key)
         {"FISB_EXPERIMENTAL", [](const Config& x) { return yesNo(x.fisb_experimental); }},
         {"INPUTS_FILE", [](const Config& x) { return x.inputs_file; }},
         {"LOCATIONS_FILE", [](const Config& x) { return x.locations_file; }},
+        {"STATS_FILE", [](const Config& x) { return x.stats_file; }},
+        {"STATS_AIRCRAFT_MAX", [](const Config& x) { return std::to_string(x.stats_aircraft_max); }},
+        {"STATS_SAVE_S", [](const Config& x) { return std::to_string(x.stats_save_s); }},
     };
     const auto it = text.find(key);
     if (it == text.end())

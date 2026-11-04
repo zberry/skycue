@@ -250,6 +250,10 @@ int run(int argc, char** argv)
     try {
         engine->loadLocations(resolveConfigRelative(config_path, "fisb-locations.json"),
                               resolveConfigRelative(config_path, config.locations_file));
+        // The statistics (STATS_FILE, skycue.stats.json next to the config
+        // and the runtime overlay unless set; empty: not saved).
+        engine->loadStats(resolveConfigRelative(config_path, config.stats_file),
+                          std::chrono::seconds(config.stats_save_s));
     } catch (const std::exception& e) {
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;

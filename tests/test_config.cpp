@@ -403,6 +403,37 @@ BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_the_config)
     BOOST_TEST(resolveInputsFile("/skycue.conf", "") == "/skycue.inputs.json");
 }
 
+BOOST_AUTO_TEST_CASE(stats_keys_defaults_and_ranges)
+{
+    Config c = parseConfigText(kLatLon, "t");
+    BOOST_TEST(c.stats_file == "skycue.stats.json");
+    BOOST_TEST(c.stats_aircraft_max == 20000);
+    BOOST_TEST(c.stats_save_s == 300);
+    BOOST_TEST(skycued::configValueText(c, "STATS_SAVE_S") == "300");
+    BOOST_TEST(skycued::configValueText(c, "STATS_AIRCRAFT_MAX") == "20000");
+    BOOST_TEST(skycued::configValueText(c, "STATS_FILE") == "skycue.stats.json");
+    c = parseConfigText(std::string(kLatLon) + "STATS_FILE=\nSTATS_AIRCRAFT_MAX=100\nSTATS_SAVE_S=86400\n", "t");
+    BOOST_TEST(c.stats_file.empty());
+    BOOST_TEST(c.stats_aircraft_max == 100);
+    BOOST_TEST(c.stats_save_s == 86400);
+    c = parseConfigText(std::string(kLatLon) + "STATS_FILE=/var/s.json\nSTATS_AIRCRAFT_MAX=1000000\nSTATS_SAVE_S=10\n",
+                        "t");
+    BOOST_TEST(c.stats_file == "/var/s.json");
+    BOOST_TEST(c.stats_aircraft_max == 1000000);
+    BOOST_TEST(c.stats_save_s == 10);
+    for (const char* line : {"STATS_AIRCRAFT_MAX=99", "STATS_AIRCRAFT_MAX=1.5", "STATS_AIRCRAFT_MAX=1000001",
+                             "STATS_AIRCRAFT_MAX=x"}) {
+        ConfigError e = expectError(std::string(kLatLon) + line + "\n");
+        BOOST_TEST(e.line == 3, line);
+        BOOST_TEST(contains(e.what(), "STATS_AIRCRAFT_MAX"), line);
+    }
+    for (const char* line : {"STATS_SAVE_S=9", "STATS_SAVE_S=86401", "STATS_SAVE_S=10.5", "STATS_SAVE_S=x"}) {
+        ConfigError e = expectError(std::string(kLatLon) + line + "\n");
+        BOOST_TEST(e.line == 3, line);
+        BOOST_TEST(contains(e.what(), "STATS_SAVE_S"), line);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(locations_file_parsed)
 {
     BOOST_TEST(parseConfigText("RECEIVER_LAT=1\nRECEIVER_LON=2\nLOCATIONS_FILE=/x/loc.csv\n", "t").locations_file ==

@@ -3,6 +3,7 @@
 #include "file_util.hpp"
 #include "inputs/dump978_input.hpp"
 #include "log.hpp"
+#include "time_util.hpp"
 
 #include <cctype>
 #include <cerrno>
@@ -36,13 +37,24 @@ IdList loadList(const std::string& path)
     return path.empty() ? IdList() : IdList::loadFile(path);
 }
 
+ReceiverPosition makeReceiver(const Config& c)
+{
+    return ReceiverPosition{c.receiver_lat, c.receiver_lon, c.receiver_alt_m + c.antenna_height_m};
+}
+
 FilterSet makeFilters(const Config& c)
 {
     if (!std::isfinite(c.receiver_lat) || !std::isfinite(c.receiver_lon))
         throw std::runtime_error("the receiver position (RECEIVER_LAT, RECEIVER_LON) is required");
-    return FilterSet(ReceiverPosition{c.receiver_lat, c.receiver_lon, c.receiver_alt_m + c.antenna_height_m},
-                     FilterConfig{c.max_range_nm, c.min_elevation_deg}, loadList(c.allow_list_file),
+    return FilterSet(makeReceiver(c), FilterConfig{c.max_range_nm, c.min_elevation_deg}, loadList(c.allow_list_file),
                      loadList(c.block_list_file));
+}
+
+StatsLimits makeStatsLimits(const Config& c)
+{
+    StatsLimits l;
+    l.aircraft_max = static_cast<std::size_t>(std::max(1, c.stats_aircraft_max));
+    return l;
 }
 
 Thresholds makeThresholds(const Config& c)
@@ -132,6 +144,7 @@ Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_pt
       filters_(makeFilters(config_)),
       thresholds_(makeThresholds(config_)),
       track_timeout_(std::max<long long>(1, std::llround(config_.track_timeout_s))),
+      stats_store_(makeReceiver(config_), makeStatsLimits(config_)),
       tick_timer_(io),
       stats_timer_(io),
       lost_timer_(io)
@@ -201,6 +214,7 @@ void Engine::start()
         pushFilterChange("startup");
     inputs_->start();
     last_locations_save_ = steady::now();
+    last_stats_save_ = last_locations_save_;
     armTick();
     armStats();
 }
@@ -240,6 +254,8 @@ void Engine::stop()
         fisb_rec_->flush();
     if (!locations_path_.empty() && locations_.dirty())
         saveLocations();
+    if (!stats_path_.empty() && stats_store_.dirty())
+        saveStats();
     LOG_INFO("stopping: " << shutdown_drops << " shutdown drops; " << statsLine());
 }
 
@@ -254,7 +270,7 @@ void Engine::handleObservation(const TrackObservation& obs)
     // The send decision runs on the steady clock at arrival, not on the data
     // clock's anchor: an observation stamped behind the data clock leaves the
     // anchor where it is, and MAX_INTERVAL_S resends must not stall with it.
-    process(table_.apply(obs), steady::now(), obs.lat.has_value());
+    process(obs, table_.apply(obs), steady::now(), obs.lat.has_value());
 }
 
 void Engine::handleUplink(std::chrono::system_clock::time_point when, const std::string& hex)
@@ -409,17 +425,23 @@ void Engine::saveLocations()
     }
 }
 
-void Engine::process(TrackState& state, steady::time_point now, bool positioned)
+void Engine::process(const TrackObservation& obs, TrackState& state, steady::time_point now, bool positioned)
 {
-    decide(state, now);
+    // Evaluated once, before the decision: evaluate() reads only the id and
+    // the latest values, so the decision, the stats and the observed event
+    // all see the same result; and the stats ledger entry exists before the
+    // sent()/dropped() that the decision causes.
+    const FilterResult result = filters_.evaluate(state);
+    stats_store_.observe(obs, state, result);
+    decide(state, result, now);
     if (positioned && sink_ && !stopped_) {
         EngineEvent ev = kindEvent(EventKind::observed);
-        ev.track = trackSnapshot(state, filters_.evaluate(state));
+        ev.track = trackSnapshot(state, result);
         emit(ev);
     }
 }
 
-void Engine::decide(TrackState& state, steady::time_point now)
+void Engine::decide(TrackState& state, const FilterResult& result, steady::time_point now)
 {
     const SendReason reason = shouldSend(state, now, thresholds_);
     if (reason == SendReason::none) {
@@ -434,7 +456,6 @@ void Engine::decide(TrackState& state, steady::time_point now)
             now - state.last_sent_at < std::chrono::duration<double>(thresholds_.min_interval_s))
             return;
     }
-    const FilterResult result = filters_.evaluate(state);
     if (isSend(result.decision)) {
         if (reason == SendReason::none && state.currently_forwarded)
             return;  // still eligible; nothing worth sending yet
@@ -451,6 +472,7 @@ void Engine::forward(TrackState& state, const FilterResult& result, steady::time
     markSent(state, track, now);
     state.currently_forwarded = true;
     ++sent_updates_;
+    stats_store_.sent(state.id, dataNow());
     if (sent_)
         sent_->writeTrack(track, "update");
     if (sink_) {
@@ -465,6 +487,7 @@ void Engine::drop(TrackState& state, skycue::DropReason reason, std::optional<De
     forwarder_.sendDrop(state.id, reason);
     state.currently_forwarded = false;
     countDrop(reason, decision);
+    stats_store_.dropped(state.id, reason, decision, dataNow());
     if (sent_)
         sent_->writeDrop(state.id, reason);
     emitDrop(state, reason, decision);
@@ -659,6 +682,7 @@ void Engine::tick()
             }
             forwarder_.sendDrop(id, reason);
             countDrop(reason);
+            stats_store_.dropped(id, reason, std::nullopt, now);
             if (sent_)
                 sent_->writeDrop(id, reason);
             emitDrop(id, f->second, reason);
@@ -678,10 +702,70 @@ void Engine::tick()
         sent_->flush();
     if (fisb_rec_)
         fisb_rec_->flush();
+    // One EngineStats for the store and the stats event. The store is fed
+    // only on the data clock: before the first observation or uplink there
+    // is nothing to place, and a wall-clock bucket would only be "restarted"
+    // by a replay of older data.
+    const bool want_stats = sink_ || have_data_clock_;
+    EngineStats s;
+    if (want_stats)
+        s = stats();
+    if (have_data_clock_)
+        stats_store_.tick(dataNow(), s);
+    if (!stats_path_.empty() && stats_store_.dirty() && steady::now() - last_stats_save_ >= stats_save_interval_)
+        saveStats();
     if (sink_) {
         EngineEvent ev = kindEvent(EventKind::stats);
-        ev.stats = stats();
+        ev.stats = std::move(s);
         emit(ev);
+    }
+}
+
+void Engine::loadStats(const std::string& path, std::chrono::seconds save_interval)
+{
+    stats_path_ = path;
+    stats_save_interval_ = save_interval;
+    stats_save_failing_ = false;
+    last_stats_save_ = steady::now();
+    if (path.empty()) {
+        LOG_INFO("stats: STATS_FILE is empty; the statistics are not saved");
+        return;
+    }
+    if (loadStatsFile(path, stats_store_) == StatsLoad::loaded) {
+        const auto since = stats_store_.sinceS();
+        LOG_INFO(path << ": statistics of " << stats_store_.aircraftCount() << " aircraft"
+                      << (since ? " since " + formatIso8601Ms(std::chrono::system_clock::time_point(
+                                                  std::chrono::seconds(*since)))
+                                : std::string()));
+    }
+}
+
+void Engine::resetStats(const std::string& origin)
+{
+    if (stopped_)
+        return;
+    stats_store_.reset(dataNow());
+    LOG_INFO("stats: reset by " << origin);
+    if (!stats_path_.empty())
+        saveStats();
+}
+
+void Engine::saveStats()
+{
+    // On the io thread: toJson of a full store (1440 + 720 buckets, 20000
+    // aircraft, 40000 grid cells) is a noticeable fraction of a second, which
+    // one save per STATS_SAVE_S (default 300 s) accepts.
+    last_stats_save_ = steady::now();
+    try {
+        saveStatsFile(stats_path_, stats_store_);
+        stats_store_.markSaved();
+        if (stats_save_failing_)
+            LOG_INFO(stats_path_ << ": saved again");
+        stats_save_failing_ = false;
+    } catch (const std::exception& e) {
+        if (!stats_save_failing_)
+            LOG_WARN("stats not saved: " << e.what() << "; retrying every " << stats_save_interval_.count() << " s");
+        stats_save_failing_ = true;
     }
 }
 

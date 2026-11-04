@@ -635,6 +635,8 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     BOOST_TEST((all == std::set<std::string>(known.begin(), known.end())));
     BOOST_TEST(restart_set.count("INPUTS_FILE") == 1u);
     BOOST_TEST(restart_set.count("LOCATIONS_FILE") == 1u);
+    for (const char* k : {"STATS_FILE", "STATS_AIRCRAFT_MAX", "STATS_SAVE_S"})
+        BOOST_TEST(restart_set.count(k) == 1u, k);
 
     // b differs from a in every field but the live four.
     skycued::Config a;
@@ -666,6 +668,9 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     b.fisb_experimental = true;
     b.inputs_file = "i.json";
     b.locations_file = "l.csv";
+    b.stats_file = "s.json";
+    b.stats_aircraft_max = 100;
+    b.stats_save_s = 10;
     b.sdr_1090_serial = "s1";
     b.sdr_978_serial = "s2";
     b.gain_1090 = "40";

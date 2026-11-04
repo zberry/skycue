@@ -149,6 +149,14 @@ skycue_set_warnings(test_engine)
 add_test(NAME engine COMMAND test_engine)
 set_tests_properties(engine PROPERTIES TIMEOUT 120)
 
+add_executable(test_stats_engine test_stats_engine.cpp)
+target_link_libraries(test_stats_engine PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_stats_engine PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_stats_engine)
+add_test(NAME stats_engine COMMAND test_stats_engine)
+set_tests_properties(stats_engine PROPERTIES TIMEOUT 120)
+
 foreach(_t engine_api recording_independence runtime_config web_config)
   add_executable(test_${_t} test_${_t}.cpp)
   target_link_libraries(test_${_t} PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)

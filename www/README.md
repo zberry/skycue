@@ -112,6 +112,13 @@ Device positions are `.device-marker` markers, FIS-B ground stations
 `.station-marker`. Everything from an input's definition, the device or a
 server error is set with `textContent`, never as markup.
 
+## View section
+
+`#view` (between Filters and the Allow list) holds the per-browser view
+settings (`normalizeView`, localStorage `skycue.view`); `viewMatches`
+decides a track, `trackClass` and `trackCountry` estimate its class and
+country, and `viewShows` in `app.js` exempts the selected track.
+
 ## Cues tab
 
 The Cues tab (`showCues`) shows skycued's output side. `#cues-counters` has

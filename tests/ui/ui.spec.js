@@ -1127,6 +1127,79 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe('0');
 });
 
+// The ruler: away from the fixture's aircraft (around 38.9 N 77 W), two
+// clicks 300 px apart on one row at zoom 8 near 30 N are 84..88 nm
+// (611.5 m/px at the equator x cos(lat)), heading east.
+test('ruler_measures_without_touching_selection', async ({ page }) => {
+  await openPage(page);
+  const panel = await selectTarget(page);
+  const toggle = page.locator('#ruler-toggle');
+  await expect(toggle).toHaveAttribute('title', 'Measure');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await page.evaluate(() => window.skycueApp.setView(30, -90, 8));
+  const ruler = () => page.evaluate(() => window.skycueApp.ruler());
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const box = await page.locator('#map').boundingBox();
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  await page.mouse.click(cx - 150, cy);
+  let r = await ruler();
+  expect(r.armed).toBe(true);
+  expect(r.start).not.toBeNull();
+  expect(r.end).toBeNull();
+  await page.mouse.move(cx + 50, cy, { steps: 3 });
+  r = await ruler();
+  expect(r.fixed).toBe(false);
+  expect(r.label).toMatch(/ nm · .* km · \d{3}°T$/);
+  await page.mouse.click(cx + 150, cy);
+  r = await ruler();
+  expect(r.fixed).toBe(true);
+  const m = /^(\d+\.\d) nm · (\d+\.\d) km · (\d{3})°T$/.exec(r.label);
+  expect(m, r.label).not.toBeNull();
+  const nm = Number(m[1]), km = Number(m[2]), brg = Number(m[3]);
+  expect(nm).toBeGreaterThanOrEqual(84);
+  expect(nm).toBeLessThanOrEqual(88);
+  expect(Math.abs(km - nm * 1.852)).toBeLessThan(0.2);
+  expect(brg).toBeGreaterThanOrEqual(88);
+  expect(brg).toBeLessThanOrEqual(92);
+  await expect(page.locator('.ruler-label')).toHaveText(r.label);
+  await expect(page.locator('path.ruler-line')).toHaveCount(1);
+  // The map clicks neither deselected nor closed the panel; the mouse no
+  // longer moves a fixed ruler.
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe(TARGET);
+  await expect(panel).toBeVisible();
+  await page.mouse.move(cx, cy + 100);
+  expect((await ruler()).label).toBe(r.label);
+
+  // Escape clears and disarms, the panel stays.
+  await page.keyboard.press('Escape');
+  r = await ruler();
+  expect(r).toEqual({ armed: false, start: null, end: null, fixed: false, label: '' });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('path.ruler-line')).toHaveCount(0);
+  await expect(page.locator('.ruler-label')).toHaveCount(0);
+  await expect(panel).toBeVisible();
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe(TARGET);
+
+  // Armed, an aircraft click is an endpoint (its position), not a selection.
+  await page.evaluate(() => window.skycueApp.setView(38.9, -77.0, 7));
+  const other = (await page.evaluate(() => window.skycueApp.markers())).find((x) => x.hex !== TARGET && !x.dimmed);
+  await toggle.click();
+  await page.locator(`.ac-marker[data-hex="${other.hex}"] .ac-glyph`).click();
+  r = await ruler();
+  expect(r.start).not.toBeNull();
+  expect(Math.abs(r.start.lat - other.lat)).toBeLessThan(0.05);
+  expect(Math.abs(r.start.lon - other.lon)).toBeLessThan(0.05);
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe(TARGET);
+  // The button again clears and disarms; a map click deselects as before.
+  await toggle.click();
+  expect((await ruler()).armed).toBe(false);
+  await expect(page.locator('.ruler-dot')).toHaveCount(0);
+  await page.evaluate(() => window.skycueApp.setView(30, -90, 8));
+  await page.mouse.click(cx - 150, cy);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBeNull();
+});
+
 // The main daemon has no radar or raster: the opacity slider has nothing to
 // act on, so it is disabled and its row dimmed.
 test('radar_opacity_disabled_without_products', async ({ page }) => {

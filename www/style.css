@@ -108,6 +108,17 @@ input.invalid { border-color: var(--blocked); }
 .leaflet-control-attribution a { color: var(--accent); }
 .leaflet-bar a { background: var(--panel); color: var(--text); border-color: var(--line); }
 .leaflet-bar a:hover { background: var(--panel-2); color: var(--text); }
+/* The ruler (app.js initRuler): a button under the zoom control, a crosshair
+   while armed, the label a dark box that reads on either map style. */
+.leaflet-bar a.ruler-toggle { display: flex; align-items: center; justify-content: center; }
+.leaflet-bar a.ruler-toggle.active { color: var(--accent); background: var(--panel-2); }
+#map.ruler-armed, #map.ruler-armed .leaflet-interactive { cursor: crosshair; }
+.ruler-label { pointer-events: none; }
+.ruler-label span {
+  display: inline-block; white-space: nowrap; padding: 2px 6px; border-radius: 3px; font-size: 12px;
+  font-variant-numeric: tabular-nums; background: rgba(13, 17, 23, .85); color: var(--text); border: 1px dashed #ff4fa3;
+}
+.ruler-label.fixed span { border-style: solid; }
 .graticule-label { color: #3d5268; font-size: 11px; white-space: nowrap; pointer-events: none; }
 
 /* aircraft */

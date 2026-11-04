@@ -201,6 +201,15 @@ of one `P.signalColor` step, `SIGNAL_COLORS` from `SIGNAL_MIN_DB` to
 `path.trail`, which is then transparent; `#trail-signal-legend` is
 `P.signalLegend`.
 
+## Ruler
+
+The "Measure" button (`#ruler-toggle`, a `leaflet-bar` control top left,
+under the zoom buttons, so the alert strip's lift of `.leaflet-bottom` never
+reaches it) arms `ruler` in `app.js`: the map's and the markers' click
+handlers give their point to `rulerClick` instead of selecting, the
+document's Escape clears it before it would close the panel, and the label
+is `P.rulerLabel(P.rulerMeasure(...))` (`rangeNm` and `bearingDeg`).
+
 ## Cues tab
 
 The Cues tab (`showCues`) shows skycued's output side. `#cues-counters` has

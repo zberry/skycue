@@ -240,7 +240,11 @@
       drawGraticule();
     }
     L.control.scale({ position: 'bottomleft' }).addTo(map);
-    map.on('click', function () { deselect(); });
+    map.on('click', function (ev) {
+      if (ruler.armed) { rulerClick(ev.latlng); return; }
+      deselect();
+    });
+    initRuler();
     initFisbLayers();
     initMapView();
     // Markers for what arrived before the map existed.
@@ -306,6 +310,112 @@
     setMapStyle(storeGet(VIEW_KEYS.style), true);
     setOverlay('borders', offer.borders && storeGet(VIEW_KEYS.borders) === '1', true);
     setOverlay('cities', offer.cities && storeGet(VIEW_KEYS.cities) === '1', true);
+  }
+
+  // ---- ruler ("Measure") -------------------------------------------------------
+  // A button under the zoom control arms the ruler: the first map click (or
+  // aircraft click: its position) sets the start, the mouse drags a dashed
+  // line labelled with P.rulerLabel (great-circle distance, initial true
+  // bearing), the second click fixes it; a further click starts a new one.
+  // Escape or the button again clears and disarms. While armed, map clicks
+  // never select or deselect, and double-click zoom is off.
+  var RULER_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">' +
+    '<path d="M1.5 11.5l10-10 3 3-10 10z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>' +
+    '<path d="M4.5 8.5l1.5 1.5M6.5 6.5l1 1M8.5 4.5l1.5 1.5M10.5 2.5l1 1" stroke="currentColor" stroke-width="1.1"/></svg>';
+  var RULER_COLOR = '#ff4fa3';   // none of the decision colours; reads on Light and Dark
+  var ruler = { armed: false, start: null, end: null, fixed: false, button: null, line: null, dot: null, label: null, dblZoom: false };
+
+  function initRuler() {
+    var RulerControl = L.Control.extend({
+      options: { position: 'topleft' },
+      onAdd: function () {
+        var div = L.DomUtil.create('div', 'leaflet-bar ruler-control');
+        var a = L.DomUtil.create('a', 'ruler-toggle', div);
+        a.href = '#';
+        a.id = 'ruler-toggle';
+        a.title = 'Measure';
+        a.setAttribute('role', 'button');
+        a.setAttribute('aria-label', 'Measure');
+        a.setAttribute('aria-pressed', 'false');
+        a.innerHTML = RULER_SVG;
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.on(a, 'click', function (ev) {
+          L.DomEvent.preventDefault(ev);
+          if (ruler.armed) clearRuler(); else armRuler();
+        });
+        ruler.button = a;
+        return div;
+      }
+    });
+    new RulerControl().addTo(map);
+    map.on('mousemove', function (ev) {
+      if (!ruler.armed || !ruler.start || ruler.fixed) return;
+      ruler.end = ev.latlng;
+      drawRuler();
+    });
+  }
+
+  function armRuler() {
+    ruler.armed = true;
+    ruler.button.setAttribute('aria-pressed', 'true');
+    ruler.button.classList.add('active');
+    map.getContainer().classList.add('ruler-armed');
+    ruler.dblZoom = map.doubleClickZoom.enabled();
+    map.doubleClickZoom.disable();
+  }
+
+  function clearRuler() {
+    [ruler.line, ruler.dot, ruler.label].forEach(function (l) { if (l) map.removeLayer(l); });
+    ruler.line = ruler.dot = ruler.label = null;
+    ruler.start = ruler.end = null;
+    ruler.fixed = false;
+    if (!ruler.armed) return;
+    ruler.armed = false;
+    ruler.button.setAttribute('aria-pressed', 'false');
+    ruler.button.classList.remove('active');
+    map.getContainer().classList.remove('ruler-armed');
+    if (ruler.dblZoom) map.doubleClickZoom.enable();
+  }
+
+  // A click while armed, at a map point or an aircraft's position.
+  function rulerClick(ll) {
+    ll = L.latLng(ll);
+    if (!ruler.start || ruler.fixed) {
+      clearRulerLayers();
+      ruler.start = ll;
+      ruler.end = null;
+      ruler.fixed = false;
+    } else {
+      ruler.end = ll;
+      ruler.fixed = true;
+    }
+    drawRuler();
+  }
+
+  function clearRulerLayers() {
+    [ruler.line, ruler.label].forEach(function (l) { if (l) map.removeLayer(l); });
+    ruler.line = ruler.label = null;
+  }
+
+  function drawRuler() {
+    var s = ruler.start, e = ruler.end;
+    if (!ruler.dot) {
+      ruler.dot = L.circleMarker(s, { className: 'ruler-dot', color: RULER_COLOR, radius: 3, weight: 2, fillOpacity: 1, interactive: false }).addTo(map);
+    } else ruler.dot.setLatLng(s);
+    if (!e) return;
+    if (!ruler.line) {
+      ruler.line = L.polyline([s, e], { className: 'ruler-line', color: RULER_COLOR, weight: 2, dashArray: '6 5', interactive: false }).addTo(map);
+    } else ruler.line.setLatLngs([s, e]);
+    var text = P.rulerLabel(P.rulerMeasure(s.lat, s.lng, e.lat, e.lng));
+    if (!ruler.label) {
+      ruler.label = L.marker(e, {
+        icon: L.divIcon({ className: 'ruler-label', html: '<span></span>', iconSize: null, iconAnchor: [-10, 10] }),
+        interactive: false, keyboard: false
+      }).addTo(map);
+    } else ruler.label.setLatLng(e);
+    var span = ruler.label.getElement().querySelector('span');
+    if (span.textContent !== text) span.textContent = text;
+    ruler.label.getElement().classList.toggle('fixed', ruler.fixed);
   }
 
   function setMapStyle(style, initial) {
@@ -522,7 +632,10 @@
       keyboard: false, riseOnHover: true
     });
     var key = e.key;
-    e.marker.on('click', function () { select(key); });
+    e.marker.on('click', function () {
+      if (ruler.armed) { rulerClick(e.marker.getLatLng()); return; }
+      select(key);
+    });
     e.marker.addTo(map);
     e.trail = L.polyline([], { className: 'trail', weight: 1.5, opacity: 0.6, interactive: false }).addTo(map);
   }
@@ -3296,7 +3409,8 @@
       if (tr) select(tr.getAttribute('data-key'));
     });
     document.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape') { setViewSetMenu(false); closePanel(); }
+      if (ev.key === 'Escape' && ruler.armed) clearRuler();   // the ruler only, not the panel too
+      else if (ev.key === 'Escape') { setViewSetMenu(false); closePanel(); }
       else if (!slashFocusesSearch(ev)) digitAppliesSet(ev);
     });
     setInterval(prune, 2000);
@@ -3333,6 +3447,13 @@
       return out;
     },
     rangeRingRadius: function () { return rangeRing ? rangeRing.getRadius() : null; },
+    // The ruler: armed, its ends ({lat, lon} or null), fixed, the label text.
+    ruler: function () {
+      var ll = function (p) { return p ? { lat: p.lat, lon: p.lng } : null; };
+      var lab = ruler.label && ruler.label.getElement();
+      return { armed: ruler.armed, start: ll(ruler.start), end: ll(ruler.end), fixed: ruler.fixed,
+        label: lab ? lab.textContent : '' };
+    },
     // "Colour trail by signal": the option, and one aircraft's trail as drawn
     // (its points, and the stroke colour of each signal run; [] when off).
     setTrailSignal: function (on) { setTrailSignal(on); },

@@ -1311,5 +1311,30 @@ test('signalRuns: runs coalesce and share their boundary points', () => {
   assert.strictEqual(runs.reduce((n, r) => n + r.points.length - 1, 0), pts.length - 1);
 });
 
+// Ruler: distance, initial bearing, the label.
+test('rulerMeasure LAX to JFK: 2144 nm, initial course 066', () => {
+  // The Aviation Formulary's worked example (LAX 33°57'N 118°24'W, JFK
+  // 40°38'N 73°47'W): 2144 nm, initial true course 66°. The formulary's
+  // nm is one arc minute; on rangeNm's 6371008.8 m sphere it is 2145.
+  const m = P.rulerMeasure(33 + 57 / 60, -(118 + 24 / 60), 40 + 38 / 60, -(73 + 47 / 60));
+  between(m.nm, 2143, 2146, 'nm');
+  between(m.km, 2143 * 1.852, 2146 * 1.852, 'km');
+  between(m.bearing, 65.5, 66.5, 'bearing');
+  assert.strictEqual(P.rulerLabel(m), '2,145 nm · 3,973 km · 066°T');
+});
+test('rulerMeasure DC to NYC and back', () => {
+  const m = P.rulerMeasure(38.9, -77.0, 40.7, -74.0);
+  between(m.nm, 175, 176, 'nm');
+  between(m.bearing, 50, 52, 'bearing');
+  between(P.rulerMeasure(40.7, -74.0, 38.9, -77.0).bearing, 232, 234, 'reverse bearing');
+});
+test('rulerLabel formats', () => {
+  assert.strictEqual(P.rulerLabel({ nm: 0, km: 0, bearing: 0 }), '0.0 nm · 0.0 km · 000°T');
+  assert.strictEqual(P.rulerLabel({ nm: 12.345, km: 22.863, bearing: 7.4 }), '12.3 nm · 22.9 km · 007°T');
+  assert.strictEqual(P.rulerLabel({ nm: 600, km: 1111.2, bearing: 359.6 }), '600.0 nm · 1,111 km · 000°T');
+  assert.strictEqual(P.rulerLabel(null), '');
+  assert.strictEqual(P.rulerLabel({ nm: NaN, km: NaN, bearing: 0 }), '');
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

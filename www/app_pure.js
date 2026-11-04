@@ -1579,6 +1579,25 @@
     return out;
   }
 
+  // ---- ruler ("Measure") -----------------------------------------------------
+  // Great-circle distance (rangeNm's sphere) and initial true bearing from
+  // the first point to the second.
+  var KM_PER_NM = METRES_PER_NM / 1000;
+  function rulerMeasure(lat1, lon1, lat2, lon2) {
+    var nm = rangeNm(lat1, lon1, lat2, lon2);
+    return { nm: nm, km: nm * KM_PER_NM, bearing: bearingDeg(lat1, lon1, lat2, lon2) };
+  }
+  // "175.6 nm · 325.2 km · 050°T": one decimal under 1000 (none from 1000 up,
+  // with thousands separators), the bearing in whole degrees, 000..359.
+  function rulerLabel(m) {
+    if (!m || typeof m.nm !== 'number' || !isFinite(m.nm)) return '';
+    var dist = function (v) { return v < 1000 ? v.toFixed(1) : thousands(Math.round(v)); };
+    var b = Math.round(m.bearing) % 360;
+    var bs = String(b);
+    while (bs.length < 3) bs = '0' + bs;
+    return dist(m.nm) + ' nm · ' + dist(m.km) + ' km · ' + bs + '°T';
+  }
+
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
@@ -1626,7 +1645,8 @@
     normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches,
     SIGNAL_MIN_DB: SIGNAL_MIN_DB, SIGNAL_MAX_DB: SIGNAL_MAX_DB, SIGNAL_COLORS: SIGNAL_COLORS,
-    signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns
+    signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns,
+    rulerMeasure: rulerMeasure, rulerLabel: rulerLabel
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

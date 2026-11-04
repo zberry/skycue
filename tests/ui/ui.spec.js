@@ -868,6 +868,102 @@ test('alerts_toggle_pressed_differs_from_view_pressed', async ({ page }) => {
   await page.locator('#stats-toggle').click();
 });
 
+const storedAlerts = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('skycue.alerts')));
+
+// No AudioContext before the first click anywhere (spec 3.3); then a raised
+// row with sound on plays its pattern, and Mute silences it.
+test('alerts_sound_waits_for_a_click', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__acCount = 0;
+    const Real = window.AudioContext;
+    window.AudioContext = function () { window.__acCount++; return new Real(); };
+  });
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  expect(await page.evaluate(() => window.__acCount)).toBe(0);
+  await expect(page.locator('#alerts-sound-hint')).toBeVisible();
+  await expect(page.locator('#alerts-sound-hint')).toContainText('click to enable sound');
+  expect((await alertState(page)).tones).toEqual([]);
+
+  await page.locator('#view-heading').click();
+  expect(await page.evaluate(() => window.__acCount)).toBe(1);
+  await expect(page.locator('#alerts-sound-hint')).toBeHidden();
+  expect((await alertState(page)).armed).toBe(true);
+  await inject(page, { hex: 'fff7b1' });
+  await expect(page.locator('#alerts-count')).toHaveText('2');
+  expect((await alertState(page)).tones).toEqual(['double']);
+
+  await page.locator('#alerts-gear').click();
+  await page.locator('#alerts-mute').check();
+  await inject(page, { hex: 'fff7b2' });
+  await expect(page.locator('#alerts-count')).toHaveText('3');
+  expect((await alertState(page)).tones).toEqual(['double']);
+  expect(await page.evaluate(() => window.__acCount)).toBe(1);
+});
+
+test('alerts_config_enables_range_enter', async ({ page }) => {
+  await alertsOnly(page, []);
+  await openPage(page);
+  await page.locator('#alerts-gear').click();
+  await expect(page.locator('#alerts-config')).toBeVisible();
+  expect((await alertState(page)).configOpen).toBe(true);
+  await expect(page.locator('#alerts-rules tr[data-rule]')).toHaveCount(ALERT_RULES.length);
+  const row = page.locator('#alerts-rules tr[data-rule="range_enter"]');
+  await row.locator('.rule-enabled').check();
+  const threshold = row.locator('[data-param="threshold_nm"]');
+  await threshold.fill('8');
+  await threshold.press('Tab');
+  expect((await storedAlerts(page)).rules.range_enter).toEqual({ enabled: true, sound: false, threshold_nm: 8 });
+  await inject(page, { hex: 'fff7b3', callsign: 'TESTRG', squawk: '1200', range_nm: 5 });
+  await expect(page.locator('#alerts-line .al-kind')).toHaveText('Range');
+  await expect(page.locator('#alerts-line .al-detail')).toHaveText('inside 8 nm (5.0 nm)');
+
+  await threshold.fill('-1');
+  await expect(threshold).toHaveClass(/\binvalid\b/);
+  await threshold.press('Tab');
+  expect((await storedAlerts(page)).rules.range_enter.threshold_nm).toBe(8);
+});
+
+test('alerts_watch_list_from_config', async ({ page }) => {
+  await alertsOnly(page, []);
+  await openPage(page);
+  await page.locator('#alerts-gear').click();
+  await page.locator('#alerts-rules tr[data-rule="watch"] .rule-enabled').check();
+  await page.locator('#alerts-watch').fill('testw\nzzz');
+  await page.locator('#alerts-watch').blur();
+  expect((await storedAlerts(page)).watch).toEqual(['testw', 'zzz']);
+  await inject(page, { hex: 'fff7b4', callsign: 'TESTW1', squawk: '1200' });
+  await expect(page.locator('#alerts-line .al-kind')).toHaveText('Watch');
+  await expect(page.locator('#alerts-line .al-detail')).toHaveText('matches watch entry "testw"');
+});
+
+test('alerts_clear_history_and_escape', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await inject(page, { hex: 'fff7b5' });
+  await inject(page, { hex: 'fff7b6' });
+  await expect(page.locator('#alerts-count')).toHaveText('2');
+  await page.locator('#alerts-expand').click();
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveCount(2);
+  await page.locator('#rx-toggle').click();
+  await expect(page.locator('#details')).toBeVisible();
+  await page.locator('#alerts-gear').click();
+  let question = null;
+  page.once('dialog', (d) => { question = d.message(); d.accept(); });
+  await page.locator('#alerts-clear').click();
+  expect(question).toBe('Clear the alert history? Acknowledged and unacknowledged alerts are removed.');
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveCount(0);
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('skycue.alertLog')).rows)).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#alerts-config')).toBeHidden();
+  expect((await alertState(page)).configOpen).toBe(false);
+  await expect(page.locator('#details')).toBeVisible();
+});
+
 // ---- Config tab ----------------------------------------------------------------
 test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   const errors = watchErrors(page);

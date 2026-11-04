@@ -15,6 +15,13 @@
 //         setHideFiltered(on), selectTrack(key), openReceiver(),
 //         openStatsAircraft(key), tracks()}  (app.js builds it).
 //
+// The gear opens #alerts-config (spec 3.4): per rule enabled, sound and its
+// parameters, the watch list, Mute and Clear history; every change is
+// stored at once and goes to the engine with the present tracks. Sound
+// (spec 3.3): the first pointerdown anywhere arms it and makes the one
+// AudioContext; nothing touches Web Audio before. A raised row with sound
+// on plays its tone pattern unless muted, once per engine call.
+//
 // Every stored or daemon string reaches the DOM through textContent.
 // Plain ES2017 (functions and var, like app.js).
 (function () {
@@ -25,6 +32,11 @@
   var LOG_KEY = 'skycue.alertLog';
   var NOTE_MS = 20000;          // a click's note stays this long
   var NONE_TEXT = 'No unacknowledged alerts';
+  var CLEAR_QUESTION = 'Clear the alert history? Acknowledged and unacknowledged alerts are removed.';
+  var TONE_GAIN = 0.2;
+  var TONES_KEPT = 50;          // state().tones keeps the last this many
+  // The config panel's label before each rule parameter input.
+  var PARAM_TEXT = { threshold_nm: 'within nm', altitude_ft: 'below ft', range_nm: 'within nm' };
 
   // '2026-11-04T12:34:56.789Z' -> '12:34:56Z'.
   function clockText(isoTime) { return String(isoTime).substr(11, 8) + 'Z'; }
@@ -41,6 +53,10 @@
     var savedLog = null;        // the last skycue.alertLog written
     var logPending = false;     // a track call may have changed the log
     var noteSeq = 0, noteTimer = null;
+    var audio = null;           // the AudioContext, made on the first pointerdown
+    var armed = false;
+    var tones = [];             // the patterns played, oldest first
+    var configOpen = false;
 
     function now() { return host.dataNow(); }
 
@@ -69,6 +85,162 @@
     function changed(force) {
       if (saveLog() || force) render();
     }
+    // A new rules config: to the engine over the present tracks, stored.
+    function applyConfig(cfg) {
+      engine.setConfig(cfg, host.tracks());
+      saveConfig();
+      changed(false);
+    }
+
+    // ---- sound ----
+
+    // The first pointerdown anywhere (capture, so an alert button's own
+    // handler cannot stop it) arms sound; the AudioContext is made then.
+    function arm() {
+      document.removeEventListener('pointerdown', arm, true);
+      armed = true;
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      try { if (Ctx) audio = new Ctx(); } catch (e) { audio = null; }
+      $('alerts-sound-hint').hidden = true;
+    }
+    function playTone(pattern) {
+      tones.push(pattern);
+      if (tones.length > TONES_KEPT) tones.shift();
+      if (!audio) return;
+      try {
+        if (audio.state === 'suspended') audio.resume();
+        var t0 = audio.currentTime;
+        A.tonePlan(pattern).forEach(function (beep) {
+          var osc = audio.createOscillator(), gain = audio.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = beep.freq;
+          gain.gain.value = TONE_GAIN;
+          osc.connect(gain);
+          gain.connect(audio.destination);
+          osc.start(t0 + beep.at);
+          osc.stop(t0 + beep.at + beep.dur);
+        });
+      } catch (e) { /* no sound; the strip still shows the alert */ }
+    }
+    // The rows one engine call raised: one tone at most, the loudest pattern
+    // of those with sound on. True when any row was raised.
+    function sounded(raised) {
+      var pattern = null;
+      raised.forEach(function (r) {
+        if (r.sound && pattern !== 'double') pattern = r.pattern;
+      });
+      if (pattern && armed && !engine.config().mute) playTone(pattern);
+      return raised.length > 0;
+    }
+
+    // ---- the config panel ----
+
+    function ruleRow(rule) {
+      var tr = document.createElement('tr');
+      tr.setAttribute('data-rule', rule.id);
+      var title = document.createElement('td');
+      title.className = 'rule-title';
+      title.textContent = rule.title;
+      tr.appendChild(title);
+      ['rule-enabled', 'rule-sound'].forEach(function (cls) {
+        var td = document.createElement('td');
+        var box = document.createElement('input');
+        box.type = 'checkbox';
+        box.className = cls;
+        box.setAttribute('aria-label', rule.title + (cls === 'rule-enabled' ? ' on' : ' sound'));
+        td.appendChild(box);
+        tr.appendChild(td);
+      });
+      var params = document.createElement('td');
+      Object.keys(rule.params).forEach(function (p) {
+        var label = document.createElement('label');
+        label.className = 'rule-param';
+        label.textContent = PARAM_TEXT[p] + ' ';
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.setAttribute('data-param', p);
+        input.setAttribute('min', String(A.PARAM_LIMITS[p][0]));
+        input.setAttribute('max', String(A.PARAM_LIMITS[p][1]));
+        input.setAttribute('step', 'any');
+        label.appendChild(input);
+        params.appendChild(label);
+      });
+      tr.appendChild(params);
+      return tr;
+    }
+    // The panel's inputs from the engine's config.
+    function fillConfig() {
+      var cfg = engine.config();
+      Array.prototype.forEach.call($('alerts-rules').tBodies[0].rows, function (tr) {
+        var r = cfg.rules[tr.getAttribute('data-rule')];
+        tr.querySelector('.rule-enabled').checked = r.enabled;
+        tr.querySelector('.rule-sound').checked = r.sound;
+        Array.prototype.forEach.call(tr.querySelectorAll('[data-param]'), function (input) {
+          input.value = String(r[input.getAttribute('data-param')]);
+          input.classList.remove('invalid');
+        });
+      });
+      $('alerts-watch').value = cfg.watch.join('\n');
+      $('alerts-mute').checked = cfg.mute;
+    }
+    function setConfigOpen(on) {
+      configOpen = on;
+      if (on) fillConfig();
+      $('alerts-config').hidden = !on;
+      $('alerts-gear').setAttribute('aria-expanded', String(on));
+      if (on) $('alerts-config').querySelector('input').focus();
+      else if ($('alerts-config').contains(document.activeElement)) $('alerts-gear').focus();
+    }
+    // One change in the panel: fn edits a copy of the config, then it applies.
+    function editConfig(fn) {
+      var cfg = engine.config();
+      fn(cfg);
+      applyConfig(cfg);
+    }
+    // A parameter input: a number within PARAM_LIMITS applies, anything else
+    // marks the input invalid and stores nothing.
+    function paramEdited(input) {
+      var p = input.getAttribute('data-param'), lim = A.PARAM_LIMITS[p];
+      var text = input.value.trim();
+      var v = text === '' ? NaN : Number(text);
+      var ok = isFinite(v) && v >= lim[0] && v <= lim[1];
+      input.classList.toggle('invalid', !ok);
+      if (!ok) return;
+      var id = input.closest('tr[data-rule]').getAttribute('data-rule');
+      editConfig(function (cfg) { cfg.rules[id][p] = v; });
+    }
+
+    A.RULES.forEach(function (rule) { $('alerts-rules').tBodies[0].appendChild(ruleRow(rule)); });
+    $('alerts-rules').addEventListener('change', function (ev) {
+      var t = ev.target, tr = t.closest('tr[data-rule]');
+      if (!tr || t.type !== 'checkbox') return;
+      var id = tr.getAttribute('data-rule');
+      var field = t.classList.contains('rule-enabled') ? 'enabled' : 'sound';
+      editConfig(function (cfg) { cfg.rules[id][field] = t.checked; });
+    });
+    $('alerts-rules').addEventListener('input', function (ev) {
+      if (ev.target.hasAttribute('data-param')) paramEdited(ev.target);
+    });
+    $('alerts-watch').addEventListener('change', function () {
+      editConfig(function (cfg) { cfg.watch = A.normalizeWatch($('alerts-watch').value); });
+      $('alerts-watch').value = engine.config().watch.join('\n');
+    });
+    $('alerts-mute').addEventListener('change', function () {
+      editConfig(function (cfg) { cfg.mute = $('alerts-mute').checked; });
+    });
+    $('alerts-clear').addEventListener('click', function () {
+      if (!window.confirm(CLEAR_QUESTION)) return;
+      engine.clear();
+      changed(true);
+    });
+    $('alerts-config-close').addEventListener('click', function () { setConfigOpen(false); });
+    // Escape closes the panel only; the side panel's Escape does not see it.
+    $('alerts-config').addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Escape') return;
+      ev.stopPropagation();
+      setConfigOpen(false);
+    });
+    document.addEventListener('pointerdown', arm, true);
 
     // ---- drawing ----
 
@@ -223,7 +395,7 @@
     $('alerts-expand').addEventListener('click', function () { setDrawer(!view.drawer); });
     $('alerts-hide').addEventListener('click', function () { setShown(false); });
     $('alerts-toggle').addEventListener('click', function () { setShown(!view.shown); });
-    $('alerts-gear').addEventListener('click', function () { /* the config panel (Task 3) */ });
+    $('alerts-gear').addEventListener('click', function () { setConfigOpen(!configOpen); });
     $('alerts-log').tBodies[0].addEventListener('click', function (ev) {
       var tr = ev.target.closest('tr[data-alert-id]');
       if (!tr) return;
@@ -241,7 +413,7 @@
 
     // A track call: a raised row redraws and saves now, the rest on the tick.
     function deferred(raised) {
-      if (raised.length) changed(true);
+      if (sounded(raised)) changed(true);
       else logPending = true;
     }
 
@@ -251,16 +423,15 @@
       trackGone: function (key) { engine.trackGone(key); logPending = true; },
       beginBaseline: function () { engine.beginBaseline(); },
       endBaseline: function (keys) { engine.endBaseline(keys); changed(false); },
-      inputs: function (list) { changed(engine.inputs(list, now(), Date.now()).length > 0); },
-      daemon: function (connected) { changed(engine.daemon(connected, now(), Date.now()).length > 0); },
-      tick: function () { changed(engine.tick(now(), Date.now()).length > 0); },
+      inputs: function (list) { changed(sounded(engine.inputs(list, now(), Date.now()))); },
+      daemon: function (connected) { changed(sounded(engine.daemon(connected, now(), Date.now()))); },
+      tick: function () { changed(sounded(engine.tick(now(), Date.now()))); },
       // setConfig changes the rules and the watch list, never the strip's
       // hidden and drawer state.
       config: fullConfig,
       setConfig: function (cfg) {
-        engine.setConfig(cfg, host.tracks());
-        saveConfig();
-        changed(false);
+        applyConfig(cfg);
+        if (configOpen) fillConfig();
       },
       state: function () {
         var rows = engine.rows();
@@ -271,7 +442,7 @@
             return { id: r.id, rule: r.rule, key: r.key, input: r.input, label: r.label, detail: r.detail,
               acked: r.acked, quiet: r.quiet, recovered: r.recovered };
           }),
-          armed: false, tones: []
+          armed: armed, tones: tones.slice(), configOpen: configOpen
         };
       },
       setHoldOffMs: function (ms) { engine.setHoldOffMs(ms); }

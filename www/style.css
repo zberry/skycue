@@ -180,6 +180,26 @@ input.invalid { border-color: var(--blocked); }
 #alerts-log tbody tr.acked .al-id, #alerts-log tbody tr.acked .al-detail { color: var(--muted); }
 #alerts-log td.al-detail { white-space: normal; overflow-wrap: anywhere; width: 100%; }
 #alerts-log .al-ack { padding: 0 6px; font-size: 12px; }
+#alerts-sound-hint { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* The config panel (spec 3.4, 7): over the drawer at the strip's right end,
+   above the bar; the field look of the Receiver tab's #input-form. */
+#alerts-config {
+  position: absolute; right: 8px; bottom: 32px; z-index: 1; width: 360px; max-width: calc(100% - 16px);
+  max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-bottom: none;
+}
+#alerts-config[hidden] { display: none; }
+.alerts-config-head { display: flex; align-items: center; }
+.alerts-config-head h3 { flex: 1; }
+#alerts-config-close { padding: 0 6px; }
+#alerts-rules { width: 100%; border-collapse: collapse; font-size: 12px; }
+#alerts-rules th { text-align: left; color: var(--muted); font-weight: normal; padding: 2px 4px 2px 0; }
+#alerts-rules td { padding: 2px 4px 2px 0; border-top: 1px solid var(--line); vertical-align: middle; }
+#alerts-rules td.rule-title { white-space: nowrap; }
+#alerts-rules .rule-param { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); margin-right: 6px; white-space: nowrap; }
+#alerts-rules .rule-param input { width: 64px; }
+#alerts-config input.invalid { border-color: var(--blocked); outline-color: var(--blocked); }
+#alerts-watch { box-sizing: border-box; resize: vertical; font-family: ui-monospace, Menlo, Consolas, monospace; }
 
 /* Stats view (spec 6): overlays the map like the table and scrolls; a
    toolbar, the headline tiles, then one card grid per section (2 columns,
@@ -452,10 +472,11 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .input-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .input-actions button { font-size: 12px; padding: 2px 8px; }
 #input-form { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
-#input-form h3 { font-size: 13px; margin: 0 0 6px; }
-#input-form label.field { display: block; color: var(--muted); font-size: 12px; margin: 6px 0 0; }
-#input-form label.field input:not([type="checkbox"]), #input-form label.field select { display: block; width: 100%; margin-top: 2px; }
-#input-form label.field.check { display: flex; margin-top: 8px; }
+#input-form h3, #alerts-config h3 { font-size: 13px; margin: 0 0 6px; }
+#input-form label.field, #alerts-config label.field { display: block; color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+#input-form label.field input:not([type="checkbox"]), #input-form label.field select,
+#alerts-config label.field textarea { display: block; width: 100%; margin-top: 2px; }
+#input-form label.field.check, #alerts-config label.field.check { display: flex; margin-top: 8px; }
 #input-form select:disabled { opacity: .6; }
 #input-form input[readonly] { color: var(--muted); }
 .field-error { display: block; color: var(--blocked); font-size: 11px; min-height: 0; }

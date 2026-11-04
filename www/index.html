@@ -203,15 +203,32 @@
           <tbody></tbody>
         </table>
       </div>
+      <div id="alerts-config" role="dialog" aria-labelledby="alerts-config-title" hidden>
+        <div class="alerts-config-head">
+          <h3 id="alerts-config-title">Alert settings</h3>
+          <button id="alerts-config-close" type="button" aria-label="Close alert settings">×</button>
+        </div>
+        <table id="alerts-rules">
+          <thead><tr><th>rule</th><th>on</th><th>sound</th><th>parameters</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <label class="field">Watch list (hex, callsign or registration prefix, one per line)
+          <textarea id="alerts-watch" rows="4" autocomplete="off" spellcheck="false"></textarea></label>
+        <label class="field check"><input id="alerts-mute" type="checkbox"> Mute all alert sounds</label>
+        <div class="form-buttons"><button id="alerts-clear" type="button">Clear history</button></div>
+      </div>
       <div id="alerts-note" role="status" hidden></div>
       <div class="alerts-bar">
         <span id="alerts-count" title="Unacknowledged alerts">0</span>
         <span id="alerts-line" role="button" tabindex="0">No unacknowledged alerts</span>
+        <span id="alerts-sound-hint" title="Browsers play sound only after a click on the page"><span
+          aria-hidden="true">🔕</span> click to enable sound</span>
         <button id="alerts-ack" type="button" disabled>Ack</button>
         <button id="alerts-ack-all" type="button" disabled>Ack all</button>
         <button id="alerts-expand" type="button" aria-expanded="false" aria-controls="alerts-drawer"
           title="Alert history">▲</button>
-        <button id="alerts-gear" type="button" title="Alert settings" aria-label="Alert settings">⚙</button>
+        <button id="alerts-gear" type="button" title="Alert settings" aria-label="Alert settings"
+          aria-expanded="false" aria-controls="alerts-config">⚙</button>
         <button id="alerts-hide" type="button" title="Hide the alert strip" aria-label="Hide the alert strip">×</button>
       </div>
     </div>

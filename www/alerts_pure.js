@@ -112,6 +112,84 @@
     return out;
   }
 
+  // ---- settings file (spec 4.4, 11 "Import merge") ----
+  // {skycue_settings: 1, sets: [...], alerts: {mute, rules, watch}}: the
+  // filter sets and the alert config, never the strip's hidden and drawer
+  // state. Import validates it with the stores' own normalisers.
+
+  var SETTINGS_VERSION = 1;
+  var SETTINGS_MAX_BYTES = 1048576;
+
+  // The alert config as the file carries it.
+  function exportConfig(config) {
+    var c = normalizeConfig(config);
+    return { mute: c.mute, rules: c.rules, watch: c.watch };
+  }
+  function settingsFile(viewSets, config) {
+    return { skycue_settings: SETTINGS_VERSION, sets: P.normalizeViewSets(viewSets).sets, alerts: exportConfig(config) };
+  }
+  function settingsFileName(nowMs) { return 'skycue-settings-' + P.utcDate(nowMs) + '.json'; }
+
+  // A file's text to {ok: true, sets, alerts, alertRules} (alerts null when
+  // the file has none; alertRules the known rule ids it names) or
+  // {ok: false, error}.
+  function parseSettings(text) {
+    var obj;
+    try { obj = JSON.parse(text); } catch (e) { return { ok: false, error: 'not JSON' }; }
+    if (!isObject(obj) || typeof obj.skycue_settings !== 'number') return { ok: false, error: 'not a skycue settings file' };
+    if (obj.skycue_settings !== SETTINGS_VERSION) return { ok: false, error: 'unsupported version ' + obj.skycue_settings };
+    var inAlerts = isObject(obj.alerts) ? obj.alerts : null;
+    var inRules = inAlerts && isObject(inAlerts.rules) ? inAlerts.rules : {};
+    return {
+      ok: true,
+      sets: P.normalizeViewSets({ version: 1, sets: obj.sets }).sets,
+      alerts: inAlerts ? normalizeConfig(inAlerts) : null,
+      alertRules: RULES.map(function (r) { return r.id; }).filter(function (id) { return isObject(inRules[id]); })
+    };
+  }
+
+  // The stores after an import. current = {sets, alerts} (alerts the full
+  // config with hidden and drawer), incoming = a parseSettings result.
+  // 'replace' takes the file's sets and alert config; 'merge' keeps the
+  // current sets in order, replaces same-named ones in place, appends new
+  // names up to the cap, takes the file's rules rule by rule and the union of
+  // the watch lists. Either way the strip's hidden and drawer state stays
+  // (and, merging, the mute). Neither argument is changed.
+  function mergeSettings(current, incoming, mode) {
+    var cur = normalizeConfig(current.alerts);
+    var inc = incoming.alerts ? copy(incoming.alerts) : null;
+    var replacedNames = [], droppedNames = [];
+    var sets, alerts;
+    if (mode === 'replace') {
+      sets = copy(incoming.sets);
+      alerts = inc || cur;
+    } else {
+      sets = copy(current.sets);
+      var names = sets.map(function (s) { return s.name; });
+      incoming.sets.forEach(function (s) {
+        var i = names.indexOf(s.name);
+        if (i >= 0) {
+          sets[i] = copy(s);
+          replacedNames.push(s.name);
+        } else if (sets.length < P.VIEW_SETS_MAX) {
+          sets.push(copy(s));
+          names.push(s.name);
+        } else droppedNames.push(s.name);
+      });
+      alerts = cur;
+      if (inc) {
+        incoming.alertRules.forEach(function (id) { if (own(inc.rules, id)) alerts.rules[id] = inc.rules[id]; });
+        alerts.watch = normalizeWatch(cur.watch.concat(inc.watch));
+      }
+    }
+    alerts.hidden = cur.hidden;
+    alerts.drawer = cur.drawer;
+    return {
+      sets: P.normalizeViewSets({ version: 1, sets: sets }).sets, alerts: normalizeConfig(alerts),
+      replacedNames: replacedNames, droppedNames: droppedNames
+    };
+  }
+
   // The first watch entry that is a case-insensitive prefix of the track's
   // trimmed hex, callsign or registration; null when none is.
   function watchMatch(t, watch) {
@@ -566,6 +644,9 @@
     RULES: RULES, PARAM_LIMITS: PARAM_LIMITS, QUIET_MS: QUIET_MS, HOLD_OFF_MS: HOLD_OFF_MS, LOG_MAX: LOG_MAX,
     PAIRS_MAX: PAIRS_MAX, WATCH_MAX: WATCH_MAX, WATCH_LEN: WATCH_LEN, DAEMON_ID: DAEMON_ID,
     defaultConfig: defaultConfig, normalizeConfig: normalizeConfig, normalizeWatch: normalizeWatch,
+    SETTINGS_VERSION: SETTINGS_VERSION, SETTINGS_MAX_BYTES: SETTINGS_MAX_BYTES, exportConfig: exportConfig,
+    settingsFile: settingsFile, settingsFileName: settingsFileName, parseSettings: parseSettings,
+    mergeSettings: mergeSettings,
     watchMatch: watchMatch, durationText: durationText, tonePlan: tonePlan, normalizeLog: normalizeLog,
     createEngine: createEngine
   };

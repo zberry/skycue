@@ -34,14 +34,16 @@ const FISB_BASE = process.env.SKYCUE_FISB_URL;
 const RADAR_BASE = process.env.SKYCUE_RADAR_URL;
 
 // Every request the page makes goes to the origin it was loaded from
-// (data: URLs, the radar canvases, are not requests to a host).
+// (data: URLs, the radar canvases, are not requests to a host; nor is a
+// blob: URL of the page's own origin, a download it made).
 let offOrigin;
 test.beforeEach(async ({ page, baseURL }) => {
   offOrigin = [];
   const origin = baseURL.replace(/\/$/, '');
   const wsOrigin = origin.replace(/^http/, 'ws');
   page.on('request', (r) => {
-    if (!r.url().startsWith(origin + '/') && !r.url().startsWith('data:')) offOrigin.push(r.url());
+    const u = r.url();
+    if (!u.startsWith(origin + '/') && !u.startsWith('data:') && !u.startsWith('blob:' + origin + '/')) offOrigin.push(u);
   });
   page.on('websocket', (ws) => {
     if (!ws.url().startsWith(wsOrigin + '/')) offOrigin.push(ws.url());
@@ -2438,6 +2440,13 @@ test('view_sets_save_apply_modified_rename_delete_keys', async ({ page }) => {
   await page.selectOption('#view-set-select', { label: 'Airlines' });
   expect(await activeViewSet(page)).toBe(0);
   expect(await page.evaluate(() => window.skycueApp.getViewFilters().search)).toBe('ual');
+  // Choosing the active set again re-applies it when the state drifted.
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'dal' }));
+  expect(await setSelectedText(page)).toBe('Airlines (modified)');
+  await page.selectOption('#view-set-select', { label: 'Airlines' });
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters())).toEqual(ual);
+  expect(await setSelectedText(page)).toBe('Airlines');
+  expect(await activeViewSet(page)).toBe(0);
   await page.click('#view-set-more');
   await expect(page.locator('#view-set-more')).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#view-set-menu [data-act="up"]')).toBeDisabled();
@@ -2480,6 +2489,94 @@ test('view_sets_row_fits_panel', async ({ page }) => {
   await expect(page.locator('#view-set-menu')).toBeVisible();
   expect(await page.evaluate(() => { const f = document.getElementById('filters'); return f.scrollWidth - f.clientWidth; })).toBe(0);
   await page.keyboard.press('Escape');
+});
+
+// Settings export and import (spec §4.4, §11 "Import merge"): one JSON file
+// with the filter sets and the alert config, replaced or merged; never sent
+// to skycued.
+async function saveSetAs(page, name) {
+  page.once('dialog', (d) => d.accept(name));
+  await page.click('#view-set-save');
+}
+async function deleteSets(page, names) {
+  for (const name of names) {
+    await page.selectOption('#view-set-select', { label: name });
+    page.once('dialog', (d) => d.accept());
+    await page.click('#view-set-delete');
+  }
+  expect(await setOptionTexts(page)).toEqual(['— current —']);
+  await page.evaluate(() => { window.skycueApp.resetViewFilters(); window.skycueApp.setHideFiltered(false); });
+}
+async function importFile(page, file) {
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), viewSetMenu(page, 'import')]);
+  expect(chooser.isMultiple()).toBe(false);
+  await page.setInputFiles('#settings-file', file);
+}
+test('settings_export_then_import_restores_sets', async ({ page }) => {
+  const writes = [];                                         // import never touches skycued
+  page.on('request', (r) => { if (r.method() !== 'GET') writes.push(r.method() + ' ' + r.url()); });
+  await openPage(page);
+  await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'ual' }));
+  await saveSetAs(page, 'A');
+  await page.evaluate(() => { window.skycueApp.resetViewFilters(); window.skycueApp.setViewFilters({ emergency: true }); });
+  await saveSetAs(page, 'B');
+  const [download] = await Promise.all([page.waitForEvent('download'), viewSetMenu(page, 'export')]);
+  expect(download.suggestedFilename()).toMatch(/^skycue-settings-\d{4}-\d{2}-\d{2}\.json$/);
+  const file = await download.path();
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  expect(data.skycue_settings).toBe(1);
+  expect(data.sets.map((s) => s.name)).toEqual(['A', 'B']);
+  expect(data.alerts.rules.emergency.enabled).toBe(true);
+  expect(Object.prototype.hasOwnProperty.call(data.alerts, 'hidden')).toBe(false);
+  const ual = await page.evaluate(() => window.skycuePure.normalizeView({ search: 'ual' }));
+  expect(data.sets[0]).toEqual({ name: 'A', view: ual, hideFiltered: false });
+
+  await deleteSets(page, ['A', 'B']);
+  await importFile(page, file);
+  await expect(page.locator('#settings-import')).toBeVisible();
+  await expect(page.locator('#settings-import-text')).toContainText('2 filter sets and the alert settings');
+  await expect(page.locator('#settings-import-text')).not.toContainText('Merge replaces');
+  await page.click('#settings-import-replace');
+  await expect(page.locator('#settings-import')).toBeHidden();
+  await expect(page.locator('#view-set-msg')).toHaveText('Imported 2 filter sets.');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'A', 'B']);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets.map((x) => x.name)).toEqual(['A', 'B']);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.alerts'))).rules.emergency.enabled).toBe(true);
+
+  await page.selectOption('#view-set-select', { label: 'A' });
+  page.once('dialog', (d) => d.accept('C'));
+  await viewSetMenu(page, 'rename');
+  await importFile(page, file);
+  await expect(page.locator('#settings-import-text')).toContainText('Merge replaces: B');
+  await page.click('#settings-import-merge');
+  expect(await setOptionTexts(page)).toEqual(['— current —', 'C', 'B', 'A']);
+  await expect(page.locator('#view-set-msg')).toHaveText('Imported 2 filter sets.');
+  expect(writes).toEqual([]);
+  await deleteSets(page, ['C', 'B', 'A']);
+});
+test('settings_import_bad_and_hostile_files', async ({ page }) => {
+  await openPage(page);
+  const msg = page.locator('#view-set-msg');
+  await page.setInputFiles('#settings-file', { name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('{"x":1}') });
+  await expect(msg).toHaveText('Cannot import: not a skycue settings file.');
+  await expect(msg).toHaveClass(/error/);
+  await expect(page.locator('#settings-import')).toBeHidden();
+  await page.setInputFiles('#settings-file', { name: 'big.json', mimeType: 'application/json',
+    buffer: Buffer.alloc(1536 * 1024, ' ') });
+  await expect(msg).toHaveText('File too large (over 1 MB).');
+  await expect(page.locator('#settings-import')).toBeHidden();
+  const hostile = '<img src=x onerror="window.__xss=3">';
+  await page.setInputFiles('#settings-file', { name: '<b>h</b>.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ skycue_settings: 1, sets: [{ name: hostile, view: { search: hostile } }] })) });
+  await expect(page.locator('#settings-import-text')).toHaveText('<b>h</b>.json: 1 filter sets. Replace yours, or merge?');
+  await page.click('#settings-import-replace');
+  expect(await setOptionTexts(page)).toEqual(['— current —', hostile]);
+  await page.selectOption('#view-set-select', { label: hostile });
+  await expect(page.locator('#view-search')).toHaveValue(hostile);
+  expect(await page.locator('#view img').count()).toBe(0);
+  expect(await page.locator('#settings-import b').count()).toBe(0);
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+  await deleteSets(page, [hostile]);
 });
 
 // The map (spec §5). RPA4521 (ac5e81) times out for ~3 s of each ~122 s

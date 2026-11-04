@@ -1150,6 +1150,11 @@ test('putViewSet: add, replace, cap', () => {
   assert.strictEqual(P.putViewSet(full, 'S3', P.normalizeView(null), true).replaced, true, 'replacing at the cap is allowed');
   assert.strictEqual(full.sets.length, 20);
 });
+test('utcDate: the UTC calendar date of a time', () => {
+  assert.strictEqual(P.utcDate(Date.parse('2026-11-04T23:59:59Z')), '2026-11-04');
+  assert.strictEqual(P.utcDate(Date.parse('2026-11-05T00:00:00Z')), '2026-11-05');
+  assert.strictEqual(P.utcDate(Date.parse('2026-01-01T20:04:05-08:00')), '2026-01-02');
+});
 test('trackAlt', () => {
   assert.strictEqual(P.trackAlt({ on_ground: true, alt_baro_ft: 500 }), 0);
   assert.strictEqual(P.trackAlt({ alt_baro_ft: 500, alt_geom_ft: 600 }), 500);

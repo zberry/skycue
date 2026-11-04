@@ -42,6 +42,10 @@
   var VIEW_SETS_KEY = 'skycue.viewSets';
   var viewSets = P.normalizeViewSets(storeGet(VIEW_SETS_KEY));
   var activeSet = null;
+  // The alert config's store (alerts_view.js owns it; the settings import
+  // writes it only without the strip). AP: alerts_pure.js, may be absent.
+  var ALERTS_KEY = 'skycue.alerts';
+  var AP = window.skycueAlertsPure || null;
 
   var $ = function (id) { return document.getElementById(id); };
   function dataNow() { return Date.now() + clockOffsetMs; }
@@ -719,6 +723,8 @@
   // ---- Saved filter sets -------------------------------------------------------
   function saveViewSets() { storeSet(VIEW_SETS_KEY, JSON.stringify(viewSets)); }
   // The select's options, the "(modified)" marker and which buttons apply.
+  // A modified active set shows as a hidden "<name> (modified)" option, so
+  // choosing the set itself again is a change and re-applies it.
   function syncViewSetSelect() {
     var sel = $('view-set-select');
     if (!sel) return;
@@ -726,11 +732,14 @@
     if (activeSet !== null && activeSet >= n) activeSet = null;
     while (sel.options.length) sel.remove(0);
     sel.appendChild(new Option('— current —', ''));
-    viewSets.sets.forEach(function (set, i) {
-      var modified = i === activeSet && !P.viewSetMatches(set, viewFilter, hideFiltered);
-      sel.appendChild(new Option(modified ? set.name + ' (modified)' : set.name, String(i)));
-    });
-    sel.value = activeSet === null ? '' : String(activeSet);
+    viewSets.sets.forEach(function (set, i) { sel.appendChild(new Option(set.name, String(i))); });
+    var active = activeSet === null ? null : viewSets.sets[activeSet];
+    if (active && !P.viewSetMatches(active, viewFilter, hideFiltered)) {
+      var marker = new Option(active.name + ' (modified)', 'modified');
+      marker.hidden = true;
+      sel.appendChild(marker);
+      sel.value = 'modified';
+    } else sel.value = activeSet === null ? '' : String(activeSet);
     $('view-set-delete').disabled = activeSet === null;
     var item = function (act) { return document.querySelector('#view-set-menu [data-act="' + act + '"]'); };
     item('rename').disabled = activeSet === null;
@@ -796,6 +805,80 @@
     saveViewSets();
     syncViewSetSelect();
   }
+
+  // ---- Settings file (spec 4.4): the sets and the alert config -----------------
+  // A download of `text` as the file `name`; the object URL goes on the next tick.
+  function downloadText(name, text, mime) {
+    var url = URL.createObjectURL(new Blob([text], { type: mime }));
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.hidden = true;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+  }
+  // The alert config now: the strip's own (with hidden and drawer) or, without
+  // the strip, the stored one.
+  function currentAlerts() {
+    return alertsView ? alertsView.config() : AP.normalizeConfig(storeGet(ALERTS_KEY));
+  }
+  function exportSettings() {
+    downloadText(AP.settingsFileName(Date.now()),
+      JSON.stringify(AP.settingsFile(viewSets, currentAlerts()), null, 2), 'application/json');
+  }
+  // The parsed file waiting for Replace or Merge (null: the panel is hidden).
+  var pendingImport = null;
+  function setImportPanel(pending) {
+    pendingImport = pending;
+    $('settings-import').hidden = !pending;
+    if (!pending) { $('settings-import-text').textContent = ''; return; }
+    var r = pending.parsed;
+    var text = pending.name + ': ' + r.sets.length + ' filter sets' +
+      (r.alerts ? ' and the alert settings' : '') + '. Replace yours, or merge?';
+    var replaced = AP.mergeSettings({ sets: viewSets.sets, alerts: currentAlerts() }, r, 'merge').replacedNames;
+    if (replaced.length) text += '\nMerge replaces: ' + replaced.join(', ');
+    $('settings-import-text').textContent = text;
+  }
+  // Reads the chosen file and offers Replace or Merge; never sent to skycued.
+  function importSettings(file) {
+    setImportPanel(null);
+    if (file.size > AP.SETTINGS_MAX_BYTES) {
+      $('settings-file').value = '';
+      viewSetMsg('File too large (over 1 MB).', true);
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      $('settings-file').value = '';
+      var r = AP.parseSettings(String(reader.result));
+      if (!r.ok) { viewSetMsg('Cannot import: ' + r.error + '.', true); return; }
+      viewSetMsg('');
+      setImportPanel({ name: file.name, parsed: r });
+    };
+    reader.onerror = function () {
+      $('settings-file').value = '';
+      viewSetMsg('Cannot import: the file could not be read.', true);
+    };
+    reader.readAsText(file);
+  }
+  function applyImport(mode) {
+    if (!pendingImport) return;
+    var r = pendingImport.parsed;
+    var m = AP.mergeSettings({ sets: viewSets.sets, alerts: currentAlerts() }, r, mode);
+    viewSets = P.normalizeViewSets({ version: 1, sets: m.sets });
+    if (mode === 'replace') activeSet = null;
+    saveViewSets();
+    if (alertsView) alertsView.setConfig(m.alerts); // stores skycue.alerts
+    else storeSet(ALERTS_KEY, JSON.stringify(m.alerts));
+    setImportPanel(null);
+    var n = r.sets.length - m.droppedNames.length;
+    viewSetMsg('Imported ' + n + ' filter sets.' + (m.droppedNames.length ? '\nNot imported (at most ' +
+      P.VIEW_SETS_MAX + ' sets): ' + m.droppedNames.join(', ') : ''));
+    syncViewSetSelect();
+  }
+
   function setViewSetMenu(open) {
     $('view-set-menu').hidden = !open;
     $('view-set-more').setAttribute('aria-expanded', String(open));
@@ -822,18 +905,31 @@
   function wireViewSets() {
     var sel = $('view-set-select');
     sel.addEventListener('change', function () {
-      if (sel.value === '') { activeSet = null; syncViewSetSelect(); } else applyViewSet(Number(sel.value));
+      if (sel.value === '') { activeSet = null; syncViewSetSelect(); } else if (sel.value === 'modified') applyViewSet(activeSet);
+      else applyViewSet(Number(sel.value));
     });
     $('view-set-save').addEventListener('click', saveViewSet);
     $('view-set-delete').addEventListener('click', deleteViewSet);
     $('view-set-more').addEventListener('click', function () { setViewSetMenu($('view-set-menu').hidden); });
-    var acts = { rename: renameViewSet, up: function () { moveViewSet(-1); }, down: function () { moveViewSet(1); } };
+    var acts = { rename: renameViewSet, up: function () { moveViewSet(-1); }, down: function () { moveViewSet(1); },
+      'export': exportSettings, 'import': function () { $('settings-file').click(); } };
+    // Without alerts_pure.js there is no settings file.
+    ['export', 'import'].forEach(function (act) {
+      document.querySelector('#view-set-menu [data-act="' + act + '"]').disabled = !AP;
+    });
     $('view-set-menu').addEventListener('click', function (ev) {
       var b = ev.target.closest('button[data-act]');
-      if (!b || b.disabled || !acts[b.getAttribute('data-act')]) return; // Export… and Import…: not wired yet
+      if (!b || b.disabled || !acts[b.getAttribute('data-act')]) return;
       setViewSetMenu(false);
       acts[b.getAttribute('data-act')]();
     });
+    $('settings-file').addEventListener('change', function () {
+      var file = $('settings-file').files[0];
+      if (file) importSettings(file);
+    });
+    $('settings-import-replace').addEventListener('click', function () { applyImport('replace'); });
+    $('settings-import-merge').addEventListener('click', function () { applyImport('merge'); });
+    $('settings-import-cancel').addEventListener('click', function () { setImportPanel(null); });
     // Escape closes the menu only, not the side panel too.
     $('view-set-menu').addEventListener('keydown', function (ev) {
       if (ev.key !== 'Escape') return;

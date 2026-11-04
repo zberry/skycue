@@ -1454,6 +1454,9 @@
     return { store: { version: 1, sets: sets }, replaced: i >= 0, index: i >= 0 ? i : sets.length - 1 };
   }
 
+  // The UTC calendar date of a time as YYYY-MM-DD (the downloads' file names).
+  function utcDate(ms) { return new Date(ms).toISOString().slice(0, 10); }
+
   // How many controls differ from the default (the heading badge). The
   // altitude band and its ground box count as one; the map mode never counts.
   function viewActiveCount(v) {
@@ -1568,7 +1571,7 @@
     CLASSES: CLASSES, CATEGORY_LABELS: CATEGORY_LABELS, trackClass: trackClass, isEmergency: isEmergency, trackCountry: trackCountry,
     VIEW_DEFAULTS: VIEW_DEFAULTS, normalizeView: normalizeView, viewActiveCount: viewActiveCount,
     VIEW_SETS_MAX: VIEW_SETS_MAX, VIEW_SET_NAME_MAX: VIEW_SET_NAME_MAX, viewSetName: viewSetName,
-    normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet,
+    normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches
   };
   root.skycuePure = api;

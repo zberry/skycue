@@ -87,8 +87,17 @@
           <button type="button" role="menuitem" data-act="rename">Rename</button>
           <button type="button" role="menuitem" data-act="up">Move up</button>
           <button type="button" role="menuitem" data-act="down">Move down</button>
-          <button type="button" role="menuitem" data-act="export" disabled>Export…</button>
-          <button type="button" role="menuitem" data-act="import" disabled>Import…</button>
+          <button type="button" role="menuitem" data-act="export" title="Download the filter sets and the alert settings as a file">Export…</button>
+          <button type="button" role="menuitem" data-act="import" title="Load filter sets and alert settings from a file">Import…</button>
+        </div>
+      </div>
+      <input id="settings-file" type="file" accept=".json,application/json" hidden>
+      <div id="settings-import" role="group" aria-label="Import settings" hidden>
+        <p id="settings-import-text" class="msg"></p>
+        <div class="row view-sets">
+          <button id="settings-import-replace" type="button" title="Use the file's filter sets and alert settings instead of yours">Replace</button>
+          <button id="settings-import-merge" type="button" title="Add the file's filter sets to yours and take its alert rules">Merge</button>
+          <button id="settings-import-cancel" type="button">Cancel</button>
         </div>
       </div>
       <p id="view-set-msg" class="msg" role="status"></p>

@@ -8,7 +8,9 @@
 const path = require('path');
 const assert = require('assert');
 
-const A = require(path.resolve(process.argv[2] || path.join(__dirname, '..', '..', 'www', 'alerts_pure.js')));
+const FILE = path.resolve(process.argv[2] || path.join(__dirname, '..', '..', 'www', 'alerts_pure.js'));
+const A = require(FILE);
+const P = require(path.join(path.dirname(FILE), 'app_pure.js'));
 
 let failed = 0;
 let passed = 0;
@@ -102,6 +104,109 @@ test('normalizeWatch: lines, length and count caps', () => {
   assert.strictEqual(w[199], 'e199');
   assert.deepStrictEqual(A.normalizeWatch(['N1', null, 3, ' n1 ', 'dal']), ['N1', 'dal']);
   assert.deepStrictEqual(A.normalizeWatch(null), []);
+});
+
+// ---- settings file (spec 4.4, 11 "Import merge") ----
+const vset = (name, view, hideFiltered) => ({ name, view: P.normalizeView(view), hideFiltered: !!hideFiltered });
+const parsedFile = (o) => { const r = A.parseSettings(JSON.stringify(Object.assign({ skycue_settings: 1 }, o))); assert.ok(r.ok, r.error); return r; };
+
+test('settingsFile: shape', () => {
+  assert.strictEqual(A.SETTINGS_VERSION, 1);
+  assert.strictEqual(A.SETTINGS_MAX_BYTES, 1048576);
+  const c = A.defaultConfig();
+  c.hidden = true; c.drawer = true; c.mute = true; c.watch = ['ual'];
+  const f = A.settingsFile({ version: 1, sets: [vset('A', { search: 'ual' })] }, c);
+  assert.deepStrictEqual(Object.keys(f), ['skycue_settings', 'sets', 'alerts']);
+  assert.strictEqual(f.skycue_settings, 1);
+  assert.deepStrictEqual(Object.keys(f.alerts), ['mute', 'rules', 'watch']);
+  assert.deepStrictEqual(f.alerts, { mute: true, rules: A.defaultConfig().rules, watch: ['ual'] });
+  assert.deepStrictEqual(f.sets, [vset('A', { search: 'ual' })]);
+  assert.deepStrictEqual(A.exportConfig(c), f.alerts);
+});
+
+test('parseSettings: validation', () => {
+  assert.deepStrictEqual(A.parseSettings('{'), { ok: false, error: 'not JSON' });
+  assert.deepStrictEqual(A.parseSettings('{"sets":[]}'), { ok: false, error: 'not a skycue settings file' });
+  assert.deepStrictEqual(A.parseSettings('[1]'), { ok: false, error: 'not a skycue settings file' });
+  assert.deepStrictEqual(A.parseSettings('null'), { ok: false, error: 'not a skycue settings file' });
+  assert.deepStrictEqual(A.parseSettings('{"skycue_settings":2}'), { ok: false, error: 'unsupported version 2' });
+  const r = parsedFile({
+    sets: [{ name: 'A', view: { search: 'ual' }, hideFiltered: true }, { name: 'B', view: 'bogus' }],
+    alerts: { rules: { watch: { enabled: true } }, watch: ['ual'] }
+  });
+  assert.deepStrictEqual(r.sets, [vset('A', { search: 'ual' }, true), vset('B', null)]);
+  assert.deepStrictEqual(r.alertRules, ['watch']);
+  assert.strictEqual(r.alerts.rules.watch.enabled, true);
+  assert.deepStrictEqual(r.alerts.rules.emergency, A.defaultConfig().rules.emergency);
+  assert.deepStrictEqual(r.alerts.watch, ['ual']);
+  const none = parsedFile({ sets: [] });
+  assert.strictEqual(none.alerts, null);
+  assert.deepStrictEqual(none.alertRules, []);
+  assert.deepStrictEqual(none.sets, []);
+});
+
+test('mergeSettings: replace', () => {
+  const cur = A.defaultConfig();
+  cur.hidden = true; cur.drawer = true; cur.watch = ['dal'];
+  const current = { sets: [vset('A', { search: 'x' })], alerts: cur };
+  const inc = parsedFile({ sets: [{ name: 'B', view: { emergency: true } }],
+    alerts: { mute: true, rules: { range_enter: { enabled: true } }, watch: ['ual'] } });
+  const m = A.mergeSettings(current, inc, 'replace');
+  assert.deepStrictEqual(m.sets, inc.sets);
+  const want = Object.assign({}, inc.alerts, { hidden: true, drawer: true });
+  assert.deepStrictEqual(m.alerts, want);
+  assert.strictEqual(m.alerts.mute, true);
+  assert.deepStrictEqual(m.replacedNames, []);
+  assert.deepStrictEqual(m.droppedNames, []);
+  const noAlerts = A.mergeSettings(current, parsedFile({ sets: [] }), 'replace');
+  assert.deepStrictEqual(noAlerts.sets, []);
+  assert.deepStrictEqual(noAlerts.alerts, cur);
+});
+
+test('mergeSettings: merge', () => {
+  const cur = A.defaultConfig();
+  cur.mute = true; cur.hidden = true;
+  cur.rules.range_enter = { enabled: true, sound: false, threshold_nm: 8 };
+  cur.rules.emergency.sound = false;
+  cur.watch = ['ual', 'dal'];
+  const current = { sets: [vset('A', { search: 'a' }), vset('B', { search: 'b' })], alerts: cur };
+  const inc = parsedFile({
+    sets: [{ name: 'B', view: { search: 'b2' }, hideFiltered: true }, { name: 'C', view: {} }],
+    alerts: { mute: false, rules: { emergency: { sound: true } }, watch: ['DAL', 'swa'] }
+  });
+  assert.deepStrictEqual(inc.alertRules, ['emergency']);
+  const m = A.mergeSettings(current, inc, 'merge');
+  assert.deepStrictEqual(m.sets.map((s) => s.name), ['A', 'B', 'C']);
+  assert.deepStrictEqual(m.sets[1], vset('B', { search: 'b2' }, true));
+  assert.deepStrictEqual(m.replacedNames, ['B']);
+  assert.deepStrictEqual(m.droppedNames, []);
+  assert.strictEqual(m.alerts.rules.emergency.sound, true);
+  assert.strictEqual(m.alerts.rules.range_enter.enabled, true);
+  assert.strictEqual(m.alerts.rules.range_enter.threshold_nm, 8);
+  assert.deepStrictEqual(m.alerts.watch, ['ual', 'dal', 'swa']);
+  assert.strictEqual(m.alerts.mute, true);
+  assert.strictEqual(m.alerts.hidden, true);
+  assert.strictEqual(m.alerts.drawer, false);
+  assert.deepStrictEqual(current.sets.map((s) => s.name), ['A', 'B'], 'current is not changed');
+  assert.strictEqual(cur.rules.emergency.sound, false, 'current alerts are not changed');
+  const noAlerts = A.mergeSettings(current, parsedFile({ sets: [] }), 'merge');
+  assert.deepStrictEqual(noAlerts.alerts, A.normalizeConfig(cur));
+});
+
+test('mergeSettings: cap at 20', () => {
+  const sets = [];
+  for (let i = 0; i < 19; i++) sets.push(vset('S' + i, null));
+  const inc = parsedFile({ sets: [{ name: 'N1' }, { name: 'N2' }, { name: 'N3' }, { name: 'S0', view: { search: 'z' } }] });
+  const m = A.mergeSettings({ sets, alerts: A.defaultConfig() }, inc, 'merge');
+  assert.strictEqual(m.sets.length, 20);
+  assert.strictEqual(m.sets[19].name, 'N1');
+  assert.strictEqual(m.sets[0].view.search, 'z');
+  assert.deepStrictEqual(m.replacedNames, ['S0']);
+  assert.deepStrictEqual(m.droppedNames, ['N2', 'N3']);
+});
+
+test('settingsFileName', () => {
+  assert.strictEqual(A.settingsFileName(Date.parse('2026-11-04T23:59:59Z')), 'skycue-settings-2026-11-04.json');
 });
 
 test('watchMatch: prefix over hex, callsign, registration', () => {

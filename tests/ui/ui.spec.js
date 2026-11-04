@@ -500,19 +500,19 @@ test('cues_recent_drops_only_kept_in_this_browser', async ({ page }) => {
   expect(await page.evaluate(() => window.localStorage.getItem('skycue.cues.dropsOnly'))).toBe('0');
 });
 
-// The header strip (stats, Weather, Table) on one row at 1280 px, with
+// The header strip (stats, the four panel buttons, Table) on one row at 1280 px, with
 // live numbers in it (here and, with the FIS-B stats filled, in the 2015
 // sample's describe). A plain stat too long for its share is cut with an
 // ellipsis by design (style.css), so a cut is not checked here; see
 // header_long_stat_is_ellipsised_on_one_row for that.
-// headerRowOffsets: how far the vertical middles of Weather, Table and every
+// headerRowOffsets: how far the vertical middles of the panel buttons, Table and every
 // shown stat sit from the brand's (a wrapped control is a whole row, about
 // 20 px, off).
 async function headerRowOffsets(page) {
   return page.evaluate(() => {
     const mid = (e) => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
     const brand = mid(document.querySelector('#stats .brand'));
-    const els = [document.getElementById('wx-toggle'), document.getElementById('table-toggle')]
+    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle'))
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
     return els.map((e) => Math.abs(mid(e) - brand));
   });
@@ -541,7 +541,7 @@ test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
     const stat = b.closest('.stat');
     const mid = (e) => { const q = e.getBoundingClientRect(); return q.top + q.height / 2; };
     const brand = mid(document.querySelector('#stats .brand'));
-    const els = [document.getElementById('wx-toggle'), document.getElementById('table-toggle')]
+    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle'))
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
     const cut = stat.scrollWidth > stat.clientWidth;
     const overflow = getComputedStyle(stat).textOverflow;
@@ -556,6 +556,42 @@ test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
   expect(r.full).toContain('1234567890 1234567890 1234567890 1234567890 1234567890 1234567890');
   expect(r.title, 'the cut stat reads in full on hover').toBe(r.full);
   for (const d of r.offsets) expect(d).toBeLessThan(4);
+});
+
+// One header button per side-panel tab (Weather, Receiver, Cues, Config): each
+// opens the panel on its tab and is the only one pressed; pressed again it
+// closes the panel; Escape closes it and clears all four.
+test('header_buttons_open_each_panel_tab', async ({ page }) => {
+  await openPage(page);
+  const buttons = { weather: '#wx-toggle', receiver: '#rx-toggle', cues: '#cues-toggle', config: '#cfg-toggle' };
+  await expect(page.locator('#panel-buttons > button')).toHaveText(['Weather', 'Receiver', 'Cues', 'Config']);
+  const panel = page.locator('#details');
+  const pressed = () => page.locator('#panel-buttons > button').evaluateAll((bs) =>
+    bs.map((b) => b.id + '=' + b.getAttribute('aria-pressed')));
+  const expectPressed = async (only) => expect(await pressed()).toEqual(
+    Object.values(buttons).map((sel) => sel.slice(1) + '=' + String(sel === only)));
+  for (const [tab, sel] of Object.entries(buttons)) {
+    await page.locator(sel).click();
+    await expect(panel).toBeVisible();
+    await expect(page.locator(`#tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(`#pane-${tab}`)).toBeVisible();
+    await expectPressed(sel);
+  }
+  // The pressed one again closes the panel.
+  await page.locator('#cfg-toggle').click();
+  await expect(panel).toBeHidden();
+  await expectPressed(null);
+  // Open on Receiver, then Escape closes it and clears all four.
+  await page.locator('#rx-toggle').click();
+  await expect(panel).toBeVisible();
+  await expectPressed('#rx-toggle');
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expectPressed(null);
+  // The inputs counter still opens the Receiver tab, and presses Receiver.
+  await page.locator('#stat-inputs').click();
+  await expect(page.locator('#tab-receiver')).toHaveAttribute('aria-selected', 'true');
+  await expectPressed('#rx-toggle');
 });
 
 test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {

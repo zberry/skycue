@@ -25,7 +25,12 @@
   <span class="stat fisb">radar age <b id="stat-radar-age">–</b></span>
   <span class="stat fisb">stations <b id="stat-fisb-stations">–</b></span>
   <span class="stat fisb warn" id="stat-fisb-skew" role="status" hidden>clock skew: <b id="stat-fisb-skew-text"></b></span>
-  <button id="wx-toggle" type="button" data-opens-tab="weather" aria-pressed="false">Weather</button>
+  <span id="panel-buttons" role="group" aria-label="Side panel">
+    <button id="wx-toggle" type="button" data-opens-tab="weather" aria-pressed="false">Weather</button>
+    <button id="rx-toggle" type="button" data-opens-tab="receiver" aria-pressed="false">Receiver</button>
+    <button id="cues-toggle" type="button" data-opens-tab="cues" aria-pressed="false">Cues</button>
+    <button id="cfg-toggle" type="button" data-opens-tab="config" aria-pressed="false">Config</button>
+  </span>
   <button id="table-toggle" type="button" aria-pressed="false">Table</button>
 </header>
 <div id="conn-banner" role="alert" hidden>Disconnected from skycued, reconnecting…</div>

@@ -40,7 +40,15 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 #stats .dot.on { color: var(--sent); }
 #stats .dot.off { color: var(--blocked); }
 #stats .warn, #stats .warn b { color: #e3b341; }
-#wx-toggle { margin-left: auto; }
+/* The four side-panel buttons as one segmented control: shared borders, no
+   gap, rounded outer corners only. A pressed or hovered segment lifts above
+   its neighbours so its accent border shows on all four sides. */
+#panel-buttons { margin-left: auto; display: inline-flex; }
+#panel-buttons > button { border-radius: 0; position: relative; }
+#panel-buttons > button + button { margin-left: -1px; }
+#panel-buttons > button:first-child { border-radius: 4px 0 0 4px; }
+#panel-buttons > button:last-child { border-radius: 0 4px 4px 0; }
+#panel-buttons > button:hover, #panel-buttons > button[aria-pressed="true"], #panel-buttons > button:focus-visible { z-index: 1; }
 [data-opens-tab][aria-pressed="true"], #table-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 #stat-inputs { padding: 0 6px; font-weight: 600; font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
@@ -365,8 +373,9 @@ table.cfg-table td.cfg-restart { padding-right: 0; white-space: nowrap; text-ali
 
 /* Five tabs on one row needs about 340 px of side panel at the 13 px tab
    font; below 1280 px the panel narrows and the tabs may wrap.
-   The header strip (14 stats, Weather, Table) stays on one row from 1280 px:
-   it needs about 1600 px at 13 px with 18 px gaps, so it is 12 px with 8 px
+   The header strip (14 stats, the four panel buttons, Table) stays on one
+   row from 1280 px: it needs about 1600 px at 13 px with 18 px gaps, so it
+   is 12 px with 8 px
    gaps up to 1700 px and 11 px up to 1400 px. Should wide numbers still not
    fit, the plain stats give way (cut with an ellipsis), never the buttons. */
 /* The 12 px step: in effect at 1401-1700 px (the max-width: 1400px rule

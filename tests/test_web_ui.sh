@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The web UI's files as skycued serves them from the staged www directory:
 # /, /app.js, /app_pure.js, /style.css and (when Leaflet was staged)
-# /vendor/leaflet/leaflet.js with their content types, /api/state with the
+# /vendor/leaflet/leaflet.js and (when ECharts was staged)
+# /vendor/echarts/echarts.min.js with their content types, /api/state with the
 # fixture's 12 tracks, a path escaping the www directory rejected, the
 # page's scripts free of post-ES2017 syntax; then, when
 # node is installed, `node --check` on the page's scripts and the pure-function
@@ -69,6 +70,13 @@ if [ -e "$www/vendor/leaflet/leaflet.js" ]; then
   get /vendor/leaflet/images/layers.png 200 image/png
 else
   echo "SKIP: Leaflet not staged (configure with -DSKYCUE_LEAFLET_DIR)"
+fi
+if [ -e "$www/vendor/echarts/echarts.min.js" ]; then
+  get /vendor/echarts/echarts.min.js 200 application/javascript
+  get /vendor/echarts/LICENSE 200 application/octet-stream
+  get /vendor/echarts/NOTICE 200 application/octet-stream
+else
+  echo "SKIP: ECharts not staged (configure with -DSKYCUE_ECHARTS_DIR)"
 fi
 for bad in '/../etc/passwd' '/%2e%2e/etc/passwd' '/vendor/../../etc/passwd'; do
   code=$(curl -s --path-as-is -o /dev/null -w '%{http_code}' "$base$bad")

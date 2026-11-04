@@ -2105,7 +2105,7 @@ test('stats_range_switches_resolution_and_persists', async ({ page }) => {
 
 // Six headline tiles with numbers and a drawn sparkline each; a refresh
 // moves the observations as the replay goes on.
-test('stats_tiles_show_totals_with_sparklines', async ({ page }, testInfo) => {
+test('stats_tiles_show_totals_with_sparklines', async ({ page }) => {
   await openStats(page);
   const s = await statsState(page);
   expect(Object.keys(s.tiles)).toEqual(['aircraft', 'observations', 'sent', 'drops', 'max_range', 'emergencies']);
@@ -2129,7 +2129,6 @@ test('stats_tiles_show_totals_with_sparklines', async ({ page }, testInfo) => {
     return tileNumber(page, 'observations');
   }, { timeout: 15000 }).toBeGreaterThan(before);
   expect((await statsState(page)).tiles.observations).toBe(await tileText(page, 'observations'));
-  await page.screenshot({ path: testInfo.outputPath(`skycue-stats-${testInfo.project.name}.png`), fullPage: true });
 });
 
 // Live: a refresh every 10 s while the view is shown; once it is hidden,
@@ -2138,8 +2137,12 @@ test('stats_live_polls_only_while_shown', async ({ page }) => {
   await openStats(page);
   await expect(page.locator('#stats-live')).toBeChecked();
   const r0 = (await statsState(page)).refreshes;
+  const obs0 = (await statsState(page)).tiles.observations;
   await expect.poll(async () => (await statsState(page)).refreshes, { timeout: 15000 }).toBeGreaterThan(r0);
   await expect.poll(async () => (await statsState(page)).liveTimer).toBe(true);
+  // A headline tile moves on the live refreshes alone (no statsRefresh()).
+  await expect.poll(() => tileText(page, 'observations'), { timeout: 25000 }).not.toBe(obs0);
+  expect(Number((await tileText(page, 'observations')).replace(/,/g, ''))).toBeGreaterThan(Number(obs0.replace(/,/g, '')));
   let statsRequests = 0;
   page.on('request', (r) => { if (r.url().includes('/api/stats/')) statsRequests++; });
   await page.locator('#stats-toggle').click();
@@ -2157,22 +2160,31 @@ test('stats_live_polls_only_while_shown', async ({ page }) => {
 });
 
 // Reset asks first: dismissed, nothing happens; accepted, the statistics
-// start again (a newer "since").
-test('stats_reset_asks_first', async ({ page }) => {
+// start again: a newer "since" and fewer observations in the range (from
+// the new since) than before. (Not fewer aircraft: the looping replay hears
+// all 12 again within seconds.)
+test('stats_reset_asks_first_and_empties', async ({ page }) => {
   await openStats(page);
-  const since0 = (await api('/api/stats/summary')).body.since;
+  const s0 = (await api('/api/stats/summary')).body;
+  expect(s0.range.observations).toBeGreaterThan(0);
   let question = null;
   page.once('dialog', (d) => { question = d.message(); d.dismiss(); });
   await page.locator('#stats-reset').click();
   await expect.poll(() => question).not.toBe(null);
   expect(question).toMatch(/^Reset all statistics\?/);
   await page.waitForTimeout(500);
-  expect((await api('/api/stats/summary')).body.since).toBe(since0);
+  const kept = (await api('/api/stats/summary')).body;
+  expect(kept.since).toBe(s0.since);
+  expect(kept.range.observations).toBeGreaterThanOrEqual(s0.range.observations);
+  const before = kept.range.observations;
   page.once('dialog', (d) => d.accept());
   await page.locator('#stats-reset').click();
   await expect(page.locator('#stats-msg')).toHaveText('Statistics reset.', { timeout: 10000 });
-  const since1 = (await api('/api/stats/summary')).body.since;
-  expect(Date.parse(since1)).toBeGreaterThan(Date.parse(since0));
+  const s1 = (await api('/api/stats/summary')).body;
+  expect(Date.parse(s1.since)).toBeGreaterThan(Date.parse(s0.since));
+  expect(s1.range.observations).toBeLessThan(before);
+  // The page drew the emptied totals too.
+  expect(await tileNumber(page, 'observations')).toBeLessThan(before);
 });
 
 // Input health lives in the Receiver tab (spec 2): the toolbar opens it
@@ -2369,11 +2381,14 @@ test.describe('stats weather (FIS-B daemon)', () => {
     o.series.forEach((s) => expect(isPairs(s.data), s.id).toBe(true));
     // One point per bucket of the range's series, from its uat_uplink,
     // uat_downlink and fisb_products columns; the caption gives their sums.
-    // (Here uat_seen comes from the recording's UAT observations; the
-    // series' UAT columns read zero in this replay, so no sum > 0 is asked.)
+    // The decoded products are counted (the unpaced replay decodes every
+    // uplink before the store's first tick); the UAT frame columns are the
+    // dump978 input's counters, which a replay has not, so they read zero.
     const se = (await apiAt(FISB_BASE, '/api/stats/series')).body;
     o.series.forEach((s) => expect(s.data.length, s.id).toBe(se.t.length));
     const sums = o.series.map((s) => sumPairs(s.data));
+    expect(sums[2]).toBeGreaterThan(0);
+    expect(sums[2]).toBe(se.fisb_products.reduce((a, b) => a + b, 0));
     const cap = await cardCaption(page, 'weather-uat');
     const th = (n) => n.toLocaleString('en-US');
     expect(cap).toBe(th(sums[0]) + ' uplink · ' + th(sums[1]) + ' downlink frames · ' + th(sums[2]) + ' products');
@@ -2945,4 +2960,147 @@ test('stats_coverage_fleet_signal_rows_are_full', async ({ page }) => {
       Object.keys(rows).forEach((k) => expect(rows[k], sec.id + ' row ' + k).toBeCloseTo(sec.gr, 0));
     }
   }
+});
+
+// ---- Stats: the whole view, chart disposal, the ledger across a restart -------
+// The chart cards a view on `summary` draws: Weather only once UAT was
+// seen (the aircraft detail card, made empty, draws once a row is opened).
+const allCards = (summary) => TRAFFIC_CARDS.concat(COVERAGE_CARDS, FLEET_CARDS, SIGNAL_CARDS,
+  summary.uat_seen ? ['weather-uat'] : []).sort();
+const drawnCards = async (page) => (await statsState(page)).cards.filter((c) => c.canvas).map((c) => c.id).sort();
+
+// Every card and sparkline draws a canvas of some size, with ECharts from
+// skycued itself (the afterEach hook fails on any request to another host).
+test('stats_every_card_renders_canvas', async ({ page }, testInfo) => {
+  await openAircraftSection(page);
+  // The detail card too: open the fixture's target.
+  await searchAircraft(page, TARGET);
+  await page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"]`).click();
+  await expect(page.locator('#stats-detail')).toBeVisible();
+  await page.evaluate(() => window.skycueApp.statsRefresh());
+  const want = allCards((await api('/api/stats/summary')).body).concat(['aircraft-detail']).sort();
+  await expect.poll(() => drawnCards(page), { timeout: 15000 }).toEqual(want);
+  const s = await statsState(page);
+  expect(s.cards.map((c) => c.id).sort()).toEqual(want);
+  expect(s.sparks.filter((x) => x.canvas).length).toBe(6);
+  const sizes = await page.$$eval('#stats-view .card[data-card] .card-chart', (els) => els.map((el) => {
+    const c = el.querySelector('canvas');
+    return { id: el.closest('.card').getAttribute('data-card'), w: c ? c.width : 0, h: c ? c.height : 0 };
+  }));
+  expect(sizes.map((x) => x.id).sort()).toEqual(want);
+  for (const x of sizes) {
+    expect(x.w, x.id).toBeGreaterThan(100);
+    expect(x.h, x.id).toBeGreaterThan(100);
+  }
+  const echartsFrom = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name)
+    .filter((n) => /echarts/.test(n)).map((n) => n.startsWith(location.origin + '/')));
+  expect(echartsFrom).toEqual([true]);
+  // The shot shows the whole view with every card drawn (the search and
+  // detail closed again).
+  await page.locator('#stats-detail-close').click();
+  await expect(page.locator('#stats-detail')).toBeHidden();
+  await page.fill('#stats-aircraft-search', '');
+  await expect.poll(async () => (await acState(page)).q).toBe('');
+  await page.evaluate(() => document.getElementById('stats-view').scrollTo(0, 0));
+  await page.screenshot({ path: testInfo.outputPath(`skycue-stats-${testInfo.project.name}.png`), fullPage: true });
+  await restoreMap(page);
+});
+
+// Hidden past the dispose delay (shortened here from 60 s), every chart is
+// disposed; shown again, each is made anew, drawn, and a Fleet click
+// handler is bound to the new chart.
+test('stats_charts_disposed_when_hidden_and_recreated', async ({ page }) => {
+  await openStats(page);
+  const want = allCards((await api('/api/stats/summary')).body);
+  await expect.poll(() => drawnCards(page), { timeout: 15000 }).toEqual(want);
+  const instances = () => page.evaluate(() => Array.from(document.querySelectorAll('#stats-view .card-chart, #stats-view .tile-spark'))
+    .filter((el) => window.echarts.getInstanceByDom(el)).length);
+  expect(await instances()).toBe(want.length + 6);
+  await page.evaluate(() => window.skycueApp.stats.setDisposeMs(300));
+  await page.evaluate(() => window.skycueApp.showMain('map'));
+  await expect.poll(async () => {
+    const st = await statsState(page);
+    return st.cards.concat(st.sparks).filter((c) => c.canvas).length;
+  }, { timeout: 5000 }).toBe(0);
+  expect(await instances()).toBe(0);
+  await page.evaluate(() => window.skycueApp.stats.setDisposeMs(-1));
+  await page.evaluate(() => window.skycueApp.showMain('stats'));
+  await expect.poll(() => drawnCards(page), { timeout: 15000 }).toEqual(want);
+  await expect.poll(async () => (await statsState(page)).sparks.filter((x) => x.canvas).length).toBe(6);
+  expect(await instances()).toBe(want.length + 6);
+  await page.locator('#stats-live').uncheck();
+  await expect.poll(async () => {
+    const o = await cardOption(page, 'fleet-category');
+    return o && o.series[0].data.length;
+  }, { timeout: 10000 }).toBeGreaterThan(0);
+  const code = (await cardOption(page, 'fleet-category')).series[0].data[0].name;
+  const filter = (await pure(page, 'categoryFilter', code)).category;
+  await clickItem(page, 'fleet-category', 'donut', 0, 0.5);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.mainView())).toBe('map');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().category)).toBe(filter);
+  await restoreMap(page);
+});
+
+// The "stats" skycued (run.sh) replays the fixture at 20x and saves its
+// statistics to stats.json. Stopped and started again, it reloads the
+// ledger (every entry kept, `since` the same), while the replay's clock
+// starts over behind the reloaded series, which therefore restart (shorter
+// than before) with an INFO line in its log.
+const STATS_BASE = process.env.SKYCUE_STATS_URL;
+const nodePath = require('path');
+async function statsDaemonUp() {
+  try {
+    await fetch(STATS_BASE + '/api/stats');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+// Exited (no /proc entry, or a zombie its parent has not reaped yet).
+function processGone(pid) {
+  try {
+    const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return st.slice(st.lastIndexOf(')') + 2, st.lastIndexOf(')') + 3) === 'Z';
+  } catch (e) {
+    return true;
+  }
+}
+const restartLines = () => (fs.readFileSync(process.env.SKYCUE_STATS_LOG, 'utf8')
+  .match(/INFO {2}stats: the data clock moved backwards to .*; the series restart/g) || []).length;
+
+test('stats_ledger_survives_restart', async () => {
+  // A few minutes of series first (a minute bucket every 3 s at 20x).
+  const minutes = async () => (await apiAt(STATS_BASE, '/api/stats/series')).body.t.length;
+  await expect.poll(minutes, { timeout: 60000 }).toBeGreaterThanOrEqual(6);
+  const s0 = (await apiAt(STATS_BASE, '/api/stats/summary')).body;
+  const m0 = await minutes();
+  const rows0 = (await apiAt(STATS_BASE, '/api/stats/aircraft?sort=observations')).body.rows;
+  expect(s0.aircraft_total).toBeGreaterThanOrEqual(12);   // the fixture's 12, at least
+  expect(rows0.length).toBe(s0.aircraft_total);
+  const k = rows0[0];
+  const lines0 = restartLines();
+  const file = nodePath.join(nodePath.dirname(process.env.SKYCUE_STATS_LOG), 'stats.json');
+
+  const pid = Number(fs.readFileSync(process.env.SKYCUE_STATS_PID_FILE, 'utf8'));
+  process.kill(pid, 'SIGTERM');
+  await expect.poll(statsDaemonUp, { timeout: 10000 }).toBe(false);
+  await expect.poll(() => processGone(pid), { timeout: 10000 }).toBe(true);
+  // Saved on the way out: the file holds the ledger.
+  expect(fs.readFileSync(file, 'utf8')).toContain(JSON.stringify(k.key));
+  const child = childProcess.spawn('bash', ['-c', process.env.SKYCUE_STATS_START_CMD], { detached: true, stdio: 'ignore' });
+  child.unref();
+  await expect.poll(statsDaemonUp, { timeout: 10000 }).toBe(true);
+
+  // The series restarted: shorter than before (it takes ~3 s per minute to grow again).
+  await expect.poll(minutes, { timeout: 5000 }).toBeLessThan(m0);
+  await expect.poll(restartLines, { timeout: 5000 }).toBeGreaterThan(lines0);
+  // The ledger survived.
+  const s1 = (await apiAt(STATS_BASE, '/api/stats/summary')).body;
+  expect(s1.since).toBe(s0.since);
+  expect(s1.aircraft_total).toBeGreaterThanOrEqual(s0.aircraft_total);
+  const r = await apiAt(STATS_BASE, `/api/stats/aircraft/${k.hex}?addr_type=${k.addr_type}`);
+  expect(r.status).toBe(200);
+  expect(r.body.key).toBe(k.key);
+  expect(r.body.first_seen).toBe(k.first_seen);
+  expect(r.body.observations).toBeGreaterThanOrEqual(k.observations);
 });

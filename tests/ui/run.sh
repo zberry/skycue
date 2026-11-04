@@ -11,7 +11,9 @@
 # .bin) and NODE_PATH. One more, the
 # "receivers" skycued, runs no built-in decoder inputs and one
 # pingstation_json input, ps-sim, that skycue-pingsim feeds the readsb
-# fixture to (with a device status every 2 s), for the Receiver tab cases.
+# fixture to (with a device status every 2 s), for the Receiver tab cases;
+# and the "stats" skycued, the readsb fixture at 20x with its statistics in
+# a stats.json, which the ledger case restarts.
 # usage: run.sh SKYCUED FIXTURE_DIR WWW_STAGE PINGSIM [PLAYWRIGHT ARGS...]
 # (extra arguments go to `playwright test`, e.g. --grep NAME).
 # Every process it starts is stopped on every way out: normal end, a
@@ -259,6 +261,24 @@ done
 [ "$up" = 1 ] || fail "receivers skycued did not come up"
 bash -c "echo \$\$ > '$tmp/pingsim.pid'; exec '$pingsim' --udp '127.0.0.1:$ps_port' --as json --loop --speed 5 --status-interval 2 --status-lat 38.9 --status-lon -77.0 '$fixtures/readsb-sample.jsonl' >>'$tmp/pingsim.log' 2>&1" </dev/null >/dev/null 2>&1 &
 
+# Stats: one more skycued (the readsb fixture at 20x, looping) whose
+# statistics are saved to stats.json beside its conf, for the ledger-across-
+# a-restart case: the spec stops it and starts it again with this command
+# (the replay's clock then starts over behind the reloaded series).
+st_port=$(free_port)
+sed -e "s/^WEB_PORT=.*/WEB_PORT=$st_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" -e "s/^STATS_FILE=.*/STATS_FILE=stats.json/" \
+  "$tmp/skycue.conf" > "$tmp/stats.conf"
+echo "STATS_SAVE_S=10" >> "$tmp/stats.conf"
+st_start_cmd="echo \$\$ > '$tmp/stats.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 20 --replay-loop --config '$tmp/stats.conf' --www-dir '$www' >>'$tmp/stats.log' 2>&1"
+bash -c "$st_start_cmd" </dev/null >/dev/null 2>&1 &
+st_base="http://127.0.0.1:$st_port"
+up=0
+for (( i=0; i<100; i++ )); do
+  python3 -I -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)' "$st_base/api/stats" 2>/dev/null && { up=1; break; }
+  sleep 0.1
+done
+[ "$up" = 1 ] || fail "stats skycued did not come up"
+
 out_dir=$(dirname "$www")/ui-test-results
 rm -rf "$out_dir"
 export SKYCUE_BASE_URL="$base"
@@ -270,6 +290,10 @@ export SKYCUE_RADAR_URL="$radar_base"
 export SKYCUE_TILES_URL="$tiles_base"
 export SKYCUE_OVERLAYS_URL="$ov_base"
 export SKYCUE_RECEIVERS_URL="$rx_base"
+export SKYCUE_STATS_URL="$st_base"
+export SKYCUE_STATS_START_CMD="$st_start_cmd"
+export SKYCUE_STATS_PID_FILE="$tmp/stats.pid"
+export SKYCUE_STATS_LOG="$tmp/stats.log"
 export SKYCUE_CUE_PORT="$cue_port"
 export SKYCUE_UI_OUT="$out_dir"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

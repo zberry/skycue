@@ -4,7 +4,8 @@
 # and stats_view.js, /style.css and (when Leaflet was staged)
 # /vendor/leaflet/leaflet.js and (when ECharts was staged)
 # /vendor/echarts/echarts.min.js with their content types, /api/state with the
-# fixture's 12 tracks, a path escaping the www directory rejected, the
+# fixture's 12 tracks, /api/stats/summary with its since, a path escaping
+# the www directory rejected, the
 # page's scripts free of post-ES2017 syntax; then, when
 # node is installed, `node --check` on the page's scripts and the pure-function
 # tests (tests/js/app_pure.test.js, tests/js/stats_pure.test.js). Prints
@@ -98,6 +99,10 @@ for (( i=0; i<100; i++ )); do
   sleep 0.1
 done
 [ "$n" = 12 ] || fail "/api/state has $n tracks, want 12"
+# The Stats view's summary, JSON with its `since` once observations are in.
+get /api/stats/summary 200 application/json
+python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])); assert isinstance(s["since"], str) and s["aircraft_total"] > 0' \
+  "$tmp/body" || { head -c 300 "$tmp/body"; fail "/api/stats/summary has no since or no aircraft"; }
 
 # The page's own scripts stay plain ES2017 (as app.js says), checked
 # with or without node: optional chaining `?.`, `??`, `.at(`,

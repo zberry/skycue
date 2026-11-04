@@ -677,28 +677,33 @@ BOOST_AUTO_TEST_CASE(tick_deltas_and_samples)
 {
     StatsStore st(kRx);
     EngineStats s;
-    // Nothing stored and no series: the first tick only takes the base.
-    s.uat_downlink = 10;
+    // No counts and no series: a tick stores nothing (client samples alone
+    // do not start the series).
     s.tcp_clients = 2;
     st.tick(at(kT0), s);
     BOOST_TEST(st.series(StatsRes::minute).empty());
     BOOST_TEST(!st.uatSeen());
     BOOST_TEST(!st.dirty());
-    s.uat_downlink = 15;
+    // The bases start at 0 (the Engine's counters at its start), so the
+    // first count is kept whole, as from an unpaced replay before any tick.
+    s.uat_downlink = 10;
     st.tick(at(kT0 + 1), s);
     BOOST_REQUIRE(st.series(StatsRes::minute).size() == 1u);
-    BOOST_TEST(st.series(StatsRes::minute).back().uat_downlink == 5u);
+    BOOST_TEST(st.series(StatsRes::minute).back().uat_downlink == 10u);
     BOOST_TEST(st.series(StatsRes::minute).back().tcp_clients == 2u);
     BOOST_TEST(st.uatSeen());
     BOOST_TEST(st.dirty());
+    s.uat_downlink = 15;
+    st.tick(at(kT0 + 1), s);
+    BOOST_TEST(st.series(StatsRes::minute).back().uat_downlink == 15u);
     s.uat_downlink = 3;  // the counter went down: a new base
     st.tick(at(kT0 + 2), s);
-    BOOST_TEST(st.series(StatsRes::minute).back().uat_downlink == 5u);
+    BOOST_TEST(st.series(StatsRes::minute).back().uat_downlink == 15u);
     s.uat_downlink = 4;
     s.uat_uplink = 0;
     s.fisb_products = 0;
     st.tick(at(kT0 + 3), s);
-    BOOST_TEST(st.series(StatsRes::minute).back().uat_downlink == 6u);
+    BOOST_TEST(st.series(StatsRes::minute).back().uat_downlink == 16u);
 
     // Uplinks and products count the same way.
     s.uat_uplink = 7;

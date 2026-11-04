@@ -69,8 +69,9 @@
 // sent() / dropped(): the bucket counters (drops by reason and, filtered, by
 // decision, through countDropIn as Engine::countDrop) and the ledger entry
 // when there is one. tick(): adds the positive deltas of uat_downlink,
-// uat_uplink and fisb_products since the previous tick (the first tick and a
-// counter that went down only set the base); a positive delta sets uatSeen().
+// uat_uplink and fisb_products since the previous tick (the bases start at 0,
+// the Engine's counters at its start; a counter that went down only sets the
+// base); a positive delta sets uatSeen().
 // It sets tcp_clients/web_clients of the newest minute to the sample and of
 // the newest hour to the maximum. On an empty series a tick stores only a
 // positive delta (which starts the series).
@@ -88,7 +89,7 @@
 // columnar: one array per field, all of one table the same length. Keys of
 // aircraft are "<hex>|<addr_type>" (addressTypeName), the page's trackKey; an
 // unset optional is "". fromJson() validates every field and builds a new
-// store, which keeps only what the file holds: the tick() bases, the open
+// store, which keeps only what the file holds: the tick() bases (0), the open
 // address sets and the restart-log clock start empty, dirty() is false
 // (true when the load had to evict). A ledger over aircraft_max is evicted
 // down in steps of max(1, aircraft_max / 20), oldest last_seen first, and a
@@ -320,8 +321,10 @@ private:
     std::optional<int64_t> since_s_, series_since_s_;
     bool uat_seen_ = false;
     bool dirty_ = false;
-    // tick(): the previous counters (unset before the first tick).
-    std::optional<uint64_t> base_downlink_, base_uplink_, base_products_;
+    // tick(): the previous counters. They start at 0, as the Engine's do, so
+    // the first tick keeps what was counted before it (an unpaced replay
+    // decodes every uplink before that tick).
+    uint64_t base_downlink_ = 0, base_uplink_ = 0, base_products_ = 0;
     std::optional<std::chrono::steady_clock::time_point> last_restart_log_;
 };
 

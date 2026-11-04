@@ -268,7 +268,7 @@ BOOST_AUTO_TEST_CASE(reset_empties_and_saves)
 BOOST_AUTO_TEST_CASE(fisb_products_counted)
 {
     // The uplinks of the FIS-B fixture, fed through one input after an
-    // observation started the data clock (and a tick took the counter base).
+    // observation started the data clock and a tick ran.
     std::vector<std::string> hexes;
     {
         std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/fisb/received-with-uplinks.jsonl");
@@ -304,6 +304,44 @@ BOOST_AUTO_TEST_CASE(fisb_products_counted)
     BOOST_TEST(fx.t.call([&] { return fx.engine->statsStore().uatSeen(); }));
 }
 
+BOOST_AUTO_TEST_CASE(fisb_products_of_unpaced_replay_counted)
+{
+    // A replay of uplinks alone at speed 0 (as the UI suite's FIS-B daemons
+    // run): every uplink is decoded before the engine's first tick, which
+    // must still put the products in the series (the counters start at 0
+    // with the engine, so there is no earlier count to skip).
+    TempDir dir;
+    const std::string rec = dir.path + "/uplinks.jsonl";
+    {
+        std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/fisb/received-with-uplinks.jsonl");
+        std::ofstream out(rec);
+        int n = 0;
+        for (std::string line; std::getline(in, line) && n < 200;)
+            if (line.find("\"type\":\"uat_uplink\"") != std::string::npos) {
+                out << line << '\n';
+                ++n;
+            }
+        BOOST_REQUIRE(n == 200);
+    }
+    EngineFx fx(baseConfig(), [rec](asio::io_context& io) -> std::unique_ptr<ObservationSource> {
+        return std::make_unique<skycued::ReplayObservationSource>(io, rec, 0, false);
+    });
+    BOOST_REQUIRE(waitUntil([&] { return fx.stats().fisb_uplinks == 200u; }));
+    const uint64_t products = fx.stats().fisb_products;
+    BOOST_REQUIRE(products > 0u);
+    auto stored = [&] {
+        return fx.t.call([&] {
+            uint64_t n = 0;
+            for (const auto& b : fx.engine->statsStore().series(StatsRes::minute))
+                n += b.fisb_products;
+            return n;
+        });
+    };
+    BOOST_TEST(waitUntil([&] { return stored() == products; }, slow(3s)));
+    BOOST_TEST(stored() > 0u);
+    BOOST_TEST(fx.t.call([&] { return fx.engine->statsStore().uatSeen(); }));
+}
+
 BOOST_AUTO_TEST_CASE(uat_frames_reach_the_series)
 {
     // A real Dump978Input (EngineStats takes uat_downlink/uat_uplink from
@@ -327,7 +365,7 @@ BOOST_AUTO_TEST_CASE(uat_frames_reach_the_series)
     BOOST_REQUIRE(sock);
     sock->non_blocking(false);
     fx.t.call([&] { readsb->emit(nearbyObservation(0xA00001, 0)); });
-    std::this_thread::sleep_for(1500ms);  // a tick takes the counter base
+    std::this_thread::sleep_for(1500ms);  // a tick runs first
     const skycued::EngineStats before = fx.stats();
     std::string lines;
     for (int i = 0; i < 5; ++i)

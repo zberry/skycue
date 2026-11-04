@@ -102,10 +102,10 @@ bool usablePosition(const TrackObservation& obs)
 }
 
 // The positive change of a counter since `base`, which becomes v (a counter
-// that went down is a new base; the first call only sets it).
-uint64_t counterDelta(std::optional<uint64_t>& base, uint64_t v)
+// that went down is a new base).
+uint64_t counterDelta(uint64_t& base, uint64_t v)
 {
-    const uint64_t d = base && v > *base ? v - *base : 0;
+    const uint64_t d = v > base ? v - base : 0;
     base = v;
     return d;
 }

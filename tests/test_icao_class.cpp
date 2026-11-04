@@ -160,6 +160,7 @@ BOOST_AUTO_TEST_CASE(tables_sorted_and_disjoint)
     }
     for (std::size_t i = 0; i < n_mil; ++i) {
         BOOST_TEST(kMilitaryBlocks[i].first <= kMilitaryBlocks[i].last, "military block " << i);
+        BOOST_TEST(kMilitaryBlocks[i].last <= 0xFFFFFFu, "military block " << i);
         if (i > 0)
             BOOST_TEST(kMilitaryBlocks[i - 1].last < kMilitaryBlocks[i].first, "military block " << i);
     }

@@ -58,22 +58,31 @@ add_test(NAME icao_class COMMAND test_icao_class)
 # icao_tables_current: skycued/src/icao_tables.inc is what
 # scripts/gen-icao-tables.py writes from www/app_pure.js. Skipped when the
 # generator or the page is not there (skycue built inside a parent project)
-# or python3 is not installed.
+# or python3 is not installed. icao_tables_generator (test_icao_generator.sh):
+# the generator's exit status on broken copies of the page; skipped likewise.
 get_filename_component(_skycue_gen_icao
   "${PROJECT_SOURCE_DIR}/../scripts/gen-icao-tables.py" ABSOLUTE)
 set(_skycue_app_pure "${PROJECT_SOURCE_DIR}/www/app_pure.js")
+set(_skycue_icao_inc "${PROJECT_SOURCE_DIR}/skycued/src/icao_tables.inc")
 find_program(SKYCUE_PYTHON3 python3)
+set(_skycue_icao_skip "")
 if(NOT EXISTS "${_skycue_gen_icao}")
-  skycue_skip_test(icao_tables_current "scripts/gen-icao-tables.py not found")
+  set(_skycue_icao_skip "scripts/gen-icao-tables.py not found")
 elseif(NOT EXISTS "${_skycue_app_pure}")
-  skycue_skip_test(icao_tables_current "www/app_pure.js not found")
+  set(_skycue_icao_skip "www/app_pure.js not found")
 elseif(NOT SKYCUE_PYTHON3)
-  skycue_skip_test(icao_tables_current "python3 not found")
+  set(_skycue_icao_skip "python3 not found")
+endif()
+if(_skycue_icao_skip)
+  skycue_skip_test(icao_tables_current "${_skycue_icao_skip}")
+  skycue_skip_test(icao_tables_generator "${_skycue_icao_skip}")
 else()
   add_test(NAME icao_tables_current
-    COMMAND ${SKYCUE_PYTHON3} -I ${_skycue_gen_icao} --check ${_skycue_app_pure}
-      ${PROJECT_SOURCE_DIR}/skycued/src/icao_tables.inc)
-  set_tests_properties(icao_tables_current PROPERTIES TIMEOUT 60)
+    COMMAND ${SKYCUE_PYTHON3} -I ${_skycue_gen_icao} --check ${_skycue_app_pure} ${_skycue_icao_inc})
+  add_test(NAME icao_tables_generator
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_icao_generator.sh ${SKYCUE_PYTHON3}
+      ${_skycue_gen_icao} ${_skycue_app_pure} ${_skycue_icao_inc} ${CMAKE_CURRENT_BINARY_DIR}/icao-generator)
+  set_tests_properties(icao_tables_current icao_tables_generator PROPERTIES TIMEOUT 60)
 endif()
 
 add_executable(test_registration test_registration.cpp)

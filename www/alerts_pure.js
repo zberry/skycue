@@ -246,6 +246,7 @@
     var seen = { military: {}, sent: {}, country: {} };
     var inputState = {};
     var daemonState = { downSince: null, fired: false };
+    var seenConnected = {};
     var baseline = false, seedInputs = false;
     var holdOffMs = HOLD_OFF_MS;
     var lastNow = 0;
@@ -397,6 +398,16 @@
       s.downSince = null;
       s.fired = false;
     }
+    // The first time an input (or the daemon) is seen connected, an alert
+    // still open from the stored log (an outage from before a reload, its
+    // length unknown) is acknowledged as recovered.
+    function firstConnected(id, nowMs) {
+      if (own(seenConnected, id)) return;
+      seenConnected[id] = true;
+      var p = lg.pairs[inputPair(id)];
+      var row = p && p.open !== null ? findRow(p.open) : null;
+      if (row) ackRow(row, nowMs, 'recovered');
+    }
     function holdOffOver(s, wallMs) {
       return s.downSince !== null && !s.fired && wallMs - s.downSince >= holdOffMs;
     }
@@ -436,6 +447,7 @@
         var connected = !!(isObject(it.state) && it.state.connected);
         var name = typeof it.name === 'string' && it.name ? it.name : id;
         var s = inputState[id];
+        if (connected) firstConnected(id, nowMs);
         if (!s) {
           inputState[id] = { connected: connected, downSince: null, fired: false, name: name };
           return;
@@ -460,6 +472,7 @@
       var out = [];
       if (connected) {
         if (daemonState.downSince !== null) endOutage(DAEMON_ID, daemonState, nowMs, wallMs, null);
+        firstConnected(DAEMON_ID, nowMs);
       } else {
         if (daemonState.downSince === null) daemonState.downSince = wallMs;
         checkDaemon(nowMs, wallMs, out);

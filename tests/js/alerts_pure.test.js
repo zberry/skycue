@@ -423,6 +423,36 @@ test('normalizeLog: round trip', () => {
   assert.strictEqual(next.id, stored.nextId);
 });
 
+test('input_lost: open row from a stored log recovers on the first connected sighting', () => {
+  const c = cfg({ input_lost: { enabled: true } });
+  const e = A.createEngine(c, null);
+  e.beginBaseline();
+  e.inputs(inp(true), T0, W0);
+  e.endBaseline([]);
+  e.inputs(inp(false), T0 + 1000, W0 + 1000);
+  const r = one(e.tick(T0 + 11000, W0 + 11000));
+  const e2 = A.createEngine(c, A.normalizeLog(JSON.stringify(e.toStore())));
+  assert.strictEqual(e2.unacked().length, 1);
+  e2.beginBaseline();
+  assert.deepStrictEqual(e2.inputs(inp(true), T0 + 60000, W0 + 60000), []);
+  like(e2.rows()[0], { id: r.id, acked: true, ackTime: new Date(T0 + 60000).toISOString(), recovered: 'recovered' });
+  assert.deepStrictEqual(e2.unacked(), []);
+  // The pair's ack is set: a new outage inside the quiet period is a quiet row.
+  e2.endBaseline([]);
+  e2.inputs(inp(false), T0 + 61000, W0 + 61000);
+  assert.deepStrictEqual(e2.tick(T0 + 71000, W0 + 71000), []);
+  like(e2.rows()[0], { quiet: true, acked: true });
+
+  const d = A.createEngine(c, null);
+  d.daemon(false, T0, W0);
+  const dr = one(d.tick(T0 + 10000, W0 + 10000));
+  const d2 = A.createEngine(c, A.normalizeLog(JSON.stringify(d.toStore())));
+  assert.strictEqual(d2.unacked().length, 1);
+  assert.deepStrictEqual(d2.daemon(true, T0 + 60000, W0 + 60000), []);
+  like(d2.rows()[0], { id: dr.id, input: 'skycued', acked: true, recovered: 'recovered' });
+  assert.deepStrictEqual(d2.unacked(), []);
+});
+
 test('normalizeLog: caps and garbage', () => {
   const rows = [];
   for (let i = 1; i <= 5000; i++) {

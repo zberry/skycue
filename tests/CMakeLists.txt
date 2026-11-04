@@ -46,6 +46,36 @@ target_compile_definitions(test_stats_store PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_stats_store)
 add_test(NAME stats_store COMMAND test_stats_store)
 
+# icao_class: the daemon's copy of the page's class/country rules, on the
+# case fixture app_pure.test.js runs too.
+add_executable(test_icao_class test_icao_class.cpp)
+target_link_libraries(test_icao_class PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_icao_class PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_icao_class)
+add_test(NAME icao_class COMMAND test_icao_class)
+
+# icao_tables_current: skycued/src/icao_tables.inc is what
+# scripts/gen-icao-tables.py writes from www/app_pure.js. Skipped when the
+# generator or the page is not there (skycue built inside a parent project)
+# or python3 is not installed.
+get_filename_component(_skycue_gen_icao
+  "${PROJECT_SOURCE_DIR}/../scripts/gen-icao-tables.py" ABSOLUTE)
+set(_skycue_app_pure "${PROJECT_SOURCE_DIR}/www/app_pure.js")
+find_program(SKYCUE_PYTHON3 python3)
+if(NOT EXISTS "${_skycue_gen_icao}")
+  skycue_skip_test(icao_tables_current "scripts/gen-icao-tables.py not found")
+elseif(NOT EXISTS "${_skycue_app_pure}")
+  skycue_skip_test(icao_tables_current "www/app_pure.js not found")
+elseif(NOT SKYCUE_PYTHON3)
+  skycue_skip_test(icao_tables_current "python3 not found")
+else()
+  add_test(NAME icao_tables_current
+    COMMAND ${SKYCUE_PYTHON3} -I ${_skycue_gen_icao} --check ${_skycue_app_pure}
+      ${PROJECT_SOURCE_DIR}/skycued/src/icao_tables.inc)
+  set_tests_properties(icao_tables_current PROPERTIES TIMEOUT 60)
+endif()
+
 add_executable(test_registration test_registration.cpp)
 target_link_libraries(test_registration PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_registration PRIVATE BOOST_TEST_DYN_LINK)

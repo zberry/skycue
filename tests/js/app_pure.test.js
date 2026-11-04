@@ -1172,5 +1172,21 @@ test('viewMatches country: a non-ICAO address has no country', () => {
   assert.strictEqual(P.viewMatches(icao, V({ classes: ['military'] })), true);
 });
 
+// The same cases tests/test_icao_class.cpp runs through the daemon's copy of
+// these rules (skycued/src/icao_class.cpp): an absent want is null.
+test('class cases fixture', () => {
+  const C = require(path.join(__dirname, '..', 'fixtures', 'icao_class_cases.json'));
+  const want = (c) => (c.want === undefined ? null : c.want);
+  const name = (c) => JSON.stringify(c);
+  ['country', 'track_country', 'military', 'callsign_kind', 'track_class'].forEach((g) => {
+    assert.ok(Array.isArray(C[g]) && C[g].length > 0, 'group ' + g);
+  });
+  C.country.forEach((c) => assert.strictEqual(P.icaoCountry(c.hex), want(c), name(c)));
+  C.track_country.forEach((c) => assert.strictEqual(P.trackCountry(c), want(c), name(c)));
+  C.military.forEach((c) => assert.strictEqual(P.icaoMilitary(c.hex), want(c), name(c)));
+  C.callsign_kind.forEach((c) => assert.strictEqual(P.callsignKind(c.callsign), want(c), name(c)));
+  C.track_class.forEach((c) => assert.strictEqual(P.trackClass(c), want(c), name(c)));
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

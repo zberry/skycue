@@ -35,6 +35,7 @@ add_library(skycued_core STATIC
   src/filters.cpp
   src/forwarder.cpp
   src/geo.cpp
+  src/icao_class.cpp
   src/inputs/capture_writer.cpp
   src/inputs/cat021_map.cpp
   src/inputs/device_time.cpp

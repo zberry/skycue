@@ -14,6 +14,11 @@
   `CFG_COPY`, one key per quoting branch; the node test checks the text,
   `test_config` parses it with `parseConfigText` and `test_start_script.sh`
   with `skycue-start.sh`. Hand-written; regenerate it if `configText` changes.
+- `icao_class_cases.json`: cases for the page's address country, military
+  block, callsign kind and track class rules (`app_pure.js`), run by
+  `tests/js/app_pure.test.js` against the page and by `test_icao_class` against
+  the daemon's copy (`skycued/src/icao_class.cpp`). Hand-written; the JS is the
+  source of truth.
 
 ## raw/modes-120s.csv.gz
 

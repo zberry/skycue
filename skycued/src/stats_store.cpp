@@ -83,12 +83,6 @@ void pushDistinct(std::vector<std::string>& list, const std::string& v)
         list.erase(list.begin());
 }
 
-int64_t gridKey(int32_t lat_i, int32_t lon_i)
-{
-    return static_cast<int64_t>((static_cast<uint64_t>(static_cast<uint32_t>(lat_i)) << 32) |
-                                static_cast<uint32_t>(lon_i));
-}
-
 // floor(x) as a bin index in [0, n): clamped in double before the cast, so
 // a huge or non-finite x is never converted out of int's range.
 int clampedBin(double x, int n)
@@ -437,6 +431,12 @@ void StatsStore::observe(const TrackObservation& obs, const TrackState& state, c
 
     if (is_new && ledger_.size() > limits_.aircraft_max)
         evictOldest(evictStep(), obs.id);
+}
+
+int64_t StatsStore::gridKey(int32_t lat_i, int32_t lon_i)
+{
+    return static_cast<int64_t>((static_cast<uint64_t>(static_cast<uint32_t>(lat_i)) << 32) |
+                                static_cast<uint32_t>(lon_i));
 }
 
 std::size_t StatsStore::evictStep() const { return std::max<std::size_t>(1, limits_.aircraft_max / 20); }

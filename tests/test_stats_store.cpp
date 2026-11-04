@@ -1201,7 +1201,12 @@ BOOST_AUTO_TEST_CASE(file_size_at_defaults_under_10mb)
     BOOST_TEST_MESSAGE("stats file at the defaults: " << text.size() << " bytes; toJson " << ms(t1 - t0)
                                                       << " ms, fromJson " << ms(t2 - t1) << " ms");
     BOOST_TEST(text.size() < std::size_t(10) * 1024 * 1024);
-    BOOST_TEST(ms(t2 - t1) < 5000 * testSlowFactor());
+#ifdef NDEBUG
+    const long long load_limit_ms = 5000;
+#else
+    const long long load_limit_ms = 15000;  // Debug: PropertyTree alone takes ~3 s
+#endif
+    BOOST_TEST(ms(t2 - t1) < load_limit_ms * testSlowFactor());
     BOOST_TEST(back.aircraftCount() == 20000u);
     BOOST_TEST((back.toJson() == text));
 }
@@ -1334,4 +1339,58 @@ BOOST_AUTO_TEST_CASE(restart_on_first_older_obs_after_load)
     BOOST_TEST(back.seriesSinceS().value() == t - 3600);
     BOOST_TEST(back.aircraftCount() == 2u);
     BOOST_TEST(back.aircraft(icao(1))->observations == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(counts_capped_at_int64_max_on_load)
+{
+    // The file's integers are written as int64: a larger count is capped on
+    // load, so the next save and load still work.
+    const std::string base = populatedStore().toJson();
+    const std::size_t p = base.find("\"evicted\":0");
+    BOOST_REQUIRE(p != std::string::npos);
+    std::string text = base;
+    text.replace(p, 11, "\"evicted\":18446744073709551615");
+    text = editFirstElement(text, "\"minutes\":{", "\"observations\":[", "18446744073709551615");
+    const StatsStore st = StatsStore::fromJson(text, kRx, StatsLimits());
+    const uint64_t cap = uint64_t(std::numeric_limits<int64_t>::max());
+    BOOST_TEST(st.evicted() == cap);
+    BOOST_TEST(st.series(StatsRes::minute).front().observations == cap);
+    const StatsStore again = StatsStore::fromJson(st.toJson(), kRx, StatsLimits());
+    BOOST_TEST(again.evicted() == cap);
+    BOOST_TEST(again.toJson() == st.toJson());
+    // Over 2^64 - 1 is not a count at all.
+    BOOST_CHECK_THROW(StatsStore::fromJson(editFirstElement(base, "\"minutes\":{", "\"observations\":[",
+                                                            "18446744073709551616"),
+                                           kRx, StatsLimits()),
+                      std::runtime_error);
+}
+
+BOOST_AUTO_TEST_CASE(whitespace_in_list_entries)
+{
+    StatsStore st(kRx);
+    Obs o = obsAt(1, kT0, 39.0, -77.0);
+    o.obs.callsign = "AB\tC D";
+    sync(o);
+    feed(st, o);
+    o.obs.received_time = at(kT0 + 1);
+    o.obs.callsign = "XYZ";
+    sync(o);
+    feed(st, o);
+    const StatsStore back = StatsStore::fromJson(st.toJson(), kRx, StatsLimits());
+    BOOST_TEST((back.aircraft(icao(1))->callsigns == std::vector<std::string>{"AB_C_D", "XYZ"}));
+    BOOST_TEST(back.toJson() == StatsStore::fromJson(back.toJson(), kRx, StatsLimits()).toJson());
+}
+
+BOOST_AUTO_TEST_CASE(missing_evicted_rejected)
+{
+    std::string text = populatedStore().toJson();
+    const std::size_t p = text.find("\"evicted\":0,");
+    BOOST_REQUIRE(p != std::string::npos);
+    text.erase(p, 12);
+    try {
+        StatsStore::fromJson(text, kRx, StatsLimits());
+        BOOST_ERROR("no exception");
+    } catch (const std::runtime_error& e) {
+        BOOST_TEST(std::string(e.what()) == "stats file: evicted: missing");
+    }
 }

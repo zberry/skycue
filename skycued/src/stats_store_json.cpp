@@ -14,7 +14,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
+#include <cctype>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <fstream>
 #include <locale>
@@ -67,12 +69,6 @@ constexpr std::size_t kRssiCells = std::size_t(kStatsRssiRangeBins) * std::size_
 // floor(lat / 0.05) and floor(lon / 0.05) of a position on the globe.
 constexpr int64_t kGridLatMax = 1800, kGridLonMax = 3600;
 
-int64_t gridKey(int32_t lat_i, int32_t lon_i)
-{
-    return static_cast<int64_t>((static_cast<uint64_t>(static_cast<uint32_t>(lat_i)) << 32) |
-                                static_cast<uint32_t>(lon_i));
-}
-
 bool alignedTo(int64_t t_s, int64_t len)
 {
     int64_t r = t_s % len;
@@ -107,17 +103,19 @@ std::optional<Source> parseSourceName(const std::string& s)
     return std::nullopt;
 }
 
-// The ledger's lists, space-joined; a space inside an entry (never seen: a
-// callsign is trimmed, squawks are digits) is written as '_' so the list
-// splits back into the same number of entries.
+// The ledger's lists, space-joined; whitespace inside an entry (never seen:
+// a callsign is trimmed, squawks are digits) is written as '_', and an empty
+// entry is left out, so the list splits back into the same entries.
 std::string joinList(const std::vector<std::string>& list)
 {
     std::string out;
     for (const std::string& v : list) {
+        if (v.empty())
+            continue;
         if (!out.empty())
             out += ' ';
         for (char ch : v)
-            out += ch == ' ' ? '_' : ch;
+            out += std::isspace(static_cast<unsigned char>(ch)) ? '_' : ch;
     }
     return out;
 }
@@ -330,12 +328,14 @@ public:
         return out;
     }
 
+    // Capped at INT64_MAX: the file's integers are written as int64, so a
+    // larger count would not survive the next save.
     uint64_t count(const std::string& text, const std::string& field)
     {
         const std::optional<uint64_t> v = parseInteger<uint64_t>(text);
         if (!v)
             fail(field, "not a non-negative integer");
-        return *v;
+        return std::min<uint64_t>(*v, uint64_t(std::numeric_limits<int64_t>::max()));
     }
 
     double number(const std::string& text, const std::string& field)
@@ -559,6 +559,8 @@ StatsStore StatsStore::fromJson(const std::string& text, std::optional<ReceiverP
             fail(k, "not an integer");
         (std::string(k) == "since" ? st.since_s_ : st.series_since_s_) = *v;
     }
+    if (!top.has("evicted"))
+        fail("evicted", "missing");
     st.evicted_ = rd.count(top.getString("evicted").value_or(""), "evicted");
     const std::optional<bool> uat = top.getBool("uat_seen");
     if (!uat)

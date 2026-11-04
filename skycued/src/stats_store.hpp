@@ -24,7 +24,10 @@
 //     seriesSinceS() = t, one INFO "stats: the data clock moved backwards to
 //     <iso>; the series restart", at most once a minute); sent(), dropped()
 //     and tick() never restart: an older time goes into the newest bucket.
-// Restarts leave the histograms, coverage, grid and ledger alone.
+// Restarts leave the histograms, coverage, grid and ledger alone. After a
+// restart (and after a load) the open address sets start empty, so an
+// aircraft already counted in the current minute or hour bucket may be
+// counted in its `aircraft` once more (accepted).
 //
 // A bucket's `aircraft` counts distinct TrackIds (address and type) through
 // an address set for the newest and for the previous bucket of each ring;
@@ -300,6 +303,8 @@ private:
     // Erases the n entries with the oldest last_seen_s, never `keep`.
     void evictOldest(std::size_t n, std::optional<skycue::TrackId> keep);
     std::size_t evictStep() const;  // max(1, aircraft_max / 20)
+    // The grid_ key of a cell: (int64_t(lat_i) << 32) | uint32_t(lon_i).
+    static int64_t gridKey(int32_t lat_i, int32_t lon_i);
     void clearAll();
 
     std::optional<ReceiverPosition> receiver_;

@@ -619,7 +619,8 @@
     var active = P.viewActiveCount(viewFilter);
     $('view-count').textContent = active > 0 ? 'showing ' + viewShownCount() + ' of ' + tracks.size : '';
     $('view-badge').textContent = active > 0 ? '· ' + active : '';
-    $('view-clear').disabled = active === 0;
+    // Clear also resets the map mode, which is not counted in the badge.
+    $('view-clear').disabled = active === 0 && viewFilter.mapMode === 'hide';
   }
   // Merges `partial` into the view, persists and re-renders. `fromControls`:
   // the controls already show it (the operator is typing), leave them be.
@@ -783,7 +784,8 @@
       if (e.trail && e.pts.length) {
         var n = e.pts.length;
         pruneTrail(e);
-        if (e.pts.length !== n) e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
+        // A dimmed entry's polyline stays empty (renderEntry refills it on un-dimming).
+        if (e.pts.length !== n && !e.dimmed) e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
       }
     });
   }
@@ -2960,6 +2962,8 @@
     setViewFilters: function (partial) { setViewFilters(partial); },
     resetViewFilters: resetViewFilters,
     shownCount: viewShownCount,
+    // The 2-s trail and stale-track prune, run now.
+    prune: function () { prune(); },
     // Runs a pending View render now (it is otherwise one animation frame away).
     renderAll: function () { viewRenderPending = true; flushViewRender(); },
     // Adds a marker skycued does not know (the reconnect test checks it goes).

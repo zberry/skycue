@@ -1849,6 +1849,11 @@ test('view_persists_across_reload_and_slash_focuses_search', async ({ page }) =>
   await expect(page.locator('#view-search')).toHaveValue('');
   await expect(page.locator('#view-search')).not.toBeFocused();
   await expect(page.locator('#view-badge')).toHaveText('');
+  // Only dim left: not counted in the badge, but Clear still resets it.
+  await expect(page.locator('#view-clear')).toBeEnabled();
+  await page.click('#view-clear');
+  await expect(page.locator('input[name="view-map-mode"][value="hide"]')).toBeChecked();
+  await expect(page.locator('#view-clear')).toBeDisabled();
   await page.evaluate(() => window.skycueApp.resetViewFilters());
 });
 test('view_section_fits_panel_and_details_show_class_and_country', async ({ page }) => {
@@ -1905,12 +1910,28 @@ test('view_dim_mode_ghosts_non_matches', async ({ page }) => {
     return { lat: typeof m.lat, rotate: /rotate\(/.test(el.style.transform) };
   }, TARGET);
   expect(pos).toEqual({ lat: 'number', rotate: true });
+  // A trail point expiring (the 2-s prune) does not refill a dimmed trail.
+  // abc0d1 gets a point 1 s short of the 120 s trail age and a current one.
+  await page.evaluate(() => {
+    const now = window.skycueApp.dataNow();
+    [now - 119000, now].forEach((ms) => window.skycueApp.injectTestMarker({ hex: 'abc0d1', decision: 'send',
+      alt_baro_ft: 5000, lat: 38.95, lon: -77.05, position_time: new Date(ms).toISOString() }));
+  });
+  await expect.poll(async () => (await markerOf(page, 'abc0d1') || {}).dimmed).toBe(true);
+  await page.waitForTimeout(1500);
+  const pruned = await page.evaluate(() => {
+    window.skycueApp.prune();
+    return window.skycueApp.markers().filter((m) => m.dimmed && m.trail > 0).length;
+  });
+  expect(pruned).toBe(0);
   // Un-dimming gives the trails back at once (not only on the next update).
   const back = await page.evaluate(() => {
     window.skycueApp.setViewFilters({ search: '' });
     window.skycueApp.renderAll();
     return window.skycueApp.markers().filter((m) => m.trail > 0).map((m) => m.hex);
   });
+  // abc0d1's old point did expire: one point left once it is un-dimmed.
+  expect((await markerOf(page, 'abc0d1')).trail).toBe(1);
   // At most one missing: RPA4521 (ac5e81) may have timed out meanwhile.
   expect(trailsBefore.filter((h) => back.indexOf(h) < 0).length).toBeLessThanOrEqual(1);
   await page.fill('#view-search', TARGET);

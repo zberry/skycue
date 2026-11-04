@@ -717,6 +717,7 @@
     if (e.marker) map.removeLayer(e.marker);
     if (e.trail) map.removeLayer(e.trail);
     tracks.delete(key);
+    if (alertsView) alertsView.trackGone(key);
     if (key === selectedKey) deselect();
     tableDirty = true;
   }
@@ -741,6 +742,7 @@
     }
     e.t = t;
     if (observed) e.seenWall = Date.now();
+    if (alertsView) alertsView.track(e.t);
     renderEntry(e, observed);
     if (key === selectedKey) renderDetails();
     tableDirty = true;
@@ -756,6 +758,7 @@
   }
 
   function onDrop(d) {
+    if (alertsView) alertsView.drop(d);
     var key = P.trackKey(d);
     var e = tracks.get(key);
     if (!e) return;
@@ -1159,6 +1162,7 @@
   // the active one goes back to the map.
   var mainView = 'map';
   var statsView = null;             // stats_view.js, made in wire()
+  var alertsView = null;            // alerts_view.js, made in wire()
   function showMain(which) {
     if (which !== 'table' && (which !== 'stats' || !statsView)) which = 'map';
     var prev = mainView;
@@ -2140,6 +2144,7 @@
   function applyInputs(list) {
     rx.inputs = Array.isArray(list) ? list : [];
     rx.wall = Date.now();
+    if (alertsView) alertsView.inputs(rx.inputs);
     // An id that went may come back as a new input: forget its client state.
     var ids = {};
     rx.inputs.forEach(function (i) { ids[i.id] = true; });
@@ -2165,6 +2170,7 @@
       if (!inp || !inp.state) return;
       ['connected', 'messages', 'observations', 'uplinks', 'rejected'].forEach(function (k) { inp.state[k] = l[k]; });
     });
+    if (alertsView) alertsView.inputs(rx.inputs);
     updateInputsHeader();
   }
   function updateInputsHeader() {
@@ -2705,11 +2711,15 @@
   function setConnected(on) {
     connected = on;
     $('conn-banner').hidden = on;
+    if (alertsView) alertsView.daemon(on);
   }
 
   var snapshotCount = 0;            // snapshots applied (a test hook)
   function onSnapshot(s) {
     snapshotCount++;
+    // A silent baseline for the "new"-type alert rules (spec 11), the
+    // inputs seeded by both of the snapshot's inputs lists.
+    if (alertsView) alertsView.beginBaseline();
     clearAll();
     clockOffsetMs = Date.parse(s.now) - Date.now();
     if (isNaN(clockOffsetMs)) clockOffsetMs = 0;
@@ -2724,6 +2734,7 @@
     applyFilters(s.filters);
     updateReceiver();
     (s.tracks || []).forEach(function (t) { onTrack(t, true); });
+    if (alertsView) alertsView.endBaseline(Array.from(tracks.keys()));
     if (selectedKey && !tracks.has(selectedKey)) deselect();
     else if (selectedKey) renderDetails();
     attempt = 0;
@@ -2915,6 +2926,23 @@
       });
     } else $('stats-toggle').hidden = true;
     $('stats-toggle').addEventListener('click', function () { showMain(mainView === 'stats' ? 'map' : 'stats'); });
+    if (window.skycueAlertsView && window.skycueAlertsPure) {
+      alertsView = window.skycueAlertsView.create({
+        dataNow: dataNow, storeGet: storeGet, storeSet: storeSet, request: request,
+        hasTrack: function (key) { return tracks.has(key); },
+        // Whether Hide filtered leaves the track on the map.
+        trackVisible: function (key) { return P.trackVisible(tracks.get(key).t.decision, true); },
+        getHideFiltered: function () { return hideFiltered; },
+        setHideFiltered: setHideFiltered,
+        selectTrack: function (key) { showMain('map'); select(key); },
+        openReceiver: function () { openPanel('receiver'); },
+        openStatsAircraft: function (key) { showMain('stats'); if (statsView) statsView.openAircraft(key); },
+        tracks: function () { return Array.from(tracks.values()).map(function (e) { return e.t; }); }
+      });
+    } else {
+      $('alerts-toggle').hidden = true;
+      $('alerts').hidden = true;
+    }
     Array.prototype.forEach.call(document.querySelectorAll('#table-view th'), function (th) {
       th.addEventListener('click', function () { sortBy(th.getAttribute('data-key')); });
       th.addEventListener('keydown', function (ev) {
@@ -2952,6 +2980,7 @@
       if (++ticks % 15 === 0) fisb.wxDirty = fisb.symDirty = true; // ages and age classes
       renderWx();
       if (fisb.symDirty) renderWxSymbols();
+      if (alertsView) alertsView.tick(); // input hold-offs, the log
     }, 1000);
   }
 
@@ -3000,6 +3029,15 @@
       f.openAircraft = function (key) { return statsView ? statsView.openAircraft(key) : Promise.resolve(); };
       return f;
     })(),
+    // The alert strip's state (alerts_view.js state()), with its input
+    // hold-off (default 10 s) and the rules' config.
+    alerts: (function () {
+      var f = function () { return alertsView ? alertsView.state() : null; };
+      f.setHoldOffMs = function (ms) { if (alertsView) alertsView.setHoldOffMs(ms); };
+      f.config = function () { return alertsView ? alertsView.config() : null; };
+      f.setConfig = function (cfg) { if (alertsView) alertsView.setConfig(cfg); };
+      return f;
+    })(),
     statsRefresh: function () { return statsView ? statsView.refreshNow() : Promise.resolve(false); },
     resetViewFilters: resetViewFilters,
     shownCount: viewShownCount,
@@ -3009,6 +3047,8 @@
     renderAll: function () { viewRenderPending = true; flushViewRender(); },
     // Adds a marker skycued does not know (the reconnect test checks it goes).
     injectTestMarker: function (t) { onTrack(t, true); },
+    // Removes a track as a drop or the prune would (the alert strip's "no longer tracked").
+    removeTestMarker: function (key) { removeEntry(key); },
     dataNow: dataNow,
     // FIS-B: the initial /api/fisb/* load is done; WebSocket items through
     // the page's own handler; what the radar canvases hold.

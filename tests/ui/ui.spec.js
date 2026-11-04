@@ -500,32 +500,39 @@ test('cues_recent_drops_only_kept_in_this_browser', async ({ page }) => {
   expect(await page.evaluate(() => window.localStorage.getItem('skycue.cues.dropsOnly'))).toBe('0');
 });
 
-// The header strip (stats, the four panel buttons, Table) on one row at 1280 px, with
+// The header strip (stats, the four panel buttons, Table, Stats, Alerts with a
+// two-digit badge) on one row at 1280 px, with
 // live numbers in it (here and, with the FIS-B stats filled, in the 2015
 // sample's describe). A plain stat too long for its share is cut with an
 // ellipsis by design (style.css), so a cut is not checked here; see
 // header_long_stat_is_ellipsised_on_one_row for that.
-// headerRowOffsets: how far the vertical middles of the panel buttons, Table, Stats and every
-// shown stat sit from the brand's (a wrapped control is a whole row, about
-// 20 px, off).
-async function headerRowOffsets(page) {
-  return page.evaluate(() => {
+// headerRowOffsets: how far the vertical middles of the panel buttons, Table, Stats, Alerts and
+// every shown stat sit from the brand's (a wrapped control is a whole row, about
+// 20 px, off). With `badge`, the Alerts count badge is first shown with that
+// text (in the same evaluate, so no live alert can redraw it in between).
+async function headerRowOffsets(page, badge) {
+  return page.evaluate((badge) => {
+    const b = document.getElementById('alerts-badge');
+    if (badge !== null && b) {
+      b.textContent = badge;
+      b.hidden = false;
+    }
     const mid = (e) => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
     const brand = mid(document.querySelector('#stats .brand'));
-    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle'))
+    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle, #alerts-toggle'))
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
     return els.map((e) => Math.abs(mid(e) - brand));
-  });
+  }, badge === undefined ? null : badge);
 }
 test('header_fits_one_row_at_1280', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await openPage(page);
   await waitMarkers(page, 10);
-  for (const d of await headerRowOffsets(page)) expect(d).toBeLessThan(4);
+  for (const d of await headerRowOffsets(page, '99')) expect(d).toBeLessThan(4);
   // And at the widths between it and 1920 (where the font and gaps grow).
   for (const width of [1400, 1401, 1600, 1700, 1920]) {
     await page.setViewportSize({ width, height: 800 });
-    for (const d of await headerRowOffsets(page)) expect(d, `at ${width} px`).toBeLessThan(4);
+    for (const d of await headerRowOffsets(page, '99')) expect(d, `at ${width} px`).toBeLessThan(4);
   }
 });
 
@@ -541,7 +548,7 @@ test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
     const stat = b.closest('.stat');
     const mid = (e) => { const q = e.getBoundingClientRect(); return q.top + q.height / 2; };
     const brand = mid(document.querySelector('#stats .brand'));
-    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle'))
+    const els = Array.from(document.querySelectorAll('#panel-buttons > button, #table-toggle, #stats-toggle, #alerts-toggle'))
       .concat(Array.from(document.querySelectorAll('#stats > .stat')).filter((e) => !e.hidden && e.offsetParent !== null));
     const cut = stat.scrollWidth > stat.clientWidth;
     const overflow = getComputedStyle(stat).textOverflow;
@@ -611,6 +618,250 @@ test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {
   await expect.poll(() => page.locator('#cues-recent tbody tr').count(), { timeout: 15000 }).toBeGreaterThan(1);
   const scroll = page.locator('#pane-cues .cues-scroll');
   expect(await scroll.evaluate((e) => e.scrollWidth - e.clientWidth)).toBeLessThanOrEqual(0);
+});
+
+// ---- Alerts ----------------------------------------------------------------------
+// The alert strip at the bottom of the main area (alerts_view.js over the
+// engine in alerts_pure.js). Each case names the rules it runs with
+// (alertsOnly), so the default-on rules on the live replay add no rows.
+const ALERT_RULES = ['emergency', 'military_new', 'sent_new', 'input_lost', 'range_enter', 'altitude_below',
+  'new_country', 'watch', 'drop_filtered'];
+// skycue.alerts before the first load only (a reload keeps what the page stored).
+async function alertsOnly(page, on, extra) {
+  await page.addInitScript(([on, all, extra]) => {
+    if (sessionStorage.getItem('alertsSeeded')) return;
+    sessionStorage.setItem('alertsSeeded', '1');
+    const rules = {};
+    all.forEach((id) => { rules[id] = { enabled: on.includes(id) }; });
+    localStorage.setItem('skycue.alerts', JSON.stringify(Object.assign({ version: 1, rules }, extra || {})));
+  }, [on, ALERT_RULES, extra || null]);
+}
+const EMERG = { hex: 'fff7a0', addr_type: 'icao', callsign: 'TEST77', lat: 38.95, lon: -76.9, decision: 'send',
+  squawk: '7700', range_nm: 6, alt_baro_ft: 9000, track_deg: 0 };
+const inject = (page, o) => page.evaluate((t) => window.skycueApp.injectTestMarker(t), Object.assign({}, EMERG, o));
+const alertState = (page) => page.evaluate(() => window.skycueApp.alerts());
+const drawerIds = (page) => page.locator('#alerts-log tr[data-alert-id] .al-id').allTextContents();
+
+test('alerts_emergency_raises_strip_and_badge', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await expect(page.locator('#alerts')).toHaveClass(/\bhas-emergency\b/);
+  await expect(page.locator('#alerts-line .al-kind')).toHaveText('Emergency');
+  await expect(page.locator('#alerts-line .al-id')).toHaveText('TEST77');
+  await expect(page.locator('#alerts-line .al-detail')).toHaveText('squawk 7700');
+  await expect(page.locator('#alerts-line .al-time')).toHaveText(/^\d\d:\d\d:\d\dZ$/);
+  await expect(page.locator('#alerts-badge')).toBeVisible();
+  await expect(page.locator('#alerts-badge')).toHaveText('1');
+
+  await page.locator('#alerts-ack').click();
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+  await expect(page.locator('#alerts-badge')).toBeHidden();
+  await expect(page.locator('#alerts-line')).toHaveText('No unacknowledged alerts');
+  await expect(page.locator('#alerts')).not.toHaveClass(/\bhas-emergency\b/);
+
+  await page.locator('#alerts-expand').click();
+  await expect(page.locator('#alerts-drawer')).toBeVisible();
+  await expect(page.locator('#alerts-expand')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveCount(1);
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveClass(/\backed\b/);
+});
+
+test('alerts_ack_all_and_drawer_row_ack', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  for (const n of [1, 2, 3]) await inject(page, { hex: `fff7a${n}`, callsign: `T${n}` });
+  await expect(page.locator('#alerts-count')).toHaveText('3');
+  await page.locator('#alerts-expand').click();
+  await expect.poll(() => drawerIds(page)).toEqual(['T3', 'T2', 'T1']);
+  await page.locator('#alerts-log tr[data-alert-id]', { hasText: 'T2' }).locator('.al-ack').click();
+  await expect(page.locator('#alerts-count')).toHaveText('2');
+  await page.locator('#alerts-ack-all').click();
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+  await expect(page.locator('#alerts-log tr[data-alert-id]:not(.acked)')).toHaveCount(0);
+  await expect(page.locator('#alerts-log tr.acked')).toHaveCount(3);
+});
+
+test('alerts_hide_show_and_persist', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await page.locator('#alerts-expand').click();
+  await page.locator('#alerts-hide').click();
+  await expect(page.locator('#alerts')).toBeHidden();
+  await expect(page.locator('#alerts-toggle')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#alerts-badge')).toHaveText('1');
+
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await expect(page.locator('#alerts')).toBeHidden();
+  await page.locator('#alerts-toggle').click();
+  await expect(page.locator('#alerts')).toBeVisible();
+  await expect(page.locator('#alerts-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await expect(page.locator('#alerts-drawer')).toBeVisible();
+  await expect(page.locator('#alerts-expand')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#alerts-log tr[data-alert-id]')).toHaveCount(1);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('skycue.alerts')).hidden)).toBe(false);
+});
+
+test('alerts_reload_keeps_log_without_refiring', async ({ page }) => {
+  await alertsOnly(page, ['watch'], { watch: [TARGET] });
+  await openPage(page);
+  await expect.poll(async () => (await alertState(page)).rows.length, { timeout: 20000 }).toBe(1);
+  const r0 = (await alertState(page)).rows[0];
+  expect([r0.rule, r0.key]).toEqual(['watch', `${TARGET}|icao`]);
+
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await waitMarkers(page, 10);
+  expect((await alertState(page)).rows.length).toBe(1);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await page.locator('#alerts-ack').click();
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await waitMarkers(page, 10);
+  const s = await alertState(page);
+  expect(s.rows.length).toBe(1);
+  expect(s.unacked).toBe(0);
+  expect(s.rows[0].quiet).toBe(false);
+  await expect(page.locator('#alerts-count')).toHaveText('0');
+});
+
+test('alerts_click_selects_aircraft', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await page.locator('#table-toggle').click();
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('table');
+  await page.locator('#alerts-line').click();
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('map');
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe('fff7a0');
+});
+
+test('alerts_click_turns_hide_filtered_off', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  try {
+    await inject(page, { hex: 'fff7a4', decision: 'out_of_range' });
+    await expect(page.locator('#alerts-count')).toHaveText('1');
+    await page.evaluate(() => window.skycueApp.setHideFiltered(true));
+    await page.locator('#alerts-line').click();
+    expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(false);
+    await expect(page.locator('#alerts-note')).toHaveText('Hide filtered turned off to show TEST77.');
+    expect(await page.evaluate(() => window.skycueApp.selected())).toBe('fff7a4');
+  } finally {
+    await page.evaluate(() => window.skycueApp.setHideFiltered(false));
+  }
+});
+
+test('alerts_click_untracked_offers_stats', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await page.route('**/api/stats/aircraft/fff7a5*', (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ key: 'fff7a5|icao', hex: 'fff7a5', addr_type: 'icao', first_seen: '2026-11-04T12:00:00.000Z',
+      last_seen: '2026-11-04T12:01:00.000Z', observations: 1 }) }));
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page, { hex: 'fff7a5' });
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await page.evaluate(() => window.skycueApp.removeTestMarker('fff7a5|icao'));
+  await page.locator('#alerts-line').click();
+  await expect(page.locator('#alerts-note')).toContainText('TEST77 is no longer tracked.');
+  await expect(page.locator('#alerts-open-stats')).toBeVisible();
+  await expect(page.locator('#alerts-open-stats')).toHaveText('Open in Stats');
+  await page.locator('#alerts-open-stats').click();
+  expect(await page.evaluate(() => window.skycueApp.mainView())).toBe('stats');
+  await expect.poll(async () => (await statsState(page)).detailKey).toBe('fff7a5|icao');
+
+  await page.locator('#stats-toggle').click();     // back to the map
+  await inject(page, { hex: 'fff7a6' });           // no route: the ledger answers 404
+  await expect(page.locator('#alerts-count')).toHaveText('2');
+  await page.evaluate(() => window.skycueApp.removeTestMarker('fff7a6|icao'));
+  const answered = page.waitForResponse((r) => r.url().includes('/api/stats/aircraft/fff7a6'));
+  await page.locator('#alerts-line').click();
+  await answered;
+  await expect(page.locator('#alerts-note')).toContainText('TEST77 is no longer tracked.');
+  await expect(page.locator('#alerts-open-stats')).toBeHidden();
+});
+
+test('alerts_text_is_not_html', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  const evil = '<img src=x onerror="window.__xss=1">';
+  await inject(page, { hex: 'fff7a7', callsign: evil });
+  await expect(page.locator('#alerts-line .al-id')).toHaveText(evil);
+  await page.locator('#alerts-expand').click();
+  await expect(page.locator('#alerts-log tr[data-alert-id] .al-id')).toHaveText(evil);
+  expect(await page.locator('#alerts img').count()).toBe(0);
+  expect(await page.locator('#alerts-drawer img').count()).toBe(0);
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+});
+
+test('alerts_strip_leaves_map_controls_clear', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  const s = await page.locator('#alerts').boundingBox();
+  // The scale and the weather control (the main daemon has no tiles, so no
+  // attribution control).
+  const bottoms = await page.evaluate(() => Array.from(document.querySelectorAll('#map .leaflet-bottom .leaflet-control'))
+    .filter((e) => e.offsetParent !== null).map((e) => e.getBoundingClientRect().bottom));
+  expect(bottoms.length).toBeGreaterThan(0);
+  for (const b of bottoms) expect(b).toBeLessThanOrEqual(s.y + 1);
+  const padding = (sel) => page.locator(sel).evaluate((e) => parseFloat(getComputedStyle(e).paddingBottom));
+  await page.locator('#table-toggle').click();
+  expect(await padding('#table-view')).toBeGreaterThanOrEqual(s.height);
+  await page.locator('#stats-toggle').click();
+  expect(await padding('#stats-view')).toBeGreaterThanOrEqual(s.height);
+  await page.locator('#stats-toggle').click();
+});
+
+test('alerts_survive_garbage_storage', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('skycue.alerts', '{"rules":7,"hidden":"x"}');
+    const rows = [];
+    for (let i = 0; i < 5000; i++) {
+      if (i % 7 === 0) { rows.push(i % 2 ? null : 'junk'); continue; }
+      rows.push({ id: i % 11 === 0 ? 'x' : i, rule: i % 5 === 0 ? 'bogus' : 'emergency',
+        time: i % 13 === 0 ? 'never' : new Date(1.7e12 + i * 1000).toISOString(), key: i % 3 ? `ab${i}|icao` : 42,
+        label: i % 4 ? `L${i}` : { a: 1 }, detail: 'squawk 7700', acked: i % 2 === 0, quiet: 'yes' });
+    }
+    localStorage.setItem('skycue.alertLog', JSON.stringify({ version: 1, nextId: 'q', rows,
+      pairs: { 'emergency|ab1|icao': 5, 'bogus|x': {} } }));
+  });
+  const errors = watchErrors(page);
+  await openPage(page);
+  await expect(page.locator('#alerts')).toBeVisible();
+  expect((await alertState(page)).rows.length).toBeLessThanOrEqual(200);
+  expect(errors).toEqual([]);
+});
+
+// Alerts pressed means "the strip is shown", not "this view is shown", so it
+// does not take the pressed look of Table and Stats.
+test('alerts_toggle_pressed_differs_from_view_pressed', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await page.locator('#stats-toggle').click();
+  await expect(page.locator('#stats-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#alerts-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await page.mouse.move(0, 0);
+  const bg = (sel) => page.locator(sel).evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await bg('#alerts-toggle')).not.toBe(await bg('#stats-toggle'));
+  await page.locator('#stats-toggle').click();
 });
 
 // ---- Config tab ----------------------------------------------------------------
@@ -1012,10 +1263,10 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openFisbPage(page);
     await expect(page.locator('#stat-fisb-stations')).not.toHaveText('–');
-    for (const d of await headerRowOffsets(page)) expect(d).toBeLessThan(4);
+    for (const d of await headerRowOffsets(page, '99')) expect(d).toBeLessThan(4);
     for (const width of [1401, 1600, 1700]) {
       await page.setViewportSize({ width, height: 800 });
-      for (const d of await headerRowOffsets(page)) expect(d, `at ${width} px`).toBeLessThan(4);
+      for (const d of await headerRowOffsets(page, '99')) expect(d, `at ${width} px`).toBeLessThan(4);
     }
   });
 

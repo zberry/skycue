@@ -53,6 +53,13 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 #panel-buttons > button:hover, #panel-buttons > button[aria-pressed="true"], #panel-buttons > button:focus-visible,
 #main-buttons > button:hover, #main-buttons > button[aria-pressed="true"], #main-buttons > button:focus-visible { z-index: 1; }
 [data-opens-tab][aria-pressed="true"], #table-toggle[aria-pressed="true"], #stats-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+/* Alerts: pressed means "the alert strip is shown", not "this view is
+   shown", so it does not take the views' accent look. */
+#alerts-toggle.strip-toggle[aria-pressed="true"] { background: var(--bg); }
+#alerts-badge {
+  display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 7px; background: var(--accent);
+  color: var(--bg); font-size: 11px; font-weight: 700; line-height: 14px; font-variant-numeric: tabular-nums;
+}
 #stat-inputs { padding: 0 6px; font-weight: 600; font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
 
@@ -136,6 +143,41 @@ input.invalid { border-color: var(--blocked); }
   position: absolute; inset: 0; overflow: auto; background: var(--bg); padding: var(--gutter); z-index: 1000;
 }
 #table-view[hidden] { display: none; }
+
+/* Alert strip (spec 3.1, 7; alerts_view.js): the bottom edge of the main
+   area, over the map, the table and the Stats view; 32 px collapsed, the
+   drawer above the bar while expanded (at most 40 % of the main area).
+   alerts_view.js sets --alerts-h to the strip's height while it is shown. */
+#alerts {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1100; max-height: 40%;
+  display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--line); font-size: 13px;
+}
+#map-wrap.alerts-on .leaflet-bottom { bottom: 32px; }
+#map-wrap.alerts-on #table-view, #map-wrap.alerts-on #stats-view { padding-bottom: calc(var(--alerts-h, 32px) + var(--gutter)); }
+.alerts-bar { flex: none; height: 32px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+.alerts-bar > button { flex: none; padding: 1px 8px; font-size: 12px; }
+#alerts-count {
+  flex: none; min-width: 20px; box-sizing: border-box; padding: 0 6px; border-radius: 9px; text-align: center;
+  background: var(--accent); color: var(--bg); font-size: 12px; font-weight: 700; line-height: 18px; font-variant-numeric: tabular-nums;
+}
+#alerts.has-emergency #alerts-count { background: var(--blocked); color: #fff; }
+#alerts-line { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+#alerts-line.none { color: var(--muted); cursor: default; }
+#alerts-line > span + span { margin-left: 8px; }
+#alerts .al-time, #alerts .al-kind { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+#alerts .al-id { font-family: ui-monospace, Menlo, Consolas, monospace; }
+#alerts .al-detail { color: var(--text); }
+#alerts-note {
+  flex: none; padding: 4px 8px 0; font-size: 12px; color: #e3b341;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#alerts-note button { margin-left: 8px; padding: 0 6px; font-size: 12px; }
+#alerts-drawer { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px; border-bottom: 1px solid var(--line); }
+#alerts-log tbody tr[data-alert-id] { cursor: pointer; }
+#alerts-log tbody tr[data-alert-id]:hover { background: var(--panel-2); }
+#alerts-log tbody tr.acked .al-id, #alerts-log tbody tr.acked .al-detail { color: var(--muted); }
+#alerts-log td.al-detail { white-space: normal; overflow-wrap: anywhere; width: 100%; }
+#alerts-log .al-ack { padding: 0 6px; font-size: 12px; }
 
 /* Stats view (spec 6): overlays the map like the table and scrolls; a
    toolbar, the headline tiles, then one card grid per section (2 columns,

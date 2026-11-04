@@ -34,6 +34,8 @@
   <span id="main-buttons" role="group" aria-label="Main view">
     <button id="table-toggle" type="button" aria-pressed="false">Table</button>
     <button id="stats-toggle" type="button" aria-pressed="false">Stats</button>
+    <button id="alerts-toggle" class="strip-toggle" type="button" aria-pressed="true" aria-controls="alerts"
+      title="Show or hide the alert strip">Alerts<span id="alerts-badge" hidden>0</span></button>
   </span>
 </header>
 <div id="conn-banner" role="alert" hidden>Disconnected from skycued, reconnecting…</div>
@@ -194,6 +196,25 @@
         <div id="stats-aircraft" class="stats-grid"></div>
       </section>
     </div>
+    <div id="alerts" role="region" aria-label="Alerts">
+      <div id="alerts-drawer" hidden>
+        <table id="alerts-log" class="cues-table">
+          <thead><tr><th>time</th><th>kind</th><th>aircraft / input</th><th>detail</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="alerts-note" role="status" hidden></div>
+      <div class="alerts-bar">
+        <span id="alerts-count" title="Unacknowledged alerts">0</span>
+        <span id="alerts-line" role="button" tabindex="0">No unacknowledged alerts</span>
+        <button id="alerts-ack" type="button" disabled>Ack</button>
+        <button id="alerts-ack-all" type="button" disabled>Ack all</button>
+        <button id="alerts-expand" type="button" aria-expanded="false" aria-controls="alerts-drawer"
+          title="Alert history">▲</button>
+        <button id="alerts-gear" type="button" title="Alert settings" aria-label="Alert settings">⚙</button>
+        <button id="alerts-hide" type="button" title="Hide the alert strip" aria-label="Hide the alert strip">×</button>
+      </div>
+    </div>
   </div>
   <aside id="details" tabindex="-1" aria-label="Side panel" hidden>
     <div class="tabs">
@@ -337,9 +358,11 @@
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="vendor/echarts/echarts.min.js"></script>
 <script src="app_pure.js"></script>
+<script src="alerts_pure.js"></script>
 <script src="stats_pure.js"></script>
 <script src="chart_theme.js"></script>
 <script src="stats_view.js"></script>
+<script src="alerts_view.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

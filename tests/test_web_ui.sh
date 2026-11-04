@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The web UI's files as skycued serves them from the staged www directory:
 # /, /app.js, /app_pure.js, the Stats view's stats_pure.js, chart_theme.js
-# and stats_view.js, the alert strip's alerts_pure.js, /style.css and (when Leaflet was staged)
+# and stats_view.js, the alert strip's alerts_pure.js and alerts_view.js, /style.css and (when Leaflet was staged)
 # /vendor/leaflet/leaflet.js and (when ECharts was staged)
 # /vendor/echarts/echarts.min.js with their content types, /api/state with the
 # fixture's 12 tracks, /api/stats/summary with its since, a path escaping
@@ -34,7 +34,7 @@ fail() {
   exit 1
 }
 for f in "$skycued" "$replay" "$www/index.html" "$www/app.js" "$www/app_pure.js" "$www/style.css" \
-  "$www/stats_pure.js" "$www/chart_theme.js" "$www/stats_view.js" "$www/alerts_pure.js"; do
+  "$www/stats_pure.js" "$www/chart_theme.js" "$www/stats_view.js" "$www/alerts_pure.js" "$www/alerts_view.js"; do
   [ -e "$f" ] || fail "$f missing"
 done
 
@@ -66,12 +66,12 @@ get() {
 get / 200 text/html
 grep -q 'vendor/leaflet/leaflet.js' "$tmp/body" || fail "index.html does not load Leaflet"
 grep -q 'app_pure.js' "$tmp/body" && grep -q 'app.js' "$tmp/body" || fail "index.html does not load the scripts"
-for js in vendor/echarts/echarts.min.js stats_pure.js chart_theme.js stats_view.js; do
+for js in vendor/echarts/echarts.min.js stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js; do
   grep -q "src=\"$js\"" "$tmp/body" || fail "index.html does not load $js"
 done
 get /app.js 200 application/javascript
 get /app_pure.js 200 application/javascript
-for js in stats_pure.js chart_theme.js stats_view.js; do get "/$js" 200 application/javascript; done
+for js in stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js; do get "/$js" 200 application/javascript; done
 get /style.css 200 text/css
 if [ -e "$www/vendor/leaflet/leaflet.js" ]; then
   get /vendor/leaflet/leaflet.js 200 application/javascript
@@ -117,7 +117,7 @@ for js in "$www"/*.js; do
 done
 
 if command -v node >/dev/null 2>&1; then
-  for js in app_pure.js app.js stats_pure.js chart_theme.js stats_view.js alerts_pure.js; do
+  for js in app_pure.js app.js stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js; do
     node --check "$www/$js" || fail "node --check $js"
   done
   node "$jsdir/app_pure.test.js" "$www/app_pure.js" || fail "app_pure.test.js"

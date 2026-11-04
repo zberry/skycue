@@ -2637,3 +2637,239 @@ test('stats_aircraft_focus_and_pending_search', async ({ page }) => {
   await expect.poll(async () => (await acState(page)).rows, { timeout: 10000 }).toEqual([TARGET_KEY]);
   await restoreMap(page);
 });
+
+// ---- Stats: Coverage, Fleet and Signal (spec 6 items 3-5) ----------------------
+const COVERAGE_CARDS = ['coverage-polar', 'coverage-range', 'coverage-elevation', 'coverage-density'];
+const FLEET_CARDS = ['fleet-altitude', 'fleet-speed', 'fleet-category', 'fleet-class', 'fleet-country',
+  'fleet-source', 'fleet-addr-type'];
+const SIGNAL_CARDS = ['signal-rssi-range', 'signal-rssi'];
+const BAND_COLOURS = ['#ff7b72', '#f0883e', '#e3b341', '#7ee787', '#56d4dd', '#58a6ff', '#d2a8ff', '#6e7681'];
+async function openCards(page, ids) {
+  await openStats(page);
+  await expect.poll(async () => (await statsState(page)).cards.filter((c) => ids.includes(c.id) && c.canvas)
+    .map((c) => c.id), { timeout: 15000 }).toEqual(ids);
+}
+// The page point of a series' data item: the middle of a bar, or a point
+// at `frac` of a sector's radius (a pie slice or a polar bar).
+const itemPoint = (page, card, seriesId, index, frac) => page.evaluate(([cid, sid, i, f]) => {
+  const el = document.querySelector('[data-card="' + cid + '"] .card-chart');
+  const inst = window.echarts.getInstanceByDom(el);
+  const model = inst.getModel().getSeries().find((s) => s.id === sid);
+  const lay = model.getData().getItemLayout(i);
+  const box = el.getBoundingClientRect();
+  if (lay.r !== undefined) {
+    const a = (lay.startAngle + lay.endAngle) / 2, r = lay.r0 + (lay.r - lay.r0) * f;
+    return { x: box.left + lay.cx + r * Math.cos(a), y: box.top + lay.cy + r * Math.sin(a) };
+  }
+  return { x: box.left + lay.x + lay.width * f, y: box.top + lay.y + lay.height / 2 };
+}, [card, seriesId, index, frac]);
+async function clickItem(page, card, seriesId, index, frac) {
+  await page.locator(`[data-card="${card}"]`).scrollIntoViewIfNeeded();
+  const p = await itemPoint(page, card, seriesId, index, frac);
+  await page.mouse.click(p.x, p.y);
+}
+// Hidden and shown again: the next refresh fetches coverage and rssi anew
+// (open() makes the slow fetches due). Live off, so nothing changes after.
+async function refetchSlow(page) {
+  await page.locator('#stats-live').uncheck();
+  const r0 = (await statsState(page)).refreshes;
+  await page.evaluate(() => { window.skycueApp.showMain('map'); window.skycueApp.showMain('stats'); });
+  await expect.poll(async () => (await statsState(page)).refreshes, { timeout: 10000 }).toBeGreaterThan(r0);
+  await page.evaluate(() => window.skycueApp.statsRefresh());   // the open's refresh has drawn
+}
+// A shot of the box around some cards (scrolled to the first).
+async function shootCards(page, ids, file) {
+  await page.locator(`[data-card="${ids[0]}"]`).scrollIntoViewIfNeeded();
+  await page.locator(`[data-card="${ids[0]}"]`).evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  const boxes = [];
+  for (const id of ids) boxes.push(await page.locator(`[data-card="${id}"]`).boundingBox());
+  const x = Math.min(...boxes.map((b) => b.x)), y = Math.min(...boxes.map((b) => b.y));
+  const r = Math.max(...boxes.map((b) => b.x + b.width)), b = Math.max(...boxes.map((q) => q.y + q.height));
+  await page.screenshot({ path: file, clip: { x, y, width: r - x, height: b - y } });
+}
+const pure = (page, fn, arg) => page.evaluate(([f, a]) => window.skycueStatsPure[f](a), [fn, arg]);
+
+test('stats_coverage_polar_histograms_and_density', async ({ page }, testInfo) => {
+  await openCards(page, COVERAGE_CARDS);
+  // The whole-history maxima only grow while the replay runs: the chart
+  // drawn between two reads lies between them.
+  const cov = (await api('/api/stats/coverage')).body;
+  await refetchSlow(page);
+  const p = await cardOption(page, 'coverage-polar');
+  const d = await cardOption(page, 'coverage-density');
+  const cov2 = (await api('/api/stats/coverage')).body;
+  const sum = (await api('/api/stats/summary')).body;
+  expect(sum.receiver).toBeTruthy();
+  expect(cov.cells.length).toBeGreaterThan(0);
+  // Polar: one bar series per band, in the map's band colours, 72 sectors.
+  expect(p.series.length).toBe(8);
+  const byId = {};
+  p.series.forEach((s) => { byId[s.id] = s; });
+  for (let i = 0; i < 8; i++) {
+    const s = byId['band:' + i];
+    expect(s.type).toBe('bar');
+    expect(s.coordinateSystem).toBe('polar');
+    expect(s.name).toBe(cov.bands[i]);
+    expect(s.itemStyle.color).toBe(BAND_COLOURS[i]);
+    expect(s.data.length).toBe(72);
+  }
+  expect(p.angleAxis[0].type).toBe('category');
+  expect(p.angleAxis[0].data.length).toBe(72);
+  expect(p.legend[0].data).toEqual(cov.bands);
+  // Each cell's largest range is its band's sector value.
+  const later = {};
+  cov2.cells.forEach((c) => { later[c.sector + ':' + c.band] = c.max_range_nm; });
+  for (const c of cov.cells) {
+    const v = byId['band:' + c.band].data[c.sector];
+    expect(v).toBeGreaterThanOrEqual(c.max_range_nm - 1e-6);
+    expect(v).toBeLessThanOrEqual(later[c.sector + ':' + c.band] + 1e-6);
+  }
+  expect(await cardCaption(page, 'coverage-polar')).toMatch(/^farthest \d+(\.\d)? nm · [0-9a-f]{6} · since /);
+  // Range and elevation: one bar series each, labels "<start>–<end>".
+  for (const id of ['coverage-range', 'coverage-elevation']) {
+    const o = await cardOption(page, id);
+    expect(o.series.length, id).toBe(1);
+    expect(o.series[0].type).toBe('bar');
+    expect(o.xAxis[0].data.length).toBe(o.series[0].data.length);
+    o.xAxis[0].data.forEach((l) => expect(l).toMatch(/^-?\d+–-?\d+$/));
+    expect(o.series[0].data.reduce((a, v) => a + v, 0)).toBeGreaterThan(0);
+    expect(await cardCaption(page, id)).toMatch(/^\d{1,3}(,\d{3})* observations · since /);
+  }
+  // Density: cells, rings and the receiver on a square plot.
+  expect(d.series.map((s) => [s.id, s.type])).toEqual([['cells', 'custom'], ['rings', 'line'], ['receiver', 'scatter']]);
+  expect(d.series[0].data.length).toBeGreaterThanOrEqual(cov.grid.cells.length);
+  expect(d.series[0].data.length).toBeLessThanOrEqual(cov2.grid.cells.length);
+  expect(d.series[2].data).toEqual([[cov.receiver.lon, cov.receiver.lat]]);
+  expect(d.series[1].data.filter((x) => x !== null).length % 73).toBe(0);
+  expect(d.series[1].data.length).toBeGreaterThan(0);
+  expect(d.grid[0].width).toBe(d.grid[0].height);
+  const xa = d.xAxis[0], ya = d.yAxis[0];
+  expect((xa.max - xa.min) * Math.cos(cov.receiver.lat * Math.PI / 180)).toBeCloseTo(ya.max - ya.min, 6);
+  expect(await cardCaption(page, 'coverage-density')).toMatch(/^\d{1,3}(,\d{3})* cells · \d{1,3}(,\d{3})* positions/);
+  const sec = sectionOf(page, '#stats-coverage');
+  await sec.scrollIntoViewIfNeeded();
+  await sec.screenshot({ path: testInfo.outputPath(`skycue-stats-coverage-${testInfo.project.name}.png`) });
+});
+
+// The "no receiver position" caption needs a daemon without RECEIVER_LAT/LON;
+// every UI daemon here has one (the radar, FIS-B and receivers daemons too),
+// so it is not tested in the browser.
+test.skip('stats_coverage_caption_without_receiver', async () => {});
+
+test('stats_coverage_polar_click_opens_record_holder', async ({ page }) => {
+  await openCards(page, COVERAGE_CARDS);
+  await page.locator('#stats-live').uncheck();
+  const cov = (await api('/api/stats/coverage')).body;
+  const far = cov.cells.reduce((m, c) => (!m || c.max_range_nm > m.max_range_nm ? c : m), null);
+  // Near the tip of the farthest bar: no other bar of that sector reaches it.
+  // Hovering shows the record holder's address and range.
+  await page.locator('[data-card="coverage-polar"]').scrollIntoViewIfNeeded();
+  const pt = await itemPoint(page, 'coverage-polar', 'band:' + far.band, far.sector, 0.95);
+  await page.mouse.move(pt.x, pt.y);
+  await expect(page.locator('[data-card="coverage-polar"] .card-chart'))
+    .toContainText(far.key.split('|')[0] + '', { timeout: 5000 });
+  await clickItem(page, 'coverage-polar', 'band:' + far.band, far.sector, 0.95);
+  await expect(page.locator('#stats-detail')).toBeVisible();
+  expect((await statsState(page)).detailKey).toBe(far.key);
+  await expect(page.locator('#stats-detail .card-title')).toContainText(far.key.split('|')[0]);
+  await page.locator('#stats-detail-close').click();
+});
+
+test('stats_fleet_histograms_donuts_and_countries', async ({ page }, testInfo) => {
+  await openCards(page, FLEET_CARDS);
+  const sum = (await api('/api/stats/summary')).body;
+  for (const id of ['fleet-altitude', 'fleet-speed']) {
+    const o = await cardOption(page, id);
+    expect(o.series.map((s) => s.type), id).toEqual(['bar']);
+    expect(o.xAxis[0].data.length).toBe(o.series[0].data.length);
+    expect(o.series[0].data.reduce((a, v) => a + v, 0)).toBeGreaterThan(0);
+  }
+  for (const id of ['fleet-category', 'fleet-class', 'fleet-source', 'fleet-addr-type']) {
+    const o = await cardOption(page, id);
+    expect(o.series.map((s) => s.type), id).toEqual(['pie']);
+    expect(o.series[0].data.length, id).toBeGreaterThan(0);
+    const v = o.series[0].data.map((x) => x.value);
+    for (let i = 1; i < v.length; i++) expect(v[i - 1]).toBeGreaterThanOrEqual(v[i]);
+  }
+  const names = async (id) => (await cardOption(page, id)).series[0].data.map((x) => x.name).sort();
+  expect(await names('fleet-category')).toEqual(Object.keys(sum.counts.by_category).sort());
+  expect(await names('fleet-source')).toEqual(Object.keys(sum.counts.by_source).sort());
+  expect(await names('fleet-addr-type')).toEqual(Object.keys(sum.counts.by_addr_type).sort());
+  for (const n of await names('fleet-class')) expect(['airline', 'private', 'military', 'unknown']).toContain(n);
+  const c = await cardOption(page, 'fleet-country');
+  expect(c.series.map((s) => s.type)).toEqual(['bar']);
+  expect(c.yAxis[0].data.length).toBeGreaterThan(0);
+  expect(c.yAxis[0].data.length).toBeLessThanOrEqual(16);
+  expect(c.yAxis[0].data.length).toBe(c.series[0].data.length);
+  expect(await cardCaption(page, 'fleet-class')).toMatch(/^\d{1,3}(,\d{3})* aircraft in the range$/);
+  expect(await cardCaption(page, 'fleet-category')).toMatch(/observations · \d+ categor(y|ies) · since /);
+  // The section is taller than the view: two shots, the first cards and the rest.
+  await shootCards(page, FLEET_CARDS.slice(0, 4), testInfo.outputPath(`skycue-stats-fleet-${testInfo.project.name}.png`));
+  await shootCards(page, FLEET_CARDS.slice(4), testInfo.outputPath(`skycue-stats-fleet-2-${testInfo.project.name}.png`));
+});
+
+test('stats_fleet_category_and_class_clicks_filter_the_map', async ({ page }) => {
+  await openCards(page, FLEET_CARDS);
+  await page.locator('#stats-live').uncheck();
+  const code = (await cardOption(page, 'fleet-category')).series[0].data[0].name;
+  const want = (await pure(page, 'categoryFilter', code)).category;
+  await clickItem(page, 'fleet-category', 'donut', 0, 0.5);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.mainView())).toBe('map');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().category)).toBe(want);
+  await restoreMap(page);
+  await page.evaluate(() => window.skycueApp.showMain('stats'));
+  await expect.poll(async () => (await statsState(page)).cards.find((x) => x.id === 'fleet-class').canvas,
+    { timeout: 15000 }).toBe(true);
+  await page.locator('#stats-live').uncheck();
+  const cls = (await cardOption(page, 'fleet-class')).series[0].data[0].name;
+  await clickItem(page, 'fleet-class', 'donut', 0, 0.5);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.mainView())).toBe('map');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().classes)).toEqual([cls]);
+  await restoreMap(page);
+});
+
+test('stats_fleet_country_click_filters_the_map', async ({ page }) => {
+  await openCards(page, FLEET_CARDS);
+  await page.locator('#stats-live').uncheck();
+  const list = (await cardOption(page, 'fleet-country')).yAxis[0].data;
+  const i = list.findIndex((n) => n !== 'other');
+  expect(i).toBeGreaterThanOrEqual(0);
+  const want = (await pure(page, 'countryFilter', list[i])).country;
+  await clickItem(page, 'fleet-country', 'countries', i, 0.5);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.mainView())).toBe('map');
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().country)).toBe(want);
+  await restoreMap(page);
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().country)).toBe('');
+});
+
+test('stats_signal_rssi_vs_range_and_histogram', async ({ page }, testInfo) => {
+  await openCards(page, SIGNAL_CARDS);
+  const rssi = (await api('/api/stats/rssi')).body;
+  await refetchSlow(page);
+  const o = await cardOption(page, 'signal-rssi-range');
+  const rssi2 = (await api('/api/stats/rssi')).body;
+  expect(o.series.map((s) => [s.id, s.type])).toEqual([['cells', 'heatmap'], ['median', 'line']]);
+  // The range axis ends a bin past the farthest column with counts.
+  const lastCol = rssi2.counts.reduce((a, row, r) => (row.some((n) => n > 0) ? r : a), -1);
+  expect(o.xAxis[0].data.length).toBeGreaterThanOrEqual(Math.min(10, rssi.counts.length));
+  expect(o.xAxis[0].data.length).toBeLessThanOrEqual(Math.min(rssi.counts.length, Math.max(10, lastCol + 2)));
+  o.series[0].data.forEach((c) => expect(c[0]).toBeLessThan(o.xAxis[0].data.length));
+  expect(o.yAxis[0].data.length).toBe(rssi.counts[0].length);
+  // Cells only appear while the replay runs: the drawing lies between the two reads.
+  const cols = (m) => m.counts.filter((row) => row.some((n) => n > 0)).length;
+  const nonZero = (m) => m.counts.reduce((a, row) => a + row.filter((n) => n > 0).length, 0);
+  expect(cols(rssi)).toBeGreaterThan(0);
+  expect(o.series[1].data.length).toBeGreaterThanOrEqual(cols(rssi));
+  expect(o.series[1].data.length).toBeLessThanOrEqual(cols(rssi2));
+  expect(o.series[0].data.length).toBeGreaterThanOrEqual(nonZero(rssi));
+  expect(o.series[0].data.length).toBeLessThanOrEqual(nonZero(rssi2));
+  // Each median point sits on a bin of the rssi axis.
+  o.series[1].data.forEach((m) => { expect(Number.isInteger(m[1])).toBe(true); expect(m[1]).toBeGreaterThanOrEqual(0); });
+  const h = await cardOption(page, 'signal-rssi');
+  expect(h.series.map((s) => s.type)).toEqual(['bar']);
+  expect(h.series[0].data.reduce((a, v) => a + v, 0)).toBeGreaterThan(0);
+  expect(await cardCaption(page, 'signal-rssi-range')).toMatch(/observations with a range and signal · since /);
+  const sec = sectionOf(page, '#stats-signal');
+  await sec.scrollIntoViewIfNeeded();
+  await sec.screenshot({ path: testInfo.outputPath(`skycue-stats-signal-${testInfo.project.name}.png`) });
+});

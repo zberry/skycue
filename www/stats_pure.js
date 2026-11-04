@@ -328,6 +328,187 @@
     return { range_nm: r, bearing_deg: row.max_range_bearing_deg, max_nm: max };
   }
 
+  // ---- Coverage, Fleet and Signal (spec 6 items 3-5) ----------------------------
+  var COVERAGE_BANDS = ['0-2.5k', '2.5-5k', '5-10k', '10-20k', '20-30k', '30-40k', '40k+', 'unknown'];
+  var SECTORS = 72;
+
+  // GET api/stats/coverage's cells as the polar chart's series: one per
+  // band (in the coverage's band order), 72 sector values each (the band's
+  // largest range there, 0 where empty), holder(sector, band) -> that
+  // cell or null, and max = the farthest cell of all (null when none).
+  function polarSeries(coverage) {
+    var names = coverage && Array.isArray(coverage.bands) && coverage.bands.length ? coverage.bands : COVERAGE_BANDS;
+    var deg = coverage && isNum(coverage.sector_deg) && coverage.sector_deg > 0 ? coverage.sector_deg : 360 / SECTORS;
+    var n = Math.round(360 / deg);
+    var angles = [], i;
+    for (i = 0; i < n; i++) angles.push(i * deg);
+    var bands = names.map(function (name) {
+      var data = [];
+      for (var k = 0; k < n; k++) data.push(0);
+      return { name: name, data: data };
+    });
+    var cells = {}, max = null;
+    var list = coverage && Array.isArray(coverage.cells) ? coverage.cells : [];
+    list.forEach(function (c) {
+      if (!c || !isNum(c.sector) || !isNum(c.band) || !isNum(c.max_range_nm)) return;
+      if (c.sector < 0 || c.sector >= n || c.band < 0 || c.band >= bands.length) return;
+      bands[c.band].data[c.sector] = c.max_range_nm;
+      cells[c.sector + ':' + c.band] = c;
+      if (!max || c.max_range_nm > max.max_range_nm) max = c;
+    });
+    return {
+      angles: angles, bands: bands, max: max,
+      holder: function (sector, band) { return cells[sector + ':' + band] || null; }
+    };
+  }
+
+  // A histogram {start, bin, counts} as bars: labels "<start>–<end>" of each
+  // bin and the counts. With trim, the empty bins before the first count
+  // and after the last are left out (none at all when every bin is empty).
+  function histBars(h, trim) {
+    var out = { labels: [], values: [] };
+    if (!h || !Array.isArray(h.counts) || !isNum(h.start) || !isNum(h.bin)) return out;
+    var lo = 0, hi = h.counts.length - 1;
+    if (trim) {
+      while (lo <= hi && !(h.counts[lo] > 0)) lo++;
+      while (hi >= lo && !(h.counts[hi] > 0)) hi--;
+    }
+    for (var i = lo; i <= hi; i++) {
+      out.labels.push(String(h.start + i * h.bin) + '–' + String(h.start + (i + 1) * h.bin));
+      out.values.push(isNum(h.counts[i]) ? h.counts[i] : 0);
+    }
+    return out;
+  }
+
+  // GET api/stats/rssi as heatmap cells [rangeBin, rssiBin, n] (non-zero
+  // only, range-major) and the median signal per range column
+  // [rangeBin, dB at the median bin's centre] (columns without counts left
+  // out; an even count takes the lower middle). ranges/levels: the matrix size.
+  function rssiHeatmap(rssi) {
+    var out = { data: [], median: [], ranges: 0, levels: 0 };
+    if (!rssi || !Array.isArray(rssi.counts)) return out;
+    var start = isNum(rssi.rssi_start) ? rssi.rssi_start : -50;
+    var bin = isNum(rssi.rssi_bin_db) ? rssi.rssi_bin_db : 2;
+    out.ranges = rssi.counts.length;
+    rssi.counts.forEach(function (row, r) {
+      if (!Array.isArray(row)) return;
+      if (row.length > out.levels) out.levels = row.length;
+      var sum = 0;
+      row.forEach(function (n, b) {
+        if (isNum(n) && n > 0) { out.data.push([r, b, n]); sum += n; }
+      });
+      if (!sum) return;
+      var cum = 0;
+      for (var b = 0; b < row.length; b++) {
+        cum += isNum(row[b]) && row[b] > 0 ? row[b] : 0;
+        if (cum >= sum / 2) { out.median.push([r, start + b * bin + bin / 2]); break; }
+      }
+    });
+    return out;
+  }
+
+  // A count object {name: n} as donut slices, most first (ties by name),
+  // zeros dropped.
+  function donut(obj) {
+    if (!obj || typeof obj !== 'object') return [];
+    return Object.keys(obj).filter(function (k) { return isNum(obj[k]) && obj[k] > 0; })
+      .map(function (k) { return { name: k, value: obj[k] }; })
+      .sort(function (a, b) { return b.value - a.value || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0); });
+  }
+
+  // summary.range.by_country ([{name, n}], most first) as the first n bars
+  // and one final 'other' holding the rest plus the daemon's own 'other'.
+  function topCountries(byCountry, n) {
+    if (!Array.isArray(byCountry)) return [];
+    var other = 0, list = [];
+    byCountry.forEach(function (c) {
+      if (!c || !isNum(c.n)) return;
+      if (c.name === 'other') other += c.n;
+      else list.push({ name: String(c.name), value: c.n });
+    });
+    list.sort(function (a, b) { return b.value - a.value || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0); });
+    list.slice(n).forEach(function (c) { other += c.value; });
+    list = list.slice(0, n);
+    if (other > 0) list.push({ name: 'other', value: other });
+    return list;
+  }
+
+  // The position grid (GET api/stats/coverage's grid, [lat, lon, n]) as
+  // heatmap cells [lon, lat, n] and a view square on the ground around the
+  // receiver (else the cells' centre) that holds every cell: the latitude
+  // span is the longitude span times cos(latitude), so 50 nm rings are
+  // round on a square plot. Half a side is 50 nm at the least. null
+  // without cells. centre = [lon, lat]; halfNm = half the side in nm.
+  var NM_PER_DEG = 60;
+  function gridView(coverage) {
+    var g = coverage && coverage.grid;
+    var cells = g && Array.isArray(g.cells) ? g.cells.filter(function (c) {
+      return Array.isArray(c) && isNum(c[0]) && isNum(c[1]) && isNum(c[2]);
+    }) : [];
+    if (!cells.length) return null;
+    var cell = isNum(g.cell_deg) ? g.cell_deg : 0.05, h = cell / 2;
+    var rx = coverage.receiver && isNum(coverage.receiver.lat) && isNum(coverage.receiver.lon) ? coverage.receiver : null;
+    var lat0, lon0;
+    if (rx) { lat0 = rx.lat; lon0 = rx.lon; } else {
+      var b = [Infinity, -Infinity, Infinity, -Infinity];
+      cells.forEach(function (c) {
+        b[0] = Math.min(b[0], c[0] - h); b[1] = Math.max(b[1], c[0] + h);
+        b[2] = Math.min(b[2], c[1] - h); b[3] = Math.max(b[3], c[1] + h);
+      });
+      lat0 = (b[0] + b[1]) / 2;
+      lon0 = (b[2] + b[3]) / 2;
+    }
+    var cos = Math.max(0.05, Math.cos(lat0 * Math.PI / 180));
+    var half = 50 / NM_PER_DEG;   // degrees of latitude
+    cells.forEach(function (c) {
+      half = Math.max(half, Math.abs(c[0] - lat0) + h, (Math.abs(c[1] - lon0) + h) * cos);
+    });
+    return {
+      data: cells.map(function (c) { return [c[1], c[0], c[2]]; }),
+      xMin: lon0 - half / cos, xMax: lon0 + half / cos, yMin: lat0 - half, yMax: lat0 + half,
+      cell: cell, centre: [lon0, lat0], receiver: !!rx, halfNm: half * NM_PER_DEG
+    };
+  }
+
+  // A range ring nm around the receiver: 72 points [lon, lat] every 5°
+  // (great circle, P.destinationPoint).
+  function rangeRing(receiver, nm) {
+    if (!receiver || !isNum(receiver.lat) || !isNum(receiver.lon)) return [];
+    var out = [];
+    for (var b = 0; b < 360; b += 5) {
+      var p = P.destinationPoint(receiver.lat, receiver.lon, b, nm);
+      out.push([p[1], p[0]]);
+    }
+    return out;
+  }
+  // The rings of a square view of half side halfNm: every 50 nm out to
+  // its corners, one at the least.
+  function ringRadii(halfNm) {
+    var out = [50];
+    for (var r = 100; r <= halfNm * Math.SQRT2; r += 50) out.push(r);
+    return out;
+  }
+
+  // The view filter a Fleet click sets (ruling 5): a category slice A1-A7
+  // is itself, 'none' is 'none', any other code 'other'; a class slice is
+  // that class alone; a country bar is that country, the daemon's 'unknown'
+  // (no country) the filter's 'other', and the remainder bar ('other',
+  // many countries) none (null).
+  var FILTER_CATEGORIES = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
+  function categoryFilter(code) {
+    if (FILTER_CATEGORIES.indexOf(code) >= 0 || code === 'none') return { category: code };
+    return { category: 'other' };
+  }
+  function classFilter(name) {
+    return P.CLASSES.indexOf(name) >= 0 ? { classes: [name] } : null;
+  }
+  function countryFilter(name) {
+    if (!name || name === 'other') return null;
+    return { country: name === 'unknown' ? 'other' : String(name) };
+  }
+  // A ledger key '<hex>|<addr_type>' -> its hex.
+  function keyHex(key) { return key ? String(key).split('|')[0] : ''; }
+
   var api = {
     RANGES: RANGES, DEFAULT_RANGE: DEFAULT_RANGE, rangeKey: rangeKey, rangeQuery: rangeQuery,
     seriesTimes: seriesTimes, sliceSeries: sliceSeries, spark: spark, DROP_FIELDS: DROP_FIELDS,
@@ -337,7 +518,10 @@
     uatSeries: uatSeries, uatShown: uatShown,
     AIRCRAFT_PAGE: AIRCRAFT_PAGE, AIRCRAFT_SORTS: AIRCRAFT_SORTS, AIRCRAFT_COLS: AIRCRAFT_COLS,
     aircraftQuery: aircraftQuery, aircraftCell: aircraftCell, aircraftPager: aircraftPager,
-    aircraftLastPage: aircraftLastPage, detailRows: detailRows, detailPolar: detailPolar, isoTime: isoTime
+    aircraftLastPage: aircraftLastPage, detailRows: detailRows, detailPolar: detailPolar, isoTime: isoTime,
+    COVERAGE_BANDS: COVERAGE_BANDS, polarSeries: polarSeries, histBars: histBars, rssiHeatmap: rssiHeatmap,
+    donut: donut, topCountries: topCountries, gridView: gridView, rangeRing: rangeRing, ringRadii: ringRadii,
+    categoryFilter: categoryFilter, classFilter: classFilter, countryFilter: countryFilter, keyHex: keyHex
   };
   if (root) root.skycueStatsPure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

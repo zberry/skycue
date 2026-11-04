@@ -487,6 +487,311 @@
       });
     });
 
+    // ---- Coverage, Fleet and Signal (spec 6 items 3-5) -------------------------
+    // Whole-history charts (summary.hist and counts, coverage, rssi) say
+    // "since <since>"; class and country follow the range. A null coverage
+    // or rssi (not fetched yet, or its fetch failed) keeps the last drawing.
+    // Tooltips are HTML: every API string in one goes through esc().
+    var NO_RECEIVER = 'No receiver position: coverage, range and elevation need RECEIVER_LAT/RECEIVER_LON';
+    var BAND_COLOURS = theme.bands || (window.skycueChartTheme && window.skycueChartTheme.BANDS) || [];
+    var CATEGORY_LABELS = (window.skycuePure && window.skycuePure.CATEGORY_LABELS) || {};
+    var SOURCE_LABEL = { adsb_1090: 'ADS-B 1090', uat_978: 'UAT 978', tisb: 'TIS-B', adsr: 'ADS-R', mlat: 'MLAT' };
+    var ADDR_LABEL = { icao: 'ICAO', non_icao: 'non-ICAO', tisb_trackfile: 'TIS-B track file' };
+    var ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return ESC[c]; }); }
+    function withSince(text, summary) {
+      var s = S.sinceText(summary && summary.since);
+      return s ? text + ' · ' + s : text;
+    }
+    function sum(values) { return values.reduce(function (a, v) { return a + (typeof v === 'number' ? v : 0); }, 0); }
+    // A card without a chart (no receiver) shows its caption only.
+    function showChart(card, on) { card.el.querySelector('.card-chart').hidden = !on; }
+    // A click handler, bound once per chart instance (a disposed chart is
+    // recreated without it).
+    function onClick(card, ch, fn) {
+      if (card.clickChart === ch) return;
+      card.clickChart = ch;
+      ch.on('click', fn);
+    }
+    var hasReceiver = function (summary) {
+      return !!(summary && summary.receiver && typeof summary.receiver.lat === 'number');
+    };
+    // The view filter set by a Fleet click, then the map.
+    function filterMap(partial) {
+      if (!partial) return;
+      host.setViewFilter(partial);
+      host.showMain('map');
+    }
+
+    // A histogram card (bars of hist.<name>, the empty ends trimmed).
+    function drawHist(card, summary, name, unit, colour) {
+      if (!summary) return;
+      var h = summary.hist && summary.hist[name];
+      var b = S.histBars(h, true);
+      card.setCaption(withSince(fmt(sum(b.values)) + ' observations', summary));
+      var ch = card.chart();
+      if (!ch) return;
+      ch.setOption({
+        animation: false,
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: function (ps) {
+          var p = ps[0];
+          return p ? esc(p.name + ' ' + unit) + '<br>' + fmt(p.value) + ' observations' : '';
+        } },
+        grid: { left: 48, right: 16, top: 12, bottom: 34 },
+        xAxis: { type: 'category', data: b.labels, name: unit, nameLocation: 'middle', nameGap: 22,
+          axisTick: { alignWithLabel: false }, axisLabel: { hideOverlap: true, formatter: function (v) {
+            return String(v).split('–')[0];
+          } } },
+        yAxis: countAxis(),
+        series: [{ id: name, name: name, type: 'bar', data: b.values, barCategoryGap: '12%', itemStyle: { color: colour } }]
+      });
+    }
+
+    // A donut of {name: n}, slices named by labelOf; click(name) when given.
+    function drawDonut(card, items, labelOf, unit, click) {
+      var ch = card.chart();
+      if (!ch) return;
+      if (click) onClick(card, ch, function (p) { if (p && p.componentType === 'series') click(p.name); });
+      ch.setOption({
+        animation: false,
+        tooltip: { trigger: 'item', formatter: function (p) {
+          return esc(labelOf(p.name)) + '<br>' + fmt(p.value) + ' ' + unit + ' (' + host.formatNum(p.percent, 1, ' %') + ')';
+        } },
+        series: [{ id: 'donut', type: 'pie', radius: ['40%', '66%'], center: ['50%', '52%'], cursor: click ? 'pointer' : 'default',
+          data: items.map(function (x) { return { name: x.name, value: x.value }; }),
+          label: { color: tk.text, fontSize: 11, formatter: function (p) { return labelOf(p.name); } },
+          labelLine: { length: 6, length2: 6 }, minShowLabelAngle: 4,
+          itemStyle: { borderColor: tk.panel, borderWidth: 1 } }]
+      });
+    }
+
+    // ---- Coverage --------------------------------------------------------------
+    var polar = S.polarSeries(null);   // the drawn table (tooltip and click)
+    function polarBand(p) { return p && p.seriesId ? Number(String(p.seriesId).split(':')[1]) : -1; }
+    function drawPolar(card, d) {
+      if (!d.summary) return;
+      if (!hasReceiver(d.summary)) { showChart(card, false); card.setCaption(NO_RECEIVER); return; }
+      showChart(card, true);
+      if (!d.coverage) return;
+      polar = S.polarSeries(d.coverage);
+      var m = polar.max;
+      card.setCaption(withSince(m ? 'farthest ' + host.formatNum(m.max_range_nm, 1, ' nm') + ' · ' + S.keyHex(m.key)
+        : 'no ranges yet', d.summary));
+      var ch = card.chart();
+      if (!ch) return;
+      onClick(card, ch, function (p) {
+        var h = polar.holder(p.dataIndex, polarBand(p));
+        if (h && h.key) openAircraft(h.key);
+      });
+      var deg = polar.angles.length ? 360 / polar.angles.length : 5;
+      var compass = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
+      // The bars of a sector overlap (the largest range of each band, not a
+      // sum); the low bands, usually the shortest, are drawn last, on top.
+      var series = [];
+      for (var i = polar.bands.length - 1; i >= 0; i--) {
+        series.push({ id: 'band:' + i, name: polar.bands[i].name, type: 'bar', coordinateSystem: 'polar',
+          data: polar.bands[i].data, barGap: '-100%', barCategoryGap: '0%', cursor: 'pointer',
+          itemStyle: { color: BAND_COLOURS[i] } });
+      }
+      ch.setOption({
+        animation: false,
+        legend: Object.assign({}, LEGEND_WRAP, { data: polar.bands.map(function (b) { return b.name; }) }),   // all 8 on view
+        tooltip: { trigger: 'item', formatter: function (p) {
+          var h = polar.holder(p.dataIndex, polarBand(p));
+          if (!h) return '';
+          var a = p.dataIndex * deg;
+          return esc(a + '–' + (a + deg) + '° · ' + p.seriesName + ' ft') + '<br>' +
+            esc(host.formatNum(h.max_range_nm, 1, ' nm') + ' · ' + S.keyHex(h.key)) + '<br>' +
+            esc(S.isoTime(h.time)) + '<br>' + fmt(h.n) + ' observations';
+        } },
+        polar: { radius: [0, '72%'], center: ['50%', '58%'] },
+        angleAxis: { type: 'category', data: polar.angles.map(String), startAngle: 90, clockwise: true,
+          axisTick: { show: false }, axisLabel: { interval: 0, formatter: function (v) { return compass[v] || ''; } },
+          splitLine: { show: false } },
+        radiusAxis: { type: 'value', min: 0, splitNumber: 3,
+          axisLabel: { fontSize: 10, formatter: function (v) { return v ? v + ' nm' : ''; } } },
+        series: series
+      });
+    }
+    function drawRange(card, d, name, unit, colour) {
+      if (!d.summary) return;
+      if (!hasReceiver(d.summary)) { showChart(card, false); card.setCaption(NO_RECEIVER); return; }
+      showChart(card, true);
+      drawHist(card, d.summary, name, unit, colour);
+    }
+    // The position density on a lat/lon grid: square on the ground, the
+    // receiver marked, rings every 50 nm, no basemap.
+    function drawDensity(card, d) {
+      if (!d.coverage) return;
+      var v = S.gridView(d.coverage);
+      var g = d.coverage.grid || {};
+      var n = v ? sum(v.data.map(function (c) { return c[2]; })) : 0;
+      card.setCaption(withSince(v ? fmt(v.data.length) + ' cells · ' + fmt(n) + ' positions' +
+        (g.full ? ' · grid full' : '') : 'no positions yet', d.summary));
+      showChart(card, !!v);
+      var ch = v && card.chart();
+      if (!ch) return;
+      var rx = d.coverage.receiver;
+      var rings = [];
+      if (v.receiver) {
+        S.ringRadii(v.halfNm).forEach(function (nm) {
+          var ring = S.rangeRing(rx, nm);
+          if (rings.length) rings.push(null);   // a gap between rings
+          rings = rings.concat(ring, [ring[0]]);
+        });
+      }
+      var max = 1;
+      v.data.forEach(function (c) { if (c[2] > max) max = c[2]; });
+      var half = v.cell / 2;
+      var side = Math.max(60, ch.getHeight() - 40);   // a square plot, centred
+      var left = Math.max(48, Math.round((ch.getWidth() - side) / 2));
+      var deg = function (x) { return host.formatNum(x, 1, '°'); };
+      ch.setOption({
+        animation: false,
+        tooltip: { trigger: 'item', formatter: function (p) {
+          if (p.seriesId === 'receiver') return 'receiver';
+          var c = p.value;
+          return esc(host.formatNum(c[1], 3, '°') + ', ' + host.formatNum(c[0], 3, '°')) + '<br>' + fmt(c[2]) + ' positions';
+        } },
+        grid: { top: 10, height: side, width: side, left: left },
+        // The edges are not round numbers: their labels would crowd the next one.
+        xAxis: { type: 'value', min: v.xMin, max: v.xMax, scale: true, splitLine: { show: false },
+          axisLabel: { hideOverlap: true, formatter: deg, showMinLabel: false, showMaxLabel: false } },
+        yAxis: { type: 'value', min: v.yMin, max: v.yMax, scale: true, splitLine: { show: false },
+          axisLabel: { formatter: deg, showMinLabel: false, showMaxLabel: false } },
+        // The colour follows log10(n), so a few busy cells do not wash out the rest.
+        visualMap: { type: 'continuous', seriesIndex: 0, dimension: 3, min: -0.5, max: Math.max(0.5, Math.log10(max)),
+          calculable: false, orient: 'vertical', left: left + side + 16, top: 'middle', itemWidth: 10, itemHeight: 120,
+          text: [fmt(max), '1'], inRange: { color: [tk.line || '#30363d', tk.accent || '#58a6ff', dec.elev || '#f0883e'] } },
+        series: [
+          { id: 'cells', name: 'positions', type: 'custom', encode: { x: 0, y: 1 },
+            data: v.data.map(function (c) { return [c[0], c[1], c[2], Math.log10(c[2])]; }),
+            renderItem: function (params, api) {
+              var a = api.coord([api.value(0) - half, api.value(1) + half]);
+              var b = api.coord([api.value(0) + half, api.value(1) - half]);
+              return { type: 'rect', shape: { x: a[0], y: a[1], width: Math.max(1, b[0] - a[0]), height: Math.max(1, b[1] - a[1]) },
+                style: { fill: api.visual('color') } };
+            } },
+          { id: 'rings', name: '50 nm rings', type: 'line', data: rings, symbol: 'none', silent: true, connectNulls: false,
+            tooltip: { show: false }, lineStyle: { color: tk.muted, width: 1, type: 'dashed', opacity: 0.8 } },
+          { id: 'receiver', name: 'receiver', type: 'scatter', data: v.receiver ? [[rx.lon, rx.lat]] : [],
+            symbol: 'diamond', symbolSize: 10, itemStyle: { color: tk.text, borderColor: tk.bg, borderWidth: 1 }, z: 5 }
+        ]
+      });
+    }
+    registerSection(function (d) {
+      var grid = sectionEl('coverage');
+      drawPolar(addCard(grid, 'coverage-polar', 'Range by bearing and altitude'), d);
+      drawRange(addCard(grid, 'coverage-range', 'Range'), d, 'range', 'nm', tk.accent);
+      drawRange(addCard(grid, 'coverage-elevation', 'Elevation'), d, 'elevation', '°', dec.elev);
+      drawDensity(addCard(grid, 'coverage-density', 'Position density'), d);
+    });
+
+    // ---- Fleet -----------------------------------------------------------------
+    var catLabel = function (code) { return CATEGORY_LABELS[code] ? code + ' ' + CATEGORY_LABELS[code] : code; };
+    var labelFrom = function (table) { return function (k) { return table[k] || String(k).replace(/_/g, ' '); }; };
+    function drawCountries(card, d) {
+      var r = rangeOf(d.summary);
+      if (!r) return;
+      var list = S.topCountries(r.by_country, 15);
+      card.setCaption(fmt(r.aircraft) + ' aircraft in the range' + (list.length ? ' · top 15' : ''));
+      var ch = card.chart();
+      if (!ch) return;
+      onClick(card, ch, function (p) { if (p && p.componentType === 'series') filterMap(S.countryFilter(p.name)); });
+      ch.setOption({
+        animation: false,
+        tooltip: { trigger: 'item', formatter: function (p) {
+          return esc(p.name === 'unknown' ? 'unknown (no country)' : p.name) + '<br>' + fmt(p.value) + ' aircraft';
+        } },
+        grid: { left: 8, right: 24, top: 6, bottom: 20, containLabel: true },
+        xAxis: { type: 'value', min: 0, minInterval: 1, axisLabel: { formatter: function (v) { return fmt(v); } } },
+        yAxis: { type: 'category', inverse: true, data: list.map(function (x) { return x.name; }),
+          axisTick: { show: false }, axisLabel: { fontSize: 10, width: 120, overflow: 'truncate' } },
+        // The remainder bar is many countries: muted, and no filter.
+        series: [{ id: 'countries', name: 'aircraft', type: 'bar', barCategoryGap: '20%', barMaxWidth: 18, cursor: 'pointer',
+          data: list.map(function (x) {
+            return { value: x.value, itemStyle: { color: x.name === 'other' ? tk.muted : tk.accent } };
+          }) }]
+      });
+    }
+    registerSection(function (d) {
+      var grid = sectionEl('fleet');
+      var s = d.summary;
+      var alt = addCard(grid, 'fleet-altitude', 'Altitude'), gs = addCard(grid, 'fleet-speed', 'Ground speed');
+      var cat = addCard(grid, 'fleet-category', 'Emitter category'), cls = addCard(grid, 'fleet-class', 'Estimated class');
+      var cty = addCard(grid, 'fleet-country', 'Country of registration');
+      var src = addCard(grid, 'fleet-source', 'Source'), adr = addCard(grid, 'fleet-addr-type', 'Address type');
+      if (!s) return;
+      drawHist(alt, s, 'altitude', 'ft', BAND_COLOURS[5] || tk.accent);
+      drawHist(gs, s, 'speed', 'kt', BAND_COLOURS[3] || tk.accent);
+      var counts = s.counts || {};
+      var cats = S.donut(counts.by_category);
+      cat.setCaption(withSince(fmt(sum(cats.map(function (x) { return x.value; }))) + ' observations · ' +
+        cats.length + (cats.length === 1 ? ' category' : ' categories'), s));
+      drawDonut(cat, cats, catLabel, 'observations', function (name) { filterMap(S.categoryFilter(name)); });
+      var r = rangeOf(s);
+      if (r) {
+        cls.setCaption(fmt(r.aircraft) + ' aircraft in the range');
+        drawDonut(cls, S.donut(r.by_class), function (k) { return k; }, 'aircraft',
+          function (name) { filterMap(S.classFilter(name)); });
+      }
+      drawCountries(cty, d);
+      [[src, counts.by_source, SOURCE_LABEL], [adr, counts.by_addr_type, ADDR_LABEL]].forEach(function (x) {
+        var items = S.donut(x[1]);
+        x[0].setCaption(withSince(fmt(sum(items.map(function (i) { return i.value; }))) + ' observations', s));
+        drawDonut(x[0], items, labelFrom(x[2]), 'observations', null);
+      });
+    });
+
+    // ---- Signal ----------------------------------------------------------------
+    function drawRssiRange(card, d) {
+      if (!d.rssi) return;
+      var h = S.rssiHeatmap(d.rssi);
+      var rb = d.rssi.range_bin_nm || 10, start = typeof d.rssi.rssi_start === 'number' ? d.rssi.rssi_start : -50;
+      var bin = d.rssi.rssi_bin_db || 2;
+      var total = sum(h.data.map(function (c) { return c[2]; }));
+      card.setCaption(withSince(fmt(total) + ' observations with a range and signal', d.summary));
+      var ch = card.chart();
+      if (!ch) return;
+      var xs = [], ys = [], max = 1, i;
+      // The range axis ends a bin past the farthest column with counts
+      // (10 bins at the least), not at 490 nm+.
+      var last = -1;
+      h.data.forEach(function (c) { if (c[0] > last) last = c[0]; });
+      var cols = Math.min(h.ranges, Math.max(10, last + 2));
+      for (i = 0; i < cols; i++) xs.push(i === h.ranges - 1 ? (i * rb) + '+' : (i * rb) + '–' + ((i + 1) * rb));
+      for (i = 0; i < h.levels; i++) ys.push(String(start + i * bin));
+      h.data.forEach(function (c) { if (c[2] > max) max = c[2]; });
+      ch.setOption({
+        animation: false,
+        tooltip: { trigger: 'item', formatter: function (p) {
+          if (p.seriesId === 'median') return esc(xs[p.value[0]] + ' nm') + '<br>median ' + host.formatNum(h.median[p.dataIndex][1], 0, ' dBFS');
+          var c = p.value;
+          return esc(xs[c[0]] + ' nm · ' + ys[c[1]] + '…' + (start + (c[1] + 1) * bin) + ' dBFS') + '<br>' + fmt(c[3]) + ' observations';
+        } },
+        grid: { left: 44, right: 54, top: 12, bottom: 34 },
+        xAxis: { type: 'category', data: xs, name: 'nm', nameLocation: 'middle', nameGap: 22, splitArea: { show: false },
+          axisLabel: { hideOverlap: true, formatter: function (v) { return String(v).split('–')[0]; } } },
+        yAxis: { type: 'category', data: ys, name: 'dBFS', nameGap: 4, axisLabel: { interval: 3 } },
+        visualMap: { type: 'continuous', seriesIndex: 0, dimension: 2, min: -0.5, max: Math.max(0.5, Math.log10(max)),
+          calculable: false, orient: 'vertical', right: 0, top: 'middle', itemWidth: 10, itemHeight: 120,
+          text: [fmt(max), '1'], inRange: { color: [tk.line || '#30363d', tk.accent || '#58a6ff', dec.elev || '#f0883e'] } },
+        series: [
+          { id: 'cells', name: 'observations', type: 'heatmap',
+            data: h.data.map(function (c) { return [c[0], c[1], Math.log10(c[2]), c[2]]; }) },
+          // The median on the same category axes: a dB at a bin's centre is that bin's index.
+          { id: 'median', name: 'median', type: 'line', symbol: 'circle', symbolSize: 4, z: 5,
+            data: h.median.map(function (m) { return [m[0], (m[1] - start - bin / 2) / bin]; }),
+            lineStyle: { color: tk.text, width: 1.5 }, itemStyle: { color: tk.text } }
+        ]
+      });
+    }
+    registerSection(function (d) {
+      var grid = sectionEl('signal');
+      drawRssiRange(addCard(grid, 'signal-rssi-range', 'Signal vs range'), d);
+      drawHist(addCard(grid, 'signal-rssi', 'Signal level'), d.summary, 'rssi', 'dBFS', BAND_COLOURS[4] || tk.accent);
+    });
+
     // ---- Aircraft (the ledger, spec 6 item 7) ----------------------------------
     // A table of GET api/stats/aircraft (search, header sort, 100 a page;
     // the whole ledger, not the range), and a detail card of one entry.

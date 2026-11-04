@@ -449,5 +449,183 @@ test('detailPolar: the max-range point, null without one', () => {
   assert.strictEqual(S.detailPolar(null), null);
 });
 
+// ---- Coverage, Fleet and Signal (Task 10) ------------------------------------
+const BAND_NAMES = ['0-2.5k', '2.5-5k', '5-10k', '10-20k', '20-30k', '30-40k', '40k+', 'unknown'];
+function coverageTable() {
+  return {
+    sector_deg: 5, bands: BAND_NAMES.slice(),
+    cells: [
+      { sector: 0, band: 0, max_range_nm: 12.5, key: 'aaaaaa|icao', time: '2026-11-03T12:00:00.000Z', n: 3 },
+      { sector: 0, band: 4, max_range_nm: 88, key: 'bbbbbb|icao', time: '2026-11-03T12:01:00.000Z', n: 40 },
+      { sector: 71, band: 7, max_range_nm: 120, key: 'c0ffee|tisb_trackfile', time: '2026-11-03T12:02:00.000Z', n: 2 }
+    ],
+    grid: { cell_deg: 0.05, cap: 40000, full: false,
+      cells: [[38.925, -76.975, 311], [40.025, -77.025, 9], [38.875, -78.475, 1]] },
+    receiver: { lat: 38.9, lon: -77 }
+  };
+}
+
+test('polarSeries: 8 bands x 72, holder lookup', () => {
+  const p = S.polarSeries(coverageTable());
+  assert.strictEqual(p.angles.length, 72);
+  assert.strictEqual(p.angles[0], 0);
+  assert.strictEqual(p.angles[1], 5);
+  assert.strictEqual(p.angles[71], 355);
+  assert.deepStrictEqual(p.bands.map((b) => b.name), BAND_NAMES);
+  p.bands.forEach((b) => assert.strictEqual(b.data.length, 72));
+  assert.strictEqual(p.bands[7].data[71], 120);
+  assert.strictEqual(p.bands[0].data[0], 12.5);
+  assert.strictEqual(p.bands[4].data[0], 88);
+  // Every other value is 0.
+  const nonZero = [];
+  p.bands.forEach((b, bi) => b.data.forEach((v, si) => { if (v !== 0) nonZero.push([bi, si]); }));
+  assert.deepStrictEqual(nonZero, [[0, 0], [4, 0], [7, 71]]);
+  assert.strictEqual(p.holder(71, 7).key, 'c0ffee|tisb_trackfile');
+  assert.strictEqual(p.holder(71, 7).time, '2026-11-03T12:02:00.000Z');
+  assert.strictEqual(p.holder(0, 4).max_range_nm, 88);
+  assert.strictEqual(p.holder(70, 7), null);
+  assert.strictEqual(p.holder(0, 1), null);
+  // The record over all cells.
+  assert.strictEqual(p.max.key, 'c0ffee|tisb_trackfile');
+  // Null or empty: 8 zero bands, no holders.
+  const e = S.polarSeries(null);
+  assert.strictEqual(e.bands.length, 8);
+  assert.strictEqual(e.bands[3].data.reduce((a, v) => a + v, 0), 0);
+  assert.strictEqual(e.holder(0, 0), null);
+  assert.strictEqual(e.max, null);
+});
+
+test('histBars: labels and values', () => {
+  assert.deepStrictEqual(S.histBars({ start: -8000, bin: 500, counts: [1, 2] }),
+    { labels: ['-8000–-7500', '-7500–-7000'], values: [1, 2] });
+  assert.deepStrictEqual(S.histBars({ start: 0, bin: 10, counts: [0, 4, 0, 5, 0, 0] }),
+    { labels: ['0–10', '10–20', '20–30', '30–40', '40–50', '50–60'], values: [0, 4, 0, 5, 0, 0] });
+  // trim: the empty bins before the first and after the last count go.
+  assert.deepStrictEqual(S.histBars({ start: 0, bin: 10, counts: [0, 4, 0, 5, 0, 0] }, true),
+    { labels: ['10–20', '20–30', '30–40'], values: [4, 0, 5] });
+  assert.deepStrictEqual(S.histBars({ start: -50, bin: 1, counts: [0, 0, 0] }, true), { labels: [], values: [] });
+  assert.deepStrictEqual(S.histBars(null), { labels: [], values: [] });
+  assert.deepStrictEqual(S.histBars({ start: 0, bin: 2 }), { labels: [], values: [] });
+});
+
+test('rssiHeatmap: non-zero cells and median', () => {
+  const counts = [];
+  for (let r = 0; r < 50; r++) { const row = []; for (let b = 0; b < 25; b++) row.push(0); counts.push(row); }
+  counts[3][5] = 1;
+  counts[3][6] = 2;
+  counts[10][0] = 4;
+  counts[10][24] = 4;    // even: the lower middle bin
+  const h = S.rssiHeatmap({ range_bin_nm: 10, rssi_bin_db: 2, rssi_start: -50, counts: counts });
+  assert.deepStrictEqual(h.data, [[3, 5, 1], [3, 6, 2], [10, 0, 4], [10, 24, 4]]);
+  // Column 3: 3 observations, the 2nd is in bin 6 -> its centre -50 + 6*2 + 1.
+  assert.deepStrictEqual(h.median, [[3, -50 + 6 * 2 + 1], [10, -49]]);
+  assert.strictEqual(h.ranges, 50);
+  assert.strictEqual(h.levels, 25);
+  assert.deepStrictEqual(S.rssiHeatmap(null), { data: [], median: [], ranges: 0, levels: 0 });
+});
+
+test('topCountries: top n plus other', () => {
+  const by = [];
+  for (let i = 0; i < 17; i++) by.push({ name: 'C' + String(i).padStart(2, '0'), n: 100 - i });
+  by.push({ name: 'other', n: 4 });
+  const t = S.topCountries(by, 15);
+  assert.strictEqual(t.length, 16);
+  assert.deepStrictEqual(t[0], { name: 'C00', value: 100 });
+  assert.deepStrictEqual(t[14], { name: 'C14', value: 86 });
+  // The two past the 15th (85 + 84) plus the daemon's own other (4).
+  assert.deepStrictEqual(t[15], { name: 'other', value: 85 + 84 + 4 });
+  // Few enough: as given, no other.
+  assert.deepStrictEqual(S.topCountries([{ name: 'Canada', n: 2 }, { name: 'unknown', n: 5 }], 15),
+    [{ name: 'unknown', value: 5 }, { name: 'Canada', value: 2 }]);
+  // A lone daemon other stays last.
+  assert.deepStrictEqual(S.topCountries([{ name: 'other', n: 9 }, { name: 'Canada', n: 2 }], 15),
+    [{ name: 'Canada', value: 2 }, { name: 'other', value: 9 }]);
+  assert.deepStrictEqual(S.topCountries(null, 15), []);
+});
+
+test('gridView: square around the receiver', () => {
+  const v = S.gridView(coverageTable());
+  // Square on the ground: the longitude span is the latitude span over cos(lat).
+  const cos = Math.cos(38.9 * Math.PI / 180);
+  assert.ok(Math.abs((v.xMax - v.xMin) * cos - (v.yMax - v.yMin)) < 1e-9);
+  // Centred on the receiver.
+  assert.ok(Math.abs((v.xMax + v.xMin) / 2 - -77) < 1e-9);
+  assert.ok(Math.abs((v.yMax + v.yMin) / 2 - 38.9) < 1e-9);
+  // Every cell inside (with its half cell).
+  [[38.925, -76.975], [40.025, -77.025], [38.875, -78.475]].forEach((c) => {
+    assert.ok(c[0] - 0.025 >= v.yMin && c[0] + 0.025 <= v.yMax, 'lat ' + c[0]);
+    assert.ok(c[1] - 0.025 >= v.xMin && c[1] + 0.025 <= v.xMax, 'lon ' + c[1]);
+  });
+  // The westmost cell sets the span: |-78.5 - -77| lon at cos(38.9).
+  assert.ok(Math.abs(v.xMin - -78.5) < 1e-9);
+  assert.deepStrictEqual(v.data, [[-76.975, 38.925, 311], [-77.025, 40.025, 9], [-78.475, 38.875, 1]]);
+  assert.strictEqual(v.cell, 0.05);
+  assert.deepStrictEqual(v.centre, [-77, 38.9]);
+  assert.strictEqual(v.receiver, true);
+  // At least one 50 nm ring fits: a half span of 50 nm (5/6 deg of latitude) at the least.
+  const c = coverageTable();
+  c.grid.cells = [[38.925, -76.975, 1]];
+  const s = S.gridView(c);
+  assert.ok(Math.abs((s.yMax - s.yMin) - 100 / 60) < 1e-9);
+  // No receiver: centred on the cells' bounds.
+  c.receiver = undefined;
+  c.grid.cells = [[10.025, 20.025, 1], [12.025, 20.025, 1]];
+  const n = S.gridView(c);
+  assert.strictEqual(n.receiver, false);
+  assert.ok(Math.abs((n.yMax + n.yMin) / 2 - 11.025) < 1e-9);
+  assert.ok(Math.abs((n.yMax - n.yMin) - (2 + 0.05)) < 1e-9);
+  assert.strictEqual(S.gridView({ grid: { cells: [] } }), null);
+  assert.strictEqual(S.gridView(null), null);
+});
+
+test('rangeRing: 72 points at 50 nm', () => {
+  const ring = S.rangeRing({ lat: 38.9, lon: -77 }, 50);
+  assert.strictEqual(ring.length, 72);
+  // Bearing 0: due north, 50 nm = 50/60 deg of latitude on the page's sphere (within 0.1 %).
+  assert.ok(Math.abs(ring[0][0] - -77) < 1e-9);
+  assert.ok(Math.abs(ring[0][1] - (38.9 + 50 / 60)) < 0.001);
+  // Bearing 90 (index 18): east, nearly the same latitude.
+  assert.ok(ring[18][0] > -77 + 50 / 60);
+  assert.ok(Math.abs(ring[18][1] - 38.9) < 0.02);
+  // Bearing 180 (index 36): due south.
+  assert.ok(Math.abs(ring[36][0] - -77) < 1e-9);
+  assert.ok(Math.abs(ring[36][1] - (38.9 - 50 / 60)) < 0.001);
+  assert.deepStrictEqual(S.rangeRing(null, 50), []);
+  // The rings of a view: every 50 nm out to its corners.
+  assert.deepStrictEqual(S.ringRadii(120), [50, 100, 150]);
+  assert.deepStrictEqual(S.ringRadii(30), [50]);
+});
+
+test('donut: descending, zeros dropped', () => {
+  assert.deepStrictEqual(S.donut({ A3: 5, none: 9, A1: 0, B2: 5 }),
+    [{ name: 'none', value: 9 }, { name: 'A3', value: 5 }, { name: 'B2', value: 5 }]);
+  assert.deepStrictEqual(S.donut(null), []);
+  assert.deepStrictEqual(S.donut({}), []);
+});
+
+test('click-through mapping: category, class, country', () => {
+  assert.deepStrictEqual(S.categoryFilter('A1'), { category: 'A1' });
+  assert.deepStrictEqual(S.categoryFilter('A7'), { category: 'A7' });
+  assert.deepStrictEqual(S.categoryFilter('none'), { category: 'none' });
+  assert.deepStrictEqual(S.categoryFilter('A0'), { category: 'other' });
+  assert.deepStrictEqual(S.categoryFilter('B2'), { category: 'other' });
+  assert.deepStrictEqual(S.categoryFilter('D7'), { category: 'other' });
+  assert.deepStrictEqual(S.classFilter('military'), { classes: ['military'] });
+  assert.deepStrictEqual(S.classFilter('unknown'), { classes: ['unknown'] });
+  assert.strictEqual(S.classFilter('bogus'), null);
+  assert.deepStrictEqual(S.countryFilter('Canada'), { country: 'Canada' });
+  // The daemon's 'unknown' (no country) is the view filter's 'other'.
+  assert.deepStrictEqual(S.countryFilter('unknown'), { country: 'other' });
+  // The remainder bar (many countries) is not a filter.
+  assert.strictEqual(S.countryFilter('other'), null);
+  assert.strictEqual(S.countryFilter(''), null);
+});
+
+test('keyHex: the hex of a ledger key', () => {
+  assert.strictEqual(S.keyHex('a1b2c3|icao'), 'a1b2c3');
+  assert.strictEqual(S.keyHex('c0ffee'), 'c0ffee');
+  assert.strictEqual(S.keyHex(null), '');
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

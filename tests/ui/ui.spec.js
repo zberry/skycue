@@ -1403,6 +1403,113 @@ test('trails_show_all_selected_off', async ({ page }) => {
   expect((await trailCounts(page)).dom).toBeGreaterThan(1);
 });
 
+// Trails, Project ahead: a dashed line from the marker along track_deg for
+// gs_kt x the minutes (480 kt for 2 min: 16 nm), in the decision colour;
+// moved with the aircraft, gone without a speed or on the ground, following
+// Show; "off" removes every one.
+test('trail_project_ahead', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 3);
+  const hex = 'fff0a5';
+  const at = (o) => page.evaluate((a) => window.skycueApp.injectTestMarker(Object.assign({ hex: a.hex, addr_type: 'icao',
+    decision: 'send', track_deg: 60, gs_kt: 480, rssi: -20, alt_baro_ft: 12000,
+    position_time: new Date(window.skycueApp.dataNow() - a.ago).toISOString() }, a.o)), { hex, o, ago: o.ago || 10000 });
+  await at({ lat: 39.2, lon: -77.5, ago: 16000 });
+  await at({ lat: 39.21, lon: -77.48, ago: 10000 });
+  const ahead = () => page.evaluate((h) => window.skycueApp.ahead(h), hex);
+  expect(await ahead()).toBe(null);
+  expect(await page.locator('path.trail-ahead').count()).toBe(0);
+
+  await page.locator('#view-trail-ahead').selectOption('2');
+  let a = await ahead();
+  expect(a.dashed).toBe(true);
+  expect(a.points[0]).toEqual(a.marker);
+  expect(a.points[0]).toEqual([39.21, -77.48]);
+  const far = await page.evaluate((p) => window.skycuePure.rulerMeasure(p[0][0], p[0][1], p[p.length - 1][0], p[p.length - 1][1]), a.points);
+  expect(Math.abs(far.nm - 16)).toBeLessThan(0.05);
+  expect(Math.abs(far.bearing - 60)).toBeLessThan(0.2);
+  expect(a.color).toBe((await page.evaluate((h) => window.skycueApp.trail(h), hex)).color);
+  expect(a.weight).toBe(1.5);
+  // The fixture's aircraft with a track and a speed get one too: one dashed line per aircraft.
+  const total = await page.locator('path.trail-ahead').count();
+  expect(total).toBeGreaterThan(1);
+  expect(await page.locator('path.trail[stroke-dasharray], path.trail-run[stroke-dasharray]').count()).toBe(0);
+
+  // The aircraft moves: the line starts at the new position; slower, shorter.
+  await at({ lat: 39.22, lon: -77.46, gs_kt: 240, ago: 5000 });
+  a = await ahead();
+  expect(a.points[0]).toEqual([39.22, -77.46]);
+  const far2 = await page.evaluate((p) => window.skycuePure.rulerMeasure(p[0][0], p[0][1], p[p.length - 1][0], p[p.length - 1][1]), a.points);
+  expect(Math.abs(far2.nm - 8)).toBeLessThan(0.05);
+  // No ground speed, or on the ground: no line; back when it has one again.
+  await at({ lat: 39.23, lon: -77.44, gs_kt: undefined, ago: 4000 });
+  expect(await ahead()).toBe(null);
+  await at({ lat: 39.231, lon: -77.439, on_ground: true, ago: 3000 });
+  expect(await ahead()).toBe(null);
+  await at({ lat: 39.232, lon: -77.438, ago: 2000 });
+  expect(await ahead()).not.toBe(null);
+
+  // Show "selected": the selected aircraft's line only; "off": none.
+  await page.evaluate((h) => window.skycueApp.selectHex(h), hex);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
+  expect((await ahead()).weight).toBe(3);
+  await page.locator('input[name="view-trail-show"][value="selected"]').check();
+  expect(await page.locator('path.trail-ahead').count()).toBe(1);
+  expect(await ahead()).not.toBe(null);
+  await page.locator('input[name="view-trail-show"][value="off"]').check();
+  expect(await page.locator('path.trail-ahead').count()).toBe(0);
+  await page.locator('input[name="view-trail-show"][value="all"]').check();
+  expect(await page.locator('path.trail-ahead').count()).toBeGreaterThan(1);
+
+  await page.locator('#view-trail-ahead').selectOption('0');
+  expect(await page.locator('path.trail-ahead').count()).toBe(0);
+  expect(await ahead()).toBe(null);
+});
+
+// The three Trails settings in a saved filter set (the number keys too),
+// cleared by 0, and kept in skycue.view across a reload.
+test('trails_settings_in_sets_and_reload', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await page.locator('input[name="view-trail-show"][value="selected"]').check();
+  await page.locator('#view-trail-color').selectOption('altitude');
+  await page.locator('#view-trail-ahead').selectOption('5');
+  await expect(page.locator('#view-clear')).toBeEnabled();
+  page.once('dialog', (d) => d.accept('Trails'));
+  await page.click('#view-set-save');
+  const saved = JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets[0].view;
+  expect([saved.trailShow, saved.trailColor, saved.trailAhead]).toEqual(['selected', 'altitude', 5]);
+
+  await page.locator('body').press('0');
+  await expect(page.locator('input[name="view-trail-show"][value="all"]')).toBeChecked();
+  await expect(page.locator('#view-trail-color')).toHaveValue('decision');
+  await expect(page.locator('#view-trail-ahead')).toHaveValue('0');
+  await expect(page.locator('#trail-alt-legend')).toBeHidden();
+  await expect(page.locator('#view-clear')).toBeDisabled();
+
+  await page.locator('body').press('1');
+  await expect(page.locator('input[name="view-trail-show"][value="selected"]')).toBeChecked();
+  await expect(page.locator('#view-trail-color')).toHaveValue('altitude');
+  await expect(page.locator('#view-trail-ahead')).toHaveValue('5');
+  await expect(page.locator('#trail-alt-legend')).toBeVisible();
+  expect(await setSelectedText(page)).toBe('Trails');
+  // A Trails change alone makes the set "(modified)".
+  await page.locator('#view-trail-ahead').selectOption('1');
+  expect(await setSelectedText(page)).toBe('Trails (modified)');
+  await page.locator('#view-trail-ahead').selectOption('5');
+  expect(await setSelectedText(page)).toBe('Trails');
+
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await expect(page.locator('input[name="view-trail-show"][value="selected"]')).toBeChecked();
+  await expect(page.locator('#view-trail-color')).toHaveValue('altitude');
+  await expect(page.locator('#view-trail-ahead')).toHaveValue('5');
+  await expect(page.locator('#trail-alt-legend')).toBeVisible();
+  const v = await page.evaluate(() => window.skycueApp.getViewFilters());
+  expect([v.trailShow, v.trailColor, v.trailAhead]).toEqual(['selected', 'altitude', 5]);
+  await page.locator('body').press('0');
+});
+
 // The ruler: away from the fixture's aircraft (around 38.9 N 77 W), two
 // clicks 300 px apart on one row at zoom 8 near 30 N are 84..88 nm
 // (611.5 m/px at the equator x cos(lat)), heading east.

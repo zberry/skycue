@@ -121,6 +121,15 @@
         </div>
         <div id="trail-signal-legend" class="sig-legend" aria-label="Trail signal scale" hidden></div>
         <div id="trail-alt-legend" class="sig-legend" aria-label="Trail altitude scale" hidden></div>
+        <div class="row trail-row">
+          <label class="trail-key" for="view-trail-ahead">Project ahead</label>
+          <select id="view-trail-ahead" title="A dashed line from each aircraft along its track: where it gets to in this time at its ground speed, flying straight">
+            <option value="0">off</option>
+            <option value="1">1 min</option>
+            <option value="2">2 min</option>
+            <option value="5">5 min</option>
+          </select>
+        </div>
       </div>
       <label for="view-search">Search</label>
       <input id="view-search" type="text" placeholder="hex, callsign or reg" autocomplete="off" spellcheck="false" title="Press / to search">

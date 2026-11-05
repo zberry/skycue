@@ -1463,6 +1463,68 @@ test('normalizeView: the Trails group (colour by)', () => {
   assert.strictEqual(P.viewSetMatches(back, P.normalizeView({ trailShow: 'off', trailColor: 'signal' }), true), false);
 });
 
+// Trails, Project ahead: the point, the length, the line.
+test('projectPoint: 60 nm due north is +1 deg of latitude; east on the equator; the ruler agrees', () => {
+  // 60 nm is 1 deg of arc to 0.07 % on rangeNm's sphere (1852 m per nm,
+  // 1 deg = 111.195 km): 0.99932 deg.
+  const n = P.projectPoint(39, -77, 0, 60);
+  between(n[0], 39 + 0.9990, 39 + 0.9996, 'north lat');
+  between(n[1], -77.000001, -76.999999, 'north lon');
+  const e = P.projectPoint(0, 0, 90, 60);
+  between(e[0], -1e-9, 1e-9, 'east lat');
+  between(e[1], 0.9990, 0.9996, 'east lon');
+  const s = P.projectPoint(39, -77, 180, 30);
+  between(s[0], 38.5, 38.501, 'south lat');
+  const m = P.rulerMeasure(39.7, -86.3, ...P.projectPoint(39.7, -86.3, 237, 16));
+  between(m.nm, 15.999, 16.001, 'distance back');
+  between(m.bearing, 236.99, 237.01, 'bearing back');
+  assert.deepStrictEqual(P.projectPoint(10, 20, 45, 0), [10, 20]);
+});
+test('aheadNm: ground speed times minutes', () => {
+  assert.strictEqual(P.aheadNm(480, 2), 16);
+  assert.strictEqual(P.aheadNm(600, 5), 50);
+  assert.strictEqual(P.aheadNm(120, 1), 2);
+  assert.strictEqual(P.aheadNm(0, 5), 0);
+});
+test('projectAhead: from the position along the track, great-circle points, null without one', () => {
+  const t = { lat: 39, lon: -77, track_deg: 45, gs_kt: 480 };
+  const line = P.projectAhead(t, 2);
+  assert.deepStrictEqual(line[0], [39, -77], 'starts at the position');
+  assert.strictEqual(line.length, 3, '16 nm: two steps of at most 10 nm');
+  const far = P.rulerMeasure(39, -77, ...line[line.length - 1]);
+  between(far.nm, 15.999, 16.001, 'length');
+  between(far.bearing, 44.99, 45.01, 'initial bearing');
+  // Every point is on the great circle: the bearing from the start stays the track's.
+  const mid = P.rulerMeasure(39, -77, ...line[1]);
+  between(mid.nm, 7.999, 8.001, 'mid distance');
+  between(mid.bearing, 44.99, 45.01, 'mid bearing');
+  assert.strictEqual(P.projectAhead(Object.assign({}, t, { gs_kt: 600 }), 5).length, 6, '50 nm: 5 steps');
+  assert.strictEqual(P.projectAhead(Object.assign({}, t, { gs_kt: 60 }), 1).length, 2, '1 nm: one step');
+  assert.strictEqual(P.projectAhead(t, 0), null, 'off');
+  [{ track_deg: undefined }, { track_deg: null }, { gs_kt: undefined }, { gs_kt: 0 }, { gs_kt: -5 }, { gs_kt: NaN },
+    { on_ground: true }, { lat: undefined }, { lon: null }].forEach((o) => {
+    assert.strictEqual(P.projectAhead(Object.assign({}, t, o), 2), null, JSON.stringify(o));
+  });
+  assert.strictEqual(P.projectAhead(null, 2), null);
+});
+test('normalizeView: the Trails group (project ahead), all three in a set', () => {
+  assert.deepStrictEqual(P.TRAIL_AHEAD_MIN, [0, 1, 2, 5]);
+  assert.strictEqual(P.VIEW_DEFAULTS.trailAhead, 0);
+  [0, 1, 2, 5].forEach((m) => assert.strictEqual(P.normalizeView({ trailAhead: m }).trailAhead, m));
+  assert.strictEqual(P.normalizeView({ trailAhead: '5' }).trailAhead, 5, 'the select gives a string');
+  [3, 10, -1, 2.5, '', 'off', null, true, [2]].forEach((m) => assert.strictEqual(P.normalizeView({ trailAhead: m }).trailAhead, 0, String(m)));
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView({ trailAhead: 1 })), false);
+  assert.strictEqual(P.viewActiveCount(P.normalizeView({ trailAhead: 5 })), 0);
+  const v = P.normalizeView({ classes: ['airline'], trailShow: 'selected', trailColor: 'altitude', trailAhead: '2' });
+  assert.deepStrictEqual([v.trailShow, v.trailColor, v.trailAhead], ['selected', 'altitude', 2]);
+  const store = P.putViewSet(P.normalizeViewSets(null), 'Trails', v, false).store;
+  const back = P.normalizeViewSets(JSON.parse(JSON.stringify(store))).sets[0];
+  assert.deepStrictEqual(back.view, v);
+  assert.strictEqual(P.viewSetMatches(back, v, false), true);
+  assert.strictEqual(P.viewSetMatches(back, P.normalizeView(Object.assign({}, v, { trailAhead: 5 })), false), false);
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView(P.VIEW_DEFAULTS)), true);
+});
+
 // Ruler: distance, initial bearing, the label.
 // Trail steps: join, skip a small step back in time, break on an implied
 // speed over TRAIL_MAX_KT (over at least 1 s) or a big step back.

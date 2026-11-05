@@ -686,6 +686,11 @@
   // (P.trailRunsAppend, P.trailRunsTrim, updateTrail); drawTrail rebuilds
   // only on a Trails change, a (re)creation, an un-dimming or a trail of
   // two points or fewer.
+  // With Project ahead, e.ahead is the dashed line from the marker along
+  // its track for that many minutes at its ground speed (P.projectAhead),
+  // in the decision colour and the trail's weight; only an entry with a
+  // trail has one (it follows Show), and updateAhead keeps it with every
+  // render.
   var TRAIL_OPACITY = 0.6;          // the plain trail
   var RUN_OPACITY = 0.9;            // a run with a colour of the scale
   var RUN_DIM_OPACITY = 0.25;       // a run without a value (no signal, no altitude)
@@ -744,6 +749,27 @@
     } else dropRuns(e);
     e.trailStyle = null;
     styleTrail(e);
+    updateAhead(e);
+  }
+
+  // The projection ahead from the current position, made, moved, restyled
+  // or removed (no trail, Project ahead off, no track or speed, on the ground).
+  var AHEAD_OPACITY = 0.8;
+  function updateAhead(e) {
+    var pts = e.trail ? P.projectAhead(e.t, viewFilter.trailAhead) : null;
+    if (!pts) { dropAhead(e); return; }
+    var color = trailColor(e), weight = trailWeight(e);
+    if (!e.ahead) {
+      e.ahead = L.polyline(pts, { className: 'trail-ahead', interactive: false, color: color, weight: weight,
+        opacity: AHEAD_OPACITY, dashArray: '6 6' }).addTo(map);
+      return;
+    }
+    e.ahead.setLatLngs(pts);
+    if (e.ahead.options.color !== color || e.ahead.options.weight !== weight) e.ahead.setStyle({ color: color, weight: weight });
+  }
+  function dropAhead(e) {
+    if (e.ahead) map.removeLayer(e.ahead);
+    e.ahead = null;
   }
 
   // The trail after `pruned` points went from its front and, with
@@ -774,13 +800,14 @@
   function removeTrail(e) {
     if (e.trail) map.removeLayer(e.trail);
     dropRuns(e);
+    dropAhead(e);
     e.trail = null;
     e.trailStyle = null;
   }
 
   // The Trails group's settings live in the view (skycue.view, the filter
   // sets, Clear); a change shows the right legend and redraws every trail.
-  var TRAIL_FIELDS = ['trailShow', 'trailColor'];
+  var TRAIL_FIELDS = ['trailShow', 'trailColor', 'trailAhead'];
   function trailOptionsChanged(a, b) {
     return TRAIL_FIELDS.some(function (k) { return a[k] !== b[k]; });
   }
@@ -877,6 +904,7 @@
     else if (inPlace && e.pts[e.pts.length - 1] === pushed) updateTrail(e, pruned, true);
     else if (observed || fresh || wasDimmed) drawTrail(e);
     styleMarker(e);
+    updateAhead(e);
   }
 
   function updateHiddenCount() {
@@ -928,6 +956,7 @@
     eachEl('input[name="view-map-mode"]', function (r) { r.checked = r.value === v.mapMode; });
     eachEl('input[name="view-trail-show"]', function (r) { r.checked = r.value === v.trailShow; });
     $('view-trail-color').value = v.trailColor;
+    $('view-trail-ahead').value = String(v.trailAhead);
   }
   function readViewFromControls() {
     var o = {
@@ -936,7 +965,7 @@
       category: $('view-category').value, country: $('view-country').value,
       mapMode: (document.querySelector('input[name="view-map-mode"]:checked') || {}).value,
       trailShow: (document.querySelector('input[name="view-trail-show"]:checked') || {}).value,
-      trailColor: $('view-trail-color').value
+      trailColor: $('view-trail-color').value, trailAhead: $('view-trail-ahead').value
     };
     Object.keys(VIEW_NUMBERS).forEach(function (k) { o[k] = $(VIEW_NUMBERS[k]).value; });
     return P.normalizeView(o);
@@ -1006,7 +1035,7 @@
     ['view-search'].concat(Object.keys(VIEW_NUMBERS).map(function (k) { return VIEW_NUMBERS[k]; })).forEach(function (id) {
       $(id).addEventListener('input', fromControls);
     });
-    ['view-ground', 'view-emergency', 'view-category', 'view-country', 'view-trail-color'].forEach(function (id) {
+    ['view-ground', 'view-emergency', 'view-category', 'view-country', 'view-trail-color', 'view-trail-ahead'].forEach(function (id) {
       $(id).addEventListener('change', fromControls);
     });
     eachEl('input[name="view-map-mode"], input[name="view-trail-show"]', function (r) { r.addEventListener('change', fromControls); });
@@ -3633,6 +3662,16 @@
     selected: function () {
       var e = selectedKey && tracks.get(selectedKey);
       return e ? e.t.hex : null;
+    },
+    // One aircraft's projection ahead as drawn (null without one).
+    ahead: function (hex) {
+      var out = null;
+      tracks.forEach(function (e) {
+        if (e.t.hex !== hex || !e.ahead) return;
+        out = { points: e.ahead.getLatLngs().map(function (p) { return [p.lat, p.lng]; }), color: e.ahead.options.color,
+          weight: e.ahead.options.weight, dashed: !!e.ahead.options.dashArray, marker: [e.marker.getLatLng().lat, e.marker.getLatLng().lng] };
+      });
+      return out;
     },
     // Selects the (first) aircraft with this hex, as a click on its marker would.
     selectHex: function (hex) {

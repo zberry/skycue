@@ -1376,13 +1376,15 @@
     search: '', altMin: null, altMax: null, ground: true, gsMin: null, gsMax: null,
     rangeMin: null, rangeMax: null, decisions: Object.freeze(VIEW_DECISIONS.slice()),
     classes: Object.freeze(CLASSES.slice()), emergency: false, category: '', country: '', mapMode: 'hide',
-    trailShow: 'all', trailColor: 'decision'
+    trailShow: 'all', trailColor: 'decision', trailAhead: 0
   });
   // The Trails group: which aircraft have a trail (every drawn one, only
   // the selected one, none) and what colours it (the decision; the signal
-  // or the altitude of each position, trailRunColor).
+  // or the altitude of each position, trailRunColor) and how many minutes
+  // ahead the projection reaches (0: none; projectAhead).
   var TRAIL_SHOWS = ['all', 'selected', 'off'];
   var TRAIL_COLOR_BY = ['decision', 'signal', 'altitude'];
+  var TRAIL_AHEAD_MIN = [0, 1, 2, 5];
 
   function viewNumber(v) {
     if (typeof v === 'string') v = v.trim() === '' ? null : Number(v);
@@ -1419,13 +1421,15 @@
       country: country === 'other' || ICAO_COUNTRIES.indexOf(country) >= 0 ? country : '',
       mapMode: obj.mapMode === 'dim' ? 'dim' : 'hide',
       trailShow: TRAIL_SHOWS.indexOf(obj.trailShow) >= 0 ? obj.trailShow : VIEW_DEFAULTS.trailShow,
-      trailColor: TRAIL_COLOR_BY.indexOf(obj.trailColor) >= 0 ? obj.trailColor : VIEW_DEFAULTS.trailColor
+      trailColor: TRAIL_COLOR_BY.indexOf(obj.trailColor) >= 0 ? obj.trailColor : VIEW_DEFAULTS.trailColor,
+      trailAhead: TRAIL_AHEAD_MIN.indexOf(viewNumber(obj.trailAhead)) >= 0 ? viewNumber(obj.trailAhead) : VIEW_DEFAULTS.trailAhead
     };
   }
   // Whether the Trails group is at its defaults (Clear resets it; like the
   // map mode it is not counted in the heading badge).
   function viewTrailsDefault(v) {
-    return v.trailShow === VIEW_DEFAULTS.trailShow && v.trailColor === VIEW_DEFAULTS.trailColor;
+    return v.trailShow === VIEW_DEFAULTS.trailShow && v.trailColor === VIEW_DEFAULTS.trailColor &&
+      v.trailAhead === VIEW_DEFAULTS.trailAhead;
   }
 
   // Saved filter sets (spec 4): skycue.viewSets is {version: 1, sets:
@@ -1685,6 +1689,30 @@
     return mode === 'signal' ? sigOf : mode === 'altitude' ? altOf : null;
   }
 
+  // ---- projection ahead (Trails, "Project ahead") ------------------------------
+  // Dead reckoning: where an aircraft is `minutes` from now if it keeps its
+  // track and ground speed, on the great circle (destinationPoint's sphere;
+  // the track is true). projectPoint is that point; aheadNm the distance,
+  // ground speed (kt) times the time. Straight flight only: a turn or a
+  // speed change is not predicted.
+  function projectPoint(lat, lon, trackDeg, distanceNm) { return destinationPoint(lat, lon, trackDeg, distanceNm); }
+  function aheadNm(gsKt, minutes) { return gsKt * minutes / 60; }
+  // The great-circle line from the track's position along its track_deg
+  // for aheadNm(gs_kt, minutes), as [[lat, lon], ...] from the position to
+  // the far end with a point every AHEAD_STEP_NM at most (Leaflet joins
+  // points with straight lines on the map); null without a projection:
+  // minutes 0, no position, no track_deg or gs_kt (or not above 0), or on
+  // the ground.
+  var AHEAD_STEP_NM = 10;
+  function projectAhead(t, minutes) {
+    var fin = function (v) { return typeof v === 'number' && isFinite(v); };
+    if (!(minutes > 0) || !t || t.on_ground) return null;
+    if (!fin(t.lat) || !fin(t.lon) || !fin(t.track_deg) || !fin(t.gs_kt) || !(t.gs_kt > 0)) return null;
+    var nm = aheadNm(t.gs_kt, minutes), n = Math.max(1, Math.ceil(nm / AHEAD_STEP_NM)), out = [[t.lat, t.lon]];
+    for (var i = 1; i <= n; i++) out.push(projectPoint(t.lat, t.lon, t.track_deg, nm * i / n));
+    return out;
+  }
+
   // ---- trail breaks -----------------------------------------------------------
   // What a new position does to the trail, from the previous trail point
   // (prev and next are {lat, lon, ts}, ts in ms):
@@ -1772,7 +1800,9 @@
     MILITARY_CALLSIGN_PREFIXES: MILITARY_CALLSIGN_PREFIXES, callsignKind: callsignKind,
     CLASSES: CLASSES, CATEGORY_LABELS: CATEGORY_LABELS, trackClass: trackClass, isEmergency: isEmergency, trackCountry: trackCountry,
     VIEW_DEFAULTS: VIEW_DEFAULTS, normalizeView: normalizeView, viewActiveCount: viewActiveCount,
-    TRAIL_SHOWS: TRAIL_SHOWS, TRAIL_COLOR_BY: TRAIL_COLOR_BY, viewTrailsDefault: viewTrailsDefault,
+    TRAIL_SHOWS: TRAIL_SHOWS, TRAIL_COLOR_BY: TRAIL_COLOR_BY, TRAIL_AHEAD_MIN: TRAIL_AHEAD_MIN,
+    viewTrailsDefault: viewTrailsDefault,
+    projectPoint: projectPoint, aheadNm: aheadNm, AHEAD_STEP_NM: AHEAD_STEP_NM, projectAhead: projectAhead,
     VIEW_SETS_MAX: VIEW_SETS_MAX, VIEW_SET_NAME_MAX: VIEW_SET_NAME_MAX, viewSetName: viewSetName,
     normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches,

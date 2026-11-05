@@ -217,6 +217,13 @@ marker, an un-dimming or a trail of two points or fewer. The old
 checkbox's localStorage `skycue.trailSignal` is read once (`initTrails`:
 "1" becomes "signal" unless the stored view already has a `trailColor`)
 and removed.
+Project ahead (`#view-trail-ahead`, `trailAhead`, minutes in
+`P.TRAIL_AHEAD_MIN`, 0 off) is `e.ahead`, a dashed `path.trail-ahead` of
+`P.projectAhead(track, minutes)`: from the position along `track_deg` for
+`P.aheadNm(gs_kt, minutes)`, great-circle points (`P.projectPoint`, which
+is `destinationPoint`) at most `AHEAD_STEP_NM` apart. `updateAhead` makes,
+moves or removes it on every `renderEntry` and `drawTrail`; only an entry
+with a trail has one, and `removeTrail` takes it too.
 
 ## Ruler
 

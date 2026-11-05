@@ -1,6 +1,8 @@
 #define BOOST_TEST_MODULE skycued_status_poller
 #include <boost/test/unit_test.hpp>
 
+#include "restricted_fixtures.hpp"
+
 #include "engine_test_support.hpp"
 #include "inputs/input_def.hpp"
 #include "inputs/ping_cat021_input.hpp"
@@ -243,7 +245,7 @@ struct InputProbe {
 
 }  // namespace
 
-BOOST_AUTO_TEST_CASE(status_200_parsed)
+BOOST_AUTO_TEST_CASE(status_200_parsed, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     HttpServer server({{response("200 OK", statusFixture())}});
     IoThread t;
@@ -268,7 +270,7 @@ BOOST_AUTO_TEST_CASE(status_200_parsed)
     BOOST_TEST(server.requestCount() == 1u);
 }
 
-BOOST_AUTO_TEST_CASE(cat021_input_polls_status)
+BOOST_AUTO_TEST_CASE(cat021_input_polls_status, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     HttpServer server({{response("200 OK", statusFixture())}});
     IoThread t;
@@ -292,7 +294,7 @@ BOOST_AUTO_TEST_CASE(status_500_fails)
     BOOST_TEST(p.at(0).error == "HTTP 500");
 }
 
-BOOST_AUTO_TEST_CASE(status_redirect_not_followed)
+BOOST_AUTO_TEST_CASE(status_redirect_not_followed, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     HttpServer server({{response("302 Found", "", "Location: http://127.0.0.1:1/api/v1/status\r\n")},
                        {response("200 OK", statusFixture())}});
@@ -349,7 +351,7 @@ BOOST_AUTO_TEST_CASE(status_connection_refused)
     BOOST_TEST(contains(p.at(0).error, "refused"));
 }
 
-BOOST_AUTO_TEST_CASE(poller_repeats_every_interval)
+BOOST_AUTO_TEST_CASE(poller_repeats_every_interval, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     HttpServer server({{response("200 OK", statusFixture())}});
     IoThread t;
@@ -361,7 +363,7 @@ BOOST_AUTO_TEST_CASE(poller_repeats_every_interval)
     BOOST_TEST((p.at(1).at - p.at(0).at >= 900ms));
 }
 
-BOOST_AUTO_TEST_CASE(status_streak_resets_on_success)
+BOOST_AUTO_TEST_CASE(status_streak_resets_on_success, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     HttpServer server({{response("200 OK", R"({"aircraft":[]})")},
                        {response("500 Internal Server Error", "")},
@@ -393,7 +395,7 @@ BOOST_AUTO_TEST_CASE(status_streak_resets_on_success)
     BOOST_TEST(s.device_status->guid == "754104714b10828b");
 }
 
-BOOST_AUTO_TEST_CASE(poller_stop_cancels_inflight)
+BOOST_AUTO_TEST_CASE(poller_stop_cancels_inflight, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     HttpServer server({{response("200 OK", statusFixture()), 600ms}});
     IoThread t;
@@ -434,7 +436,7 @@ BOOST_AUTO_TEST_CASE(non_200_ends_after_the_header)
 
 // A request slower than the interval: one in flight at a time, and the next
 // starts no sooner than min(interval, 1 s) after the previous finished.
-BOOST_AUTO_TEST_CASE(slow_server_one_poll_in_flight)
+BOOST_AUTO_TEST_CASE(slow_server_one_poll_in_flight, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     HttpServer server({{response("200 OK", statusFixture()), 1200ms}});
     IoThread t;
@@ -444,7 +446,7 @@ BOOST_AUTO_TEST_CASE(slow_server_one_poll_in_flight)
         BOOST_TEST((server.requestTime(i) - p.at(i - 1).at >= 900ms));
 }
 
-BOOST_AUTO_TEST_CASE(no_status_url_no_request)
+BOOST_AUTO_TEST_CASE(no_status_url_no_request, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     HttpServer server({{response("200 OK", statusFixture())}});
     IoThread t;

@@ -6,7 +6,8 @@ add_test(NAME smoke COMMAND test_smoke)
 
 add_executable(test_protocol test_protocol.cpp)
 target_link_libraries(test_protocol PRIVATE skycue::skycue Boost::unit_test_framework)
-target_compile_definitions(test_protocol PRIVATE BOOST_TEST_DYN_LINK)
+target_compile_definitions(test_protocol PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
 skycue_set_warnings(test_protocol)
 add_test(NAME protocol COMMAND test_protocol)
 
@@ -162,6 +163,40 @@ set_tests_properties(parent_project PROPERTIES
   SKIP_RETURN_CODE 77
   ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
 
+# install_layout: `cmake --install` of this build tree into a DESTDIR, checked
+# against what this tree's configuration should produce (default source
+# install, package build with SKYCUE_PACKAGE_CONFIG and absolute
+# SKYCUE_SYSTEMD_UNITDIR, or SKYCUE_INSTALL_SYSTEM_FILES=OFF as the superbuild).
+add_test(NAME install_layout
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_install_layout.sh ${CMAKE_COMMAND}
+    ${PROJECT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/install-layout-work
+    ${CMAKE_INSTALL_PREFIX} ${CMAKE_INSTALL_FULL_BINDIR} ${CMAKE_INSTALL_FULL_SYSCONFDIR}
+    ${SKYCUE_INSTALL_SYSTEM_FILES} ${SKYCUE_PACKAGE_CONFIG} ${SKYCUE_SYSTEMD_UNITDIR})
+set_tests_properties(install_layout PROPERTIES TIMEOUT 120)
+
+# package_conf: cmake/PackageConfig.cmake on the example, and skycued on what
+# it writes. It picks a closed port with python3, so it is skipped (exit 77)
+# without one.
+add_test(NAME package_conf
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_package_conf.sh ${CMAKE_COMMAND}
+    ${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake ${_skycue_example_conf}
+    $<TARGET_FILE:skycued> ${CMAKE_CURRENT_BINARY_DIR}/package-conf-work "${SKYCUE_PYTHON3}")
+set_tests_properties(package_conf PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+
+# SKYCUE_TEST_SLOW_FACTOR outside sanitizer and fuzz builds: two configures
+# of skycue/ (no build), their registered timeouts and environments compared.
+if(NOT SKYCUE_PYTHON3)
+  skycue_skip_test(slow_factor "python3 not found")
+else()
+  add_test(NAME slow_factor
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_slow_factor.sh
+      ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/slow-factor-work ${SKYCUE_PYTHON3}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(slow_factor PROPERTIES
+    TIMEOUT 300
+    ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CTEST=${CMAKE_CTEST_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
+endif()
+
 add_executable(test_raw_formats test_raw_formats.cpp)
 target_link_libraries(test_raw_formats PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_raw_formats PRIVATE BOOST_TEST_DYN_LINK)
@@ -178,7 +213,7 @@ add_test(NAME rawtools
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_rawtools.sh
     $<TARGET_FILE:skycue-rawrec> $<TARGET_FILE:skycue-rawplay>
     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_TEST_READSB})
-set_tests_properties(rawtools PROPERTIES TIMEOUT 120)
+set_tests_properties(rawtools PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
 add_executable(test_engine test_engine.cpp)
 target_link_libraries(test_engine PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
@@ -196,7 +231,7 @@ skycue_set_warnings(test_stats_engine)
 add_test(NAME stats_engine COMMAND test_stats_engine)
 set_tests_properties(stats_engine PROPERTIES TIMEOUT 120)
 
-foreach(_t engine_api recording_independence runtime_config web_config)
+foreach(_t engine_api recording_independence runtime_config web_config check_inputs)
   add_executable(test_${_t} test_${_t}.cpp)
   target_link_libraries(test_${_t} PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
   target_compile_definitions(test_${_t} PRIVATE BOOST_TEST_DYN_LINK
@@ -236,13 +271,14 @@ set_tests_properties(stats_cli PROPERTIES TIMEOUT 120)
 add_test(NAME fisb_cli
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_fisb_cli.sh
     $<TARGET_FILE:skycue-fisb> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(fisb_cli PROPERTIES TIMEOUT 60)
+set_tests_properties(fisb_cli PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 add_executable(test_web_server test_web_server.cpp)
 target_link_libraries(test_web_server PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
 target_compile_definitions(test_web_server PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
-  SKYCUED_EXE="$<TARGET_FILE:skycued>")
+  SKYCUED_EXE="$<TARGET_FILE:skycued>"
+  SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
 add_dependencies(test_web_server skycued)
 skycue_set_warnings(test_web_server)
 add_test(NAME web_server COMMAND test_web_server)
@@ -339,7 +375,7 @@ add_test(NAME iqgen COMMAND test_iqgen)
 add_test(NAME iqgen_cli
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
     $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180)
+set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
 # ASTERIX CAT021 decoder, test encoder and TCP stream framer (pure).
 add_executable(test_cat021 test_cat021.cpp)
@@ -475,19 +511,5 @@ else()
   set_tests_properties(soak_short PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 endif()
 
-# Instrumented builds (SKYCUE_SANITIZE or SKYCUE_FUZZ): every test gets its
-# timeout and its waits (SKYCUE_TEST_SLOW, tests/test_slow.hpp) scaled by the
-# slow factor. The sanitizer options and suppression files are not set here:
-# scripts/run-sanitizers.sh exports them at test time and ctest passes them on.
-if(_skycue_sanitize OR SKYCUE_FUZZ)
-  get_property(_skycue_all_tests DIRECTORY PROPERTY TESTS)
-  foreach(_t IN LISTS _skycue_all_tests)
-    get_test_property(${_t} TIMEOUT _timeout)
-    if(NOT _timeout)
-      set(_timeout 1500)
-    endif()
-    math(EXPR _timeout "${_timeout} * ${_skycue_slow_factor}")
-    set_tests_properties(${_t} PROPERTIES TIMEOUT ${_timeout})
-    set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT "SKYCUE_TEST_SLOW=${_skycue_slow_factor}")
-  endforeach()
-endif()
+# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
+skycue_scale_test_timeouts()

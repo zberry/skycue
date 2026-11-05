@@ -36,14 +36,21 @@ echo "== subdir mode"
 
 echo "== install libskycue to a temporary prefix"
 "$cmake_bin" --install "$work/subdir" --prefix "$work/prefix"
-test -f "$work/prefix/lib/cmake/skycue/skycueConfig.cmake"
-test -f "$work/prefix/lib/cmake/skycue/skycueConfigVersion.cmake"
+# The library directory GNUInstallDirs chose for this platform (lib, lib64
+# or lib/<multiarch>), as libskycue's configure cached it.
+libdir=$(sed -n 's/^CMAKE_INSTALL_LIBDIR:[A-Z]*=//p' "$work/subdir/CMakeCache.txt")
+[[ -n $libdir ]] || { echo "no CMAKE_INSTALL_LIBDIR in the subdir build's cache" >&2; exit 1; }
+echo "libdir: $libdir"
+test -f "$work/prefix/$libdir/cmake/skycue/skycueConfig.cmake"
+test -f "$work/prefix/$libdir/cmake/skycue/skycueConfigVersion.cmake"
+test -f "$work/prefix/$libdir/libskycue.a"
 test -f "$work/prefix/include/skycue/client.hpp"
+test -f "$work/prefix/include/skycue/version.hpp"
 
 echo "== package mode"
 "$cmake_bin" -S "$consumer_dir" -B "$work/package" "${common[@]}" \
     -DSKYCUE_CONSUMER_MODE=package "-DCMAKE_PREFIX_PATH=$prefix_path"
-grep -qx "skycue_DIR:PATH=$work/prefix/lib/cmake/skycue" "$work/package/CMakeCache.txt"
+grep -qx "skycue_DIR:PATH=$work/prefix/$libdir/cmake/skycue" "$work/package/CMakeCache.txt"
 "$cmake_bin" --build "$work/package" -j 4
 "$work/package/consumer"
 
@@ -54,7 +61,7 @@ echo "== shared mode (SKYCUE_INSTALL=OFF)"
 "$work/shared/consumer"
 "$cmake_bin" --install "$work/shared" --prefix "$work/shared-prefix"
 test -x "$work/shared-prefix/bin/consumer"
-if [[ -e $work/shared-prefix/include/skycue || -e $work/shared-prefix/lib/cmake/skycue ]]; then
+if [[ -e $work/shared-prefix/include/skycue || -e $work/shared-prefix/$libdir/cmake/skycue ]]; then
     echo "SKYCUE_INSTALL=OFF still installed libskycue" >&2
     exit 1
 fi

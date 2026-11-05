@@ -2,6 +2,8 @@
 
 #include "json_lite.hpp"
 
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
@@ -24,14 +26,16 @@ const std::vector<std::string>& knownConfigKeys()
     static const std::vector<std::string> keys{
         "RECEIVER_LAT",    "RECEIVER_LON",      "RECEIVER_ALT_M",    "ANTENNA_HEIGHT_M",
         "SDR_1090_SERIAL", "SDR_978_SERIAL",    "GAIN_1090",         "GAIN_978",
-        "DUMP978_RAW_PORT", "DUMP978_JSON_PORT", "READSB_JSON_PORT", "WEB_PORT",
+        "DUMP978_RAW_PORT", "DUMP978_JSON_PORT", "READSB_JSON_PORT",
+        "READSB_HOST",     "DUMP978_HOST",      "DUMP978_ENABLE",    "WEB_PORT",
         "CUE_TCP_PORT",    "CUE_TCP_CONNECT",   "CUE_UDP_TARGETS",   "RECORD_DIR",
         "RECORD_FORMATS",
         "MAX_RANGE_NM",    "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE",   "BLOCK_LIST_FILE",
         "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
         "RECORD_RAW",
         "WEB_BIND",        "RECORD_MAX_GB",     "TRAIL_SECONDS",
-        "FISB_ENABLE",     "FISB_EXPERIMENTAL", "INPUTS_FILE",       "LOCATIONS_FILE",
+        "FISB_ENABLE",     "FISB_EXPERIMENTAL", "STATE_DIR",         "MAP_DIR",
+        "INPUTS_FILE",     "LOCATIONS_FILE",
         "STATS_FILE",      "STATS_AIRCRAFT_MAX", "STATS_SAVE_S",
     };
     return keys;
@@ -77,13 +81,17 @@ std::vector<std::string> words(const std::string& s)
     return out;
 }
 
+// One assignment: its value and where it is (file name and line).
 struct Entry {
     std::string value;
+    std::string file;
     int line;
 };
 
 class Converter {
 public:
+    // `file`: the name for an error not tied to an assignment (a missing key,
+    // a default out of range).
     Converter(const std::string& file, const std::map<std::string, Entry>& entries)
         : file_(file), entries_(entries)
     {
@@ -92,7 +100,9 @@ public:
     [[noreturn]] void fail(const std::string& key, const std::string& message) const
     {
         auto it = entries_.find(key);
-        throw ConfigError(file_, it == entries_.end() ? 0 : it->second.line, message);
+        if (it == entries_.end())
+            throw ConfigError(file_, 0, message);
+        throw ConfigError(it->second.file, it->second.line, message);
     }
 
     const Entry* find(const std::string& key) const
@@ -186,13 +196,19 @@ private:
     const std::map<std::string, Entry>& entries_;
 };
 
-}  // namespace
+// `name` in directory `dir` (absolute, no trailing slash unless it is "/").
+std::string underDir(const std::string& dir, const std::string& name)
+{
+    return (dir == "/" ? dir : dir + "/") + name;
+}
 
-Config parseConfigText(const std::string& text, const std::string& name)
+// The assignments of `text` (the file `name`) into `entries`, a later one
+// replacing an earlier one. Checks the grammar and that each key is known;
+// `allowed`, when given, is the only keys the file may assign.
+void collectEntries(const std::string& text, const std::string& name, std::map<std::string, Entry>& entries,
+                    const std::vector<std::string>* allowed = nullptr)
 {
     const auto& known = knownConfigKeys();
-    std::map<std::string, Entry> entries;  // last assignment wins
-
     std::istringstream in(text);
     int n = 0;
     for (std::string line; std::getline(in, line);) {
@@ -220,9 +236,43 @@ Config parseConfigText(const std::string& text, const std::string& name)
         }
         if (std::find(known.begin(), known.end(), key) == known.end())
             throw ConfigError(name, n, "unknown key " + key);
-        entries[key] = Entry{val, n};
+        if (allowed && std::find(allowed->begin(), allowed->end(), key) == allowed->end()) {
+            std::string only;
+            for (const auto& k : *allowed)
+                only += (only.empty() ? "" : ", ") + k;
+            throw ConfigError(name, n, key + " cannot be set in " + kOverridesFileName + " (only " + only + ")");
+        }
+        entries[key] = Entry{val, name, n};
     }
+}
 
+// Reads the file at `path` into `out`. False when it does not exist (nor its
+// directory: main() reports a STATE_DIR that is not one); throws ConfigError
+// when it cannot be read.
+bool readConfigFile(const std::string& path, std::string& out)
+{
+    struct stat st{};
+    if (::stat(path.c_str(), &st) != 0) {
+        if (errno == ENOENT || errno == ENOTDIR)
+            return false;
+        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
+    }
+    if (S_ISDIR(st.st_mode))
+        throw ConfigError(path, 0, "cannot open: is a directory");
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    if (in.bad())
+        throw ConfigError(path, 0, "read error");
+    out = ss.str();
+    return true;
+}
+
+// The Config the merged `entries` describe; `name` is the main file's.
+Config convertEntries(const std::map<std::string, Entry>& entries, const std::string& name)
+{
     Converter conv(name, entries);
     for (const char* key : {"RECEIVER_LAT", "RECEIVER_LON"}) {
         auto e = conv.find(key);
@@ -231,8 +281,6 @@ Config parseConfigText(const std::string& text, const std::string& name)
     }
 
     Config c;
-    for (const auto& e : entries)
-        c.file_keys.insert(e.first);
     conv.num("RECEIVER_LAT", c.receiver_lat, -90, 90);
     conv.num("RECEIVER_LON", c.receiver_lon, -180, 180);
     conv.num("RECEIVER_ALT_M", c.receiver_alt_m);
@@ -287,6 +335,27 @@ Config parseConfigText(const std::string& text, const std::string& name)
     conv.str("LOCATIONS_FILE", c.locations_file);
     conv.str("STATS_FILE", c.stats_file);
 
+    auto host = [&](const char* key, std::string& field) {  // like WEB_BIND
+        conv.str(key, field);
+        if (field.empty())
+            conv.fail(key, std::string(key) + " must not be empty");
+    };
+    host("READSB_HOST", c.readsb_host);
+    host("DUMP978_HOST", c.dump978_host);
+    conv.yesNo("DUMP978_ENABLE", c.dump978_enable);
+    // "" (unset) or absolute; one trailing slash dropped ("/" stays "/").
+    auto absoluteDir = [&](const char* key, std::string& field) {
+        conv.str(key, field);
+        if (!field.empty() && field.front() != '/')
+            conv.fail(key, std::string(key) + " must be an absolute path, got '" + field + "'");
+        if (field.size() > 1 && field.back() == '/')
+            field.pop_back();
+    };
+    absoluteDir("STATE_DIR", c.state_dir);
+    absoluteDir("MAP_DIR", c.map_dir);
+    c.allow_list_path = listFilePath(c.state_dir, c.allow_list_file);
+    c.block_list_path = listFilePath(c.state_dir, c.block_list_file);
+
     conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
     conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);
     if (auto e = conv.find("RECORD_FORMATS")) {
@@ -326,6 +395,48 @@ Config parseConfigText(const std::string& text, const std::string& name)
     return c;
 }
 
+}  // namespace
+
+const std::vector<std::string>& overridesFileKeys()
+{
+    static const std::vector<std::string> keys{"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE",
+                                               "BLOCK_LIST_FILE"};
+    return keys;
+}
+
+std::string overridesPath(const Config& c)
+{
+    return c.state_dir.empty() ? std::string() : underDir(c.state_dir, kOverridesFileName);
+}
+
+Config parseConfigLayers(const std::string& main_text, const std::string& main_name,
+                         const std::string& overrides_text, const std::string& overrides_name)
+{
+    std::map<std::string, Entry> entries, overrides;
+    collectEntries(main_text, main_name, entries);
+    collectEntries(overrides_text, overrides_name, overrides, &overridesFileKeys());
+    std::set<std::string> main_keys, override_keys;
+    std::map<std::string, std::string> main_values;
+    for (const auto& e : entries) {
+        main_keys.insert(e.first);
+        main_values[e.first] = e.second.value;
+    }
+    for (auto& e : overrides) {
+        override_keys.insert(e.first);
+        entries[e.first] = std::move(e.second);
+    }
+    Config c = convertEntries(entries, main_name);
+    c.file_keys = std::move(main_keys);
+    c.file_values = std::move(main_values);
+    c.override_keys = std::move(override_keys);
+    return c;
+}
+
+Config parseConfigText(const std::string& text, const std::string& name)
+{
+    return parseConfigLayers(text, name, std::string(), std::string());
+}
+
 std::string configValueText(const Config& c, const std::string& key)
 {
     // Static: the table below (built once) calls them without capturing.
@@ -349,6 +460,9 @@ std::string configValueText(const Config& c, const std::string& key)
         {"DUMP978_RAW_PORT", [](const Config& x) { return std::to_string(x.dump978_raw_port); }},
         {"DUMP978_JSON_PORT", [](const Config& x) { return std::to_string(x.dump978_json_port); }},
         {"READSB_JSON_PORT", [](const Config& x) { return std::to_string(x.readsb_json_port); }},
+        {"READSB_HOST", [](const Config& x) { return x.readsb_host; }},
+        {"DUMP978_HOST", [](const Config& x) { return x.dump978_host; }},
+        {"DUMP978_ENABLE", [](const Config& x) { return yesNo(x.dump978_enable); }},
         {"WEB_PORT", [](const Config& x) { return std::to_string(x.web_port); }},
         {"CUE_TCP_PORT", [](const Config& x) { return std::to_string(x.cue_tcp_port); }},
         {"CUE_TCP_CONNECT", [](const Config& x) { return endpoints(x.cue_tcp_connect_targets); }},
@@ -375,6 +489,8 @@ std::string configValueText(const Config& c, const std::string& key)
         {"TRAIL_SECONDS", [](const Config& x) { return std::to_string(x.trail_seconds); }},
         {"FISB_ENABLE", [](const Config& x) { return yesNo(x.fisb_enable); }},
         {"FISB_EXPERIMENTAL", [](const Config& x) { return yesNo(x.fisb_experimental); }},
+        {"STATE_DIR", [](const Config& x) { return x.state_dir; }},
+        {"MAP_DIR", [](const Config& x) { return x.map_dir; }},
         {"INPUTS_FILE", [](const Config& x) { return x.inputs_file; }},
         {"LOCATIONS_FILE", [](const Config& x) { return x.locations_file; }},
         {"STATS_FILE", [](const Config& x) { return x.stats_file; }},
@@ -387,9 +503,9 @@ std::string configValueText(const Config& c, const std::string& key)
     return it->second(c);
 }
 
-std::string resolveInputsFile(const std::string& conf_path, const std::string& value)
+std::string resolveInputsFile(const Config& c, const std::string& conf_path)
 {
-    return resolveConfigRelative(conf_path, value.empty() ? std::string("skycue.inputs.json") : value);
+    return resolveStatePath(c, conf_path, c.inputs_file.empty() ? std::string("skycue.inputs.json") : c.inputs_file);
 }
 
 std::string resolveConfigRelative(const std::string& conf_path, const std::string& value)
@@ -400,16 +516,72 @@ std::string resolveConfigRelative(const std::string& conf_path, const std::strin
     return slash == std::string::npos ? value : conf_path.substr(0, slash + 1) + value;
 }
 
+std::string resolveStatePath(const Config& c, const std::string& conf_path, const std::string& value)
+{
+    if (value.empty() || value.front() == '/')
+        return value;
+    if (!c.state_dir.empty())
+        return underDir(c.state_dir, value);
+    return resolveConfigRelative(conf_path, value);
+}
+
+std::string listFilePath(const std::string& state_dir, const std::string& value)
+{
+    return state_dir.empty() || value.empty() || value.front() == '/' ? value : underDir(state_dir, value);
+}
+
+namespace {
+
+// The overrides file of skycue.conf text: STATE_DIR from the grammar pass alone.
+std::string overridesPathOfText(const std::string& text, const std::string& name)
+{
+    std::map<std::string, Entry> entries;
+    collectEntries(text, name, entries);
+    const auto it = entries.find("STATE_DIR");
+    if (it == entries.end())
+        return std::string();
+    Config c;
+    c.state_dir = it->second.value;
+    if (c.state_dir.empty() || c.state_dir.front() != '/')
+        return std::string();
+    if (c.state_dir.size() > 1 && c.state_dir.back() == '/')  // as convertEntries does
+        c.state_dir.pop_back();
+    return overridesPath(c);
+}
+
+std::string readMainConfig(const std::string& path)
+{
+    std::string text;
+    if (!readConfigFile(path, text))
+        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
+    return text;
+}
+
+}  // namespace
+
+std::string overridesPathOf(const std::string& path) { return overridesPathOfText(readMainConfig(path), path); }
+
+Config parseConfigFile(const std::string& path, const std::string& overrides_path)
+{
+    std::string text, overrides_text;
+    if (!readConfigFile(path, text))
+        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
+    if (overrides_path.empty() || !readConfigFile(overrides_path, overrides_text))
+        return parseConfigText(text, path);
+    return parseConfigLayers(text, path, overrides_text, overrides_path);
+}
+
 Config parseConfigFile(const std::string& path)
 {
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
-        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    if (in.bad())
-        throw ConfigError(path, 0, "read error");
-    return parseConfigText(ss.str(), path);
+    // The main file's STATE_DIR says where the overrides are: from its
+    // grammar pass alone, so a value only the overrides make valid is no
+    // reason to refuse it. One read of the main file.
+    const std::string text = readMainConfig(path);
+    const std::string overrides_path = overridesPathOfText(text, path);
+    std::string overrides_text;
+    if (overrides_path.empty() || !readConfigFile(overrides_path, overrides_text))
+        return parseConfigText(text, path);
+    return parseConfigLayers(text, path, overrides_text, overrides_path);
 }
 
 }  // namespace skycued

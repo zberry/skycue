@@ -4,6 +4,8 @@
 #define BOOST_TEST_MODULE fisb_decoder
 #include <boost/test/unit_test.hpp>
 
+#include "restricted_fixtures.hpp"
+
 #include "gz_line_reader.hpp"
 #include "fisb/fisb_decoder.hpp"
 #include "fisb/fisb_json.hpp"
@@ -161,7 +163,7 @@ BOOST_AUTO_TEST_CASE(segment_key_includes_ground_station)
 
 // Every uplink of the 2015 sample on a 1 Hz clock from 04:12 (its products
 // are from 03:53-04:10 that day).
-BOOST_AUTO_TEST_CASE(sample_products_stored)
+BOOST_AUTO_TEST_CASE(sample_products_stored, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     Pipeline p;
     const TimePoint t0 = iso("2015-01-24T04:12:00Z");

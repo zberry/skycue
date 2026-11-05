@@ -531,13 +531,13 @@ std::string eventJson(const EngineEvent& event)
     return std::string();
 }
 
-std::string tilesAvailableJson(const std::string& www_dir)
+std::string tilesAvailableJson(const std::string& dir)
 {
     // "overlays": whether overlays/meta.json (scripts/make-overlays.sh) is a usable JSON object.
     bool overlays = false;
-    if (const auto text = readSmallFile(www_dir + "/overlays/meta.json", 64 * 1024))
+    if (const auto text = readSmallFile(dir + "/overlays/meta.json", 64 * 1024))
         overlays = JsonObject::parse(*text).has_value();
-    const std::string tiles = www_dir + "/tiles";
+    const std::string tiles = dir + "/tiles";
     if (const auto text = readSmallFile(tiles + "/meta.json", 64 * 1024)) {
         if (const auto meta = JsonObject::parse(*text)) {
             JsonWriter w;
@@ -609,7 +609,7 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
     const std::string& body = request.body;
     Engine& engine = context.engine;
     RuntimeConfig& runtime = context.runtime;
-    const std::string& www_dir = context.www_dir;
+    const std::string& map_dir = context.map_dir.empty() ? context.www_dir : context.map_dir;
     try {
         const bool get = method == "GET";
         if (path == "/api/state")
@@ -672,7 +672,7 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
         if (isStatsPath(path))
             return handleStatsApi(request, engine, context.stats);
         if (path == "/api/tiles-available")
-            return get ? json(200, tilesAvailableJson(www_dir)) : notAllowed("GET");
+            return get ? json(200, tilesAvailableJson(map_dir)) : notAllowed("GET");
         return error(404, "no such API path: " + path);
     } catch (const std::exception& e) {
         return error(500, e.what());

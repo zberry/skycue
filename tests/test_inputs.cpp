@@ -1,6 +1,8 @@
 #define BOOST_TEST_MODULE skycued_inputs
 #include <boost/test/unit_test.hpp>
 
+#include "restricted_fixtures.hpp"
+
 #include "asterix/cat021.hpp"
 #include "asterix/cat021_encode.hpp"
 #include "engine_test_support.hpp"
@@ -426,7 +428,9 @@ struct StderrCapture {
 
 // ---------------------------------------------------------------- inputs
 
-BOOST_AUTO_TEST_CASE(ping_json_input_end_to_end)
+BOOST_AUTO_TEST_CASE(ping_json_input_end_to_end,
+                     *skycue_test::needs_fixture("pingstation/icd-status.json") *
+                         skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     IoThread t;
     const uint16_t port = freeUdpPort();
@@ -655,7 +659,7 @@ BOOST_AUTO_TEST_CASE(malformed_flood_counted_and_log_rate_limited)
 
 // ---------------------------------------------------------------- manager
 
-BOOST_AUTO_TEST_CASE(create_persists_and_starts)
+BOOST_AUTO_TEST_CASE(create_persists_and_starts, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     IoThread t;
     TempDir tmp;
@@ -719,7 +723,8 @@ BOOST_AUTO_TEST_CASE(create_invalid_400_message_verbatim)
     BOOST_TEST(!exists(cfg.inputs_file));
 }
 
-BOOST_AUTO_TEST_CASE(replace_resets_connection_keeps_counters)
+BOOST_AUTO_TEST_CASE(replace_resets_connection_keeps_counters,
+                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     IoThread t;
     TempDir tmp;
@@ -744,7 +749,8 @@ BOOST_AUTO_TEST_CASE(replace_resets_connection_keeps_counters)
     BOOST_TEST(m.state("ps").counters.observations == 5u);
 }
 
-BOOST_AUTO_TEST_CASE(edit_while_receiving_rebinds_same_port)
+BOOST_AUTO_TEST_CASE(edit_while_receiving_rebinds_same_port,
+                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     IoThread t;
     TempDir tmp;
@@ -777,7 +783,7 @@ BOOST_AUTO_TEST_CASE(edit_while_receiving_rebinds_same_port)
     BOOST_TEST(m.find("ps")->def.name == "n4");
 }
 
-BOOST_AUTO_TEST_CASE(disable_stops_enable_restarts)
+BOOST_AUTO_TEST_CASE(disable_stops_enable_restarts, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     IoThread t;
     TempDir tmp;
@@ -858,7 +864,7 @@ BOOST_AUTO_TEST_CASE(builtin_enabled_persisted)
     BOOST_TEST(skycued::parseInputsFile(readAll(cfg.inputs_file)).builtin_enabled.at("readsb") == true);
 }
 
-BOOST_AUTO_TEST_CASE(remove_forgets_counters)
+BOOST_AUTO_TEST_CASE(remove_forgets_counters, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     IoThread t;
     TempDir tmp;
@@ -1077,7 +1083,8 @@ BOOST_AUTO_TEST_CASE(hand_edit_with_one_bad_entry_keeps_previous_set)
     BOOST_TEST(readAll(cfg.inputs_file + ".rejected") == text);
 }
 
-BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded)
+BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded,
+                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     IoThread t;
     TempDir tmp;
@@ -1107,7 +1114,8 @@ BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded)
     BOOST_TEST(s.counters.messages == 1u);
 }
 
-BOOST_AUTO_TEST_CASE(inputs_file_deleted_while_running_keeps_set)
+BOOST_AUTO_TEST_CASE(inputs_file_deleted_while_running_keeps_set,
+                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     IoThread t;
     TempDir tmp;
@@ -1183,7 +1191,7 @@ BOOST_AUTO_TEST_CASE(destroyed_with_pending_timer)
 
 // A device status changes device_status only: no onChanged (inputs_changed),
 // so a status every second does not resend the inputs list.
-BOOST_AUTO_TEST_CASE(device_status_does_not_fire_changed)
+BOOST_AUTO_TEST_CASE(device_status_does_not_fire_changed, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     IoThread t;
     TempDir tmp;

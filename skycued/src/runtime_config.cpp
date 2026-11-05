@@ -129,9 +129,10 @@ std::string readFile(const std::string& path)
 
 IdList loadList(const std::string& path) { return path.empty() ? IdList() : IdList::loadFile(path); }
 
-std::string overlayPathFor(const std::string& conf_path)
+// In STATE_DIR when it is set, else next to skycue.conf.
+std::string overlayPathFor(const std::string& conf_path, const std::string& state_dir)
 {
-    const std::string dir = dirOf(conf_path);
+    const std::string dir = state_dir.empty() ? dirOf(conf_path) : state_dir;
     return (dir == "/" ? dir : dir + "/") + kOverlayName;
 }
 
@@ -226,6 +227,9 @@ constexpr RestartKey kRestartKeys[] = {
     SKYCUED_RESTART_KEY("DUMP978_RAW_PORT", dump978_raw_port),
     SKYCUED_RESTART_KEY("DUMP978_JSON_PORT", dump978_json_port),
     SKYCUED_RESTART_KEY("READSB_JSON_PORT", readsb_json_port),
+    SKYCUED_RESTART_KEY("READSB_HOST", readsb_host),
+    SKYCUED_RESTART_KEY("DUMP978_HOST", dump978_host),
+    SKYCUED_RESTART_KEY("DUMP978_ENABLE", dump978_enable),
     SKYCUED_RESTART_KEY("WEB_PORT", web_port),
     SKYCUED_RESTART_KEY("CUE_TCP_PORT", cue_tcp_port),
     SKYCUED_RESTART_KEY("CUE_TCP_CONNECT", cue_tcp_connect_targets),
@@ -242,6 +246,8 @@ constexpr RestartKey kRestartKeys[] = {
     SKYCUED_RESTART_KEY("TRAIL_SECONDS", trail_seconds),
     SKYCUED_RESTART_KEY("FISB_ENABLE", fisb_enable),
     SKYCUED_RESTART_KEY("FISB_EXPERIMENTAL", fisb_experimental),
+    SKYCUED_RESTART_KEY("STATE_DIR", state_dir),
+    SKYCUED_RESTART_KEY("MAP_DIR", map_dir),
     SKYCUED_RESTART_KEY("INPUTS_FILE", inputs_file),
     SKYCUED_RESTART_KEY("LOCATIONS_FILE", locations_file),
     SKYCUED_RESTART_KEY("STATS_FILE", stats_file),
@@ -392,7 +398,7 @@ std::string overlayJson(const Overlay& o)
 
 RuntimeConfig::RuntimeConfig(boost::asio::io_context& io, std::string conf_path, Engine& engine)
     : conf_path_(std::move(conf_path)),
-      overlay_path_(overlayPathFor(conf_path_)),
+      overlay_path_(overlayPathFor(conf_path_, "")),
       engine_(engine),
       conf_watch_(conf_path_),
       overlay_watch_(overlay_path_),
@@ -409,15 +415,30 @@ RuntimeConfig::~RuntimeConfig()
 
 const std::string& RuntimeConfig::listPath(ListKind kind) const
 {
-    return kind == ListKind::allow ? file_conf_.allow_list_file : file_conf_.block_list_file;
+    return kind == ListKind::allow ? file_conf_.allow_list_path : file_conf_.block_list_path;
 }
 
 void RuntimeConfig::load()
 {
     // Stamps before reading: an edit in between is then seen again, never missed.
     conf_watch_.accept();
-    file_conf_ = parseConfigFile(conf_path_);
+    // skycue.conf alone says where the overrides file is (its STATE_DIR, from
+    // the grammar pass only: its values may be valid only with the
+    // overrides); then both are read once the overrides' stamp is taken.
+    // Again if STATE_DIR was edited in between.
+    std::string overrides = skycued::overridesPathOf(conf_path_);
+    for (;;) {
+        overrides_watch_ = SettledFile(overrides);
+        overrides_watch_.accept();
+        file_conf_ = parseConfigFile(conf_path_, overrides);
+        if (skycued::overridesPath(file_conf_) == overrides)
+            break;
+        overrides = skycued::overridesPath(file_conf_);
+    }
     running_ = file_conf_;
+    // The overlay's directory follows STATE_DIR as parsed now (a restart key).
+    overlay_path_ = overlayPathFor(conf_path_, running_.state_dir);
+    overlay_watch_ = SettledFile(overlay_path_);
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         listWatch(kind) = SettledFile(listPath(kind));
         listWatch(kind).accept();
@@ -425,6 +446,12 @@ void RuntimeConfig::load()
     }
     overlay_watch_.accept();
     overlay_ = Overlay();
+    // An install that moved to STATE_DIR: the overlay next to the config is
+    // no longer read, and its changes look lost.
+    const std::string beside_conf = overlayPathFor(conf_path_, "");
+    if (!overlay_watch_.stamp().exists && beside_conf != overlay_path_ && FileStamp::of(beside_conf).exists)
+        LOG_WARN(beside_conf << ": not read: STATE_DIR is set, so the overlay is " << overlay_path_
+                             << " (move the file there to keep its changes)");
     if (overlay_watch_.stamp().exists) {
         try {
             std::vector<std::string> warnings;
@@ -582,7 +609,7 @@ std::string RuntimeConfig::promoteToBaseline()
         values["MAX_RANGE_NM"] = formatRoundTrip(*next.max_range_nm);
     if (next.min_elevation_deg)
         values["MIN_ELEVATION_DEG"] = formatRoundTrip(*next.min_elevation_deg);
-    if (!values.empty()) {
+    if (!values.empty() && running_.state_dir.empty()) {
         try {
             const std::string text = readFile(conf_path_);
             const std::string out = conf_rewrite::rewriteKeys(text, values);
@@ -595,6 +622,26 @@ std::string RuntimeConfig::promoteToBaseline()
             next.min_elevation_deg.reset();
         } catch (const std::exception& e) {
             problems.push_back(std::string("skycue.conf not updated: ") + e.what());
+        }
+    } else if (!values.empty()) {
+        // STATE_DIR is set: skycue.conf (perhaps root's) is left alone.
+        const std::string& path = overrides_watch_.path();
+        try {
+            const std::string text = FileStamp::of(path).exists ? readFile(path) : std::string();
+            const std::string out = conf_rewrite::rewriteKeys(
+                text.empty() ? std::string("# Written by skycued (\"save as baseline\"); read after skycue.conf.\n")
+                             : text,
+                values);
+            // Never write a file skycued would refuse.
+            parseConfigLayers(readFile(conf_path_), conf_path_, out, path);
+            if (out != text) {
+                writeFile(overrides_watch_, out);
+                conf_written = true;
+            }
+            next.max_range_nm.reset();
+            next.min_elevation_deg.reset();
+        } catch (const std::exception& e) {
+            problems.push_back(std::string(kOverridesFileName) + " not updated: " + e.what());
         }
     }
 
@@ -635,7 +682,7 @@ std::string RuntimeConfig::promoteToBaseline()
 
     // Read back what was written (and anything edited by hand meanwhile).
     if (conf_written)
-        reloadConf();
+        reloadConf(running_.state_dir.empty() ? baseName(conf_path_) : std::string(kOverridesFileName));
     for (ListKind kind : {ListKind::allow, ListKind::block})
         if (list_written[kind == ListKind::allow ? 0 : 1])
             reloadList(kind);
@@ -677,8 +724,12 @@ void RuntimeConfig::poll()
 {
     bool quiet_change = false;  // a file reloaded without an Engine change
     if (conf_watch_.poll()) {
-        reloadConf();
+        reloadConf(baseName(conf_path_));
         quiet_change |= !applyEffective("file:" + baseName(conf_path_));
+    }
+    if (!overrides_watch_.path().empty() && overrides_watch_.poll()) {
+        reloadConf(kOverridesFileName);
+        quiet_change |= !applyEffective(std::string("file:") + kOverridesFileName);
     }
     if (overlay_watch_.poll()) {
         reloadOverlay();
@@ -696,11 +747,12 @@ void RuntimeConfig::poll()
         changed();
 }
 
-void RuntimeConfig::reloadConf()
+void RuntimeConfig::reloadConf(const std::string& edited)
 {
     Config c;
     try {
-        c = parseConfigFile(conf_path_);
+        // The overrides file of the running STATE_DIR (a changed one needs a restart).
+        c = parseConfigFile(conf_path_, overrides_watch_.path());
     } catch (const std::exception& e) {
         LOG_ERROR(e.what() << "; keeping the previous configuration");
         return;
@@ -722,24 +774,43 @@ void RuntimeConfig::reloadConf()
     };
     for (const auto& o : overridden)
         if (o.second)
-            LOG_WARN("runtime: " << o.first << " edited in skycue.conf but overridden by " << kOverlayName
+            LOG_WARN("runtime: " << o.first << " edited in " << edited << " but overridden by " << kOverlayName
                                  << " (use the UI or \"save as baseline\")");
+    // An edit of skycue.conf that the overrides file replaces changes nothing
+    // either: one line per key, so the edit does not look ignored.
+    if (edited == baseName(conf_path_))
+        for (const auto& key : overridesFileKeys()) {
+            const auto now = c.file_values.find(key), before = file_conf_.file_values.find(key);
+            const bool same = (now == c.file_values.end()) == (before == file_conf_.file_values.end()) &&
+                              (now == c.file_values.end() || now->second == before->second);
+            if (!same && c.override_keys.count(key))
+                LOG_INFO("runtime: " << key << " edited in " << edited << " but " << kOverridesFileName
+                                     << " sets it (" << configValueText(c, key) << "); that value stays");
+        }
+    // A relative list file resolves against STATE_DIR as running: a changed
+    // STATE_DIR is a restart key, so it does not move the lists before then.
+    c.allow_list_path = listFilePath(running_.state_dir, c.allow_list_file);
+    c.block_list_path = listFilePath(running_.state_dir, c.block_list_file);
     const Config old = file_conf_;
     file_conf_ = c;
     running_.max_range_nm = c.max_range_nm;
     running_.min_elevation_deg = c.min_elevation_deg;
     running_.allow_list_file = c.allow_list_file;
     running_.block_list_file = c.block_list_file;
-    // Whether the file sets a live key follows the file, like its value.
+    running_.allow_list_path = c.allow_list_path;
+    running_.block_list_path = c.block_list_path;
+    // Whether the file sets a live key follows the file, like its value; the
+    // overrides file holds live keys only.
     for (const char* key : {"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}) {
         if (c.file_keys.count(key))
             running_.file_keys.insert(key);
         else
             running_.file_keys.erase(key);
     }
+    running_.override_keys = c.override_keys;
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         const bool allow = kind == ListKind::allow;
-        if ((allow ? old.allow_list_file : old.block_list_file) == listPath(kind))
+        if ((allow ? old.allow_list_path : old.block_list_path) == listPath(kind))
             continue;
         // A new list file: read it now and watch it from here on. If it
         // cannot be read the previous entries stay until it can.

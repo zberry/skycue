@@ -1,6 +1,8 @@
 #define BOOST_TEST_MODULE skycued_pingstation
 #include <boost/test/unit_test.hpp>
 
+#include "restricted_fixtures.hpp"
+
 #include "asterix/cat021.hpp"
 #include "asterix/cat021_encode.hpp"
 #include "inputs/cat021_map.hpp"
@@ -273,7 +275,7 @@ BOOST_AUTO_TEST_CASE(huge_rates_dropped)
 
 // ---- JSON ----
 
-BOOST_AUTO_TEST_CASE(icd_1090_example_maps)
+BOOST_AUTO_TEST_CASE(icd_1090_example_maps, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     const std::string text = fixture("icd-traffic-1090.json");
     const auto r = parsePingDatagram(text, PingContext{kIcdArrival, TimeMode::utc});
@@ -314,7 +316,8 @@ BOOST_AUTO_TEST_CASE(icd_1090_example_maps)
     BOOST_TEST(epochNs(r.raw_frames[0].time) == int64_t{1670965892317283895});
 }
 
-BOOST_AUTO_TEST_CASE(icd_1090_example_clamped_when_far)
+BOOST_AUTO_TEST_CASE(icd_1090_example_clamped_when_far,
+                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     const TP arrival = utc(2026, 1, 1, 0, 0, 0);
     const auto r = parsePingDatagram(fixture("icd-traffic-1090.json"), PingContext{arrival, TimeMode::utc});
@@ -329,7 +332,7 @@ BOOST_AUTO_TEST_CASE(icd_1090_example_clamped_when_far)
     BOOST_TEST((r.raw_frames[0].time == arrival));
 }
 
-BOOST_AUTO_TEST_CASE(gps_time_mode_subtracts_18s)
+BOOST_AUTO_TEST_CASE(gps_time_mode_subtracts_18s, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     const TP arrival = utc(2022, 12, 13, 21, 11, 14);
     const auto r = parsePingDatagram(fixture("icd-traffic-1090.json"), PingContext{arrival, TimeMode::gps});
@@ -339,7 +342,7 @@ BOOST_AUTO_TEST_CASE(gps_time_mode_subtracts_18s)
     BOOST_TEST(r.clock_rejects == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(utcsync_zero_uses_arrival)
+BOOST_AUTO_TEST_CASE(utcsync_zero_uses_arrival, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     const auto text = replaced(fixture("icd-traffic-1090.json"), R"("utcSync":1)", R"("utcSync":0)");
     const auto r = parsePingDatagram(text, PingContext{kIcdArrival, TimeMode::utc});
@@ -351,7 +354,8 @@ BOOST_AUTO_TEST_CASE(utcsync_zero_uses_arrival)
     BOOST_TEST((r.raw_frames[0].time == kIcdArrival));
 }
 
-BOOST_AUTO_TEST_CASE(icd_status_verbatim_is_rejected)
+BOOST_AUTO_TEST_CASE(icd_status_verbatim_is_rejected,
+                     *skycue_test::needs_fixture("pingstation/icd-status-verbatim.json"))
 {
     const std::string text = fixture("icd-status-verbatim.json");
     PingResult r;
@@ -362,7 +366,7 @@ BOOST_AUTO_TEST_CASE(icd_status_verbatim_is_rejected)
     BOOST_TEST(!parsePingStatusDocument(text, kIcdArrival));
 }
 
-BOOST_AUTO_TEST_CASE(icd_status_example)
+BOOST_AUTO_TEST_CASE(icd_status_example, *skycue_test::needs_fixture("pingstation/icd-status.json"))
 {
     const std::string text = fixture("icd-status.json");
     const TP arrival = utc(2020, 11, 23, 23, 2, 23);

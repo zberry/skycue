@@ -13,7 +13,9 @@ received="$fixtures/fisb/received-with-uplinks.jsonl"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-for f in "$fisb" "$sample" "$tg30" "$golden" "$received"; do [ -e "$f" ] || fail "$f missing"; done
+# fixtures/raw/ is left out of the release tarball (fixtures/README.md).
+[ -e "$sample" ] || { echo "SKIP: $sample missing (not in the release tarball)"; exit 77; }
+for f in "$fisb" "$tg30" "$golden" "$received"; do [ -e "$f" ] || fail "$f missing"; done
 
 # section FILE TITLE: the lines of one "== TITLE..." section, header excluded.
 section() { awk -v t="== $2" 'index($0, t) == 1 { on = 1; next } /^== / { on = 0 } on' "$1"; }

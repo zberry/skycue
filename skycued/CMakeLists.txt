@@ -16,6 +16,7 @@ skycue_set_warnings(skycued_asterix)
 
 add_library(skycued_core STATIC
   src/change_detector.cpp
+  src/check_inputs.cpp
   src/conf_rewrite.cpp
   src/config.cpp
   src/dump978_raw_source.cpp

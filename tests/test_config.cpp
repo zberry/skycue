@@ -4,13 +4,18 @@
 #include "config.hpp"
 #include "log.hpp"
 
+#include <unistd.h>
+
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using skycued::Config;
 using skycued::ConfigError;
@@ -393,14 +398,29 @@ BOOST_AUTO_TEST_CASE(inputs_file_key)
 
 BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_the_config)
 {
-    using skycued::resolveInputsFile;
-    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "") == "/etc/skycue/skycue.inputs.json");
-    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "mine.json") == "/etc/skycue/mine.json");
-    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "sub/mine.json") == "/etc/skycue/sub/mine.json");
-    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "/srv/inputs.json") == "/srv/inputs.json");
-    BOOST_TEST(resolveInputsFile("skycue.conf", "") == "skycue.inputs.json");
-    BOOST_TEST(resolveInputsFile("skycue.conf", "mine.json") == "mine.json");
-    BOOST_TEST(resolveInputsFile("/skycue.conf", "") == "/skycue.inputs.json");
+    // INPUTS_FILE = `value`, STATE_DIR unset.
+    auto resolve = [](const std::string& conf_path, const std::string& value) {
+        Config c;
+        c.inputs_file = value;
+        return skycued::resolveInputsFile(c, conf_path);
+    };
+    BOOST_TEST(resolve("/etc/skycue/skycue.conf", "") == "/etc/skycue/skycue.inputs.json");
+    BOOST_TEST(resolve("/etc/skycue/skycue.conf", "mine.json") == "/etc/skycue/mine.json");
+    BOOST_TEST(resolve("/etc/skycue/skycue.conf", "sub/mine.json") == "/etc/skycue/sub/mine.json");
+    BOOST_TEST(resolve("/etc/skycue/skycue.conf", "/srv/inputs.json") == "/srv/inputs.json");
+    BOOST_TEST(resolve("skycue.conf", "") == "skycue.inputs.json");
+    BOOST_TEST(resolve("skycue.conf", "mine.json") == "mine.json");
+    BOOST_TEST(resolve("/skycue.conf", "") == "/skycue.inputs.json");
+}
+
+BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_state_dir)
+{
+    Config c = parseConfigText(std::string(kLatLon) + "STATE_DIR=/var/lib/skycue\n", "/etc/skycue/skycue.conf");
+    BOOST_TEST(skycued::resolveInputsFile(c, "/etc/skycue/skycue.conf") == "/var/lib/skycue/skycue.inputs.json");
+    c.inputs_file = "mine.json";
+    BOOST_TEST(skycued::resolveInputsFile(c, "/etc/skycue/skycue.conf") == "/var/lib/skycue/mine.json");
+    c.inputs_file = "/srv/inputs.json";
+    BOOST_TEST(skycued::resolveInputsFile(c, "/etc/skycue/skycue.conf") == "/srv/inputs.json");
 }
 
 BOOST_AUTO_TEST_CASE(stats_keys_defaults_and_ranges)
@@ -550,4 +570,262 @@ BOOST_AUTO_TEST_CASE(config_copy_text_parses)
     BOOST_TEST(c.locations_file == "o'hare locations.csv");                       // "..." holding '
     BOOST_TEST((c.file_keys == std::set<std::string>{"RECEIVER_LAT", "RECEIVER_LON", "SDR_1090_SERIAL", "CUE_UDP_TARGETS",
                                                      "RECORD_DIR", "MAX_RANGE_NM", "ALLOW_LIST_FILE", "LOCATIONS_FILE"}));
+}
+
+BOOST_AUTO_TEST_CASE(new_keys_defaults)
+{
+    const Config c = parseConfigText(kLatLon, "t");
+    BOOST_TEST(c.state_dir == "");
+    BOOST_TEST(c.map_dir == "");
+    BOOST_TEST(c.readsb_host == "127.0.0.1");
+    BOOST_TEST(c.dump978_host == "127.0.0.1");
+    BOOST_TEST(c.dump978_enable);
+    using skycued::configValueText;
+    BOOST_TEST(configValueText(c, "STATE_DIR") == "");
+    BOOST_TEST(configValueText(c, "MAP_DIR") == "");
+    BOOST_TEST(configValueText(c, "READSB_HOST") == "127.0.0.1");
+    BOOST_TEST(configValueText(c, "DUMP978_HOST") == "127.0.0.1");
+    BOOST_TEST(configValueText(c, "DUMP978_ENABLE") == "yes");
+}
+
+BOOST_AUTO_TEST_CASE(new_keys_parsed)
+{
+    const Config c = parseConfigText(std::string(kLatLon) + "STATE_DIR=/var/lib/skycue\nMAP_DIR=/var/lib/skycue/maps\n"
+                                                            "READSB_HOST=ultrafeeder\nDUMP978_HOST=192.0.2.7\nDUMP978_ENABLE=no\n",
+                                     "t");
+    BOOST_TEST(c.state_dir == "/var/lib/skycue");
+    BOOST_TEST(c.map_dir == "/var/lib/skycue/maps");
+    BOOST_TEST(c.readsb_host == "ultrafeeder");
+    BOOST_TEST(c.dump978_host == "192.0.2.7");
+    BOOST_TEST(!c.dump978_enable);
+    BOOST_TEST(skycued::configValueText(c, "DUMP978_ENABLE") == "no");
+    BOOST_TEST(skycued::configValueText(c, "STATE_DIR") == "/var/lib/skycue");
+}
+
+BOOST_AUTO_TEST_CASE(state_dir_must_be_absolute)
+{
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "STATE_DIR=var/lib\n").what()) ==
+               "test.conf:3: STATE_DIR must be an absolute path, got 'var/lib'");
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "MAP_DIR=maps\n").what()) ==
+               "test.conf:3: MAP_DIR must be an absolute path, got 'maps'");
+}
+
+BOOST_AUTO_TEST_CASE(hosts_must_not_be_empty)  // like WEB_BIND
+{
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "READSB_HOST=\n").what()) ==
+               "test.conf:3: READSB_HOST must not be empty");
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "DUMP978_HOST=\n").what()) ==
+               "test.conf:3: DUMP978_HOST must not be empty");
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "DUMP978_ENABLE=maybe\n").what()) ==
+               "test.conf:3: DUMP978_ENABLE must be yes or no, got 'maybe'");
+}
+
+BOOST_AUTO_TEST_CASE(state_paths_resolve_against_state_dir)
+{
+    Config c = parseConfigText(std::string(kLatLon) + "STATE_DIR=/s\nALLOW_LIST_FILE=allow.list\nBLOCK_LIST_FILE=/abs/b\n",
+                               "/etc/x/skycue.conf");
+    BOOST_TEST(c.allow_list_path == "/s/allow.list");
+    BOOST_TEST(c.block_list_path == "/abs/b");
+    BOOST_TEST(c.allow_list_file == "allow.list");  // as written, for /api/config
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "skycue.stats.json") == "/s/skycue.stats.json");
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "/abs/s.json") == "/abs/s.json");
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "") == "");
+    c.state_dir.clear();
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "skycue.stats.json") == "/etc/x/skycue.stats.json");
+}
+
+BOOST_AUTO_TEST_CASE(state_and_map_dir_lose_one_trailing_slash)
+{
+    const Config c = parseConfigText(std::string(kLatLon) + "STATE_DIR=/var/lib/skycue/\nMAP_DIR=/srv/maps/\n"
+                                                            "ALLOW_LIST_FILE=allow.list\n",
+                                     "/etc/x/skycue.conf");
+    BOOST_TEST(c.state_dir == "/var/lib/skycue");
+    BOOST_TEST(c.map_dir == "/srv/maps");
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "x") == "/var/lib/skycue/x");
+    BOOST_TEST(c.allow_list_path == "/var/lib/skycue/allow.list");
+    // The root stays the root, and a file under it gets one slash.
+    const Config root = parseConfigText(std::string(kLatLon) + "STATE_DIR=/\nMAP_DIR=/\n", "t");
+    BOOST_TEST(root.state_dir == "/");
+    BOOST_TEST(root.map_dir == "/");
+    BOOST_TEST(skycued::resolveStatePath(root, "t", "x") == "/x");
+}
+
+BOOST_AUTO_TEST_CASE(list_file_path_helper)
+{
+    using skycued::listFilePath;
+    BOOST_TEST(listFilePath("", "allow.list") == "allow.list");  // as written without STATE_DIR
+    BOOST_TEST(listFilePath("/s", "allow.list") == "/s/allow.list");
+    BOOST_TEST(listFilePath("/", "allow.list") == "/allow.list");
+    BOOST_TEST(listFilePath("/s", "/abs/allow.list") == "/abs/allow.list");
+    BOOST_TEST(listFilePath("/s", "") == "");
+}
+
+BOOST_AUTO_TEST_CASE(list_paths_unchanged_without_state_dir)  // today: as written (working-directory relative)
+{
+    const Config c = parseConfigText(std::string(kLatLon) + "ALLOW_LIST_FILE=allow.list\n", "/etc/x/skycue.conf");
+    BOOST_TEST(c.allow_list_path == "allow.list");
+    BOOST_TEST(c.block_list_path == "");
+}
+
+// ---- the overrides file (STATE_DIR/skycue.overrides.conf) ------------------------
+
+namespace {
+
+// A temp directory, removed with its plain files (no subdirectories) at the end.
+struct ScratchDir {
+    std::string path;
+    std::vector<std::string> files;
+    ScratchDir()
+    {
+        const char* base = std::getenv("TMPDIR");
+        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/skycue-config-XXXXXX";
+        std::vector<char> buf(tmpl.begin(), tmpl.end());
+        buf.push_back('\0');
+        BOOST_REQUIRE(::mkdtemp(buf.data()) != nullptr);
+        path = buf.data();
+    }
+    ~ScratchDir()
+    {
+        for (const auto& f : files)
+            std::remove((path + "/" + f).c_str());
+        ::rmdir(path.c_str());
+    }
+    std::string write(const std::string& name, const std::string& text)
+    {
+        files.push_back(name);
+        std::ofstream(path + "/" + name, std::ios::binary | std::ios::trunc) << text;
+        return path + "/" + name;
+    }
+};
+
+ConfigError expectLayersError(const std::string& overrides_text)
+{
+    try {
+        skycued::parseConfigLayers(std::string(kLatLon) + "STATE_DIR=/s\n", "main", overrides_text,
+                                   "/s/skycue.overrides.conf");
+    } catch (const ConfigError& e) {
+        return e;
+    }
+    BOOST_FAIL("expected ConfigError for overrides: " + overrides_text);
+    throw;  // unreachable
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(overrides_layer_over_main)
+{
+    const Config c = skycued::parseConfigLayers(std::string(kLatLon) + "STATE_DIR=/s\nMAX_RANGE_NM=150\n", "main",
+                                                "MAX_RANGE_NM=90\n", "/s/skycue.overrides.conf");
+    BOOST_TEST(c.max_range_nm == 90);
+    BOOST_TEST(c.override_keys.count("MAX_RANGE_NM") == 1u);
+    BOOST_TEST(c.override_keys.count("STATE_DIR") == 0u);
+    BOOST_TEST(c.file_keys.count("MAX_RANGE_NM") == 1u);  // the main file sets it too
+    BOOST_TEST(skycued::kOverridesFileName == std::string("skycue.overrides.conf"));
+    BOOST_TEST(skycued::overridesPath(c) == "/s/skycue.overrides.conf");
+    Config none = c;
+    none.state_dir.clear();
+    BOOST_TEST(skycued::overridesPath(none) == "");
+    // No overrides text: the main file alone.
+    const Config plain = skycued::parseConfigLayers(std::string(kLatLon) + "MAX_RANGE_NM=150\n", "main", "", "o");
+    BOOST_TEST(plain.max_range_nm == 150);
+    BOOST_TEST(plain.override_keys.empty());
+}
+
+BOOST_AUTO_TEST_CASE(overrides_list_files_resolve_against_state_dir)
+{
+    // The list paths are resolved once, on the merged values.
+    const Config c = skycued::parseConfigLayers(std::string(kLatLon) + "STATE_DIR=/s\nALLOW_LIST_FILE=a.list\n",
+                                                "main", "ALLOW_LIST_FILE=b.list\nBLOCK_LIST_FILE=/abs/block.list\n",
+                                                "/s/skycue.overrides.conf");
+    BOOST_TEST(c.allow_list_file == "b.list");
+    BOOST_TEST(c.allow_list_path == "/s/b.list");
+    BOOST_TEST(c.block_list_path == "/abs/block.list");
+    BOOST_TEST(c.override_keys == (std::set<std::string>{"ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}));
+}
+
+BOOST_AUTO_TEST_CASE(overrides_reject_other_keys)
+{
+    BOOST_TEST(skycued::overridesFileKeys() ==
+                   (std::vector<std::string>{"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}),
+               boost::test_tools::per_element());
+    ConfigError e = expectLayersError("WEB_PORT=81\n");
+    BOOST_TEST(std::string(e.what()) ==
+               "/s/skycue.overrides.conf:1: WEB_PORT cannot be set in skycue.overrides.conf (only MAX_RANGE_NM, "
+               "MIN_ELEVATION_DEG, ALLOW_LIST_FILE, BLOCK_LIST_FILE)");
+    BOOST_TEST(e.line == 1);
+    e = expectLayersError("MAX_RANGE_NM = 1\n");
+    BOOST_TEST(std::string(e.what()).rfind("/s/skycue.overrides.conf:1: malformed line", 0) == 0u, e.what());
+    // A value error names the overrides file and its line, not the main file.
+    e = expectLayersError("# saved\nMAX_RANGE_NM=0\n");
+    BOOST_TEST(std::string(e.what()).rfind("/s/skycue.overrides.conf:2: MAX_RANGE_NM must be greater than 0", 0) ==
+                   0u,
+               e.what());
+    e = expectLayersError("STATE_DIR=/t\n");
+    BOOST_TEST(contains(e.what(), "STATE_DIR cannot be set in skycue.overrides.conf"), e.what());
+    e = expectLayersError("FOO=1\n");
+    BOOST_TEST(std::string(e.what()) == "/s/skycue.overrides.conf:1: unknown key FOO");
+}
+
+BOOST_AUTO_TEST_CASE(overrides_file_read_only_with_state_dir)
+{
+    ScratchDir tmp;
+    tmp.write("skycue.overrides.conf", "MAX_RANGE_NM=90\n");
+    const std::string conf = tmp.write("skycue.conf", std::string(kLatLon) + "MAX_RANGE_NM=150\n");
+    Config c = skycued::parseConfigFile(conf);
+    BOOST_TEST(c.max_range_nm == 150);
+    BOOST_TEST(c.override_keys.empty());
+    tmp.write("skycue.conf", std::string(kLatLon) + "MAX_RANGE_NM=150\nSTATE_DIR=" + tmp.path + "\n");
+    c = skycued::parseConfigFile(conf);
+    BOOST_TEST(c.max_range_nm == 90);
+    BOOST_TEST(c.override_keys.count("MAX_RANGE_NM") == 1u);
+    // An overrides file that does not parse fails the whole config, naming it.
+    const std::string overrides = tmp.write("skycue.overrides.conf", "WEB_PORT=81\n");
+    try {
+        skycued::parseConfigFile(conf);
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& e) {
+        BOOST_TEST(std::string(e.what()).rfind(overrides + ":1: WEB_PORT cannot be set", 0) == 0u, e.what());
+    }
+    // No overrides file under STATE_DIR: the main file alone.
+    std::remove(overrides.c_str());
+    BOOST_TEST(skycued::parseConfigFile(conf).max_range_nm == 150);
+}
+
+BOOST_AUTO_TEST_CASE(main_file_valid_only_with_its_overrides_is_read)
+{
+    // STATE_DIR comes from the grammar pass alone: a skycue.conf whose own
+    // MAX_RANGE_NM is refused still finds the overrides file that replaces it.
+    ScratchDir tmp;
+    const std::string overrides = tmp.write("skycue.overrides.conf", "MAX_RANGE_NM=90\n");
+    const std::string conf =
+        tmp.write("skycue.conf", std::string(kLatLon) + "MAX_RANGE_NM=0\nSTATE_DIR=" + tmp.path + "/\n");
+    BOOST_TEST(skycued::overridesPathOf(conf) == overrides);
+    const Config c = skycued::parseConfigFile(conf);
+    BOOST_TEST(c.max_range_nm == 90);
+    BOOST_TEST(c.state_dir == tmp.path);
+    BOOST_TEST(c.override_keys.count("MAX_RANGE_NM") == 1u);
+    // The main file's values as written, whatever the overrides say.
+    BOOST_TEST(c.file_values.at("MAX_RANGE_NM") == "0");
+    BOOST_TEST(c.file_values.count("MIN_ELEVATION_DEG") == 0u);
+    // Without the overrides the main file's own value is refused, naming it.
+    std::remove(overrides.c_str());
+    try {
+        skycued::parseConfigFile(conf);
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& e) {
+        BOOST_TEST(std::string(e.what()).rfind(conf + ":3: MAX_RANGE_NM must be greater than 0", 0) == 0u, e.what());
+    }
+    // No STATE_DIR, or one that is not absolute (the conversion reports that): none.
+    tmp.write("skycue.conf", std::string(kLatLon));
+    BOOST_TEST(skycued::overridesPathOf(conf) == "");
+    tmp.write("skycue.conf", std::string(kLatLon) + "STATE_DIR=state\n");
+    BOOST_TEST(skycued::overridesPathOf(conf) == "");
+    // A grammar error is still an error.
+    tmp.write("skycue.conf", std::string(kLatLon) + "not a line\n");
+    try {
+        skycued::overridesPathOf(conf);
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& e) {
+        BOOST_TEST(std::string(e.what()).rfind(conf + ":3: malformed line", 0) == 0u, e.what());
+    }
 }

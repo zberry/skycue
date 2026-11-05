@@ -15,6 +15,8 @@
 
 #include <sys/stat.h>
 
+#include <fstream>
+#include <functional>
 #include <map>
 
 using namespace enginetest;
@@ -102,18 +104,22 @@ struct ConfigFx {
     std::unique_ptr<WebServer> web;
     uint16_t port = 0;
 
-    ConfigFx()
+    // `setup`, when given, runs first with the temp dir: it may write files
+    // there and returns more skycue.conf lines.
+    explicit ConfigFx(const std::function<std::string(const std::string& dir)>& setup = nullptr)
     {
         conf = tmp.path + "/skycue.conf";
         rec = tmp.path + "/rec";
         inputs_file = tmp.path + "/skycue.inputs.json";
         ::mkdir(rec.c_str(), 0755);
-        std::ofstream(conf) << "RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\nMAX_RANGE_NM=120\n";
+        std::ofstream(conf) << "RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\nMAX_RANGE_NM=120\n"
+                            << (setup ? setup(tmp.path) : std::string());
         fx = std::make_unique<EngineFx>(skycued::parseConfigFile(conf), fakeSource(src), 10s, rec);
         info.version = "skycued test";
         info.started = std::chrono::system_clock::now();
         info.config_path = conf;
         info.www_dir = tmp.path + "/www";
+        info.map_dir = tmp.path + "/maps";
         info.log_level = "info";
         info.inputs_path = inputs_file;
         info.cli_overrides = {{"WEB_PORT", "0"}};
@@ -168,12 +174,47 @@ BOOST_AUTO_TEST_CASE(config_json_sources_and_values)
     BOOST_TEST(daemon->getString("config_path").value_or("") == f.conf);
     BOOST_TEST(daemon->getString("overlay_path").value_or("") == f.tmp.path + "/skycue.runtime.json");
     BOOST_TEST(daemon->getString("www_dir").value_or("") == f.tmp.path + "/www");
+    BOOST_TEST(daemon->getString("map_dir").value_or("") == f.tmp.path + "/maps");
     BOOST_TEST(daemon->getString("log_level").value_or("") == "info");
     BOOST_TEST(daemon->getString("record_dir").has_value());
     const auto files = daemon->getStringArray("recording_files");
     BOOST_REQUIRE(files);
     for (const auto& name : *files)
         BOOST_TEST(name.find('/') == std::string::npos, name);
+}
+
+BOOST_AUTO_TEST_CASE(overrides_source_reported)
+{
+    ConfigFx f([](const std::string& dir) {
+        std::ofstream(dir + "/skycue.overrides.conf") << "MAX_RANGE_NM=90\n";
+        return "STATE_DIR=" + dir + "\n";
+    });
+    auto r = request(f.port, http::verb::get, "/api/config");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    auto config = parsed(r.body);
+    expectKey(keysOf(config), "MAX_RANGE_NM", "90", "overrides", false);
+    expectKey(keysOf(config), "MIN_ELEVATION_DEG", "0", "default", false);
+    expectKey(keysOf(config), "STATE_DIR", f.tmp.path, "conf", true);
+    auto daemon = config.getObject("daemon");
+    BOOST_REQUIRE(daemon);
+    BOOST_TEST(daemon->getString("overrides_path").value_or("?") == f.tmp.path + "/skycue.overrides.conf");
+    // The overlay still ranks first.
+    const auto put = request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":20}");
+    BOOST_TEST_REQUIRE(put.status == 200u, put.body);
+    r = request(f.port, http::verb::get, "/api/config");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    config = parsed(r.body);
+    expectKey(keysOf(config), "MAX_RANGE_NM", "20", "overlay", false);
+}
+
+BOOST_AUTO_TEST_CASE(overrides_path_empty_without_state_dir)
+{
+    ConfigFx f;
+    const auto r = request(f.port, http::verb::get, "/api/config");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    const auto daemon = parsed(r.body).getObject("daemon");
+    BOOST_REQUIRE(daemon);
+    BOOST_TEST(daemon->getString("overrides_path").value_or("?") == "");
 }
 
 BOOST_AUTO_TEST_CASE(overlay_source_after_put)

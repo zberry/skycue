@@ -38,7 +38,8 @@ std::string trackJson(const TrackSnapshot& track, const char* type = nullptr);
 // {"type":"drop",...} from a drop event; "" without id and reason.
 std::string dropJson(const EngineEvent& event);
 std::string expiredJson(skycue::TrackId id);                          // {"type":"expired",...}
-std::string tilesAvailableJson(const std::string& www_dir);
+// From <dir>/tiles and <dir>/overlays/meta.json; dir is MAP_DIR, else the www directory.
+std::string tilesAvailableJson(const std::string& dir);
 std::string errorJson(const std::string& message);  // {"error":"..."}
 
 // One item of a {"type":"events"} message: observed, update, drop, expired,
@@ -79,6 +80,7 @@ struct ApiContext {
     std::string www_dir;
     const DaemonInfo* daemon = nullptr;  // GET /api/config (web_config.hpp); nullptr: that is a 500
     StatsApiState* stats = nullptr;      // /api/stats/* (web_stats.hpp); nullptr: reset is not rate-limited
+    std::string map_dir = {};            // /api/tiles-available reads here (MAP_DIR); "": www_dir
 };
 
 // True for "/api" and every path under "/api/".

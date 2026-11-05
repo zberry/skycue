@@ -4,6 +4,7 @@
 #include "engine_test_support.hpp"
 
 #include "icao_class.hpp"
+#include "inputs/inputs_file.hpp"
 #include "runtime_config.hpp"
 #include "stats_store.hpp"
 #include "time_util.hpp"
@@ -18,6 +19,7 @@
 #include <boost/property_tree/ptree.hpp>
 
 #include <signal.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <spawn.h>
 #include <sys/socket.h>
@@ -265,11 +267,13 @@ struct WebOptions {
     size_t max_ws_queue_bytes = 2u << 20;
     std::string extra_conf;
     std::chrono::milliseconds ping_interval{15000};
+    bool map_dir = false;  // set wc.map_dir to maps/ (created unless map_dir_missing)
+    bool map_dir_missing = false;
 };
 
 struct WebFx {
     TempDir tmp;
-    std::string conf, rec, www;
+    std::string conf, rec, www, maps;
     FakeSource* src = nullptr;
     std::unique_ptr<EngineFx> fx;
     std::unique_ptr<RuntimeConfig> rc;
@@ -281,7 +285,10 @@ struct WebFx {
         conf = tmp.path + "/skycue.conf";
         rec = tmp.path + "/rec";
         www = tmp.path + "/www";
+        maps = tmp.path + "/maps";
         ::mkdir(rec.c_str(), 0755);
+        if (o.map_dir && !o.map_dir_missing)
+            ::mkdir(maps.c_str(), 0755);
         if (o.www) {
             ::mkdir(www.c_str(), 0755);
             writeFile(www + "/index.html", kIndex);
@@ -296,6 +303,8 @@ struct WebFx {
             wc.bind = "127.0.0.1";
             wc.port = 0;
             wc.www_dir = www;
+            if (o.map_dir)
+                wc.map_dir = maps;
             wc.max_ws_queue_bytes = o.max_ws_queue_bytes;
             wc.ping_interval = o.ping_interval;
             web = std::make_unique<WebServer>(fx->t.io, *fx->engine, *rc, wc);
@@ -399,6 +408,47 @@ uint16_t freePort()
     asio::io_context io;
     tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
     return a.local_endpoint().port();
+}
+
+// skycued --config `conf` `args` --web-bind 127.0.0.1 --web-port <free port>, logging to
+// `log`.<attempt>. freePort() releases the port before skycued binds it, so a parallel test
+// can take it in between: on "cannot listen", try another port. Returns the pid and the web
+// port once "web: listening" is logged; fails the test otherwise.
+std::pair<pid_t, uint16_t> spawnServing(const std::string& conf, std::vector<std::string> args, const std::string& log)
+{
+    args.insert(args.begin(), {"--config", conf});
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        const uint16_t port = freePort();
+        const std::string try_log = log + "." + std::to_string(attempt);
+        std::vector<std::string> all = args;
+        all.insert(all.end(), {"--web-bind", "127.0.0.1", "--web-port", std::to_string(port)});
+        const pid_t p = spawnSkycued(all, try_log);
+        const std::string listening = "web: listening on http://127.0.0.1:" + std::to_string(port);
+        const std::string busy = "web: cannot listen on 127.0.0.1:" + std::to_string(port);
+        if (!pollUntil([&] {
+                const std::string text = readAll(try_log);
+                return has(text, listening) || has(text, busy);
+            })) {
+            ::kill(p, SIGKILL);
+            waitExit(p, 1s);
+            BOOST_FAIL("skycued neither listened nor failed to listen on port " << port << ":\n" << readAll(try_log));
+        }
+        if (has(readAll(try_log), listening))
+            return {p, port};
+        BOOST_TEST(waitExit(p, 5s) == 1);
+    }
+    BOOST_FAIL("skycued found no free web port in 5 attempts");
+    return {-1, 0};
+}
+
+// The "keys" entry of GET /api/config for `key`.
+pt::ptree configKey(const pt::ptree& config, const std::string& key)
+{
+    for (const auto& k : config.get_child("keys"))
+        if (k.second.get<std::string>("key") == key)
+            return k.second;
+    BOOST_FAIL("no key " << key << " in /api/config");
+    return {};
 }
 
 }  // namespace
@@ -554,6 +604,97 @@ BOOST_AUTO_TEST_CASE(missing_www_dir_api_still_works)
     BOOST_TEST(get(f.port, "/").status == 404u);
     BOOST_TEST(get(f.port, "/api/state").status == 200u);
     BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
+}
+
+BOOST_AUTO_TEST_CASE(map_dir_serves_tiles_and_overlays)
+{
+    WebOptions o;
+    o.map_dir = true;
+    WebFx f(o);
+    for (const char* d : {"/tiles", "/tiles/7", "/tiles/7/37", "/overlays"})
+        ::mkdir((f.maps + d).c_str(), 0755);
+    writeFile(f.maps + "/tiles/7/37/49.png", "PNG");
+    writeFile(f.maps + "/tiles/meta.json", "{\"minZoom\":7,\"maxZoom\":7}");
+    writeFile(f.maps + "/overlays/meta.json", "{}");
+    Reply r = get(f.port, "/tiles/7/37/49.png");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "PNG");
+    BOOST_TEST(r.content_type == "image/png");
+    BOOST_TEST(r.cache_control == "max-age=86400");
+    r = get(f.port, "/overlays/meta.json");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "{}");
+    BOOST_TEST(r.cache_control == "no-cache");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body ==
+               "{\"tiles\":true,\"minZoom\":7,\"maxZoom\":7,\"overlays\":true}");
+    // Confined to the map directory as the rest is to www: no way out.
+    writeFile(f.tmp.path + "/secret.txt", "secret");
+    for (const char* t : {"/tiles/../../secret.txt", "/tiles/%2e%2e/%2e%2e/secret.txt", "/overlays/..%2f..%2fsecret.txt",
+                          "/tiles/7/..\\..\\secret.txt"}) {
+        r = get(f.port, t);
+        BOOST_TEST(r.status == 400u, t);
+        BOOST_TEST(r.body != "secret", t);
+    }
+    BOOST_TEST(get(f.port, "/").status == 200u);  // the rest still comes from www
+}
+
+BOOST_AUTO_TEST_CASE(map_dir_ignores_www_tiles)
+{
+    WebOptions o;
+    o.map_dir = true;
+    WebFx f(o);
+    for (const char* d : {"/tiles", "/tiles/7", "/tiles/7/37", "/overlays"})
+        ::mkdir((f.www + d).c_str(), 0755);
+    writeFile(f.www + "/tiles/7/37/49.png", "PNG");
+    writeFile(f.www + "/tiles/meta.json", "{\"minZoom\":7,\"maxZoom\":7}");
+    writeFile(f.www + "/overlays/meta.json", "{}");
+    BOOST_TEST(get(f.port, "/tiles/7/37/49.png").status == 404u);
+    BOOST_TEST(get(f.port, "/overlays/meta.json").status == 404u);
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
+    BOOST_TEST(get(f.port, "/").status == 200u);
+}
+
+// Redirects stderr (the log) to a file until text() is called.
+struct StderrCapture {
+    std::string path;
+    int saved = -1;
+    explicit StderrCapture(std::string p) : path(std::move(p))
+    {
+        std::fflush(stderr);
+        saved = ::dup(2);
+        const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        ::dup2(fd, 2);
+        ::close(fd);
+    }
+    std::string text()
+    {
+        if (saved >= 0) {
+            std::fflush(stderr);
+            ::dup2(saved, 2);
+            ::close(saved);
+            saved = -1;
+        }
+        return readAll(path);
+    }
+    ~StderrCapture() { text(); }
+};
+
+BOOST_AUTO_TEST_CASE(map_dir_missing_api_still_works)
+{
+    WebOptions o;
+    o.map_dir = true;
+    o.map_dir_missing = true;
+    TempDir logdir;
+    StderrCapture cap(logdir.path + "/stderr.txt");
+    WebFx f(o);
+    const std::string log = cap.text();
+    BOOST_TEST(has(log, "WARN"));
+    BOOST_TEST(has(log, "MAP_DIR"));
+    BOOST_TEST(has(log, "map directory " + f.maps + " (MAP_DIR) does not exist"));
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
+    BOOST_TEST(get(f.port, "/api/state").status == 200u);
+    BOOST_TEST(get(f.port, "/tiles/7/37/49.png").status == 404u);
+    BOOST_TEST(get(f.port, "/").status == 200u);
 }
 
 BOOST_AUTO_TEST_CASE(path_traversal_rejected)
@@ -1266,6 +1407,37 @@ BOOST_AUTO_TEST_CASE(web_bind_failure_exits_1)
     BOOST_TEST(has(readAll(log), "web: cannot listen on 127.0.0.1:" + std::to_string(busy.port())));
 }
 
+BOOST_AUTO_TEST_CASE(skycued_version_is_cmake_version)
+{
+    TempDir tmp;
+    const std::string log = tmp.path + "/log";
+    const pid_t pid = spawnSkycued({"--version"}, log);
+    BOOST_TEST(waitExit(pid, 5s) == 0);
+    BOOST_TEST(readAll(log) == std::string("skycued ") + SKYCUE_CMAKE_VERSION + "\n");
+}
+
+// An explicitly empty --readsb-host or --dump978-host is a usage error (exit 2,
+// one line), as an empty READSB_HOST or DUMP978_HOST key is; also with
+// --check-inputs, which would otherwise probe an empty host.
+BOOST_AUTO_TEST_CASE(empty_host_flag_exits_2)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    writeFile(conf, std::string(kConfHead) + "WEB_PORT=0\nCUE_TCP_PORT=0\n");
+    int n = 0;
+    for (const std::string flag : {"--readsb-host", "--dump978-host"}) {
+        for (const bool check : {false, true}) {
+            const std::string log = tmp.path + "/log" + std::to_string(n++);
+            std::vector<std::string> args{"--config", conf, flag, ""};
+            if (check)
+                args.push_back("--check-inputs");
+            const pid_t pid = spawnSkycued(args, log);
+            BOOST_TEST(waitExit(pid, 5s) == 2, flag << (check ? " --check-inputs" : ""));
+            BOOST_TEST(readAll(log) == "skycued: " + flag + " must not be empty\n", flag);
+        }
+    }
+}
+
 BOOST_AUTO_TEST_CASE(main_serves_with_overrides)
 {
     TempDir tmp;
@@ -1273,36 +1445,158 @@ BOOST_AUTO_TEST_CASE(main_serves_with_overrides)
     ::mkdir(www.c_str(), 0755);
     writeFile(www + "/index.html", kIndex);
     writeFile(conf, std::string(kConfHead) + "WEB_PORT=0\nWEB_BIND=0.0.0.0\nCUE_TCP_PORT=0\n");
-    // freePort() releases the port before skycued binds it, so a parallel
-    // test can take it in between: on "cannot listen", try another port.
-    uint16_t port = 0;
-    pid_t pid = -1;
-    for (int attempt = 0; attempt < 5 && pid < 0; ++attempt) {
-        port = freePort();
-        const std::string try_log = log + "." + std::to_string(attempt);
-        const pid_t p = spawnSkycued({"--config", conf, "--replay", kFixture, "--replay-loop", "--www-dir", www,
-                                      "--web-bind", "127.0.0.1", "--web-port", std::to_string(port)},
-                                     try_log);
-        const std::string listening = "web: listening on http://127.0.0.1:" + std::to_string(port);
-        const std::string busy = "web: cannot listen on 127.0.0.1:" + std::to_string(port);
-        if (!pollUntil([&] {
-                const std::string text = readAll(try_log);
-                return has(text, listening) || has(text, busy);
-            })) {
-            ::kill(p, SIGKILL);
-            waitExit(p, 1s);
-            BOOST_FAIL("skycued neither listened nor failed to listen on port " << port);
-        }
-        if (has(readAll(try_log), listening))
-            pid = p;
-        else
-            BOOST_TEST(waitExit(p, 5s) == 1);
-    }
+    const auto [pid, port] = spawnServing(conf, {"--replay", kFixture, "--replay-loop", "--www-dir", www}, log);
     BOOST_REQUIRE(pid > 0);
     BOOST_TEST(get(port, "/").body == kIndex);
     BOOST_TEST(get(port, "/api/state").status == 200u);
     ::kill(pid, SIGTERM);
     BOOST_TEST(waitExit(pid, 5s) == 0);
+}
+
+// A spawned skycued: killed when the test ends early (a failed BOOST_REQUIRE).
+struct Spawned {
+    pid_t pid;
+    uint16_t port;
+    explicit Spawned(std::pair<pid_t, uint16_t> p) : pid(p.first), port(p.second) {}
+    ~Spawned()
+    {
+        if (pid > 0) {
+            ::kill(pid, SIGKILL);
+            waitExit(pid, 1s);
+        }
+    }
+    int terminate()  // SIGTERM; the exit status (-1: it did not exit in time)
+    {
+        ::kill(pid, SIGTERM);
+        const int status = waitExit(pid, 5s);
+        if (status != -1)  // a daemon that did not exit is still the destructor's to kill
+            pid = -1;
+        return status;
+    }
+    pt::ptree json(const std::string& target) const { return parseJson(get(port, target).body); }
+};
+
+std::vector<std::string> inputIds(const pt::ptree& state)
+{
+    std::vector<std::string> ids;
+    for (const auto& in : state.get_child("inputs"))
+        ids.push_back(in.second.get<std::string>("id"));
+    return ids;
+}
+
+BOOST_AUTO_TEST_CASE(dump978_enable_no_creates_no_uat_input)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    writeFile(conf, std::string(kConfHead) + "CUE_TCP_PORT=0\nDUMP978_ENABLE=no\n");
+    Spawned d(spawnServing(conf, {"--no-readsb"}, tmp.path + "/log"));
+    const pt::ptree config = d.json("/api/config");
+    BOOST_TEST(config.get<std::string>("daemon.mode") == "live");
+    BOOST_TEST(config.get<bool>("daemon.dump978") == false);
+    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("value") == "no");
+    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "conf");
+    const auto ids = inputIds(d.json("/api/state"));
+    BOOST_TEST(std::count(ids.begin(), ids.end(), "dump978") == 0);
+    BOOST_TEST(d.terminate() == 0);
+}
+
+BOOST_AUTO_TEST_CASE(dump978_enabled_by_default)  // the counterpart: today's behaviour
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    writeFile(conf, std::string(kConfHead) + "CUE_TCP_PORT=0\n");
+    Spawned d(spawnServing(conf, {"--no-readsb"}, tmp.path + "/log"));
+    const pt::ptree config = d.json("/api/config");
+    BOOST_TEST(config.get<bool>("daemon.dump978") == true);
+    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "default");
+    const auto ids = inputIds(d.json("/api/state"));
+    BOOST_TEST(std::count(ids.begin(), ids.end(), "dump978") == 1);
+    BOOST_TEST(d.terminate() == 0);
+}
+
+BOOST_AUTO_TEST_CASE(state_dir_holds_state_files)
+{
+    TempDir tmp;
+    const std::string etc = tmp.path + "/etc", state = tmp.path + "/state";
+    BOOST_REQUIRE(::mkdir(etc.c_str(), 0755) == 0);
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    const std::string conf = etc + "/skycue.conf";
+    writeFile(conf, std::string(kConfHead) + "CUE_TCP_PORT=0\nSTATE_DIR=" + state + "\n");
+    // A replay, so the statistics change and are saved at exit.
+    Spawned d(spawnServing(conf, {"--replay", kFixture, "--replay-loop"}, tmp.path + "/log"));
+    const pt::ptree config = d.json("/api/config");
+    BOOST_TEST(config.get<std::string>("daemon.inputs_path") == state + "/skycue.inputs.json");
+    BOOST_TEST(config.get<std::string>("daemon.overlay_path") == state + "/skycue.runtime.json");
+    BOOST_TEST(config.get<std::string>("daemon.locations.learned_path") == state + "/fisb-locations.json");
+    BOOST_TEST(configKey(config, "STATE_DIR").get<std::string>("value") == state);
+    BOOST_TEST(pollUntil([&] {
+        const pt::ptree state_json = d.json("/api/state");
+        for (const auto& in : state_json.get_child("inputs"))
+            if (in.second.get<std::string>("id") == "replay" && in.second.get<uint64_t>("state.observations") > 0)
+                return true;
+        return false;
+    }));
+    BOOST_TEST(d.terminate() == 0);
+    BOOST_TEST(exists(state + "/skycue.stats.json"));
+    BOOST_TEST(!exists(etc + "/skycue.stats.json"));
+}
+
+BOOST_AUTO_TEST_CASE(state_dir_missing_exits_2)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    writeFile(conf, std::string(kConfHead) + "WEB_PORT=0\nCUE_TCP_PORT=0\nSTATE_DIR=" + tmp.path + "/nope\n");
+    const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture}, log);
+    BOOST_TEST(waitExit(pid, 5s) == 2);
+    BOOST_TEST(has(readAll(log), "skycued: STATE_DIR " + tmp.path + "/nope is not a directory"));
+    // A file is not a directory either.
+    writeFile(tmp.path + "/file", "x\n");
+    writeFile(conf, std::string(kConfHead) + "WEB_PORT=0\nCUE_TCP_PORT=0\nSTATE_DIR=" + tmp.path + "/file\n");
+    const pid_t pid2 = spawnSkycued({"--config", conf, "--replay", kFixture}, log);
+    BOOST_TEST(waitExit(pid2, 5s) == 2);
+    BOOST_TEST(has(readAll(log), "skycued: STATE_DIR " + tmp.path + "/file is not a directory"));
+}
+
+BOOST_AUTO_TEST_CASE(readsb_host_from_config_cli_wins)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    writeFile(conf, std::string(kConfHead) + "CUE_TCP_PORT=0\nREADSB_HOST=192.0.2.1\nDUMP978_HOST=192.0.2.2\n"
+                                             "DUMP978_ENABLE=yes\n");
+    Spawned d(spawnServing(conf, {"--readsb-host", "127.0.0.1", "--no-uat"}, tmp.path + "/log"));
+    const pt::ptree config = d.json("/api/config");
+    BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("value") == "127.0.0.1");
+    BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("source") == "cli");
+    // No --dump978-host: the key applies.
+    BOOST_TEST(configKey(config, "DUMP978_HOST").get<std::string>("value") == "192.0.2.2");
+    BOOST_TEST(configKey(config, "DUMP978_HOST").get<std::string>("source") == "conf");
+    // --no-uat overrides DUMP978_ENABLE=yes.
+    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("value") == "no");
+    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "cli");
+    BOOST_TEST(config.get<bool>("daemon.dump978") == false);
+    const auto ids = inputIds(d.json("/api/state"));
+    BOOST_TEST(std::count(ids.begin(), ids.end(), "dump978") == 0);
+    BOOST_TEST(std::count(ids.begin(), ids.end(), "readsb") == 1);
+    BOOST_TEST(d.terminate() == 0);
+}
+
+BOOST_AUTO_TEST_CASE(readsb_host_from_config_without_flag)
+{
+    // No --readsb-host or --dump978-host: the keys are the hosts the built-in inputs use.
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    writeFile(conf, std::string(kConfHead) + "CUE_TCP_PORT=0\nREADSB_HOST=192.0.2.1\nDUMP978_HOST=192.0.2.2\n");
+    Spawned d(spawnServing(conf, {}, tmp.path + "/log"));
+    const pt::ptree config = d.json("/api/config");
+    BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("value") == "192.0.2.1");
+    BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("source") == "conf");
+    std::map<std::string, std::string> hosts;  // input id -> host
+    const pt::ptree inputs = d.json("/api/inputs");
+    for (const auto& in : inputs.get_child("inputs"))
+        hosts[in.second.get<std::string>("id")] = in.second.get<std::string>("host", "");
+    BOOST_TEST(hosts["readsb"] == "192.0.2.1");
+    BOOST_TEST(hosts["dump978"] == "192.0.2.2");
+    BOOST_TEST(d.terminate() == 0);
 }
 
 BOOST_AUTO_TEST_CASE(filters_history_route)
@@ -1936,4 +2230,128 @@ BOOST_AUTO_TEST_CASE(stats_summary_by_country_top20_and_other)
         }
         ++i;
     }
+}
+
+
+// ---- skycued --check-inputs ----
+
+namespace {
+
+uint16_t closedPort()
+{
+    asio::io_context io;
+    tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    return a.local_endpoint().port();  // closed again on return
+}
+
+std::string checkConf(const std::string& extra)
+{
+    return std::string(kConfHead) + "CUE_TCP_PORT=0\nWEB_PORT=0\n" + extra;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(check_inputs_exit_status)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    {
+        enginetest::TestServer s;
+        const std::string p = std::to_string(s.port());
+        writeFile(conf, checkConf("READSB_JSON_PORT=" + p + "\nDUMP978_ENABLE=no\n"));
+        const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log);
+        BOOST_TEST(waitExit(pid, 10s) == 0);
+        BOOST_TEST(readAll(log) == "readsb 127.0.0.1:" + p + ": connected\n");
+    }
+    const std::string cp = std::to_string(closedPort());
+    writeFile(conf, checkConf("READSB_JSON_PORT=" + cp + "\nDUMP978_ENABLE=no\n"));
+    const std::string log2 = tmp.path + "/log2";
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log2);
+    BOOST_TEST(waitExit(pid, 10s) == 1);
+    const auto out = lines(readAll(log2));
+    BOOST_REQUIRE(out.size() == 1u);
+    BOOST_TEST(out[0].rfind("readsb 127.0.0.1:" + cp + ": ", 0) == 0u);
+    BOOST_TEST(out[0] != "readsb 127.0.0.1:" + cp + ": connected");
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_uses_readsb_host_key)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    enginetest::TestServer s;
+    const std::string p = std::to_string(s.port());
+    writeFile(conf, checkConf("READSB_HOST=127.0.0.2\nREADSB_JSON_PORT=" + p + "\nDUMP978_ENABLE=no\n"));
+    const std::string log = tmp.path + "/log";
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log);
+    BOOST_TEST(waitExit(pid, 10s) == 1);
+    const auto out = lines(readAll(log));
+    BOOST_REQUIRE(out.size() == 1u);
+    BOOST_TEST(out[0].rfind("readsb 127.0.0.2:" + p + ": ", 0) == 0u);
+    const std::string log2 = tmp.path + "/log2";
+    const pid_t pid2 = spawnSkycued({"--config", conf, "--check-inputs", "--readsb-host", "127.0.0.1"}, log2);
+    BOOST_TEST(waitExit(pid2, 10s) == 0);
+    BOOST_TEST(readAll(log2) == "readsb 127.0.0.1:" + p + ": connected\n");
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_includes_dump978_and_user_inputs)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    enginetest::TestServer s1, s2, s3;
+    const std::string p1 = std::to_string(s1.port()), p2 = std::to_string(s2.port()), p3 = std::to_string(s3.port());
+    skycued::InputsFile file;
+    skycued::InputDef ps;
+    ps.id = "ps";
+    ps.type = skycued::InputType::pingstation_cat021;
+    ps.transport = skycued::InputTransport::tcp_connect;
+    ps.host = "127.0.0.1";
+    ps.port = s3.port();
+    skycued::InputDef pu;
+    pu.id = "pu";
+    pu.type = skycued::InputType::pingstation_json;
+    pu.transport = skycued::InputTransport::udp;
+    pu.port = 30999;
+    file.inputs = {ps, pu};
+    const std::string inputs = tmp.path + "/skycue.inputs.json";
+    writeFile(inputs, skycued::inputsFileJson(file));
+    writeFile(conf, checkConf("READSB_JSON_PORT=" + p1 + "\nDUMP978_RAW_PORT=" + p2 + "\n"));
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log);
+    BOOST_TEST(waitExit(pid, 10s) == 0);
+    const auto out = lines(readAll(log));
+    BOOST_REQUIRE(out.size() == 4u);
+    BOOST_TEST(out[0] == "readsb 127.0.0.1:" + p1 + ": connected");
+    BOOST_TEST(out[1] == "dump978 127.0.0.1:" + p2 + ": connected");
+    BOOST_TEST(out[2] == "ps 127.0.0.1:" + p3 + ": connected");
+    BOOST_TEST(out[3] == "pu: not checked (listens on 0.0.0.0:30999)");
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_creates_nothing)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    const std::string state = tmp.path + "/state";
+    ::mkdir(state.c_str(), 0755);
+    writeFile(conf, checkConf("RECORD_DIR=" + tmp.path + "/rec-new\nSTATE_DIR=" + state +
+                              "\nREADSB_JSON_PORT=" + std::to_string(closedPort()) + "\nDUMP978_ENABLE=no\n"));
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log);
+    BOOST_TEST(waitExit(pid, 10s) == 1);
+    struct stat st{};
+    BOOST_TEST(::stat((tmp.path + "/rec-new").c_str(), &st) != 0);
+    size_t entries = 0;
+    if (DIR* d = ::opendir(state.c_str())) {
+        while (const dirent* e = ::readdir(d))
+            if (std::string(e->d_name) != "." && std::string(e->d_name) != "..")
+                ++entries;
+        ::closedir(d);
+    }
+    BOOST_TEST(entries == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_with_replay_is_usage_error)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    writeFile(conf, checkConf(""));
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs", "--replay", kFixture}, log);
+    BOOST_TEST(waitExit(pid, 10s) == 2);
 }

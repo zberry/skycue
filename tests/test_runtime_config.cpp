@@ -548,6 +548,55 @@ BOOST_AUTO_TEST_CASE(watch_detects_list_file_edit)
     BOOST_TEST(has(f.sent(), "file:skycue.runtime.json: "));
 }
 
+BOOST_AUTO_TEST_CASE(list_file_relative_to_state_dir)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(state + "/allow.list", "a1b2c3\n");
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nALLOW_LIST_FILE=allow.list\n");
+    f.start();
+    BOOST_TEST(f.allow() == (Strings{"a1b2c3"}));
+    // The overlay lives in STATE_DIR too, not next to the config.
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->overlayPath(); }) == state + "/skycue.runtime.json");
+    Overlay d;
+    d.allow_add = {"N123AB"};
+    f.applyUi(d);
+    BOOST_TEST(f.allow() == (Strings{"a1b2c3", "N123AB"}));
+    BOOST_TEST(has(readAll(state + "/skycue.runtime.json"), "N123AB"));
+    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+    // Save as baseline appends to the list file in STATE_DIR.
+    BOOST_TEST(f.promote() == "");
+    BOOST_TEST(has(readAll(state + "/allow.list"), "N123AB"));
+    BOOST_TEST(!exists(f.path("allow.list")));
+}
+
+BOOST_AUTO_TEST_CASE(list_reload_resolves_against_the_running_state_dir)
+{
+    // A live reload of a changed list file name resolves it against STATE_DIR as
+    // at startup: a changed STATE_DIR takes effect only on a restart.
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state"), moved = f.path("moved");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    BOOST_REQUIRE(::mkdir(moved.c_str(), 0755) == 0);
+    writeFile(state + "/allow.list", "a1b2c3\n");
+    writeFile(state + "/other.list", "beef01\n");
+    writeFile(moved + "/other.list", "dead01\n");
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nALLOW_LIST_FILE=allow.list\n");
+    f.start(true);
+    StderrCapture err(f.path("stderr.txt"));
+    BOOST_TEST(f.allow() == (Strings{"a1b2c3"}));
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + moved + "\nALLOW_LIST_FILE=other.list\n");
+    BOOST_TEST(f.waitFor([&] { return f.allow() == (Strings{"beef01"}); }, 2600ms));
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "STATE_DIR differ"); }, 500ms));
+    // The new list file is watched at its resolved path.
+    writeFile(state + "/other.list", "beef01\nN99ZZ\n");
+    BOOST_TEST(f.waitFor([&] { return f.allow() == (Strings{"beef01", "N99ZZ"}); }, 2600ms));
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().allow_list_path; }) == state + "/other.list");
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().state_dir; }) == state);
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->overlayPath(); }) == state + "/skycue.runtime.json");
+}
+
 BOOST_AUTO_TEST_CASE(watch_debounces_partial_write)
 {
     RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\n");
@@ -637,6 +686,8 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     BOOST_TEST(restart_set.count("LOCATIONS_FILE") == 1u);
     for (const char* k : {"STATS_FILE", "STATS_AIRCRAFT_MAX", "STATS_SAVE_S"})
         BOOST_TEST(restart_set.count(k) == 1u, k);
+    for (const char* k : {"STATE_DIR", "MAP_DIR", "READSB_HOST", "DUMP978_HOST", "DUMP978_ENABLE"})
+        BOOST_TEST(restart_set.count(k) == 1u, k);
 
     // b differs from a in every field but the live four.
     skycued::Config a;
@@ -675,6 +726,11 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     b.sdr_978_serial = "s2";
     b.gain_1090 = "40";
     b.gain_978 = "41";
+    b.state_dir = "/s";
+    b.map_dir = "/m";
+    b.readsb_host = "h1";
+    b.dump978_host = "h2";
+    b.dump978_enable = false;
     const auto changed = skycued::restartKeysChanged(a, b);
     BOOST_TEST((std::set<std::string>(changed.begin(), changed.end()) == restart_set));
     BOOST_TEST(changed.size() == restart.size());
@@ -686,4 +742,201 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     c.allow_list_file = "a.txt";
     c.block_list_file = "b.txt";
     BOOST_TEST(skycued::restartKeysChanged(a, c).empty());
+}
+
+// ---- the overrides file (STATE_DIR/skycue.overrides.conf) ------------------------
+
+BOOST_AUTO_TEST_CASE(promote_with_state_dir_leaves_conf_untouched)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(state + "/block.list", "");
+    const std::string conf_text =
+        std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=150\nBLOCK_LIST_FILE=block.list\n";
+    writeFile(f.conf, conf_text);
+    f.start();
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->overridesPath(); }) == state + "/skycue.overrides.conf");
+    Overlay d;
+    d.max_range_nm = 90;
+    d.block_add = {"N123AB"};
+    f.applyUi(d);
+    BOOST_TEST(f.promote() == "");
+    BOOST_TEST(readAll(f.conf) == conf_text);  // byte for byte
+    BOOST_TEST(has(readAll(state + "/skycue.overrides.conf"), "MAX_RANGE_NM=90\n"));
+    BOOST_TEST(has(readAll(state + "/block.list"), "N123AB"));
+    BOOST_TEST(!exists(state + "/skycue.runtime.json"));
+    BOOST_TEST(!exists(f.path("skycue.overrides.conf")));
+    BOOST_TEST(skycued::parseConfigFile(f.conf).max_range_nm == 90);
+    BOOST_TEST(f.overlay().empty());
+    BOOST_TEST(f.filters().max_range_nm == 90.0);
+    BOOST_TEST(f.block() == (Strings{"N123AB"}));
+    BOOST_TEST(!has(f.sent(), "save-baseline:"));  // nothing effective changed
+
+    // A second save keeps the first one's value and adds the new one.
+    Overlay e;
+    e.min_elevation_deg = 2.5;
+    f.applyUi(e);
+    BOOST_TEST(f.promote() == "");
+    const std::string overrides = readAll(state + "/skycue.overrides.conf");
+    BOOST_TEST(has(overrides, "MAX_RANGE_NM=90\n"));
+    BOOST_TEST(has(overrides, "MIN_ELEVATION_DEG=2.5\n"));
+    BOOST_TEST(readAll(f.conf) == conf_text);
+    const skycued::Config c = skycued::parseConfigFile(f.conf);
+    BOOST_TEST(c.min_elevation_deg == 2.5);
+    BOOST_TEST(c.override_keys == (std::set<std::string>{"MAX_RANGE_NM", "MIN_ELEVATION_DEG"}));
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().override_keys.count("MIN_ELEVATION_DEG"); }) == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(promote_with_state_dir_names_the_overrides_file_it_could_not_write)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\n");
+    f.start();
+    Overlay d;
+    d.max_range_nm = 90;
+    f.applyUi(d);
+    // A directory where the file should be: it cannot be read or replaced.
+    BOOST_REQUIRE(::mkdir((state + "/skycue.overrides.conf").c_str(), 0755) == 0);
+    const std::string err = f.promote();
+    BOOST_TEST(err.rfind("skycue.overrides.conf not updated: ", 0) == 0u, err);
+    BOOST_TEST(f.overlay().max_range_nm.value_or(0) == 90.0);  // stays in the overlay
+    BOOST_TEST(f.filters().max_range_nm == 90.0);
+}
+
+BOOST_AUTO_TEST_CASE(watch_detects_overrides_edit)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMIN_ELEVATION_DEG=1\n");
+    f.start(true);
+    BOOST_TEST(f.filters().min_elevation_deg == 1.0);
+    StderrCapture err(f.path("stderr.txt"));
+    writeFile(state + "/skycue.overrides.conf", "MIN_ELEVATION_DEG=3\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 3.0; }, 4000ms));
+    BOOST_TEST(has(f.sent(), "file:skycue.overrides.conf: "));
+    // A key the file may not hold: logged, and the previous values stay.
+    writeFile(state + "/skycue.overrides.conf", "MIN_ELEVATION_DEG=4\nWEB_PORT=81\n");
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "WEB_PORT cannot be set in skycue.overrides.conf"); }, 4000ms));
+    BOOST_TEST(f.filters().min_elevation_deg == 3.0);
+    // Deleted: skycue.conf's value applies again.
+    ::unlink((state + "/skycue.overrides.conf").c_str());
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 1.0; }, 4000ms));
+}
+
+BOOST_AUTO_TEST_CASE(conf_valid_only_with_its_overrides_survives_a_restart)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=150\n");
+    f.start(true);
+    Overlay d;
+    d.max_range_nm = 90;
+    f.applyUi(d);
+    BOOST_REQUIRE(f.promote() == "");
+    StderrCapture err(f.path("stderr.txt"));
+    // An edit that is valid only with the overrides file: accepted live...
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=0\n");
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "MAX_RANGE_NM edited in skycue.conf"); }, 4000ms));
+    BOOST_TEST(!has(err.text(), "keeping the previous configuration"));
+    BOOST_TEST(f.filters().max_range_nm == 90.0);
+    // ...and on a restart.
+    const double restarted = f.fx->t.call([&] {
+        RuntimeConfig again(f.fx->t.io, f.conf, *f.fx->engine);
+        again.load();
+        return again.effective().max_range_nm;
+    });
+    BOOST_TEST(restarted == 90.0);
+    BOOST_TEST(skycued::parseConfigFile(f.conf).max_range_nm == 90);
+}
+
+BOOST_AUTO_TEST_CASE(conf_edit_masked_by_overrides_logs_info)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(state + "/skycue.overrides.conf", "MAX_RANGE_NM=90\n");
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=150\nMIN_ELEVATION_DEG=0\n");
+    f.start(true);
+    BOOST_TEST(f.filters().max_range_nm == 90.0);
+    StderrCapture err(f.path("stderr.txt"));
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=120\nMIN_ELEVATION_DEG=2\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 2.0; }, 4000ms));
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "MAX_RANGE_NM edited in skycue.conf"); }, 500ms));
+    BOOST_TEST(f.filters().max_range_nm == 90.0);  // the overrides file still wins
+    // An edit of a key the overrides file does not set: no line for it.
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=120\nMIN_ELEVATION_DEG=3\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 3.0; }, 4000ms));
+    err.restore();
+    const std::string text = err.text();
+    BOOST_TEST(countOf(text, "INFO  runtime: MAX_RANGE_NM edited in skycue.conf but skycue.overrides.conf sets it "
+                             "(90); that value stays") == 1u, text);
+    BOOST_TEST(!has(text, "MIN_ELEVATION_DEG edited"), text);
+    BOOST_TEST(!has(text, "WARN"), text);
+}
+
+BOOST_AUTO_TEST_CASE(overrides_edit_overridden_by_overlay_names_the_overrides_file)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=150\n");
+    f.start(true);
+    Overlay d;
+    d.max_range_nm = 40;
+    f.applyUi(d);
+    StderrCapture err(f.path("stderr.txt"));
+    writeFile(state + "/skycue.overrides.conf", "MAX_RANGE_NM=99\n");
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "MAX_RANGE_NM edited in"); }, 4000ms));
+    err.restore();
+    const std::string text = err.text();
+    BOOST_TEST(countOf(text, "WARN  runtime: MAX_RANGE_NM edited in skycue.overrides.conf but overridden by "
+                             "skycue.runtime.json (use the UI or \"save as baseline\")") == 1u, text);
+    BOOST_TEST(!has(text, "edited in skycue.conf"), text);
+    BOOST_TEST(f.filters().max_range_nm == 40.0);
+}
+
+BOOST_AUTO_TEST_CASE(promote_without_state_dir_still_rewrites_conf)  // today's behaviour, explicitly
+{
+    RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\n");
+    f.start();
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->overridesPath(); }) == "");
+    Overlay d;
+    d.max_range_nm = 90;
+    f.applyUi(d);
+    BOOST_TEST(f.promote() == "");
+    BOOST_TEST(readAll(f.conf) == std::string(kConfHead) + "MAX_RANGE_NM=90\n");
+    BOOST_TEST(!exists(f.path("skycue.overrides.conf")));
+    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+}
+
+BOOST_AUTO_TEST_CASE(overlay_left_next_to_the_config_warns_when_state_dir_is_set)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(f.path("skycue.runtime.json"), "{\"version\": 1, \"filters\": {\"max_range_nm\": 33}}\n");
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\n");
+    StderrCapture err(f.path("stderr.txt"));
+    f.start();
+    err.restore();
+    const std::string log = err.text();
+    BOOST_TEST(has(log, "WARN "), log);
+    BOOST_TEST(has(log, f.path("skycue.runtime.json")), log);
+    BOOST_TEST(has(log, state + "/skycue.runtime.json"), log);
+    BOOST_TEST(f.filters().max_range_nm == 150.0);  // not read from the old place
+    // With the overlay in STATE_DIR there is nothing to warn about.
+    RtFx g{std::string(kConfHead)};
+    BOOST_REQUIRE(::mkdir(g.path("state").c_str(), 0755) == 0);
+    writeFile(g.path("skycue.runtime.json"), "{\"version\": 1}\n");
+    writeFile(g.path("state/skycue.runtime.json"), "{\"version\": 1}\n");
+    writeFile(g.conf, std::string(kConfHead) + "STATE_DIR=" + g.path("state") + "\n");
+    StderrCapture err2(g.path("stderr.txt"));
+    g.start();
+    err2.restore();
+    BOOST_TEST(!has(err2.text(), "skycue.runtime.json"), err2.text());
 }

@@ -1313,7 +1313,7 @@ datagram, or one line per CAT021 record (`--edition`, 2.2 to 2.7, default
 
 ```
 2026-11-02T10:15:00.123Z sim-cat udp 51 bytes
-  CAT021 sac=0 sic=0 addr=A6452D lat=39.93328 lon=-88.38120 fl=390.25 squawk=2001 ident=ATN3597 gnd=-
+  CAT021 sac=0 sic=0 addr=AC5E81 lat=37.88798 lon=-76.26140 fl=180.00 squawk=4711 ident=RPA4521 gnd=-
 ```
 
 `gnd` is `Y` (on the ground) or `-` when I021/040 says, and absent when it

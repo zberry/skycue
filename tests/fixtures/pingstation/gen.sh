@@ -2,7 +2,12 @@
 # Regenerates traffic-1090.json, status.json and status-curly-quotes.json in
 # this directory with the project's own simulator.
 #
-#   gen.sh <skycue-pingsim> <skycue-fixtures-dir>
+#   gen.sh [--check] <skycue-pingsim> <skycue-fixtures-dir>
+#
+# With --check nothing is written: the three files are regenerated into a
+# temporary directory and compared with the committed ones, and the generated
+# CAT021 block is compared with kSampleBlock in tests/test_cat021.cpp except for
+# the three I021/073 bytes. Exit status 1 on any difference.
 #
 # <skycue-fixtures-dir> is tests/fixtures (it holds readsb-sample.jsonl; the
 # outputs go to its pingstation/ subdirectory). python3 is the only other tool.
@@ -22,6 +27,8 @@
 #     STRING, and detail.rawData (a 14-byte Mode S frame, made-up content, only
 #     its length and the address bytes matter);
 #   - the callsign gets a trailing space (a real device pads it to 8 characters);
+#   - the status gets synthetic pingStationAltMM (85344) and pingStationAltType (1),
+#     which the simulator does not send;
 #   - status-curly-quotes.json is status.json with the ASCII quotes around the
 #     key "status" replaced by U+201C/U+201D; the parser must reject it.
 # Everything else (address, position, altitudes, speed, squawk, status
@@ -39,8 +46,13 @@
 # (the test fixes the values of the run that produced it).
 set -eu
 
+CHECK=0
+if [ "${1:-}" = "--check" ]; then
+    CHECK=1
+    shift
+fi
 if [ $# -ne 2 ]; then
-    echo "usage: $0 <skycue-pingsim> <skycue-fixtures-dir>" >&2
+    echo "usage: $0 [--check] <skycue-pingsim> <skycue-fixtures-dir>" >&2
     exit 2
 fi
 SIM=$1
@@ -50,10 +62,13 @@ OUT=$FIX/pingstation
 [ -f "$FIX/readsb-sample.jsonl" ] || { echo "$0: $FIX/readsb-sample.jsonl missing" >&2; exit 2; }
 mkdir -p "$OUT"
 
-exec python3 -I - "$SIM" "$FIX/readsb-sample.jsonl" "$OUT" <<'PY'
-import calendar, json, socket, subprocess, sys
+exec python3 -I - "$SIM" "$FIX/readsb-sample.jsonl" "$OUT" "$CHECK" "$FIX/../test_cat021.cpp" <<'PY'
+import calendar, json, re, socket, subprocess, sys, tempfile
 
-sim, sample, out = sys.argv[1:4]
+sim, sample, out, check, cat_test = sys.argv[1:6]
+committed = out
+if check == "1":
+    out = tempfile.mkdtemp()
 GPS_EPOCH = 315964800
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -109,6 +124,10 @@ assert '"callsign":"' in traffic and ' ",' in traffic
 
 # ---- status ----
 status["status"]["timeStamp"] = "2026-11-02T11:59:58.250Z"
+# The simulator's status has no altitude; these two are added (synthetic) so the
+# millimetre-to-metre conversion and the altitude type are covered.
+status["status"]["pingStationAltMM"] = 85344
+status["status"]["pingStationAltType"] = 1
 text = json.dumps(status, separators=(",", ":"), ensure_ascii=True) + "\n"
 curly = text.replace('"status"', "“status”", 1)
 assert curly != text
@@ -123,4 +142,23 @@ for name, body in (("traffic-1090.json", traffic), ("status.json", text), ("stat
     with open("%s/%s" % (out, name), "w", encoding="utf-8", newline="\n") as f:
         f.write(body)
     print("wrote pingstation/%s (%d bytes)" % (name, len(body.encode("utf-8"))))
+
+if check == "1":
+    bad = 0
+    for name in ("traffic-1090.json", "status.json", "status-curly-quotes.json"):
+        with open("%s/%s" % (out, name), "rb") as a, open("%s/%s" % (committed, name), "rb") as b:
+            if a.read() != b.read():
+                print("DIFFERS: " + name)
+                bad = 1
+    with open(cat_test, encoding="utf-8") as f:
+        m = re.search(r'kSampleBlock =\s*((?:"[0-9a-f ]*"\s*)+);', f.read())
+    want = bytearray.fromhex("".join(re.findall(r'"([0-9a-f ]*)"', m.group(1))))
+    got = bytearray(block)
+    for i in (23, 24, 25):  # I021/073 depends on the send time
+        want[i] = got[i] = 0
+    if want != got:
+        print("DIFFERS: CAT021 block")
+        bad = 1
+    print("check: " + ("FAILED" if bad else "ok"))
+    sys.exit(bad)
 PY

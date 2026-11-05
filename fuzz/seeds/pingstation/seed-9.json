@@ -1,1 +1,1 @@
-1{"status":{"pingStationGuid":"0000000000000001","pingStationVersionMajor":1,"pingStationVersionMinor":0,"pingStationVersionBuild":0,"timeStamp":"2026-11-02T11:59:58.250Z","pingStationLatDD":38.9,"pingStationLonDD":-77,"gpsStatus":3,"receiverStatus":0}}
+1{"status":{"pingStationGuid":"0000000000000001","pingStationVersionMajor":1,"pingStationVersionMinor":0,"pingStationVersionBuild":0,"timeStamp":"2026-11-02T11:59:58.250Z","pingStationLatDD":38.9,"pingStationLonDD":-77,"gpsStatus":3,"receiverStatus":0,"pingStationAltMM":85344,"pingStationAltType":1}}

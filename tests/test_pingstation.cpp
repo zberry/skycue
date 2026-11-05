@@ -378,8 +378,8 @@ BOOST_AUTO_TEST_CASE(status_maps)
         BOOST_TEST(s.version == "1.0.0");
         BOOST_TEST(s.lat.value_or(0) == 38.9);
         BOOST_TEST(s.lon.value_or(0) == -77.0);
-        BOOST_TEST(!s.alt_m);
-        BOOST_TEST(!s.alt_type);
+        BOOST_TEST(s.alt_m.value_or(0) == 85.344, boost::test_tools::tolerance(1e-9));  // pingStationAltMM 85344
+        BOOST_TEST(s.alt_type.value_or(-1) == 1);
         BOOST_TEST(s.gps_status.value_or(-1) == 3);
         BOOST_TEST(s.receiver_status.value_or(-1) == 0);
         BOOST_REQUIRE(s.device_time);

@@ -104,7 +104,7 @@ dump978 like any raw capture:
 
 - 1090 frames (7 or 14 bytes) go to `raw-<id>-YYYYMMDD-HHMMSS[-N].csv` as
   `<epoch_seconds>.<9-digit nanoseconds>,<HEX>` (uppercase), for example
-  `1670965892.317283895,8DC0058658AF979ECBC80D0C3C70`. rawplay sends them to
+  `1793620798.412907153,8DAC5E815821C2A65E8F1B30D47A`. rawplay sends them to
   readsb's raw input.
 - UAT frames (18 or 34 bytes) go to `raw-<id>-YYYYMMDD-HHMMSS[-N].txt` as
   `<epoch_ms> -<hex>;`, the dump978 raw downlink form with skycue-rawrec's prefix.

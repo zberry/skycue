@@ -13,7 +13,9 @@ from the first aircraft of `../readsb-sample.jsonl`, not from a device.
   stamps the send time), adds `timeOfReceptionS` and `timeOfReceptionNS` (the latter as a
   string, as devices write it), a made-up 14-byte `rawData`, and pads the callsign with a
   trailing space.
-- `status.json`: one `{"status":...}` datagram from the same run, with a fixed timestamp.
+- `status.json`: one `{"status":...}` datagram from the same run, with a fixed timestamp and two
+  synthetic fields the simulator does not send, `pingStationAltMM` (85344) and
+  `pingStationAltType` (1), so the altitude conversion is covered.
 - `status-curly-quotes.json`: `status.json` with the quotes around the key `status` replaced by
   typographic curly quotes (U+201C/U+201D). That is not valid JSON, and the parser must reject
   it (no lenient parsing); the tests check that it is rejected and counted.

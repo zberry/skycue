@@ -663,12 +663,12 @@ BOOST_AUTO_TEST_CASE(encode_rejects_bad_values) {
 }
 
 // Garbage, then two valid blocks A and B (the sample record, so A starts
-// 15 00 35 c7 11 3b 69 c1 80 00 00 ...). Byte walk:
+// 15 00 33 c3 19 7b 79 c0 00 00 ...). Byte walk:
 //   off 0  `00`: CAT 0 is never a category; drop it and leave sync (run 1, 1 byte).
 //   off 1  `15 ff 7e`: CAT 21, LEN 65406, incomplete. The buffered bytes after the
-//          header are A's: FSPEC 15 00 (FRN 4, 6), 015 = 35, 130 = c7 11 3b 69 c1
-//          80, then A's `00` as the next FSPEC, which has no presence bit: a length
-//          error, so drop now (2 bytes).
+//          header are A's: FSPEC 15 00 (FRN 4, 6), 015 = 33, 130 = c3 19 7b 79 c0
+//          00, then A's next `00` as the FSPEC of a second record, which has no
+//          presence bit: a length error, so drop now (2 bytes).
 //   off 2  `ff`, off 3 `7e`: not CAT 21 out of sync; drop (4 bytes).
 //   off 4  A: complete, walks cleanly: emitted, back in sync. Then B.
 BOOST_AUTO_TEST_CASE(framer_resync_after_garbage) {
@@ -931,9 +931,9 @@ BOOST_AUTO_TEST_CASE(framer_out_of_sync_block_across_feeds) {
 
 // In sync, a CAT 21 header whose buffered prefix already fails the walk is
 // dropped at once instead of waited for. After A comes `15 00 ff` (LEN 255);
-// the next bytes are A's again: FSPEC 15 00 (FRN 4, 6), 015 = 35, 130 = c7 11
-// 3b 69 c1 80, then A's `00` (SAC) as an FSPEC with no item: error after only
-// 12 buffered bytes. `00` and `ff` are then dropped out of sync.
+// the next bytes are A's again: FSPEC 15 00 (FRN 4, 6), 015 = 33, 130 = c3 19
+// 7b 79 c0 00, then A's next `00` as an FSPEC with no item: error after only
+// a few buffered bytes. `00` and `ff` are then dropped out of sync.
 BOOST_AUTO_TEST_CASE(framer_in_sync_bad_prefix_drops_at_once) {
   const Bytes a = encodeBlock({sampleRecord()});
   const Bytes stream = join({a, hex("15 00 ff"), a, a});

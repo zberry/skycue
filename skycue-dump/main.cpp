@@ -236,8 +236,8 @@ bool parseEndpoint(const std::string& s, std::string& host, uint16_t& port)
     return true;
 }
 
-// "  CAT021 sac=0 sic=0 addr=A6452D lat=39.93328 lon=-88.38120 fl=390.25
-// squawk=2001 ident=ATN3597 gnd=-": the fields present, in this order; gnd
+// "  CAT021 sac=0 sic=0 addr=AC5E81 lat=37.88798 lon=-76.26140 fl=180.00
+// squawk=4711 ident=RPA4521 gnd=-": the fields present, in this order; gnd
 // (Y or -) only when 040 has its first extension.
 std::string cat021Line(const skycued::asterix::Cat021Record& r)
 {

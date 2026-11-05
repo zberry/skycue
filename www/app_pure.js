@@ -1622,6 +1622,24 @@
     return { dropped: dropped, trimmed: trimmed };
   }
 
+  // ---- trail breaks -----------------------------------------------------------
+  // A trail restarts at a position it could not have flown to: one whose
+  // implied ground speed from the previous trail point (great-circle
+  // distance over the time between them) is above TRAIL_MAX_KT, or one
+  // earlier than it (a looped replay jumping back to its start, a bad
+  // position, a hex reused by another aircraft). prev and next are {lat,
+  // lon, ts} (ts in ms); equal times join, as do points without a usable time.
+  var TRAIL_MAX_KT = 1500;
+  function trailBreaks(prev, next) {
+    if (!prev || !next) return false;
+    var dt = next.ts - prev.ts;
+    if (typeof dt !== 'number' || !isFinite(dt)) return false;
+    if (dt < 0) return true;
+    if (dt === 0) return false;
+    var nm = rangeNm(prev.lat, prev.lon, next.lat, next.lon);
+    return isFinite(nm) && nm / (dt / 3600000) > TRAIL_MAX_KT;
+  }
+
   // ---- ruler ("Measure") -----------------------------------------------------
   // Great-circle distance (rangeNm's sphere) and initial true bearing from
   // the first point to the second.
@@ -1691,6 +1709,7 @@
     SIGNAL_NONE_DB: SIGNAL_NONE_DB, signalLevel: signalLevel,
     signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns,
     signalRunsAppend: signalRunsAppend, signalRunsTrim: signalRunsTrim,
+    TRAIL_MAX_KT: TRAIL_MAX_KT, trailBreaks: trailBreaks,
     rulerMeasure: rulerMeasure, rulerLabel: rulerLabel
   };
   root.skycuePure = api;

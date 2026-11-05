@@ -809,6 +809,12 @@
     if (observed) {
       var ts = Date.parse(t.position_time);
       var pushed = { ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon], sig: P.signalLevel(t.rssi) };
+      // An impossible jump (P.trailBreaks: a looped replay restarting, a bad
+      // position, a reused hex) restarts the trail here instead of joining it.
+      var prev = e.pts[e.pts.length - 1];
+      var broke = !!prev && P.trailBreaks({ lat: prev.ll[0], lon: prev.ll[1], ts: prev.ts },
+        { lat: t.lat, lon: t.lon, ts: pushed.ts });
+      if (broke) e.pts.length = 0;
       e.pts.push(pushed);
       var pruned = pruneTrail(e);
     }
@@ -822,7 +828,7 @@
     var fresh = !e.marker, wasDimmed = !!e.dimmed;
     ensureMarker(e);
     e.dimmed = !shows;
-    if (observed && !e.dimmed && !fresh && !wasDimmed && e.pts[e.pts.length - 1] === pushed) updateTrail(e, pruned, true);
+    if (observed && !broke && !e.dimmed && !fresh && !wasDimmed && e.pts[e.pts.length - 1] === pushed) updateTrail(e, pruned, true);
     else if (e.dimmed ? fresh || !wasDimmed : observed || fresh || wasDimmed) drawTrail(e);
     styleMarker(e);
   }

@@ -1365,6 +1365,24 @@ test('signalRunsAppend / signalRunsTrim equal signalRuns over a random walk', ()
 });
 
 // Ruler: distance, initial bearing, the label.
+// Trail breaks: an implied speed over TRAIL_MAX_KT, or time going back.
+test('trailBreaks: impossible jumps break, normal moves and equal times join', () => {
+  assert.strictEqual(P.TRAIL_MAX_KT, 1500);
+  const a = { lat: 39, lon: -77, ts: 1000000 };
+  const north = (nm, dtMs) => ({ lat: 39 + nm / 60, lon: -77, ts: a.ts + dtMs });
+  // 1 nm in 2 s is 1800 kt, over the limit; 1 nm in 3 s (1200 kt) joins.
+  assert.strictEqual(P.trailBreaks(a, north(1, 2000)), true, '1 nm in 2 s: 1800 kt');
+  assert.strictEqual(P.trailBreaks(a, north(1, 3000)), false, '1 nm in 3 s: 1200 kt');
+  assert.strictEqual(P.trailBreaks(a, north(100, 2000)), true, '100 nm in 2 s');
+  assert.strictEqual(P.trailBreaks(a, north(5, 0)), false, 'equal time joins');
+  assert.strictEqual(P.trailBreaks(a, north(0, -1000)), true, 'earlier time');
+  assert.strictEqual(P.trailBreaks(a, north(0.5, 2000)), false, '0.5 nm in 2 s: 900 kt');
+  assert.strictEqual(P.trailBreaks(a, north(200, 600000)), false, '200 nm in 10 min: 1200 kt');
+  assert.strictEqual(P.trailBreaks(a, north(300, 600000)), true, '300 nm in 10 min: 1800 kt');
+  assert.strictEqual(P.trailBreaks(null, a), false);
+  assert.strictEqual(P.trailBreaks(a, { lat: 40, lon: -77, ts: NaN }), false, 'no usable time joins');
+});
+
 test('rulerMeasure LAX to JFK: 2144 nm, initial course 066', () => {
   // The Aviation Formulary's worked example (LAX 33°57'N 118°24'W, JFK
   // 40°38'N 73°47'W): 2144 nm, initial true course 66°. The formulary's

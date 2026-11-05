@@ -1065,14 +1065,16 @@ async function clickableIndex(page, selector) {
 }
 
 // "Colour trail by signal": an injected aircraft flying east with its
-// signal rising from weak to strong, positions a second apart.
+// signal rising from weak to strong, positions 6 s apart (0.03° of
+// longitude, about 835 kt: under P.TRAIL_MAX_KT, so the trail joins),
+// the last 24 s ago so later steps fit before now.
 const SIG_HEX = 'fff0a1';
 async function injectSignalTrack(page) {
   await page.evaluate((hex) => {
     const now = window.skycueApp.dataNow();
     for (let i = 0; i < 12; i++) {
-      window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.6 + i * 0.05, decision: 'send',
-        track_deg: 90, rssi: -34 + i * 2.6, position_time: new Date(now - (12 - i) * 1000).toISOString() });
+      window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.6 + i * 0.03, decision: 'send',
+        track_deg: 90, rssi: -34 + i * 2.6, position_time: new Date(now - 24000 - (11 - i) * 6000).toISOString() });
     }
   }, SIG_HEX);
 }
@@ -1114,21 +1116,21 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   // A new position updates the runs in place: one as strong extends the
   // last run (the same layer), a weak one adds a run, one without a signal
   // a dashed run in the decision colour.
-  const step = (lon, rssi) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
+  const step = (lon, rssi, ago) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
     lat: 39.3, lon: a.lon, decision: 'send', track_deg: 90, rssi: a.rssi,
-    position_time: new Date(window.skycueApp.dataNow()).toISOString() }), { hex: SIG_HEX, lon, rssi });
+    position_time: new Date(window.skycueApp.dataNow() - a.ago).toISOString() }), { hex: SIG_HEX, lon, rssi, ago });
   const lastOf = (t) => t.runs[t.runs.length - 1];
-  await step(-77.0, -4);
+  await step(-77.24, -4, 18000);
   let t = await trail();
   expect(t.runs.length).toBe(on.runs.length);
   expect(lastOf(t).id).toBe(lastOf(on).id);
   expect(lastOf(t).n).toBe(lastOf(on).n + 1);
   expect(t.runs[0].id).toBe(on.runs[0].id);
-  await step(-76.95, -40);
+  await step(-77.21, -40, 12000);
   t = await trail();
   expect(t.runs.length).toBe(on.runs.length + 1);
   expect(lastOf(t)).toMatchObject({ n: 2, color: colors[0], dashed: false });
-  await step(-76.9, undefined);
+  await step(-77.18, undefined, 6000);
   t = await trail();
   expect(lastOf(t)).toMatchObject({ n: 2, color: off.color, dashed: true });
   expect(t.runs.reduce((n, r) => n + r.n - 1, 0)).toBe(14);
@@ -1161,9 +1163,9 @@ test('trail_signal_falls_back_when_signal_ages_out', async ({ page }) => {
   await page.evaluate(() => window.skycueApp.setTrailSignal(true));
   await page.evaluate((hex) => {
     const now = window.skycueApp.dataNow();
-    const at = (i, ms, rssi) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.6 + i * 0.05,
+    const at = (i, ms, rssi) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.6 + i * 0.005,
       decision: 'send', track_deg: 90, rssi, position_time: new Date(now - ms).toISOString() });
-    for (let i = 0; i < 3; i++) at(i, 118000 - i, -20);   // just inside the 120 s trail
+    for (let i = 0; i < 3; i++) at(i, 118000 - i * 1000, -20);   // just inside the 120 s trail, 1 s apart
     for (let i = 3; i < 8; i++) at(i, 1000, undefined);
   }, SIG_HEX);
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX);
@@ -1192,7 +1194,7 @@ test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
   await page.locator('#trail-signal').check();
   const hex = 'fff0a2';
   const at = (i, rssi) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
-    lat: 39.35, lon: -77.6 + a.i * 0.05, decision: 'send', track_deg: 90, rssi: a.rssi,
+    lat: 39.35, lon: -77.6 + a.i * 0.005, decision: 'send', track_deg: 90, rssi: a.rssi,
     position_time: new Date(window.skycueApp.dataNow() - (10 - a.i) * 1000).toISOString() }), { hex, i, rssi });
   for (let i = 0; i < 6; i++) await at(i, -49.5);
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
@@ -1214,6 +1216,41 @@ test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
   await expect(cell).toHaveText('—');
   await expect(cell).toHaveAttribute('title', 'no signal level from the decoder');
   await page.locator('#trail-signal').uncheck();
+});
+
+// A position the aircraft could not have flown to (over P.TRAIL_MAX_KT
+// from the last trail point, as a looped replay jumping back to its start)
+// restarts the trail there instead of drawing a line across the map; so
+// does one earlier than the last. A normal move joins.
+test('trail_breaks_on_impossible_jump', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 1);
+  const hex = 'fff0a3';
+  const at = (lat, lon, ago) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
+    lat: a.lat, lon: a.lon, decision: 'send', track_deg: 0, rssi: -20,
+    position_time: new Date(window.skycueApp.dataNow() - a.ago).toISOString() }), { hex, lat, lon, ago });
+  const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
+  await at(39.0, -77.3, 30000);
+  await at(39.02, -77.3, 25000);   // 1.2 nm in 5 s: 864 kt
+  await at(39.04, -77.3, 20000);
+  expect((await trail()).points).toBe(3);
+  await at(39.04 + 200 / 60, -77.3, 15000);   // 200 nm in 5 s
+  expect((await trail()).points).toBe(1);
+  await at(39.04 + 200 / 60 + 0.02, -77.3, 10000);
+  expect((await trail()).points).toBe(2);
+  await at(39.04 + 200 / 60 + 0.03, -77.3, 12000);   // earlier than the last point
+  expect((await trail()).points).toBe(1);
+  // With the signal colouring on, the break drops the runs too.
+  await page.evaluate(() => window.skycueApp.setTrailSignal(true));
+  await at(39.04 + 200 / 60 + 0.05, -77.3, 8000);
+  let t = await trail();
+  expect(t.points).toBe(2);
+  expect(t.runs.length).toBe(1);
+  await at(39.0, -77.3, 6000);   // back to the start: a looped replay
+  t = await trail();
+  expect(t.points).toBe(1);
+  expect(t.runs).toEqual([]);
+  await page.evaluate(() => window.skycueApp.setTrailSignal(false));
 });
 
 // The ruler: away from the fixture's aircraft (around 38.9 N 77 W), two

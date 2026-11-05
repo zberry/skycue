@@ -428,26 +428,24 @@ struct StderrCapture {
 
 // ---------------------------------------------------------------- inputs
 
-BOOST_AUTO_TEST_CASE(ping_json_input_end_to_end,
-                     *skycue_test::needs_fixture("pingstation/icd-status.json") *
-                         skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(ping_json_input_end_to_end)
 {
     IoThread t;
     const uint16_t port = freeUdpPort();
     Probe p(t, std::make_unique<PingJsonInput>(t.io, psJson("ps", port)));
     BOOST_REQUIRE(eventually([&] { return p.state().connected; }));
     UdpSender tx;
-    tx.send(port, fixture("icd-traffic-1090.json"));
+    tx.send(port, fixture("traffic-1090.json"));
     BOOST_REQUIRE(eventually([&] { return p.seen.count() == 1; }));
     const auto o = p.seen.all()[0];
     BOOST_TEST(o.input_id == "ps");
-    BOOST_TEST(o.id.address == 0xC00586u);
+    BOOST_TEST(o.id.address == 0xAC5E81u);
 
-    tx.send(port, fixture("icd-status.json"));
+    tx.send(port, fixture("status.json"));
     BOOST_REQUIRE(eventually([&] { return p.seen.statusCount() == 1; }));
     const InputState s = p.state();
     BOOST_REQUIRE(s.device_status);
-    BOOST_TEST(s.device_status->guid == "754104714b10828b");
+    BOOST_TEST(s.device_status->guid == "0000000000000001");
     BOOST_TEST(s.counters.messages == 2u);
     BOOST_TEST(s.counters.observations == 1u);
     BOOST_TEST(s.counters.rejected == 0u);
@@ -659,7 +657,7 @@ BOOST_AUTO_TEST_CASE(malformed_flood_counted_and_log_rate_limited)
 
 // ---------------------------------------------------------------- manager
 
-BOOST_AUTO_TEST_CASE(create_persists_and_starts, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(create_persists_and_starts)
 {
     IoThread t;
     TempDir tmp;
@@ -675,7 +673,7 @@ BOOST_AUTO_TEST_CASE(create_persists_and_starts, *skycue_test::needs_fixture("pi
     BOOST_TEST((file.inputs[0] == d));
     BOOST_REQUIRE(eventually([&] { return m.state("ps").connected; }));
     UdpSender tx;
-    tx.send(port, fixture("icd-traffic-1090.json"));
+    tx.send(port, fixture("traffic-1090.json"));
     BOOST_REQUIRE(eventually([&] { return m.seen.count() == 1; }));
     BOOST_TEST(m.seen.all()[0].input_id == "ps");
     BOOST_TEST(m.on([](InputManager& im) { return im.connectedCount(); }) == 1u);
@@ -723,8 +721,7 @@ BOOST_AUTO_TEST_CASE(create_invalid_400_message_verbatim)
     BOOST_TEST(!exists(cfg.inputs_file));
 }
 
-BOOST_AUTO_TEST_CASE(replace_resets_connection_keeps_counters,
-                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(replace_resets_connection_keeps_counters)
 {
     IoThread t;
     TempDir tmp;
@@ -735,7 +732,7 @@ BOOST_AUTO_TEST_CASE(replace_resets_connection_keeps_counters,
     BOOST_REQUIRE(eventually([&] { return m.state("ps").connected; }));
     UdpSender tx;
     for (int i = 0; i < 3; ++i)
-        tx.send(port, fixture("icd-traffic-1090.json"));
+        tx.send(port, fixture("traffic-1090.json"));
     BOOST_REQUIRE(eventually([&] { return m.state("ps").counters.messages == 3; }));
 
     const InputEntry e = m.on([&](InputManager& im) { return im.replace("ps", psJson("ps", port, R"(,"name":"North")")); });
@@ -744,13 +741,12 @@ BOOST_AUTO_TEST_CASE(replace_resets_connection_keeps_counters,
     BOOST_REQUIRE(eventually([&] { return m.state("ps").counters.connects == 2; }));
     BOOST_TEST(m.state("ps").connected);
     for (int i = 0; i < 2; ++i)
-        tx.send(port, fixture("icd-traffic-1090.json"));
+        tx.send(port, fixture("traffic-1090.json"));
     BOOST_REQUIRE(eventually([&] { return m.state("ps").counters.messages == 5; }));
     BOOST_TEST(m.state("ps").counters.observations == 5u);
 }
 
-BOOST_AUTO_TEST_CASE(edit_while_receiving_rebinds_same_port,
-                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(edit_while_receiving_rebinds_same_port)
 {
     IoThread t;
     TempDir tmp;
@@ -760,7 +756,7 @@ BOOST_AUTO_TEST_CASE(edit_while_receiving_rebinds_same_port,
     std::atomic<bool> stop{false};
     // Read on this thread: fixture() asserts, and Boost.Test assertions are
     // not thread-safe (TSan saw the sender race the main thread on them).
-    const std::string text = fixture("icd-traffic-1090.json");
+    const std::string text = fixture("traffic-1090.json");
     std::thread sender([&] {
         UdpSender tx;
         while (!stop) {
@@ -783,7 +779,7 @@ BOOST_AUTO_TEST_CASE(edit_while_receiving_rebinds_same_port,
     BOOST_TEST(m.find("ps")->def.name == "n4");
 }
 
-BOOST_AUTO_TEST_CASE(disable_stops_enable_restarts, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(disable_stops_enable_restarts)
 {
     IoThread t;
     TempDir tmp;
@@ -805,7 +801,7 @@ BOOST_AUTO_TEST_CASE(disable_stops_enable_restarts, *skycue_test::needs_fixture(
     BOOST_TEST(m.state("ps").counters.connects == 2u);
     BOOST_TEST(skycued::parseInputsFile(readAll(cfg.inputs_file)).inputs.at(0).enabled);
     UdpSender tx;
-    tx.send(port, fixture("icd-traffic-1090.json"));
+    tx.send(port, fixture("traffic-1090.json"));
     BOOST_REQUIRE(eventually([&] { return m.seen.count() == 1; }));
 }
 
@@ -864,7 +860,7 @@ BOOST_AUTO_TEST_CASE(builtin_enabled_persisted)
     BOOST_TEST(skycued::parseInputsFile(readAll(cfg.inputs_file)).builtin_enabled.at("readsb") == true);
 }
 
-BOOST_AUTO_TEST_CASE(remove_forgets_counters, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(remove_forgets_counters)
 {
     IoThread t;
     TempDir tmp;
@@ -874,7 +870,7 @@ BOOST_AUTO_TEST_CASE(remove_forgets_counters, *skycue_test::needs_fixture("pings
     m.on([&](InputManager& im) { return im.create(psJson("ps", port)); });
     BOOST_REQUIRE(eventually([&] { return m.state("ps").connected; }));
     UdpSender tx;
-    tx.send(port, fixture("icd-traffic-1090.json"));
+    tx.send(port, fixture("traffic-1090.json"));
     BOOST_REQUIRE(eventually([&] { return m.state("ps").counters.messages == 1; }));
     m.on([&](InputManager& im) { return im.replace("ps", psJson("ps", port, R"(,"name":"x")")); });
     BOOST_TEST(m.state("ps").counters.messages == 1u);  // kept across the replace
@@ -900,7 +896,7 @@ BOOST_AUTO_TEST_CASE(replace_and_remove_from_own_callback)
     const uint16_t port = freeUdpPort();
     m.on([&](InputManager& im) { return im.create(psJson("ps", port)); });
     BOOST_REQUIRE(eventually([&] { return m.state("ps").connected; }));
-    const std::string two = R"({"aircraft":[{"icaoAddress":"C00586"},{"icaoAddress":"C00587"}]})";
+    const std::string two = R"({"aircraft":[{"icaoAddress":"AC5E81"},{"icaoAddress":"AC5E82"}]})";
     UdpSender tx;
 
     m.on([&](InputManager&) {
@@ -1083,8 +1079,7 @@ BOOST_AUTO_TEST_CASE(hand_edit_with_one_bad_entry_keeps_previous_set)
     BOOST_TEST(readAll(cfg.inputs_file + ".rejected") == text);
 }
 
-BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded,
-                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded)
 {
     IoThread t;
     TempDir tmp;
@@ -1094,7 +1089,7 @@ BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded,
     m.on([&](InputManager& im) { return im.create(psJson("a", a)); });
     BOOST_REQUIRE(eventually([&] { return m.state("a").connected; }));
     UdpSender tx;
-    tx.send(a, fixture("icd-traffic-1090.json"));
+    tx.send(a, fixture("traffic-1090.json"));
     BOOST_REQUIRE(eventually([&] { return m.state("a").counters.messages == 1; }));
 
     handWrite(cfg.inputs_file, "{ not json");
@@ -1114,8 +1109,7 @@ BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded,
     BOOST_TEST(s.counters.messages == 1u);
 }
 
-BOOST_AUTO_TEST_CASE(inputs_file_deleted_while_running_keeps_set,
-                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(inputs_file_deleted_while_running_keeps_set)
 {
     IoThread t;
     TempDir tmp;
@@ -1125,7 +1119,7 @@ BOOST_AUTO_TEST_CASE(inputs_file_deleted_while_running_keeps_set,
     m.on([&](InputManager& im) { return im.create(psJson("a", a)); });
     BOOST_REQUIRE(eventually([&] { return m.state("a").connected; }));
     UdpSender tx;
-    tx.send(a, fixture("icd-traffic-1090.json"));
+    tx.send(a, fixture("traffic-1090.json"));
     BOOST_REQUIRE(eventually([&] { return m.state("a").counters.messages == 1; }));
 
     BOOST_REQUIRE(::unlink(cfg.inputs_file.c_str()) == 0);
@@ -1191,7 +1185,7 @@ BOOST_AUTO_TEST_CASE(destroyed_with_pending_timer)
 
 // A device status changes device_status only: no onChanged (inputs_changed),
 // so a status every second does not resend the inputs list.
-BOOST_AUTO_TEST_CASE(device_status_does_not_fire_changed, *skycue_test::needs_fixture("pingstation/icd-status.json"))
+BOOST_AUTO_TEST_CASE(device_status_does_not_fire_changed)
 {
     IoThread t;
     TempDir tmp;
@@ -1201,7 +1195,7 @@ BOOST_AUTO_TEST_CASE(device_status_does_not_fire_changed, *skycue_test::needs_fi
     BOOST_REQUIRE(eventually([&] { return m.state("ps").connected; }));
     const int changes = m.on([&](InputManager&) { return m.seen.changes; });
     UdpSender tx;
-    tx.send(port, fixture("icd-status.json"));
+    tx.send(port, fixture("status.json"));
     BOOST_REQUIRE(eventually([&] { return m.state("ps").device_status.has_value(); }));
     BOOST_TEST(m.on([&](InputManager&) { return m.seen.changes; }) == changes);
 }

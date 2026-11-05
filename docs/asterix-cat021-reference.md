@@ -18,15 +18,9 @@ not copied, and against the decoded bytes of the `cat21_re.ast` sample (§7). Ta
   stronger source than a guess, though, because each file follows its PDF item by item.
   **[T+S]** means the sample bytes decode consistently with it.
 - **[U]**: inferred, from general knowledge (DO-260, ICAO Annex 10), or only from the GPL XML.
-- **[V:the vendor interface document]**: verified against the the vendor interface document (the vendor interface document-001),
-  page N. The ICD claims CAT021 **ed. 2.5**. It gives the block layout, the FRN/item subset the
-  device emits, and one Wireshark dissection of a real record (p14), so it verifies what the
-  device sends and how Wireshark decodes it. It is not the EUROCONTROL text. Bit layouts are
-  verified only where that dissection expands them.
-- **[X:the vendor interface document]**: contradicted by that ICD, with the ICD's version quoted. None so far.
 
-The ICD and the pingStation 3 User Guide are kept locally in `docs/vendor/`
-(git-ignored, vendor copyright). §8 lists exactly what the device emits.
+This reference summarises the public EUROCONTROL CAT021 standard. §8 lists what the pingStation 3
+emits, as the project's decoder and encoder model it; the device is not a source for any bit layout.
 
 Fetched files are in the session scratchpad (`asterix/specs`, `asterix/cc`, `asterix/pdf`).
 They are data only. Nothing from the GPL XML is reproduced here.
@@ -44,21 +38,17 @@ Data block:  CAT (1 octet) | LEN (2 octets, big-endian) | record 1 | record 2 | 
 Record:      FSPEC (1..k octets) | data fields in FRN order (only those whose FSPEC bit is 1)
 ```
 
-- **CAT** = 21 (0x15) for CAT021 **[V]** (layout from CAT001 Part 2a §4.2.2.2, which has CAT=001)
-  **[V:the vendor interface document]** ("a one-octet field").
+- **CAT** = 21 (0x15) for CAT021 **[V]** (layout from CAT001 Part 2a §4.2.2.2, which has CAT=001).
 - **LEN** is the total length of the data block in octets, **including the CAT and LEN fields**
-  **[V]** **[V:the vendor interface document]**. A block with records totalling R octets has LEN = R + 3. The sample
-  shows LEN=0x002C with 44 octets **[T+S]**. The ICD example has Length 53 with one 50-octet
-  record **[V:the vendor interface document]**.
-- A data block holds one or more records of the **same category** **[V]** (Part 2a §3.1.3)
-  **[V:the vendor interface document]** (figure: "FSPEC | Items of the first record | … | FSPEC | Items of the last
-  record").
+  **[V]**. A block with records totalling R octets has LEN = R + 3. The sample
+  shows LEN=0x002C with 44 octets **[T+S]**. A one-record block generated with `skycue-pingsim`
+  (tests/test_cat021.cpp) has LEN = 51: a 48-octet record.
+- A data block holds one or more records of the **same category** **[V]** (Part 2a §3.1.3).
   Records have no length field and no separator: each record ends where its last present field
   ends, and the next record's FSPEC starts at the following octet.
 - **FSPEC**: each octet carries 7 presence bits (b8..b2 = FRN 7k+1..7k+7) and an FX bit (b1).
   FX=1 means another FSPEC octet follows. Fields are sent in **FRN order** **[V]** (Part 2a
-  §4.3.1). The CAT021 ed. 2.x UAP has 49 FRNs, so the FSPEC is at most 7 octets
-  **[V:the vendor interface document]** ("a field of up to seven octets").
+  §4.3.1). The CAT021 ed. 2.x UAP has 49 FRNs, so the FSPEC is at most 7 octets.
 - **UAP** (User Application Profile): the table that maps FRN to data item **[V]**
   (Part 2a §3.1.9). CAT021 has a single UAP in every edition.
 - **Field length rules** (Part 1 concepts, as used by asterix-specs) **[T]**:
@@ -133,9 +123,9 @@ Record:      FSPEC (1..k octets) | data fields in FRN order (only those whose FS
 
 All rows are [T]. The 2.7 UAP is identical [T]. The FRN↔item mapping of the 23 items the
 pingStation 3 emits (FRN 1, 2, 6, 7, 9, 10, 11, 12, 14, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26,
-28, 29, 30, 36; §8) is **[V:the vendor interface document]** for ed. 2.5. The length rules of 010, 040, 130, 131,
-080, 090, 210, 070, 145, 200, 155, 160, 170, 020 and 008 add up exactly to the ICD example's
-50-octet record, with 040 = 2 octets and 090 = 3 octets **[V:the vendor interface document]**.
+28, 29, 30, 36; §8) follows the ed. 2.5 UAP [T]. The length rules of 010, 040, 130, 131,
+080, 090, 210, 070, 145, 200, 155, 160, 170, 020 and 008 add up to the length of a record the
+project's encoder writes for those items [T+S].
 
 ## 3. Data items (ed. 2.6), bit layouts. All [T] unless marked.
 
@@ -242,9 +232,8 @@ the MOPS version in I021/210 (except PIC).
   2 = pass, 3 = fail. VD/VQ say whether the distance octets are meaningful. The validation
   distance is P1×128 m + P2×1 m, and P1=127 means ≥16.256 km. Quality is coded the same way.
 - Sample: `00` (primary only, all zero) [T+S].
-- Primary, ext 1 and ext 2 bit positions **[V:the vendor interface document]**: the dissection shows `010. ....` NACv
-  2, `...1 000.` NIC 8, FX 1 / `1... ....` NICbaro 1, `.11. ....` SIL 3, `...1 010.` NACp 10,
-  FX 1 / `..0. ....` SILS 0, `...1 1...` SDA 3, `.... .10.` GVA 2, FX 0.
+- Primary, ext 1 and ext 2 bit positions are as in the item table above [T]. A generated block
+  (`11 12`: primary and one extension) decodes to NIC 8, NACp 9.
 
 **3.18 I021/210 MOPS Version (1).** b8 spare. b7 VNS (1 = the MOPS version is not supported by
 the GS, which interpreted the data anyway). b6–4 VN: 0 = ED-102/DO-260, 1 = DO-260A,
@@ -252,15 +241,15 @@ the GS, which interpreted the data anyway). b6–4 VN: 0 = ED-102/DO-260, 1 = DO
 2 = 1090 ES, 3 = VDL 4, 4–7 not assigned. Sample: `02` → VN 0, LTT 1090 ES [T+S].
 
 **3.19 I021/070 Mode 3/A Code (2).** b16–13 spare, b12–1 four octal digits (3 bits each,
-A then B, C, D from the MSB) [T] **[V:the vendor interface document]** (`.... 0100 0000 0001 = SQUAWK: 02001`). The
-per-digit bit order is the usual ASTERIX "octal representation" [U], and that dissection agrees
-with it. Ed. 0.2x put V/G/L flags in b16–14 (§4).
+A then B, C, D from the MSB) [T]. The
+per-digit bit order is the usual ASTERIX "octal representation" [U]; a generated `09 c9` decodes
+to 4711. Ed. 0.2x put V/G/L flags in b16–14 (§4).
 
 **3.20 I021/230 Roll Angle (2).** s16, LSB 0.01°, range −180..180. Negative = left wing down.
 1090 ES resolution is 1°.
 
-**3.21 I021/145 Flight Level (2).** s16, LSB **1/4 FL** (= 25 ft) **[V:the vendor interface document]** (the example
-decodes to "FL: 390.25"; sign and range not shown), range −15..1500 FL.
+**3.21 I021/145 Flight Level (2).** s16, LSB **1/4 FL** (= 25 ft) [T] (a generated `02 d0`
+is FL 180), range −15..1500 FL.
 Barometric, not QNH-corrected. alt_baro_ft = raw × 25.
 
 **3.22 I021/152 Magnetic Heading (2).** u16, LSB 360/2¹⁶ ° (0.0055°). True heading is in RE/TNH.
@@ -298,8 +287,9 @@ Vol IV, not from the PDF [U]:
 | 48–57 (0x30–0x39) | 0–9 |
 | all others (0, 27–31, 33–47, 58–63) | invalid. Map to '?' or reject; readsb drops them |
 
-Trim trailing spaces. An all-space value means no callsign. The ICD example decodes 170 to
-"ATN3597" **[V:the vendor interface document]**, which confirms an 8-character field but not the code table.
+Trim trailing spaces. An all-space value means no callsign. A generated block
+decodes 170 to "RPA4521" followed by a space, which shows an 8-character field but does not
+confirm the code table.
 
 **3.30 I021/020 Emitter Category (1).** 0 no information. 1 light (≤15500 lb). 2 small
 (15500–75000 lb). 3 medium (75000–300000 lb). 4 high vortex large. 5 heavy (≥300000 lb).
@@ -418,7 +408,7 @@ records have no lengths. Therefore:
   length-rule families: `0.23` (= 0.24), `0.25`, `0.26`, `1.x/2.0–2.1` (49-FRN UAP, old
   271), and `2.2+` (2.2–2.7: the FX-extended 271). Default `2.6`. Within `2.2+`, the editions
   differ only in bit meanings, so one decoder can read all of them by following FX and
-  ignoring unknown extension octets. The pingStation 3 sends **ed. 2.5** **[V:the vendor interface document]**, which
+  ignoring unknown extension octets. The pingStation 3 sends **ed. 2.5**, which
   is in the `2.2+` family. It never sets 040 ext 3/4 (2.6-only), and it sends neither 271 nor
   RE.
 - Optionally, `cat021_re_edition` (RE 1.4 vs 1.5). Since RE is explicit and its newer parts
@@ -437,7 +427,7 @@ records have no lengths. Therefore:
 | `id.type` | 040 ATP | 0 → `AddressType::icao`. 1 (duplicate) → `icao`, logged/counted. 2 (surface vehicle), 3 (anonymous) → `non_icao`. 4–7 → `other`. Recommendation [U]. |
 | `source` | 210 LTT | 2 → `adsb_1090`, 1 → `uat_978`, else `other`. If 210 is absent, use a per-input default (normally `adsb_1090`). |
 | `received_time` | local clock at datagram arrival | as readsb "now". |
-| `position_time` | **071** if present, else **073** (+074 high precision), else 077, else `received_time` | 071 is when the position is *valid*. 073/074 is when the squitter was *received* (very close for ES). 077 is the *ASTERIX send time*, a last resort that is biased late. The pingStation 3 never sends 071/074, and its example record has none of 073/075/077 **[V:the vendor interface document, p14]**, so the `received_time` fallback is needed. Each is seconds-of-day only. Rebuild the date from the UTC date of `received_time`: if tod − now_tod > 12 h, the value is from the previous day; if < −12 h, from the next day. |
+| `position_time` | **071** if present, else **073** (+074 high precision), else 077, else `received_time` | 071 is when the position is *valid*. 073/074 is when the squitter was *received* (very close for ES). 077 is the *ASTERIX send time*, a last resort that is biased late. The pingStation 3 never sends 071/074 (§8), and a record may carry none of 073/075/077, so the `received_time` fallback is needed. Each is seconds-of-day only. Rebuild the date from the UTC date of `received_time`: if tod − now_tod > 12 h, the value is from the previous day; if < −12 h, from the next day. |
 | `lat`,`lon` | **131** if present, else 130 | Set both or neither. Ignore the position when 040 shows CL=1 (suspect) or ext 2 CPR/RCF/IPC=1 (§5.1). |
 | `on_ground` | 040 ext 1 GBS | Absent ext 1 = not on ground (GBS 0). Ed. 0.2x: GBS is in the fixed 040. |
 | `alt_baro_ft` | 145 × 25 ft | Rounded to int. ARC=3 (invalid) → do not use 145. |
@@ -488,10 +478,9 @@ records have no lengths. Therefore:
   with a timestamp); those must be configured explicitly, never guessed.
 - Keep SAC/SIC (010) and 015/400 so that several stations or services can be told apart. 016
   gives the expected update period.
-- **pingStation 3** **[V:the vendor interface document]**: CAT021 over **UDP** (to one configured host/port) or
-  **TCP**. "Each UDP datagram contains a single aircraft update." "Each TCP payload contains a
-  single aircraft update." A TCP reader must still frame on CAT/LEN. The User Guide documents
-  unicast or broadcast (its ATAK example is `x.x.x.255`, port 4000), with no multicast and no
+- **pingStation 3**: CAT021 over **UDP** (to one configured host/port) or
+  **TCP**, one aircraft update per datagram or TCP write. A TCP reader must still frame on
+  CAT/LEN. The device documentation describes unicast or broadcast (its ATAK example is `x.x.x.255`, port 4000), with no multicast and no
   default port (port 0, output disabled until configured). SAC/SIC are set on the device web
   page (default 00/00). Only one UDP format can be active, so with UDP CAT021 the device sends
   no status message. Its position and health then come only from `GET /api/v1/status` (JSON).
@@ -518,9 +507,9 @@ records have no lengths. Therefore:
 
 ## 8. pingStation 3 subset
 
-What the uAvionix pingStation 3 emits, per its ICD. Edition: **CAT021 2.5** [V:the vendor interface document].
-"The transmission of each field depends on the availability of valid data" [V:the vendor interface document], so every
-item is optional per record.
+What the uAvionix pingStation 3 emits, as modelled by the decoder and by `skycue-pingsim`.
+Edition: **CAT021 2.5**. Each field is sent only when valid data is available, so every item is
+optional per record.
 
 | FRN | Item | Section | Notes |
 |---|---|---|---|
@@ -548,7 +537,7 @@ item is optional per record.
 | 30 | 020 Emitter Category | 3.30 | |
 | 36 | 008 Aircraft Operational Status | 3.36 | |
 
-All rows are [V:the vendor interface document]. The highest FRN is 36, so the FSPEC is at most 6 octets.
+All rows follow the ed. 2.5 UAP [T]. The highest FRN is 36, so the FSPEC is at most 6 octets.
 **Never sent**: 161, 015, 071, 072, 074, 076, 230, 165, 220, 146, 148, 110, 016, 271, 132, 250,
 260, 400, 295, RE, SP. In practice this means no message amplitude (RSSI), no surface ground
 vector (RE/SGV), no true-north heading (RE/TNH), and no high-precision times. The decoder should
@@ -567,8 +556,6 @@ still implement the full 2.2+ length rules (§1), because a firmware change coul
 | https://github.com/zoranbosnjak/asterix-specs `specs/cat021/cat-{0.23,0.24,0.25,0.26,2.1,2.2,2.3,2.4,2.5,2.6,2.7}.ast`, `ref-{1.4,1.5}.ast`, `remarks.md` (master, last commit 2026-10-27) | Transcriptions, BSD-3-Clause (© 2019 KZPS) | **Read in full for 2.6. Structural diffs for the rest** [T] |
 | https://github.com/CroatiaControlLtd/asterix `install/config/asterix_cat021_{0_23,0_26,1_8,2_4,2_6}.xml` | Decoder configs, GPL-2.0 | Read for cross-check only, nothing copied [U] |
 | https://github.com/CroatiaControlLtd/asterix `install/sample_data/cat21_re.ast` | 91-byte sample, GPL-2.0 repo | Decoded (§7) |
-| the vendor interface document, the vendor interface document-001 (local copy, `docs/vendor/`, not committed) | Device claims CAT021 2.5 | **Read in full** [V:the vendor interface document] |
-| uAvionix pingStation 3 User and Installation Guide, UAV-1005950-001 (local copy, not committed) | Configuration, ports, status | Read: configuration, health, recovery broadcast, ATAK/VRS sections |
 
 Known gaps (to close when a PDF can be obtained by hand): the PIC table (090), the LW codes
 (271), the BPS offset and the remaining RE prose, the exact UDP wording in Part 1, the 1.x

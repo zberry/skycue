@@ -89,7 +89,8 @@ TrackObservation one(const std::string& members)
     return r.observations[0];
 }
 
-const TP kIcdArrival = utc(2022, 12, 13, 21, 11, 34);
+// Two seconds after the timeStamp of the generated traffic-1090.json.
+const TP kSampleArrival = utc(2026, 11, 2, 12, 0, 0);
 
 }  // namespace
 
@@ -97,41 +98,41 @@ const TP kIcdArrival = utc(2022, 12, 13, 21, 11, 34);
 
 BOOST_AUTO_TEST_CASE(iso_fraction_forms)
 {
-    const int64_t base = epochMs(utc(2022, 12, 13, 21, 11, 32));
+    const int64_t base = epochMs(utc(2026, 11, 2, 11, 59, 58));
     auto ms = [](const char* s) -> std::optional<int64_t> {
         auto t = parseDeviceTime(s);
         if (!t)
             return std::nullopt;
         return epochMs(*t);
     };
-    BOOST_TEST(ms("2022-12-13T21:11:32Z").value_or(0) == base);
-    BOOST_TEST(ms("2022-12-13T21:11:32.1Z").value_or(0) == base + 100);
-    BOOST_TEST(ms("2022-12-13T21:11:32:317283895Z").value_or(0) == base + 317);
-    BOOST_TEST(ms("2020-11-23T23:02:22.3725496Z").value_or(0) == epochMs(utc(2020, 11, 23, 23, 2, 22)) + 372);
-    BOOST_TEST(epochNs(parseDeviceTime("2022-12-13T21:11:32.317283895Z").value()) ==
-               epochNs(utc(2022, 12, 13, 21, 11, 32, 317283895)));
+    BOOST_TEST(ms("2026-11-02T11:59:58Z").value_or(0) == base);
+    BOOST_TEST(ms("2026-11-02T11:59:58.1Z").value_or(0) == base + 100);
+    BOOST_TEST(ms("2026-11-02T11:59:58:412907153Z").value_or(0) == base + 412);
+    BOOST_TEST(ms("2026-11-02T11:59:58.4129076Z").value_or(0) == base + 412);
+    BOOST_TEST(epochNs(parseDeviceTime("2026-11-02T11:59:58.412907153Z").value()) ==
+               epochNs(utc(2026, 11, 2, 11, 59, 58, 412907153)));
     BOOST_TEST(ms("2024-02-29T00:00:00Z").value_or(0) == epochMs(utc(2024, 2, 29, 0, 0, 0)));
 
     BOOST_TEST(!parseDeviceTime("2022-13-01T00:00:00Z"));
     BOOST_TEST(!parseDeviceTime("2023-02-29T00:00:00Z"));
-    BOOST_TEST(!parseDeviceTime("2022-12-13T24:00:00Z"));
-    BOOST_TEST(!parseDeviceTime("2022-12-13T21:60:00Z"));
-    BOOST_TEST(!parseDeviceTime("2022-12-13T21:11:32"));        // no Z
-    BOOST_TEST(!parseDeviceTime("2022-12-13T21:11:32.Z"));      // no fraction digits
-    BOOST_TEST(!parseDeviceTime("2022-12-13T21:11:32.1234567890Z"));  // 10 digits
-    BOOST_TEST(!parseDeviceTime("2022-12-13 21:11:32Z"));
-    BOOST_TEST(!parseDeviceTime("2022-12-13T21:11:32Zx"));
+    BOOST_TEST(!parseDeviceTime("2026-11-02T24:00:00Z"));
+    BOOST_TEST(!parseDeviceTime("2026-11-02T11:60:00Z"));
+    BOOST_TEST(!parseDeviceTime("2026-11-02T11:59:58"));        // no Z
+    BOOST_TEST(!parseDeviceTime("2026-11-02T11:59:58.Z"));      // no fraction digits
+    BOOST_TEST(!parseDeviceTime("2026-11-02T11:59:58.1234567890Z"));  // 10 digits
+    BOOST_TEST(!parseDeviceTime("2026-11-02 11:59:58Z"));
+    BOOST_TEST(!parseDeviceTime("2026-11-02T11:59:58Zx"));
     BOOST_TEST(!parseDeviceTime(""));
 }
 
 // Found by fuzz_pingstation (mode 0, an aircraft with timeStamp
-// "4044-12-13T21:11:32Z"): parseDeviceTime took any 4-digit year, and the
+// "4044-11-02T11:59:58Z"): parseDeviceTime took any 4-digit year, and the
 // seconds to nanoseconds conversion overflowed int64_t (undefined behaviour)
 // outside system_clock's range, 1677-09-21 to 2262-04-11. Years 1678 to 2261
 // are accepted (the clock check is fuzz_pingstation_clock_check_far_apart).
 BOOST_AUTO_TEST_CASE(fuzz_pingstation_device_time_out_of_range)
 {
-    for (const char* bad : {"4044-12-13T21:11:32Z", "9999-12-31T23:59:59.999999999Z", "0000-01-01T00:00:00Z",
+    for (const char* bad : {"4044-11-02T11:59:58Z", "9999-12-31T23:59:59.999999999Z", "0000-01-01T00:00:00Z",
                             "1677-12-31T23:59:59Z", "2262-01-01T00:00:00Z", "2262-04-11T23:47:16.854775807Z"})
         BOOST_TEST(!parseDeviceTime(bad), "accepted: " << bad);
     BOOST_TEST(epochNs(parseDeviceTime("2261-12-31T23:59:59.999999999Z").value()) ==
@@ -143,7 +144,7 @@ BOOST_AUTO_TEST_CASE(fuzz_pingstation_device_time_out_of_range)
     PingContext ctx;
     ctx.arrival = utc(2026, 11, 2, 10, 15, 0);
     const PingResult r = parsePingDatagram(
-        R"({"icaoAddress":"C00586","latDD":42.1,"lonDD":-93.0,"timeStamp":"4044-12-13T21:11:32Z"})", ctx);
+        R"({"icaoAddress":"AC5E81","latDD":42.1,"lonDD":-93.0,"timeStamp":"4044-11-02T11:59:58Z"})", ctx);
     BOOST_REQUIRE(r.observations.size() == 1u);
     BOOST_TEST(r.clock_rejects == 0u);
     BOOST_TEST(!r.clock_offset_s.has_value());
@@ -179,7 +180,7 @@ BOOST_AUTO_TEST_CASE(fuzz_pingstation_clock_check_far_apart)
     PingContext ctx;
     ctx.arrival = arrival;
     const PingResult r = parsePingDatagram(
-        R"({"icaoAddress":"C00586","latDD":42.1,"lonDD":-93.0,"timeStamp":"1700-01-01T00:00:00Z"})", ctx);
+        R"({"icaoAddress":"AC5E81","latDD":42.1,"lonDD":-93.0,"timeStamp":"1700-01-01T00:00:00Z"})", ctx);
     BOOST_REQUIRE(r.observations.size() == 1u);
     BOOST_TEST(r.clock_rejects == 1u);
     BOOST_TEST(r.clock_offset_s.value_or(0) < -1.0e10);
@@ -241,7 +242,7 @@ BOOST_AUTO_TEST_CASE(tod_midnight_wrap)
 BOOST_AUTO_TEST_CASE(gps_counter_time)
 {
     BOOST_TEST(epochNs(gpsCounterTime(0, 0).value()) == int64_t{315964800} * 1000000000);
-    BOOST_TEST(epochNs(gpsCounterTime(1355001092, 317283895).value()) == int64_t{1670965892317283895});
+    BOOST_TEST(epochNs(gpsCounterTime(1477655998, 412907153).value()) == int64_t{1793620798412907153});
     BOOST_TEST(gpsCounterTime((uint64_t{1} << 32) - 1, 999999999).has_value());
     BOOST_TEST(!gpsCounterTime(uint64_t{1} << 32, 0));
     BOOST_TEST(!gpsCounterTime(100000000000, 0));
@@ -275,30 +276,30 @@ BOOST_AUTO_TEST_CASE(huge_rates_dropped)
 
 // ---- JSON ----
 
-BOOST_AUTO_TEST_CASE(icd_1090_example_maps, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(traffic_1090_maps)
 {
-    const std::string text = fixture("icd-traffic-1090.json");
-    const auto r = parsePingDatagram(text, PingContext{kIcdArrival, TimeMode::utc});
+    const std::string text = fixture("traffic-1090.json");
+    const auto r = parsePingDatagram(text, PingContext{kSampleArrival, TimeMode::utc});
     BOOST_TEST(r.rejected == 0u);
     BOOST_TEST(r.clock_rejects == 0u);
     BOOST_TEST(!r.status);
     BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
     const auto& o = r.observations[0];
-    BOOST_TEST(o.id.address == 0xC00586u);
+    BOOST_TEST(o.id.address == 0xAC5E81u);
     BOOST_TEST((o.id.type == AddressType::icao));
     BOOST_TEST((o.source == Source::adsb_1090));
-    BOOST_TEST((o.received_time == kIcdArrival));
-    BOOST_TEST(o.lat.value_or(0) == 42.132614);
-    BOOST_TEST(o.lon.value_or(0) == -93.007891);
-    BOOST_TEST(o.alt_baro_ft.value_or(0) == 34025);
-    BOOST_TEST(!o.alt_geom_ft);  // baroaltDiffMM is not used
-    BOOST_TEST(o.track_deg.value_or(0) == 263.3f, boost::test_tools::tolerance(0.001f / 263.3f));
-    BOOST_TEST(o.gs_kt.value_or(0) == 410.99f, boost::test_tools::tolerance(0.01f / 410.99f));
-    BOOST_TEST(o.geom_rate_fpm.value_or(-1) == 0.0f);  // verVelocitySrc 1
-    BOOST_TEST(!o.baro_rate_fpm);
-    BOOST_TEST(o.squawk.value_or("") == "1305");
-    BOOST_TEST(o.callsign.value_or("") == "CJT340");
-    BOOST_TEST(o.category.value_or("") == "A5");
+    BOOST_TEST((o.received_time == kSampleArrival));
+    BOOST_TEST(o.lat.value_or(0) == 37.887976);
+    BOOST_TEST(o.lon.value_or(0) == -76.261396);
+    BOOST_TEST(o.alt_baro_ft.value_or(0) == 18000);
+    BOOST_TEST(o.alt_geom_ft.value_or(0) == 18300);  // secondaryAltitudeMM, type 1
+    BOOST_TEST(o.track_deg.value_or(0) == 329.67f, boost::test_tools::tolerance(0.001f / 329.67f));
+    BOOST_TEST(o.gs_kt.value_or(0) == 379.0f, boost::test_tools::tolerance(0.01f / 379.0f));
+    BOOST_TEST(!o.geom_rate_fpm);  // verVelocitySrc 0: barometric
+    BOOST_TEST(o.baro_rate_fpm.value_or(0) == 64.0f, boost::test_tools::tolerance(0.01f / 64.0f));
+    BOOST_TEST(o.squawk.value_or("") == "4711");
+    BOOST_TEST(o.callsign.value_or("") == "RPA4521");
+    BOOST_TEST(o.category.value_or("") == "A3");
     BOOST_TEST(o.emergency.value_or("") == "none");
     BOOST_TEST((o.on_ground == std::optional<bool>(false)));
     BOOST_TEST(o.nic.value_or(0) == 8);
@@ -306,21 +307,20 @@ BOOST_AUTO_TEST_CASE(icd_1090_example_maps, *skycue_test::needs_fixture("pingsta
     BOOST_TEST(!o.rssi);
     BOOST_TEST(!o.registration);
     BOOST_REQUIRE(o.position_time);
-    BOOST_TEST((*o.position_time == utc(2022, 12, 13, 21, 11, 32)));
+    BOOST_TEST((*o.position_time == utc(2026, 11, 2, 11, 59, 58)));
     BOOST_TEST(o.raw_line == text);
     BOOST_TEST(r.clock_offset_s.value_or(0) == -2.0, boost::test_tools::tolerance(1e-9));
 
     BOOST_REQUIRE_EQUAL(r.raw_frames.size(), 1u);
     BOOST_TEST((r.raw_frames[0].kind == RawFrame::Kind::adsb_1090));
-    BOOST_TEST(r.raw_frames[0].hex == "8dc0058658af979ecbc80d0c3c70");
-    BOOST_TEST(epochNs(r.raw_frames[0].time) == int64_t{1670965892317283895});
+    BOOST_TEST(r.raw_frames[0].hex == "8dac5e815821c2a65e8f1b30d47a");
+    BOOST_TEST(epochNs(r.raw_frames[0].time) == int64_t{1793620798412907153});
 }
 
-BOOST_AUTO_TEST_CASE(icd_1090_example_clamped_when_far,
-                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(traffic_1090_clamped_when_far)
 {
-    const TP arrival = utc(2026, 1, 1, 0, 0, 0);
-    const auto r = parsePingDatagram(fixture("icd-traffic-1090.json"), PingContext{arrival, TimeMode::utc});
+    const TP arrival = utc(2030, 1, 1, 0, 0, 0);
+    const auto r = parsePingDatagram(fixture("traffic-1090.json"), PingContext{arrival, TimeMode::utc});
     BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
     const auto& o = r.observations[0];
     BOOST_REQUIRE(o.position_time);
@@ -332,59 +332,58 @@ BOOST_AUTO_TEST_CASE(icd_1090_example_clamped_when_far,
     BOOST_TEST((r.raw_frames[0].time == arrival));
 }
 
-BOOST_AUTO_TEST_CASE(gps_time_mode_subtracts_18s, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(gps_time_mode_subtracts_18s)
 {
-    const TP arrival = utc(2022, 12, 13, 21, 11, 14);
-    const auto r = parsePingDatagram(fixture("icd-traffic-1090.json"), PingContext{arrival, TimeMode::gps});
+    const TP arrival = utc(2026, 11, 2, 11, 59, 40);
+    const auto r = parsePingDatagram(fixture("traffic-1090.json"), PingContext{arrival, TimeMode::gps});
     BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
     BOOST_TEST((r.observations[0].position_time.value() == arrival));
     BOOST_TEST(r.clock_offset_s.value_or(1) == 0.0);
     BOOST_TEST(r.clock_rejects == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(utcsync_zero_uses_arrival, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(utcsync_zero_uses_arrival)
 {
-    const auto text = replaced(fixture("icd-traffic-1090.json"), R"("utcSync":1)", R"("utcSync":0)");
-    const auto r = parsePingDatagram(text, PingContext{kIcdArrival, TimeMode::utc});
+    const auto text = replaced(fixture("traffic-1090.json"), R"("utcSync":1)", R"("utcSync":0)");
+    const auto r = parsePingDatagram(text, PingContext{kSampleArrival, TimeMode::utc});
     BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
-    BOOST_TEST((r.observations[0].position_time.value() == kIcdArrival));
+    BOOST_TEST((r.observations[0].position_time.value() == kSampleArrival));
     BOOST_TEST(!r.clock_offset_s);
     BOOST_TEST(r.clock_rejects == 0u);
     BOOST_REQUIRE_EQUAL(r.raw_frames.size(), 1u);
-    BOOST_TEST((r.raw_frames[0].time == kIcdArrival));
+    BOOST_TEST((r.raw_frames[0].time == kSampleArrival));
 }
 
-BOOST_AUTO_TEST_CASE(icd_status_verbatim_is_rejected,
-                     *skycue_test::needs_fixture("pingstation/icd-status-verbatim.json"))
+BOOST_AUTO_TEST_CASE(curly_quote_status_is_rejected)
 {
-    const std::string text = fixture("icd-status-verbatim.json");
+    const std::string text = fixture("status-curly-quotes.json");
     PingResult r;
-    BOOST_CHECK_NO_THROW(r = parsePingDatagram(text, PingContext{kIcdArrival, TimeMode::utc}));
+    BOOST_CHECK_NO_THROW(r = parsePingDatagram(text, PingContext{kSampleArrival, TimeMode::utc}));
     BOOST_TEST(r.rejected == 1u);
     BOOST_TEST(!r.status);
     BOOST_TEST(r.observations.empty());
-    BOOST_TEST(!parsePingStatusDocument(text, kIcdArrival));
+    BOOST_TEST(!parsePingStatusDocument(text, kSampleArrival));
 }
 
-BOOST_AUTO_TEST_CASE(icd_status_example, *skycue_test::needs_fixture("pingstation/icd-status.json"))
+BOOST_AUTO_TEST_CASE(status_maps)
 {
-    const std::string text = fixture("icd-status.json");
-    const TP arrival = utc(2020, 11, 23, 23, 2, 23);
+    const std::string text = fixture("status.json");
+    const TP arrival = utc(2026, 11, 2, 11, 59, 59);
     const auto r = parsePingDatagram(text, PingContext{arrival, TimeMode::utc});
     BOOST_TEST(r.rejected == 0u);
     BOOST_TEST(r.observations.empty());
     BOOST_REQUIRE(r.status);
     const auto check = [&](const DeviceStatus& s) {
-        BOOST_TEST(s.guid == "754104714b10828b");
+        BOOST_TEST(s.guid == "0000000000000001");
         BOOST_TEST(s.version == "1.0.0");
-        BOOST_TEST(s.lat.value_or(0) == 48.088375);
-        BOOST_TEST(s.lon.value_or(0) == -114.091881);
-        BOOST_TEST(s.alt_m.value_or(0) == 946.7, boost::test_tools::tolerance(1e-9));
-        BOOST_TEST(s.alt_type.value_or(-1) == 1);
-        BOOST_TEST(s.gps_status.value_or(-1) == 4);
+        BOOST_TEST(s.lat.value_or(0) == 38.9);
+        BOOST_TEST(s.lon.value_or(0) == -77.0);
+        BOOST_TEST(!s.alt_m);
+        BOOST_TEST(!s.alt_type);
+        BOOST_TEST(s.gps_status.value_or(-1) == 3);
         BOOST_TEST(s.receiver_status.value_or(-1) == 0);
         BOOST_REQUIRE(s.device_time);
-        BOOST_TEST(epochMs(*s.device_time) == epochMs(utc(2020, 11, 23, 23, 2, 22)) + 372);
+        BOOST_TEST(epochMs(*s.device_time) == epochMs(utc(2026, 11, 2, 11, 59, 58)) + 250);
         BOOST_TEST((s.received_at == arrival));
     };
     check(*r.status);
@@ -471,7 +470,7 @@ BOOST_AUTO_TEST_CASE(numbers_as_strings)
 
 BOOST_AUTO_TEST_CASE(both_callsign_spellings)
 {
-    BOOST_TEST(one(R"("callsign":"CJT340 ")").callsign.value_or("") == "CJT340");
+    BOOST_TEST(one(R"("callsign":"RPA4521 ")").callsign.value_or("") == "RPA4521");
     BOOST_TEST(one(R"("Callsign":" UAL1   ")").callsign.value_or("") == "UAL1");
     BOOST_TEST(!one(R"("callsign":"        ")").callsign);
     BOOST_TEST(!one("").callsign);
@@ -490,11 +489,11 @@ BOOST_AUTO_TEST_CASE(vertical_rate_source)
 BOOST_AUTO_TEST_CASE(missing_or_bad_icao_rejected)
 {
     for (const char* bad : {R"({"latDD":1.0})", R"({"icaoAddress":"C0058"})", R"({"icaoAddress":"XYZ123"})",
-                            R"({"icaoAddress":"C005861"})", R"({"icaoAddress":12})"}) {
-        const auto r = parse(std::string(R"({"aircraft":[)") + bad + R"(,{"icaoAddress":"C00586"}]})");
+                            R"({"icaoAddress":"AC5E811"})", R"({"icaoAddress":12})"}) {
+        const auto r = parse(std::string(R"({"aircraft":[)") + bad + R"(,{"icaoAddress":"AC5E81"}]})");
         BOOST_TEST(r.rejected == 1u, bad);
         BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
-        BOOST_TEST(r.observations[0].id.address == 0xC00586u);
+        BOOST_TEST(r.observations[0].id.address == 0xAC5E81u);
         BOOST_TEST(parse(bad).rejected == 1u, bad);
     }
 }
@@ -712,7 +711,7 @@ BOOST_AUTO_TEST_CASE(cat021_maps_reference_fields)
     r.bvr155 = Rate{false, -10};
     r.gvr157 = Rate{false, 64};
     r.mode3a = 01305;
-    r.ident = "CJT340  ";
+    r.ident = "RPA4521 ";
     r.ecat = 5;
     r.status = Status200{};
     r.status->ps = 3;
@@ -741,7 +740,7 @@ BOOST_AUTO_TEST_CASE(cat021_maps_reference_fields)
     BOOST_TEST(o->baro_rate_fpm.value_or(0) == -62.5f);
     BOOST_TEST(o->geom_rate_fpm.value_or(0) == 400.0f);
     BOOST_TEST(o->squawk.value_or("") == "1305");
-    BOOST_TEST(o->callsign.value_or("") == "CJT340");
+    BOOST_TEST(o->callsign.value_or("") == "RPA4521");
     BOOST_TEST(o->category.value_or("") == "A5");
     BOOST_TEST(o->emergency.value_or("") == "minfuel");
     BOOST_TEST(o->nic.value_or(0) == 8);

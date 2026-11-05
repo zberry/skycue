@@ -325,7 +325,7 @@ BOOST_AUTO_TEST_CASE(capture_line_deep_nesting_refused_without_parsing)
 
 // ---------------------------------------------------------------- capture from inputs
 
-BOOST_AUTO_TEST_CASE(capture_input_writes_datagrams, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(capture_input_writes_datagrams)
 {
     TempDir tmp;
     IoThread t;
@@ -360,7 +360,7 @@ BOOST_AUTO_TEST_CASE(capture_input_writes_datagrams, *skycue_test::needs_fixture
     const uint16_t jport = freeUdpPort();
     Probe j(t, std::make_unique<PingJsonInput>(t.io, psJson("pj", jport, R"(,"capture":true)"), rec));
     BOOST_REQUIRE(eventually([&] { return j.state().connected; }));
-    const std::string text = fixture("icd-traffic-1090.json");
+    const std::string text = fixture("traffic-1090.json");
     tx.send(jport, text);
     BOOST_REQUIRE(eventually([&] { return j.state().counters.messages == 1; }));
     j.tick();
@@ -402,30 +402,29 @@ BOOST_AUTO_TEST_CASE(capture_tcp_writes_framed_blocks_only)
 
 // ---------------------------------------------------------------- RECORD_RAW
 
-BOOST_AUTO_TEST_CASE(raw_frames_written_in_rawplay_formats,
-                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
+BOOST_AUTO_TEST_CASE(raw_frames_written_in_rawplay_formats)
 {
     TempDir tmp;
     {
-        // The ICD example with an arrival inside the clock check: the GPS counter time is used.
-        const auto arrival = std::chrono::system_clock::time_point(std::chrono::seconds(1670965892));
-        const auto r = skycued::parsePingDatagram(fixture("icd-traffic-1090.json"),
+        // The generated traffic example with an arrival inside the clock check: the GPS counter time is used.
+        const auto arrival = std::chrono::system_clock::time_point(std::chrono::seconds(1793620800));
+        const auto r = skycued::parsePingDatagram(fixture("traffic-1090.json"),
                                                   skycued::PingContext{arrival, skycued::TimeMode::utc});
         BOOST_REQUIRE_EQUAL(r.raw_frames.size(), 1u);
         RawFrameWriter w(tmp.path, "ps-north", 0);
         w.write(r.raw_frames[0]);
         // A 7-byte short frame is 1090 too.
-        w.write(RawFrame{RawFrame::Kind::adsb_1090, "5dc00586a1b2c3", arrival + 5ms});
+        w.write(RawFrame{RawFrame::Kind::adsb_1090, "5dac5e81a1b2c3", arrival + 5ms});
         w.flush();
     }
     const auto csv = fileLines(tmp.path, "raw-ps-north-", ".csv");
     BOOST_REQUIRE_EQUAL(csv.size(), 2u);
-    BOOST_TEST(csv[0] == "1670965892.317283895,8DC0058658AF979ECBC80D0C3C70");
+    BOOST_TEST(csv[0] == "1793620798.412907153,8DAC5E815821C2A65E8F1B30D47A");
     const auto m = skycued::parseCsvMessage(csv[0]);
     BOOST_REQUIRE(m);
-    BOOST_TEST(m->hex == "8DC0058658AF979ECBC80D0C3C70");
-    BOOST_TEST(m->epoch_ns == int64_t{1670965892317283895});
-    BOOST_TEST(csv[1] == "1670965892.005000000,5DC00586A1B2C3");
+    BOOST_TEST(m->hex == "8DAC5E815821C2A65E8F1B30D47A");
+    BOOST_TEST(m->epoch_ns == int64_t{1793620798412907153});
+    BOOST_TEST(csv[1] == "1793620800.005000000,5DAC5E81A1B2C3");
     BOOST_TEST(skycued::parseCsvMessage(csv[1]).has_value());
 
     // A UAT 18-byte frame through a JSON input with record_raw: no utcSync, so arrival.
@@ -436,7 +435,7 @@ BOOST_AUTO_TEST_CASE(raw_frames_written_in_rawplay_formats,
     UdpSender tx;
     const auto before = std::chrono::system_clock::now();
     tx.send(port, fixture("uat-detail.json"));
-    // rawData of 31 bytes (the ICD's UAT length): counted, not written.
+    // rawData of 31 bytes (a UAT length): counted, not written.
     tx.send(port, R"({"icaoAddress":"A1B2C4","detail":{"rawData":"00a1b2c31a2b3c4d5e6f708192a3b4c5d6e7a1b2c3d4e5f6a7b8c9d0e1f2a3"}})");
     BOOST_REQUIRE(eventually([&] { return p.state().counters.messages == 2; }));
     p.tick();

@@ -81,11 +81,14 @@ Bytes slice(const Bytes& b, std::size_t off, std::size_t n) {
 int32_t raw130(double deg) { return static_cast<int32_t>(std::lround(deg / kLsb130Deg)); }
 int32_t raw131(double deg) { return static_cast<int32_t>(std::lround(deg / kLsb131Deg)); }
 
-constexpr double kIcdLat = 39.933280851692;
-constexpr double kIcdLon = -88.3812030404806;
+constexpr double kSampleLat = 37.887976;
+constexpr double kSampleLon = -76.261396;
 
-// The vendor interface document's example record, rebuilt from the dissected values.
-Cat021Record icdRecord() {
+// A record as `skycue-pingsim --as cat021` emits it for the first aircraft of
+// tests/fixtures/readsb-sample.jsonl, rebuilt from the decoded values (the
+// generator stamps the send time into I021/073; the value below is from the
+// run that produced kSampleBlock).
+Cat021Record sampleRecord() {
   Cat021Record r;
   r.sac = 0;
   r.sic = 0;
@@ -93,37 +96,36 @@ Cat021Record icdRecord() {
   trd.atp = 0;
   trd.has_ext1 = true;
   r.trd = trd;
-  r.lat130 = raw130(kIcdLat);
-  r.lon130 = raw130(kIcdLon);
-  r.lat131 = raw131(kIcdLat);
-  r.lon131 = raw131(kIcdLon);
-  r.address = 0xA6452D;
+  r.lat131 = raw131(kSampleLat);
+  r.lon131 = raw131(kSampleLon);
+  r.address = 0xAC5E81;
+  r.tod073 = 6891024;
+  r.height140 = 2928;
   Quality090 q;
-  q.nucr_nacv = 2;
   q.nucp_nic = 8;
   q.has_ext1 = true;
-  q.nic_baro = true;
-  q.sil = 3;
-  q.nacp = 10;
-  q.has_ext2 = true;
-  q.sils = false;
-  q.sda = 3;
-  q.gva = 2;
+  q.nacp = 9;
   r.quality = q;
   Mops210 m;
   m.vn = 2;
   m.ltt = 2;
   r.mops = m;
-  r.mode3a = 02001;
-  r.fl145 = 1561;
+  r.mode3a = 04711;
+  r.fl145 = 720;
   r.status = Status200{};
-  r.bvr155 = Rate{false, 0};
-  r.vector160 = Vector160{false, 1872, 16384};
-  r.ident = "ATN3597";
+  r.bvr155 = Rate{false, 10};
+  r.gvr157 = Rate{false, -5};
+  r.vector160 = Vector160{false, 1725, 60015};
+  r.ident = "RPA4521";
   r.ecat = 3;
-  r.aos008 = 0;
   return r;
 }
+
+// The block the generator wrote for that record (one UDP datagram, 51 bytes):
+// FSPEC c3 19 7b 79 c0, 48-byte record.
+const char* const kSampleBlock =
+    "15 00 33 c3 19 7b 79 c0 00 00 01 00 0d 78 a5 d4 e4 e2 84 ad ac 5e 81 69 26 10 0b 70 11 12 12 "
+    "09 c9 02 d0 00 00 0a 7f fb 06 bd ea 6f 49 00 74 d7 2c 60 03";
 
 // Offset of an item in an encoded record, found by walking the shared layout.
 std::size_t itemOffset(const Bytes& rec, int frn) {
@@ -150,52 +152,64 @@ BOOST_AUTO_TEST_CASE(edition_names) {
   BOOST_CHECK_EQUAL(std::string(editionName(Edition::e2_7)), "2.7");
 }
 
-// Encoder consistency check against the vendor interface document's Wireshark dissection: the ICD
-// shows the example as an image, so this is NOT an independent byte vector. The
-// FSPEC, the lengths and the 090/070/145/170/080 bytes are what the dissection
-// shows. The values of 010/040/210/200/155/160/020/008 are our own choice.
-BOOST_AUTO_TEST_CASE(icd_p14_example_reencoded) {
-  const Bytes rec = encodeRecord(icdRecord());
-  BOOST_CHECK_EQUAL(rec.size(), 50u);
-  const Bytes fs = hex("c7 11 3b 69 c1 80");
-  BOOST_CHECK(slice(rec, 0, 6) == fs);
+// Encoder consistency check on a record generated with `skycue-pingsim --as
+// cat021`: the block bytes are what the generator wrote (kSampleBlock), the
+// record is rebuilt from the decoded values and must encode to the same bytes,
+// and the block must decode back to them.
+BOOST_AUTO_TEST_CASE(sample_record_reencoded) {
+  const Bytes rec = encodeRecord(sampleRecord());
+  BOOST_CHECK_EQUAL(rec.size(), 48u);
+  BOOST_CHECK(slice(rec, 0, 5) == hex("c3 19 7b 79 c0"));
 
-  const Bytes blk = encodeBlock({icdRecord()});
-  BOOST_CHECK_EQUAL(blk.size(), 53u);
-  BOOST_CHECK(slice(blk, 0, 3) == hex("15 00 35"));
+  const Bytes blk = encodeBlock({sampleRecord()});
+  BOOST_CHECK_EQUAL(blk.size(), 51u);
+  BOOST_CHECK(slice(blk, 0, 3) == hex("15 00 33"));
+  BOOST_CHECK(blk == hex(kSampleBlock));
 
-  BOOST_CHECK(slice(rec, itemOffset(rec, 17), 3) == hex("51 f5 1c"));
-  BOOST_CHECK(slice(rec, itemOffset(rec, 19), 2) == hex("04 01"));
-  BOOST_CHECK(slice(rec, itemOffset(rec, 21), 2) == hex("06 19"));
-  BOOST_CHECK(slice(rec, itemOffset(rec, 29), 6) == hex("05 43 b3 d7 9d e0"));
-  BOOST_CHECK(slice(rec, itemOffset(rec, 11), 3) == hex("a6 45 2d"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 1), 2) == hex("00 00"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 2), 2) == hex("01 00"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 7), 8) == hex("0d 78 a5 d4 e4 e2 84 ad"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 11), 3) == hex("ac 5e 81"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 12), 3) == hex("69 26 10"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 16), 2) == hex("0b 70"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 17), 2) == hex("11 12"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 18), 1) == hex("12"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 19), 2) == hex("09 c9"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 21), 2) == hex("02 d0"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 26), 4) == hex("06 bd ea 6f"));
+  BOOST_CHECK(slice(rec, itemOffset(rec, 29), 6) == hex("49 00 74 d7 2c 60"));
 
-  const DecodedBlock d = decode(blk);
+  const DecodedBlock d = decode(hex(kSampleBlock));
   BOOST_REQUIRE(!d.error);
   BOOST_REQUIRE_EQUAL(d.records.size(), 1u);
   const Cat021Record& r = d.records[0];
   BOOST_REQUIRE(r.lat131 && r.lon131);
-  BOOST_CHECK_SMALL(*r.lat131 * kLsb131Deg - kIcdLat, 1e-7);
-  BOOST_CHECK_SMALL(*r.lon131 * kLsb131Deg - kIcdLon, 1e-7);
+  BOOST_CHECK_SMALL(*r.lat131 * kLsb131Deg - kSampleLat, 1e-7);
+  BOOST_CHECK_SMALL(*r.lon131 * kLsb131Deg - kSampleLon, 1e-7);
   BOOST_REQUIRE(r.fl145);
-  BOOST_CHECK_CLOSE(*r.fl145 / 4.0, 390.25, 1e-9);
+  BOOST_CHECK_CLOSE(*r.fl145 / 4.0, 180.0, 1e-9);
   BOOST_REQUIRE(r.mode3a);
   char sq[8];
   std::snprintf(sq, sizeof sq, "%04o", static_cast<unsigned>(*r.mode3a));
-  BOOST_CHECK_EQUAL(std::string(sq), "2001");
+  BOOST_CHECK_EQUAL(std::string(sq), "4711");
   BOOST_REQUIRE(r.ident);
-  BOOST_CHECK_EQUAL(*r.ident, "ATN3597 ");
+  BOOST_CHECK_EQUAL(*r.ident, "RPA4521 ");
   BOOST_REQUIRE(r.address);
-  BOOST_CHECK_EQUAL(*r.address, 0xA6452Du);
+  BOOST_CHECK_EQUAL(*r.address, 0xAC5E81u);
   BOOST_REQUIRE(r.quality);
-  BOOST_CHECK_EQUAL(r.quality->nacp, 10);
-  BOOST_CHECK_EQUAL(r.quality->gva, 2);
+  BOOST_CHECK_EQUAL(r.quality->nucp_nic, 8);
+  BOOST_CHECK_EQUAL(r.quality->nacp, 9);
+  BOOST_REQUIRE(r.tod073);
+  BOOST_CHECK_EQUAL(*r.tod073, 6891024u);
   BOOST_CHECK(r.bytes == rec);
   BOOST_CHECK(r.opaque.empty());
+  BOOST_CHECK(encodeBlock({r}) == hex(kSampleBlock));
 }
 
 BOOST_AUTO_TEST_CASE(round_trip_every_modelled_item) {
-  Cat021Record in = icdRecord();
+  Cat021Record in = sampleRecord();
+  in.lat130 = raw130(kSampleLat);
+  in.lon130 = raw130(kSampleLon);
   in.sac = 12;
   in.sic = 34;
   Descriptor040 trd;
@@ -493,32 +507,32 @@ BOOST_AUTO_TEST_CASE(spare_frn_set_discards_rest_of_block) {
 }
 
 BOOST_AUTO_TEST_CASE(two_records_per_block) {
-  Cat021Record a = icdRecord();
-  Cat021Record b = icdRecord();
+  Cat021Record a = sampleRecord();
+  Cat021Record b = sampleRecord();
   b.address = 0x000001;
   b.ident = "N12345";
   const Bytes blk = encodeBlock({a, b});
-  BOOST_CHECK_EQUAL(blk.size(), 3u + 50u + 50u);
+  BOOST_CHECK_EQUAL(blk.size(), 3u + 48u + 48u);
   const DecodedBlock d = decode(blk);
   BOOST_REQUIRE(!d.error);
   BOOST_REQUIRE_EQUAL(d.records.size(), 2u);
-  BOOST_CHECK_EQUAL(*d.records[0].address, 0xA6452Du);
+  BOOST_CHECK_EQUAL(*d.records[0].address, 0xAC5E81u);
   BOOST_CHECK_EQUAL(*d.records[1].address, 0x000001u);
   BOOST_CHECK_EQUAL(*d.records[1].ident, "N12345  ");
 }
 
 BOOST_AUTO_TEST_CASE(two_blocks_per_datagram) {
-  Cat021Record b = icdRecord();
+  Cat021Record b = sampleRecord();
   b.address = 0x000002;
-  const Bytes dg = join({encodeBlock({icdRecord()}), encodeBlock({b, b})});
+  const Bytes dg = join({encodeBlock({sampleRecord()}), encodeBlock({b, b})});
   const BlockSplit s = splitBlocks(dg.data(), dg.size());
   BOOST_CHECK(!s.truncated);
   BOOST_REQUIRE_EQUAL(s.blocks.size(), 2u);
   BOOST_CHECK_EQUAL(s.blocks[0].offset, 0u);
-  BOOST_CHECK_EQUAL(s.blocks[0].size, 53u);
+  BOOST_CHECK_EQUAL(s.blocks[0].size, 51u);
   BOOST_CHECK_EQUAL(s.blocks[0].cat, 21);
-  BOOST_CHECK_EQUAL(s.blocks[1].offset, 53u);
-  BOOST_CHECK_EQUAL(s.blocks[1].size, 103u);
+  BOOST_CHECK_EQUAL(s.blocks[1].offset, 51u);
+  BOOST_CHECK_EQUAL(s.blocks[1].size, 99u);
   const DecodedBlock d0 = decodeBlock(dg.data() + s.blocks[0].offset, s.blocks[0].size, Edition::e2_5);
   const DecodedBlock d1 = decodeBlock(dg.data() + s.blocks[1].offset, s.blocks[1].size, Edition::e2_5);
   BOOST_REQUIRE(!d0.error && !d1.error);
@@ -528,7 +542,7 @@ BOOST_AUTO_TEST_CASE(two_blocks_per_datagram) {
 }
 
 BOOST_AUTO_TEST_CASE(truncated_len_drops_rest) {
-  const Bytes good = encodeBlock({icdRecord()});
+  const Bytes good = encodeBlock({sampleRecord()});
   {  // LEN past the end
     const Bytes dg = join({good, hex("15 00 ff 01 02"), good});
     const BlockSplit s = splitBlocks(dg.data(), dg.size());
@@ -568,7 +582,7 @@ BOOST_AUTO_TEST_CASE(item_past_len_is_error) {
   BOOST_CHECK(d2.error);
   BOOST_CHECK_EQUAL(d2.records.size(), 1u);
   // A block whose LEN does not match its size is an error.
-  Bytes blk = encodeBlock({icdRecord()});
+  Bytes blk = encodeBlock({sampleRecord()});
   blk.push_back(0);
   BOOST_CHECK(decode(blk).error);
 }
@@ -648,7 +662,7 @@ BOOST_AUTO_TEST_CASE(encode_rejects_bad_values) {
   BOOST_CHECK_THROW(encodeRecord(r), std::invalid_argument);
 }
 
-// Garbage, then two valid blocks A and B (the ICD record, so A starts
+// Garbage, then two valid blocks A and B (the sample record, so A starts
 // 15 00 35 c7 11 3b 69 c1 80 00 00 ...). Byte walk:
 //   off 0  `00`: CAT 0 is never a category; drop it and leave sync (run 1, 1 byte).
 //   off 1  `15 ff 7e`: CAT 21, LEN 65406, incomplete. The buffered bytes after the
@@ -658,7 +672,7 @@ BOOST_AUTO_TEST_CASE(encode_rejects_bad_values) {
 //   off 2  `ff`, off 3 `7e`: not CAT 21 out of sync; drop (4 bytes).
 //   off 4  A: complete, walks cleanly: emitted, back in sync. Then B.
 BOOST_AUTO_TEST_CASE(framer_resync_after_garbage) {
-  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes a = encodeBlock({sampleRecord()});
   const Bytes stream = join({hex("00 15 ff 7e"), a, a});
   Cat021StreamFramer f(Edition::e2_5);
   std::vector<Bytes> out;
@@ -673,7 +687,7 @@ BOOST_AUTO_TEST_CASE(framer_resync_after_garbage) {
 }
 
 BOOST_AUTO_TEST_CASE(framer_split_across_feeds) {
-  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes a = encodeBlock({sampleRecord()});
   Cat021StreamFramer f(Edition::e2_6);
   std::vector<Bytes> out;
   for (std::size_t i = 0; i < a.size(); ++i) {
@@ -696,7 +710,7 @@ BOOST_AUTO_TEST_CASE(framer_split_across_feeds) {
 }
 
 BOOST_AUTO_TEST_CASE(framer_skips_other_category_in_sync) {
-  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes a = encodeBlock({sampleRecord()});
   const Bytes cat48 = hex("30 00 06 01 02 03");
   const Bytes stream = join({a, cat48, a});
   Cat021StreamFramer f(Edition::e2_6, true);
@@ -713,7 +727,7 @@ BOOST_AUTO_TEST_CASE(framer_skips_other_category_in_sync) {
 // By default (a CAT 21-only feed) another CAT is garbage: its 6 bytes are
 // dropped one at a time in one run, and both CAT 21 blocks still come out.
 BOOST_AUTO_TEST_CASE(framer_default_drops_other_category) {
-  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes a = encodeBlock({sampleRecord()});
   const Bytes stream = join({a, hex("30 00 06 01 02 03"), a});
   Cat021StreamFramer f(Edition::e2_6);
   std::vector<Bytes> out;
@@ -731,7 +745,7 @@ BOOST_AUTO_TEST_CASE(framer_default_drops_other_category) {
 // (run 1). Its remaining 5 bytes (00 06 00 00 00) are not CAT 21: dropped one by
 // one (6 bytes in all). B walks cleanly and is emitted.
 BOOST_AUTO_TEST_CASE(framer_bad_cat21_block_resyncs) {
-  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes a = encodeBlock({sampleRecord()});
   const Bytes bad = hex("15 00 06 00 00 00");
   const Bytes stream = join({a, bad, a});
   Cat021StreamFramer f(Edition::e2_6);
@@ -750,7 +764,7 @@ BOOST_AUTO_TEST_CASE(framer_passed_blocks_always_decode) {
   Bytes stream;
   std::vector<Bytes> good;
   for (int i = 0; i < 2000; ++i) {
-    Cat021Record r = icdRecord();
+    Cat021Record r = sampleRecord();
     r.address = pick(0x1000000);
     if (pick(2)) r.sgv = SurfaceVector{false, true, false, true, static_cast<uint16_t>(pick(2048)), {}};
     if (pick(2)) r.tod073 = pick(0x1000000);
@@ -882,7 +896,7 @@ BOOST_AUTO_TEST_CASE(repetitive_and_explicit_past_len_are_errors) {
 }
 
 BOOST_AUTO_TEST_CASE(decode_rejects_other_category_and_empty_block) {
-  Bytes blk = encodeBlock({icdRecord()});
+  Bytes blk = encodeBlock({sampleRecord()});
   blk[0] = 48;
   BOOST_CHECK(decode(blk).error);
   const DecodedBlock d = decode(hex("15 00 03"));
@@ -894,7 +908,7 @@ BOOST_AUTO_TEST_CASE(decode_rejects_other_category_and_empty_block) {
 // Out of sync (after a dropped `00`), a good block that arrives in pieces is
 // waited for and then passed out; the walk resumes across feeds.
 BOOST_AUTO_TEST_CASE(framer_out_of_sync_block_across_feeds) {
-  Cat021Record two = icdRecord();
+  Cat021Record two = sampleRecord();
   const Bytes a = encodeBlock({two, two, two});
   const Bytes stream = join({hex("00"), a});
   Cat021StreamFramer f(Edition::e2_6);
@@ -921,7 +935,7 @@ BOOST_AUTO_TEST_CASE(framer_out_of_sync_block_across_feeds) {
 // 3b 69 c1 80, then A's `00` (SAC) as an FSPEC with no item: error after only
 // 12 buffered bytes. `00` and `ff` are then dropped out of sync.
 BOOST_AUTO_TEST_CASE(framer_in_sync_bad_prefix_drops_at_once) {
-  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes a = encodeBlock({sampleRecord()});
   const Bytes stream = join({a, hex("15 00 ff"), a, a});
   Cat021StreamFramer f(Edition::e2_6);
   std::vector<Bytes> out;
@@ -939,7 +953,7 @@ BOOST_AUTO_TEST_CASE(framer_in_sync_bad_prefix_drops_at_once) {
 // With accept_other_categories, other-category blocks are skipped in sync only
 // up to LEN 4096.
 BOOST_AUTO_TEST_CASE(framer_other_category_len_limit) {
-  const Bytes a = encodeBlock({icdRecord()});
+  const Bytes a = encodeBlock({sampleRecord()});
   {
     Bytes cat48 = hex("30 10 00");  // LEN 4096: skipped
     cat48.resize(4096, 0x15);

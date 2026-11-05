@@ -1343,11 +1343,12 @@ struct Spawned {
             waitExit(pid, 1s);
         }
     }
-    int terminate()  // SIGTERM; the exit status
+    int terminate()  // SIGTERM; the exit status (-1: it did not exit in time)
     {
         ::kill(pid, SIGTERM);
         const int status = waitExit(pid, 5s);
-        pid = -1;
+        if (status != -1)  // a daemon that did not exit is still the destructor's to kill
+            pid = -1;
         return status;
     }
     pt::ptree json(const std::string& target) const { return parseJson(get(port, target).body); }

@@ -4,13 +4,18 @@
 #include "config.hpp"
 #include "log.hpp"
 
+#include <unistd.h>
+
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using skycued::Config;
 using skycued::ConfigError;
@@ -660,4 +665,128 @@ BOOST_AUTO_TEST_CASE(list_paths_unchanged_without_state_dir)  // today: as writt
     const Config c = parseConfigText(std::string(kLatLon) + "ALLOW_LIST_FILE=allow.list\n", "/etc/x/skycue.conf");
     BOOST_TEST(c.allow_list_path == "allow.list");
     BOOST_TEST(c.block_list_path == "");
+}
+
+// ---- the overrides file (STATE_DIR/skycue.overrides.conf) ------------------------
+
+namespace {
+
+// A temp directory, removed with its plain files (no subdirectories) at the end.
+struct ScratchDir {
+    std::string path;
+    std::vector<std::string> files;
+    ScratchDir()
+    {
+        const char* base = std::getenv("TMPDIR");
+        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/skycue-config-XXXXXX";
+        std::vector<char> buf(tmpl.begin(), tmpl.end());
+        buf.push_back('\0');
+        BOOST_REQUIRE(::mkdtemp(buf.data()) != nullptr);
+        path = buf.data();
+    }
+    ~ScratchDir()
+    {
+        for (const auto& f : files)
+            std::remove((path + "/" + f).c_str());
+        ::rmdir(path.c_str());
+    }
+    std::string write(const std::string& name, const std::string& text)
+    {
+        files.push_back(name);
+        std::ofstream(path + "/" + name, std::ios::binary | std::ios::trunc) << text;
+        return path + "/" + name;
+    }
+};
+
+ConfigError expectLayersError(const std::string& overrides_text)
+{
+    try {
+        skycued::parseConfigLayers(std::string(kLatLon) + "STATE_DIR=/s\n", "main", overrides_text,
+                                   "/s/skycue.overrides.conf");
+    } catch (const ConfigError& e) {
+        return e;
+    }
+    BOOST_FAIL("expected ConfigError for overrides: " + overrides_text);
+    throw;  // unreachable
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(overrides_layer_over_main)
+{
+    const Config c = skycued::parseConfigLayers(std::string(kLatLon) + "STATE_DIR=/s\nMAX_RANGE_NM=150\n", "main",
+                                                "MAX_RANGE_NM=90\n", "/s/skycue.overrides.conf");
+    BOOST_TEST(c.max_range_nm == 90);
+    BOOST_TEST(c.override_keys.count("MAX_RANGE_NM") == 1u);
+    BOOST_TEST(c.override_keys.count("STATE_DIR") == 0u);
+    BOOST_TEST(c.file_keys.count("MAX_RANGE_NM") == 1u);  // the main file sets it too
+    BOOST_TEST(skycued::kOverridesFileName == std::string("skycue.overrides.conf"));
+    BOOST_TEST(skycued::overridesPath(c) == "/s/skycue.overrides.conf");
+    Config none = c;
+    none.state_dir.clear();
+    BOOST_TEST(skycued::overridesPath(none) == "");
+    // No overrides text: the main file alone.
+    const Config plain = skycued::parseConfigLayers(std::string(kLatLon) + "MAX_RANGE_NM=150\n", "main", "", "o");
+    BOOST_TEST(plain.max_range_nm == 150);
+    BOOST_TEST(plain.override_keys.empty());
+}
+
+BOOST_AUTO_TEST_CASE(overrides_list_files_resolve_against_state_dir)
+{
+    // The list paths are resolved once, on the merged values.
+    const Config c = skycued::parseConfigLayers(std::string(kLatLon) + "STATE_DIR=/s\nALLOW_LIST_FILE=a.list\n",
+                                                "main", "ALLOW_LIST_FILE=b.list\nBLOCK_LIST_FILE=/abs/block.list\n",
+                                                "/s/skycue.overrides.conf");
+    BOOST_TEST(c.allow_list_file == "b.list");
+    BOOST_TEST(c.allow_list_path == "/s/b.list");
+    BOOST_TEST(c.block_list_path == "/abs/block.list");
+    BOOST_TEST(c.override_keys == (std::set<std::string>{"ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}));
+}
+
+BOOST_AUTO_TEST_CASE(overrides_reject_other_keys)
+{
+    BOOST_TEST(skycued::overridesFileKeys() ==
+                   (std::vector<std::string>{"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}),
+               boost::test_tools::per_element());
+    ConfigError e = expectLayersError("WEB_PORT=81\n");
+    BOOST_TEST(std::string(e.what()) ==
+               "/s/skycue.overrides.conf:1: WEB_PORT cannot be set in skycue.overrides.conf (only MAX_RANGE_NM, "
+               "MIN_ELEVATION_DEG, ALLOW_LIST_FILE, BLOCK_LIST_FILE)");
+    BOOST_TEST(e.line == 1);
+    e = expectLayersError("MAX_RANGE_NM = 1\n");
+    BOOST_TEST(std::string(e.what()).rfind("/s/skycue.overrides.conf:1: malformed line", 0) == 0u, e.what());
+    // A value error names the overrides file and its line, not the main file.
+    e = expectLayersError("# saved\nMAX_RANGE_NM=0\n");
+    BOOST_TEST(std::string(e.what()).rfind("/s/skycue.overrides.conf:2: MAX_RANGE_NM must be greater than 0", 0) ==
+                   0u,
+               e.what());
+    e = expectLayersError("STATE_DIR=/t\n");
+    BOOST_TEST(contains(e.what(), "STATE_DIR cannot be set in skycue.overrides.conf"), e.what());
+    e = expectLayersError("FOO=1\n");
+    BOOST_TEST(std::string(e.what()) == "/s/skycue.overrides.conf:1: unknown key FOO");
+}
+
+BOOST_AUTO_TEST_CASE(overrides_file_read_only_with_state_dir)
+{
+    ScratchDir tmp;
+    tmp.write("skycue.overrides.conf", "MAX_RANGE_NM=90\n");
+    const std::string conf = tmp.write("skycue.conf", std::string(kLatLon) + "MAX_RANGE_NM=150\n");
+    Config c = skycued::parseConfigFile(conf);
+    BOOST_TEST(c.max_range_nm == 150);
+    BOOST_TEST(c.override_keys.empty());
+    tmp.write("skycue.conf", std::string(kLatLon) + "MAX_RANGE_NM=150\nSTATE_DIR=" + tmp.path + "\n");
+    c = skycued::parseConfigFile(conf);
+    BOOST_TEST(c.max_range_nm == 90);
+    BOOST_TEST(c.override_keys.count("MAX_RANGE_NM") == 1u);
+    // An overrides file that does not parse fails the whole config, naming it.
+    const std::string overrides = tmp.write("skycue.overrides.conf", "WEB_PORT=81\n");
+    try {
+        skycued::parseConfigFile(conf);
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& e) {
+        BOOST_TEST(std::string(e.what()).rfind(overrides + ":1: WEB_PORT cannot be set", 0) == 0u, e.what());
+    }
+    // No overrides file under STATE_DIR: the main file alone.
+    std::remove(overrides.c_str());
+    BOOST_TEST(skycued::parseConfigFile(conf).max_range_nm == 150);
 }

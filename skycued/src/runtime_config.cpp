@@ -422,7 +422,18 @@ void RuntimeConfig::load()
 {
     // Stamps before reading: an edit in between is then seen again, never missed.
     conf_watch_.accept();
-    file_conf_ = parseConfigFile(conf_path_);
+    // skycue.conf alone says where the overrides file is (its STATE_DIR); then
+    // both are read once the overrides' stamp is taken. Again if STATE_DIR
+    // was edited in between.
+    std::string overrides = skycued::overridesPath(parseConfigFile(conf_path_, std::string()));
+    for (;;) {
+        overrides_watch_ = SettledFile(overrides);
+        overrides_watch_.accept();
+        file_conf_ = parseConfigFile(conf_path_, overrides);
+        if (skycued::overridesPath(file_conf_) == overrides)
+            break;
+        overrides = skycued::overridesPath(file_conf_);
+    }
     running_ = file_conf_;
     // The overlay's directory follows STATE_DIR as parsed now (a restart key).
     overlay_path_ = overlayPathFor(conf_path_, running_.state_dir);
@@ -434,6 +445,12 @@ void RuntimeConfig::load()
     }
     overlay_watch_.accept();
     overlay_ = Overlay();
+    // An install that moved to STATE_DIR: the overlay next to the config is
+    // no longer read, and its changes look lost.
+    const std::string beside_conf = overlayPathFor(conf_path_, "");
+    if (!overlay_watch_.stamp().exists && beside_conf != overlay_path_ && FileStamp::of(beside_conf).exists)
+        LOG_WARN(beside_conf << ": not read: STATE_DIR is set, so the overlay is " << overlay_path_
+                             << " (move the file there to keep its changes)");
     if (overlay_watch_.stamp().exists) {
         try {
             std::vector<std::string> warnings;
@@ -591,7 +608,7 @@ std::string RuntimeConfig::promoteToBaseline()
         values["MAX_RANGE_NM"] = formatRoundTrip(*next.max_range_nm);
     if (next.min_elevation_deg)
         values["MIN_ELEVATION_DEG"] = formatRoundTrip(*next.min_elevation_deg);
-    if (!values.empty()) {
+    if (!values.empty() && running_.state_dir.empty()) {
         try {
             const std::string text = readFile(conf_path_);
             const std::string out = conf_rewrite::rewriteKeys(text, values);
@@ -604,6 +621,26 @@ std::string RuntimeConfig::promoteToBaseline()
             next.min_elevation_deg.reset();
         } catch (const std::exception& e) {
             problems.push_back(std::string("skycue.conf not updated: ") + e.what());
+        }
+    } else if (!values.empty()) {
+        // STATE_DIR is set: skycue.conf (perhaps root's) is left alone.
+        const std::string& path = overrides_watch_.path();
+        try {
+            const std::string text = FileStamp::of(path).exists ? readFile(path) : std::string();
+            const std::string out = conf_rewrite::rewriteKeys(
+                text.empty() ? std::string("# Written by skycued (\"save as baseline\"); read after skycue.conf.\n")
+                             : text,
+                values);
+            // Never write a file skycued would refuse.
+            parseConfigLayers(readFile(conf_path_), conf_path_, out, path);
+            if (out != text) {
+                writeFile(overrides_watch_, out);
+                conf_written = true;
+            }
+            next.max_range_nm.reset();
+            next.min_elevation_deg.reset();
+        } catch (const std::exception& e) {
+            problems.push_back(std::string(kOverridesFileName) + " not updated: " + e.what());
         }
     }
 
@@ -689,6 +726,10 @@ void RuntimeConfig::poll()
         reloadConf();
         quiet_change |= !applyEffective("file:" + baseName(conf_path_));
     }
+    if (!overrides_watch_.path().empty() && overrides_watch_.poll()) {
+        reloadConf();
+        quiet_change |= !applyEffective(std::string("file:") + kOverridesFileName);
+    }
     if (overlay_watch_.poll()) {
         reloadOverlay();
         quiet_change |= !applyEffective(std::string("file:") + kOverlayName);
@@ -709,7 +750,8 @@ void RuntimeConfig::reloadConf()
 {
     Config c;
     try {
-        c = parseConfigFile(conf_path_);
+        // The overrides file of the running STATE_DIR (a changed one needs a restart).
+        c = parseConfigFile(conf_path_, overrides_watch_.path());
     } catch (const std::exception& e) {
         LOG_ERROR(e.what() << "; keeping the previous configuration");
         return;
@@ -745,13 +787,15 @@ void RuntimeConfig::reloadConf()
     running_.block_list_file = c.block_list_file;
     running_.allow_list_path = c.allow_list_path;
     running_.block_list_path = c.block_list_path;
-    // Whether the file sets a live key follows the file, like its value.
+    // Whether the file sets a live key follows the file, like its value; the
+    // overrides file holds live keys only.
     for (const char* key : {"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}) {
         if (c.file_keys.count(key))
             running_.file_keys.insert(key);
         else
             running_.file_keys.erase(key);
     }
+    running_.override_keys = c.override_keys;
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         const bool allow = kind == ListKind::allow;
         if ((allow ? old.allow_list_path : old.block_list_path) == listPath(kind))

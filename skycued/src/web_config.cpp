@@ -58,6 +58,7 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
                                    .add("inputs_path", info.inputs_path)
                                    .add("overlay_path", runtime.overlayPath())
                                    .add("overlay_active", !overlay.empty())
+                                   .add("overrides_path", runtime.overridesPath())
                                    .add("www_dir", info.www_dir)
                                    .add("record_dir", effective.record_dir)
                                    .addRaw("recording_files", stringArray(files))
@@ -94,7 +95,9 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
             source = "cli";
         } else {
             value = configValueText(effective, key);
-            source = effective.file_keys.count(key) ? "conf" : "default";
+            source = effective.override_keys.count(key) ? "overrides"
+                     : effective.file_keys.count(key)   ? "conf"
+                                                        : "default";
         }
         keys.push_back(JsonWriter()
                            .add("key", key)

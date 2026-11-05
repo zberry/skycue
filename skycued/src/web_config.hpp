@@ -41,13 +41,15 @@ struct LocationFacts {
 };
 
 // {"daemon":{version, started, uptime_s, config_path, inputs_path,
-// overlay_path, overlay_active, www_dir, record_dir, recording_files,
+// overlay_path, overlay_active, overrides_path ("" when STATE_DIR is
+// unset), www_dir, record_dir, recording_files,
 // log_level, mode ("live" or "replay"), replay ({file, speed, loop}; replay
 // only), readsb, dump978, locations ({learned_path, learned, operator_path,
 // operator, operator_rejected, operator_overflow})}, "keys":[{key, value, source, restart}, ...]}, the keys in
 // knownConfigKeys() order. `source` is "overlay" (a filter value the
 // overlay sets), else "cli" (a command-line override; its value is the
-// override's), else "conf" (the file sets it), else "default"; `restart` is
+// override's), else "overrides" (skycue.overrides.conf sets it), else
+// "conf" (skycue.conf sets it), else "default"; `restart` is
 // whether the key is in restartConfigKeys(). Call on the RuntimeConfig's
 // thread.
 std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, const LocationFacts& locations,

@@ -2,8 +2,11 @@
 
 // RuntimeConfig: the configuration skycued runs with, in three layers.
 //
-//   1. The baseline: skycue.conf and the list files it names
-//      (ALLOW_LIST_FILE, BLOCK_LIST_FILE; an unset one is an empty list).
+//   1. The baseline: skycue.conf, then (when STATE_DIR is set)
+//      skycue.overrides.conf in STATE_DIR, whose MAX_RANGE_NM,
+//      MIN_ELEVATION_DEG, ALLOW_LIST_FILE and BLOCK_LIST_FILE replace
+//      skycue.conf's; and the list files they name (an unset one is an
+//      empty list).
 //   2. The runtime overlay, skycue.runtime.json in STATE_DIR (next to
 //      skycue.conf when STATE_DIR is unset): filter values that replace the
 //      baseline's, and list entries added to or removed from the list files
@@ -13,14 +16,17 @@
 //      entries, minus the overlay's `remove`, plus its `add`.
 //
 // promoteToBaseline ("save as baseline") writes the overlay into the
-// baseline files and clears it. That is the only time skycue.conf is written.
+// baseline files and clears it. That is the only time skycue.conf (STATE_DIR
+// unset) or skycue.overrides.conf (STATE_DIR set; skycue.conf is then never
+// written) is written.
 //
-// The watcher (startWatching) polls the four files every second (mtime,
+// The watcher (startWatching) polls the five files every second (mtime,
 // size, inode) and applies an edit made by hand once the file has kept the
 // same stamp for two polls in a row (so within about 2 s, and never half
 // written): the effective values are
 // handed to the Engine's live setters, so every change is recorded once, as
-// "<origin>: ..." with origin "file:<file name>". An edit that does not parse
+// "<origin>: ..." with origin "file:<file name>" (skycue.conf and
+// skycue.overrides.conf are reloaded together). An edit that does not parse
 // is logged once at ERROR and the previous values stay in effect. A changed
 // skycue.conf key that is not a filter key (ports, serials, intervals...) and
 // now differs from its running value is logged at WARN, once per reload: it
@@ -112,7 +118,8 @@ public:
     void applyUi(const Overlay& delta, const std::string& origin);
 
     // Writes the overlay into the baseline: MAX_RANGE_NM/MIN_ELEVATION_DEG
-    // into skycue.conf (conf_rewrite; every other byte kept), `add` entries
+    // into skycue.conf, or into skycue.overrides.conf (created when missing)
+    // when STATE_DIR is set (conf_rewrite; every other byte kept), `add` entries
     // appended to the list files (a missing file is created), `remove`
     // entries commented out there ("# removed by skycue save-baseline:
     // <line>"). Each part that was written leaves the overlay, which is then
@@ -140,6 +147,9 @@ public:
     Config effective() const;
     Overlay overlay() const { return overlay_; }
     std::string overlayPath() const { return overlay_path_; }
+    // skycue.overrides.conf in STATE_DIR as parsed by load(); "" when that is
+    // unset (or before load()).
+    std::string overridesPath() const { return skycued::overridesPath(running_); }
 
 private:
     const std::string& listPath(ListKind kind) const;
@@ -169,8 +179,8 @@ private:
     Overlay overlay_;
     IdList allow_file_, block_file_;
     // The watched files; a list's path is "" until load() and follows
-    // *_LIST_FILE.
-    SettledFile conf_watch_, overlay_watch_, allow_watch_{""}, block_watch_{""};
+    // *_LIST_FILE; the overrides' is overridesPath() from load() on.
+    SettledFile conf_watch_, overlay_watch_, overrides_watch_{""}, allow_watch_{""}, block_watch_{""};
     boost::asio::steady_timer timer_;
     bool watching_ = false;
     std::function<void()> on_change_;

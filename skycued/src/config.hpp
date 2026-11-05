@@ -49,7 +49,10 @@ struct Config {
     int stats_save_s = 300;              // STATS_SAVE_S: seconds between statistics saves, 10-86400
     // Accepted (they are skycue-start.sh's), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";
-    std::set<std::string> file_keys;  // the keys the file assigns (parseConfigText fills it)
+    std::set<std::string> file_keys;  // the keys skycue.conf assigns (parseConfigLayers fills it)
+    // The keys the overrides file (see overridesPath) assigns; its values
+    // replace skycue.conf's. Empty when there is no such file.
+    std::set<std::string> override_keys;
 };
 
 // what() is "<file>:<line>: <message>", or "<file>: <message>" when line is 0
@@ -59,9 +62,34 @@ struct ConfigError : std::runtime_error {
     int line;
 };
 
-Config parseConfigFile(const std::string& path);  // throws ConfigError
+// skycue.conf at `path`, then, when STATE_DIR is set and the file exists,
+// the overrides file overridesPath() names, through parseConfigLayers.
+// Throws ConfigError.
+Config parseConfigFile(const std::string& path);
+// The same with the overrides file at `overrides_path` ("" for none; read
+// when it exists) whatever the file's STATE_DIR: a live reload reads the
+// one in the running STATE_DIR.
+Config parseConfigFile(const std::string& path, const std::string& overrides_path);
 Config parseConfigText(const std::string& text, const std::string& name_for_errors);
 const std::vector<std::string>& knownConfigKeys();  // exactly the keys of etc/skycue.conf.example
+
+// The overrides file: skycued's own writes ("save as baseline") of the live
+// filter keys when STATE_DIR is set, so skycue.conf (which may belong to
+// root) is never rewritten then. Same grammar as skycue.conf; read after it.
+constexpr const char* kOverridesFileName = "skycue.overrides.conf";
+// The keys the overrides file may assign, in this order.
+const std::vector<std::string>& overridesFileKeys();
+// kOverridesFileName under c.state_dir; "" when STATE_DIR is unset.
+std::string overridesPath(const Config& c);
+// skycue.conf text, then overrides file text: each is checked by the grammar
+// under its own name (errors name that file and line), the overrides' keys
+// must be in overridesFileKeys(), and its assignments replace the main
+// file's; the merged values are then converted and checked once (a value
+// error names the file and line the value came from). Fills file_keys (the
+// main file's keys) and override_keys. Empty `overrides_text`: the main file
+// alone.
+Config parseConfigLayers(const std::string& main_text, const std::string& main_name,
+                         const std::string& overrides_text, const std::string& overrides_name);
 
 // `key`'s value in `c` as skycue.conf would spell it: numbers in their
 // shortest exact form ("38.9", "8080"), yes/no, endpoints as
@@ -87,7 +115,7 @@ std::string resolveStatePath(const Config& c, const std::string& conf_path, cons
 
 // A list file (ALLOW_LIST_FILE, BLOCK_LIST_FILE) `value`: under `state_dir`
 // when that is set and `value` is relative, else `value` as written (relative
-// to the working directory). parseConfigText fills Config::*_list_path with it;
+// to the working directory). parseConfigLayers fills Config::*_list_path with it;
 // a live reload passes the running STATE_DIR (a changed one needs a restart).
 std::string listFilePath(const std::string& state_dir, const std::string& value);
 

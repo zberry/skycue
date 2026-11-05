@@ -1182,6 +1182,40 @@ test('trail_signal_falls_back_when_signal_ages_out', async ({ page }) => {
   await page.evaluate(() => window.skycueApp.setTrailSignal(false));
 });
 
+// readsb's rssi of -49.5 means "no signal level" (replays, network-fed
+// inputs): not the weakest colour but no signal. A trail of only those is
+// the plain trail; once a real signal arrives they are its dashed
+// decision-coloured run. The detail row shows a dash, not -49.5 dBFS.
+test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await page.locator('#trail-signal').check();
+  const hex = 'fff0a2';
+  const at = (i, rssi) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
+    lat: 39.35, lon: -77.6 + a.i * 0.05, decision: 'send', track_deg: 90, rssi: a.rssi,
+    position_time: new Date(window.skycueApp.dataNow() - (10 - a.i) * 1000).toISOString() }), { hex, i, rssi });
+  for (let i = 0; i < 6; i++) await at(i, -49.5);
+  const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
+  let t = await trail();
+  expect(t.points).toBe(6);
+  expect(t.runs).toEqual([]);
+  expect(t.opacity).toBe(0.6);
+  await at(6, -20);
+  t = await trail();
+  expect(t.runs.length).toBe(2);
+  expect(t.runs[0]).toMatchObject({ n: 6, color: t.color, dashed: true });
+  expect(t.runs[1]).toMatchObject({ n: 2, dashed: false });
+  expect(t.runs[1].color).not.toBe(t.color);
+  expect(t.runs.filter((r) => !r.dashed).length).toBe(1);
+  await at(7, -49.5);
+  await page.locator(`.ac-marker[data-hex="${hex}"] .ac-glyph`).click();
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
+  const cell = page.locator('#details-fields td[data-field="rssi"]');
+  await expect(cell).toHaveText('—');
+  await expect(cell).toHaveAttribute('title', 'no signal level from the decoder');
+  await page.locator('#trail-signal').uncheck();
+});
+
 // The ruler: away from the fixture's aircraft (around 38.9 N 77 W), two
 // clicks 300 px apart on one row at zoom 8 near 30 N are 84..88 nm
 // (611.5 m/px at the equator x cos(lat)), heading east.

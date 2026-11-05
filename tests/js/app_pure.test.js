@@ -1257,7 +1257,7 @@ test('signalColor: bounds, clamping, steps weak to strong', () => {
   const C = P.SIGNAL_COLORS;
   assert.ok(C.length >= 5 && C.length <= 7, 'steps ' + C.length);
   assert.strictEqual(P.signalColor(P.SIGNAL_MIN_DB), C[0]);
-  assert.strictEqual(P.signalColor(-80), C[0]);
+  assert.strictEqual(P.signalColor(-49.4), C[0]);
   assert.strictEqual(P.signalColor(P.SIGNAL_MAX_DB), C[C.length - 1]);
   assert.strictEqual(P.signalColor(0), C[C.length - 1]);
   assert.strictEqual(P.signalColor(P.SIGNAL_MAX_DB - 0.01), C[C.length - 1]);
@@ -1273,6 +1273,21 @@ test('signalColor: no signal is null', () => {
     assert.strictEqual(P.signalColor(v), null, String(v));
     assert.strictEqual(P.signalStep(v), -1, String(v));
   });
+});
+test('signalLevel: readsb\'s -49.5 and lower are no signal', () => {
+  assert.strictEqual(P.SIGNAL_NONE_DB, -49.5);
+  [-49.5, -50, -80].forEach((v) => {
+    assert.strictEqual(P.signalLevel(v), null, String(v));
+    assert.strictEqual(P.signalStep(v), -1, String(v));
+    assert.strictEqual(P.signalColor(v), null, String(v));
+  });
+  [undefined, null, NaN, '-20'].forEach((v) => assert.strictEqual(P.signalLevel(v), null, String(v)));
+  assert.strictEqual(P.signalLevel(-49.4), -49.4);
+  assert.strictEqual(P.signalColor(-49.4), P.SIGNAL_COLORS[0]);
+  assert.strictEqual(P.signalLevel(-20), -20);
+  // The trail builder: a -49.5 trail is one run without a colour.
+  assert.deepStrictEqual(P.signalRuns([{ lat: 0, lon: 0, sig: -49.5 }, { lat: 1, lon: 1, sig: -49.5 }, { lat: 2, lon: 2, sig: -49.5 }]),
+    [{ points: [[0, 0], [1, 1], [2, 2]], color: null }]);
 });
 test('signalLegend covers the scale contiguously', () => {
   const L = P.signalLegend();

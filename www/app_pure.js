@@ -1544,10 +1544,20 @@
   var SIGNAL_MAX_DB = -5;
   var SIGNAL_COLORS = ['#4657c0', '#7b45c8', '#b03fb0', '#e0457a', '#f2662f', '#ff9a1f'];
   var SIGNAL_STEP_DB = (SIGNAL_MAX_DB - SIGNAL_MIN_DB) / SIGNAL_COLORS.length;
+  // readsb reports -49.5 (its floor) when it has no signal level for the
+  // data: network-fed Beast or raw frames, replayed recordings. An rssi at
+  // or below it is "no signal", not the weakest step.
+  var SIGNAL_NONE_DB = -49.5;
 
-  // The step index of a signal, or -1 when it is not a finite number.
+  // A track's rssi as a signal level: the number, or null when it is not a
+  // finite number or is readsb's no-signal value (SIGNAL_NONE_DB or lower).
+  function signalLevel(rssi) {
+    if (typeof rssi !== 'number' || !isFinite(rssi) || rssi <= SIGNAL_NONE_DB) return null;
+    return rssi;
+  }
+  // The step index of a signal, or -1 when it is no signal (signalLevel).
   function signalStep(db) {
-    if (typeof db !== 'number' || !isFinite(db)) return -1;
+    if (signalLevel(db) === null) return -1;
     var i = Math.floor((db - SIGNAL_MIN_DB) / SIGNAL_STEP_DB);
     return Math.max(0, Math.min(SIGNAL_COLORS.length - 1, i));
   }
@@ -1678,6 +1688,7 @@
     normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches,
     SIGNAL_MIN_DB: SIGNAL_MIN_DB, SIGNAL_MAX_DB: SIGNAL_MAX_DB, SIGNAL_COLORS: SIGNAL_COLORS,
+    SIGNAL_NONE_DB: SIGNAL_NONE_DB, signalLevel: signalLevel,
     signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns,
     signalRunsAppend: signalRunsAppend, signalRunsTrim: signalRunsTrim,
     rulerMeasure: rulerMeasure, rulerLabel: rulerLabel

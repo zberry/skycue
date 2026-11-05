@@ -2,11 +2,20 @@
 # Builds the libFuzzer harnesses in fuzz and runs them.
 #
 #   scripts/run-fuzz.sh [TARGET|all] [--seconds N] [--build-dir DIR] [--bin-dir DIR]
-#                       [--work DIR] [--findings DIR] [--canary] [--clean]
+#                       [--work DIR] [--findings DIR] [--seeds DIR] [--fixtures DIR]
+#                       [--canary] [--clean]
 #
 # TARGET is a harness name (readsb_line, ...; fuzz_<name> in the tree) or all
 # (the default). Defaults: --seconds 600, --build-dir <repo>/build-fuzz,
 # --work <build>/fuzz-work, --findings <repo>/fuzz/findings.
+#
+# Capture-derived seeds are not committed. When the fetched captures are in
+# --fixtures (default <repo>/tests/fixtures), scripts/gen-capture-seeds.py
+# writes them to <work>/capture-seeds/<target>/ and they are copied into the
+# target's fresh corpus beside the committed seeds; without the captures a
+# "SKIP: generated seeds for <target>" line says so and the run goes on with
+# the committed seeds. Every target needs at least one committed seed
+# (--seeds DIR, default <repo>/fuzz/seeds): none is an error.
 #
 # Without --bin-dir the tree is configured once with clang++ and
 # -DSKYCUE_FUZZ=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo and only the fuzz_*
@@ -14,7 +23,8 @@
 # (ctest fuzz_smoke does this).
 #
 # Each target runs on the corpus <work>/corpus/<target> (its seeds from
-# fuzz/seeds/<target>/ copied in when empty) with artefacts in
+# fuzz/seeds/<target>/ copied in when empty, then the capture-derived seeds
+# below for the targets that have them) with artefacts in
 # <work>/artifacts/<target>/ (emptied first); each artefact is copied to
 # <findings>/<target>-<name>. Every harness gets SKYCUE_FUZZ_WORK=<work> (a
 # harness that needs files makes them under $SKYCUE_FUZZ_WORK/<target>/),
@@ -57,6 +67,8 @@ build_dir=""
 bin_dir=""
 work=""
 findings=""
+seeds_root=""
+fixtures=""
 canary=0
 clean=0
 
@@ -67,6 +79,8 @@ while [ $# -gt 0 ]; do
     --bin-dir) shift; [ $# -gt 0 ] || usage; bin_dir=$(abs "$1") ;;
     --work) shift; [ $# -gt 0 ] || usage; work=$(abs "$1") ;;
     --findings) shift; [ $# -gt 0 ] || usage; findings=$(abs "$1") ;;
+    --seeds) shift; [ $# -gt 0 ] || usage; seeds_root=$(abs "$1") ;;
+    --fixtures) shift; [ $# -gt 0 ] || usage; fixtures=$(abs "$1") ;;
     --canary) canary=1 ;;
     --clean) clean=1 ;;
     -h|--help) usage ;;
@@ -82,6 +96,8 @@ esac
 [ -n "$build_dir" ] || build_dir="$repo/build-fuzz"
 [ -n "$work" ] || work="$build_dir/fuzz-work"
 [ -n "$findings" ] || findings="$repo/fuzz/findings"
+[ -n "$seeds_root" ] || seeds_root="$repo/fuzz/seeds"
+[ -n "$fixtures" ] || fixtures="$repo/tests/fixtures"
 
 # Refuse --clean on a build dir that is not a CMake tree before doing anything,
 # so a mistyped --build-dir is never deleted.
@@ -201,6 +217,17 @@ else
   unset SKYCUE_FUZZ_CANARY
 fi
 
+# Seeds cut from the fetched captures (scripts/gen-capture-seeds.py); exit 3
+# means some capture is missing and that target gets none.
+capture_targets=" raw_formats fisb_decoder iqgen_coding recording "
+gen_dir="$work/capture-seeds"
+rm -rf "$gen_dir"
+if [ -d "$fixtures" ]; then
+  python3 -I "$repo/scripts/gen-capture-seeds.py" "$fixtures" "$gen_dir" || true
+else
+  echo "run-fuzz: no fixtures dir $fixtures" >&2
+fi
+
 summary="$work/summary.tsv"
 [ -f "$summary" ] || printf 'target\tseconds\texecs\tcorpus\tfindings\n' > "$summary"
 
@@ -212,18 +239,33 @@ for t in "${targets[@]}"; do
     status=1
     continue
   fi
-  seeds="$repo/fuzz/seeds/$t"
+  seeds="$seeds_root/$t"
+  gen_seeds="$gen_dir/$t"
+  if [ -z "$(ls -A "$seeds" 2>/dev/null)" ]; then
+    echo "run-fuzz: $seeds has no committed seed" >&2
+    status=1
+    continue
+  fi
+  case "$capture_targets" in
+    *" $t "*)
+      if [ ! -d "$gen_seeds" ]; then
+        echo "SKIP: generated seeds for $t (captures not fetched or incomplete); using the committed seeds only"
+      fi
+      ;;
+  esac
   if [ "$canary" = 1 ]; then
     corpus="$work/canary-corpus/$t"
     rm -rf "$corpus"
     mkdir -p "$corpus"
-    [ -d "$seeds" ] && cp "$seeds"/* "$corpus"/ 2>/dev/null
+    cp "$seeds"/* "$corpus"/
+    [ -d "$gen_seeds" ] && cp "$gen_seeds"/* "$corpus"/
     printf 'skycue-canary\n' > "$corpus/seed-0.txt"
   else
     corpus="$work/corpus/$t"
     mkdir -p "$corpus"
-    if [ -z "$(ls -A "$corpus")" ] && [ -d "$seeds" ]; then
-      cp "$seeds"/* "$corpus"/ 2>/dev/null
+    if [ -z "$(ls -A "$corpus")" ]; then
+      cp "$seeds"/* "$corpus"/
+      [ -d "$gen_seeds" ] && cp "$gen_seeds"/* "$corpus"/
     fi
   fi
   artifacts="$work/artifacts/$t"

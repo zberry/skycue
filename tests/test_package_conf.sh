@@ -24,7 +24,7 @@ out=$work/skycue.conf
 
 # The edited lines, exactly.
 expected=(
-  "# skycue configuration (packaged). Set RECEIVER_LAT and RECEIVER_LON, then: systemctl start skycued"
+  "# skycue configuration (packaged). Set RECEIVER_LAT and RECEIVER_LON, then: systemctl enable --now skycued"
   "STATE_DIR=/var/lib/skycue"
   "MAP_DIR=/var/lib/skycue/maps"
   "#RECORD_DIR=/var/lib/skycue/recordings"

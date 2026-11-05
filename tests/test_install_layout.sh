@@ -53,7 +53,7 @@ scripts=share/skycue/scripts
 if is_on "$system_files"; then
   need $scripts/make-tiles.sh $scripts/make-overlays.sh $scripts/tiles-merge.py \
     $scripts/lib/skycue-common.sh bin/skycue-make-maps
-  for f in $scripts/make-tiles.sh $scripts/make-overlays.sh bin/skycue-make-maps; do
+  for f in $scripts/make-tiles.sh $scripts/make-overlays.sh $scripts/tiles-merge.py bin/skycue-make-maps; do
     [ -x "$p/$f" ] || fail "$prefix/$f is not executable"
   done
   # The installed front finds the installed helpers and gives them the map

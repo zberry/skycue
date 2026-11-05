@@ -38,7 +38,7 @@ set(_from_8 "GAIN_1090=auto")
 set(_to_8 "#GAIN_1090=auto")
 set(_from_9 "GAIN_978=auto")
 set(_to_9 "#GAIN_978=auto")
-set(_header "# skycue configuration (packaged). Set RECEIVER_LAT and RECEIVER_LON, then: systemctl start skycued")
+set(_header "# skycue configuration (packaged). Set RECEIVER_LAT and RECEIVER_LON, then: systemctl enable --now skycued")
 
 file(READ "${IN}" _text)
 if(_text MATCHES "\r")

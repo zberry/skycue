@@ -138,7 +138,7 @@ std::map<uint16_t, Tally> tallyFixture(const std::string& path)
 
 }  // namespace
 
-BOOST_AUTO_TEST_CASE(every_rle_block_in_tg30_totals_128)
+BOOST_AUTO_TEST_CASE(every_rle_block_in_tg30_totals_128, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     uint64_t rle = 0, lists = 0, empty = 0, raw_checked = 0;
     for (const auto& a : blockApdus(kTg30)) {
@@ -179,7 +179,8 @@ BOOST_AUTO_TEST_CASE(every_rle_block_in_tg30_totals_128)
 }
 
 BOOST_AUTO_TEST_CASE(empty_block_lists_decode_including_last_byte_case,
-                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     // Hand-built: L = 0, the high nibble alone lists b+1..b+4 (MUT/STX emit
     // nothing for this; §5.4).
@@ -252,7 +253,7 @@ BOOST_AUTO_TEST_CASE(empty_block_lists_decode_including_last_byte_case,
     BOOST_TEST(empty == 1342u + 2934u + 381u + 190u + 176u + 230u + 861u);
 }
 
-BOOST_AUTO_TEST_CASE(block_geometry_known_numbers)
+BOOST_AUTO_TEST_CASE(block_geometry_known_numbers, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     // Block 0: SW corner at (0°N, 0°E) (§5.2), so NW corner at 4'.
     auto g = blockGeometry(0, 0, false);
@@ -317,7 +318,7 @@ BOOST_AUTO_TEST_CASE(block_geometry_known_numbers)
     }
 }
 
-BOOST_AUTO_TEST_CASE(conus_vs_regional_scale)
+BOOST_AUTO_TEST_CASE(conus_vs_regional_scale, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     std::set<uint8_t> s63, s64;
     uint64_t n64 = 0;
@@ -407,7 +408,7 @@ BOOST_AUTO_TEST_CASE(high_latitude_skipped_unless_experimental)
     BOOST_TEST(d->empty_blocks == (std::vector<uint32_t>{405448, 405000, 405002}), boost::test_tools::per_element());
 }
 
-BOOST_AUTO_TEST_CASE(other_rasters_70_71_84_90_91_103_decode_as_levels)
+BOOST_AUTO_TEST_CASE(other_rasters_70_71_84_90_91_103_decode_as_levels, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     auto t = tallyFixture(kTg30);
     struct Want {
@@ -497,7 +498,7 @@ BOOST_AUTO_TEST_CASE(other_rasters_70_71_84_90_91_103_decode_as_levels)
     BOOST_TEST(!parse(413, hex("843c2af8f8f8e809")));
 }
 
-BOOST_AUTO_TEST_CASE(fuzz_blocks_no_throw)
+BOOST_AUTO_TEST_CASE(fuzz_blocks_no_throw, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     std::mt19937 rng(20261102);
     std::uniform_int_distribution<int> byte(0, 255);

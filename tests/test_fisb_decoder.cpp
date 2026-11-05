@@ -204,7 +204,7 @@ BOOST_AUTO_TEST_CASE(sample_products_stored, *skycue_test::needs_fixture("raw/ua
 
 // Design §5.5: decode tg30.978 end to end in under 2 s; spec §4.12: one
 // uplink decodes in <= 1 ms typically.
-BOOST_AUTO_TEST_CASE(tg30_end_to_end_under_2s)
+BOOST_AUTO_TEST_CASE(tg30_end_to_end_under_2s, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     const auto lines = readLines(kTg30);
     Pipeline p;
@@ -268,7 +268,7 @@ BOOST_AUTO_TEST_CASE(tg30_end_to_end_under_2s)
 }
 
 // Bit-flipped tg30 uplinks: never a throw, never a shape out of range.
-BOOST_AUTO_TEST_CASE(fuzz_products_stay_in_range)
+BOOST_AUTO_TEST_CASE(fuzz_products_stay_in_range, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     std::vector<std::vector<uint8_t>> payloads;
     for (const auto& l : readLines(kTg30)) {
@@ -399,7 +399,8 @@ struct ReplayFx {
 // The recording's 2015 times are the FIS-B reference and expiry clock: the
 // products are decoded and kept while the data clock reads 2015, and nothing
 // expires before its time on that clock.
-BOOST_AUTO_TEST_CASE(replay_decodes_uplinks_on_recording_clock)
+BOOST_AUTO_TEST_CASE(replay_decodes_uplinks_on_recording_clock,
+                     *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     // What the store holds when every record is applied at its own time.
     Pipeline ref;
@@ -465,7 +466,7 @@ BOOST_AUTO_TEST_CASE(replay_decodes_uplinks_on_recording_clock)
     BOOST_TEST(fx.countEvents(EventKind::fisb_shape) >= 1u);
 }
 
-BOOST_AUTO_TEST_CASE(recording_fisb_stream_written)
+BOOST_AUTO_TEST_CASE(recording_fisb_stream_written, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     TempDir tmp;
     {
@@ -504,7 +505,7 @@ BOOST_AUTO_TEST_CASE(recording_fisb_stream_written)
     BOOST_TEST(countOf(streamText(tmp.path, "received"), "\"type\":\"uat_uplink\"") == 704u);
 }
 
-BOOST_AUTO_TEST_CASE(fisb_disabled_decodes_nothing)
+BOOST_AUTO_TEST_CASE(fisb_disabled_decodes_nothing, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     Config cfg = baseConfig();
     cfg.fisb_enable = false;

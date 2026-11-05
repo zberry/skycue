@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # skycue-fisb on the FIS-B fixtures: --summary of the 2015 dump978 sample,
-# --json of tg30.978 against the committed golden, --ref-date, .gz, the three
+# --json of tg30.978 against the golden's SHA-256, --ref-date, .gz, the three
 # input kinds (dump978 lines, rawrec captures, received JSONL), byte-identical
 # reruns and the exit codes.
 # usage: test_fisb_cli.sh SKYCUE_FISB FIXTURE_DIR
@@ -8,14 +8,16 @@ set -u
 fisb=$1 fixtures=$2
 sample="$fixtures/raw/uat-sample.txt.gz"
 tg30="$fixtures/fisb/tg30.978"
-golden="$fixtures/fisb/tg30.golden.jsonl"
+golden_sha="$fixtures/fisb/tg30.golden.sha256"
 received="$fixtures/fisb/received-with-uplinks.jsonl"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-# fixtures/raw/ is left out of the release tarball (fixtures/README.md).
-[ -e "$sample" ] || { echo "SKIP: $sample missing (not in the release tarball)"; exit 77; }
-for f in "$fisb" "$tg30" "$golden" "$received"; do [ -e "$f" ] || fail "$f missing"; done
+# The captures are fetched by scripts/fetch-test-captures.sh (fixtures/README.md).
+for f in "$sample" "$tg30" "$received"; do
+  [ -e "$f" ] || { echo "SKIP: $f not fetched: run scripts/fetch-test-captures.sh"; exit 77; }
+done
+for f in "$fisb" "$golden_sha"; do [ -e "$f" ] || fail "$f missing"; done
 
 # section FILE TITLE: the lines of one "== TITLE..." section, header excluded.
 section() { awk -v t="== $2" 'index($0, t) == 1 { on = 1; next } /^== / { on = 0 } on' "$1"; }
@@ -48,15 +50,21 @@ done
 "$fisb" --ref-date 2015-01-24 "$sample" >"$tmp/b.out" 2>&1 || fail "(b) exit $?"
 cmp -s "$tmp/a.out" "$tmp/b.out" || { diff "$tmp/a.out" "$tmp/b.out"; fail "(b) summary differs between runs"; }
 
-# ---- (c) --json on tg30 equals the golden ------------------------------------
+# ---- (c) --json on tg30 has the golden's SHA-256 -----------------------------
 "$fisb" --json --ref-date 2020-10-30 "$tg30" >"$tmp/c1.jsonl" 2>"$tmp/c.err" || { cat "$tmp/c.err"; fail "(c) exit"; }
 [ -s "$tmp/c.err" ] && { cat "$tmp/c.err"; fail "(c) unexpected stderr"; }
 "$fisb" --json "$tg30" >"$tmp/c2.jsonl" 2>"$tmp/c2.err" || fail "(c) exit without --ref-date"
 cmp -s "$tmp/c1.jsonl" "$tmp/c2.jsonl" || fail "(c) output differs between runs (or --ref-date changed t= lines)"
 [ -s "$tmp/c2.err" ] && { cat "$tmp/c2.err"; fail "(c) warned with every line timed"; }
-# Every time in the output (received included) derives from the t= stamps: exact comparison.
-cmp -s "$tmp/c1.jsonl" "$golden" ||
-  { diff "$golden" "$tmp/c1.jsonl" | head -c 4000; fail "(c) --json differs from tg30.golden.jsonl"; }
+# Every time in the output (received included) derives from the t= stamps: exact comparison,
+# by hash (scripts/fisb-golden.md says how to refresh it).
+want=$(tr -d ' \n' <"$golden_sha")
+got=$(sha256sum "$tmp/c1.jsonl" | cut -d' ' -f1)
+if [ "$got" != "$want" ]; then
+  trap - EXIT  # keep $tmp so the output can be inspected
+  echo "(c) output kept at $tmp/c1.jsonl"
+  fail "(c) --json SHA-256 is $got, tg30.golden.sha256 has $want"
+fi
 python3 -I -c 'import json,sys
 n = 0
 for line in sys.stdin:

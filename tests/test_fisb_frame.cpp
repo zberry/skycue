@@ -612,7 +612,7 @@ BOOST_AUTO_TEST_CASE(fixture_sample_parses, *skycue_test::needs_fixture("raw/uat
     BOOST_TEST((kinds == want_kinds));
 }
 
-BOOST_AUTO_TEST_CASE(fixture_tg30_parses)
+BOOST_AUTO_TEST_CASE(fixture_tg30_parses, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     Probe p;
     std::size_t comments = 0;

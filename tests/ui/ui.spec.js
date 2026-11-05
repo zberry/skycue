@@ -1691,6 +1691,7 @@ test('radar_opacity_disabled_without_products', async ({ page }) => {
 });
 
 test.describe('fisb radar (tg30)', () => {
+  test.skip(!RADAR_BASE, 'FIS-B captures not fetched: run scripts/fetch-test-captures.sh');
   test.use({ baseURL: RADAR_BASE });
 
   test('radar_canvas_drawn_when_radar_present', async ({ page }) => {

@@ -77,9 +77,9 @@ case $interval in ''|*[!0-9]*|0) echo "soak.sh: --interval must be a whole numbe
 fixtures=$(cd "$fixtures" 2>/dev/null && pwd) || { echo "soak.sh: fixtures dir not found" >&2; exit 2; }
 fisb_rec="$fixtures/fisb/received-tg30.jsonl"
 readsb_rec="$fixtures/readsb-sample.jsonl"
-for f in "$fisb_rec" "$readsb_rec"; do
-  [ -r "$f" ] || { echo "soak.sh: fixture $f not found" >&2; exit 2; }
-done
+[ -r "$fisb_rec" ] || {
+  echo "soak.sh: fixture $fisb_rec not fetched: run scripts/fetch-test-captures.sh" >&2; exit 2; }
+[ -r "$readsb_rec" ] || { echo "soak.sh: fixture $readsb_rec not found" >&2; exit 2; }
 python3 -I -c 'import sys; float(sys.argv[1]); int(sys.argv[2])' "$growth" "$fd_tolerance" 2>/dev/null || {
   echo "soak.sh: --growth must be a number and --fd-tolerance a whole number" >&2; exit 2; }
 

@@ -460,7 +460,8 @@ BOOST_AUTO_TEST_CASE(segment_cap_512_and_rejects)
 }
 
 BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_fixtures_consumes_exact_length,
-                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     struct Want {
         std::string path;
@@ -516,7 +517,9 @@ BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_fixtures_consumes_exact_length,
     }
 }
 
-BOOST_AUTO_TEST_CASE(twgo_polygon_circle_prism_geometry, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(twgo_polygon_circle_prism_geometry,
+                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     const auto ref = sampleRef();
     auto items = fixtureTwgo(kSample, ref);
@@ -771,7 +774,9 @@ BOOST_AUTO_TEST_CASE(twgo_cancel_and_status13)
     BOOST_TEST(skycued::formatIso8601Ms(*tg->end) == "2026-11-02T12:30:00.000Z");
 }
 
-BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds,
+                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     struct Want {
         std::string path;
@@ -844,7 +849,9 @@ BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds, *skycue_test::needs_
     BOOST_TEST(parseTextProduct(h, nullptr, 0, ref).empty());
 }
 
-BOOST_AUTO_TEST_CASE(winds_period_parsed, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(winds_period_parsed,
+                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     BOOST_TEST(*windsPeriod(2, 600) == 6u);
     BOOST_TEST(*windsPeriod(1, 1200) == 12u);

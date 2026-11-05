@@ -43,6 +43,12 @@ if [ ! -e "$www/vendor/echarts/echarts.min.js" ]; then
   echo "SKIP: ECharts not staged in $www (configure with -DSKYCUE_ECHARTS_DIR)"
   exit 77
 fi
+# The FIS-B cases replay the recordings scripts/fetch-test-captures.sh derives
+# from the third-party captures (the 2015 sample and tg30).
+if [ ! -e "$fixtures/fisb/received-tg30.jsonl" ] || [ ! -e "$fixtures/fisb/received-with-uplinks.jsonl" ]; then
+  echo "SKIP: FIS-B captures not fetched (run scripts/fetch-test-captures.sh)"
+  exit 77
+fi
 
 tmp=$(mktemp -d)
 pidfile="$tmp/skycued.pid"

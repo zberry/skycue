@@ -101,6 +101,27 @@ for n in $cache_names; do grep -q -- "$n" "$out" || fail "(a) output does not na
 grep -q "file://$tmp/nowhere/o/modes/c1/modes.csv.gz" "$out" || fail "(a) output does not list the (overridden) URL"
 [ ! -e "$tmp/fxa/raw" ] || fail "(a) installed something"
 
+# (a2) the same without the test overrides: the script's own pins. --offline
+# with an empty cache lists every built-in URL and SHA-256, and downloads nothing.
+env -u SKYCUE_CAPTURE_PINS -u SKYCUE_CAPTURE_URL_BASE "$script" --cache "$tmp/ca2" --fixtures "$tmp/fxa2" --offline >"$out" 2>&1
+rc=$?
+[ "$rc" -eq 1 ] || fail "(a2) --offline with the built-in pins and an empty cache exited $rc, want 1"
+builtin=$(grep -E '^pin [^ ]+ [0-9a-f]{64} https://raw\.githubusercontent\.com/' "$script")
+[ "$(printf '%s\n' "$builtin" | wc -l)" -eq 4 ] || fail "(a2) the script should have four built-in pins"
+while read -r _ name hash url; do
+  grep -q -- "$name" "$out" || fail "(a2) output does not name $name"
+  grep -q -- "SHA-256 $hash" "$out" || fail "(a2) output does not list the SHA-256 of $name"
+  grep -qF -- "$url" "$out" || fail "(a2) output does not list the URL of $name"
+done <<<"$builtin"
+[ ! -e "$tmp/fxa2/raw" ] && [ ! -e "$tmp/ca2/fisb-decode-tg30.978" ] || fail "(a2) installed or downloaded something"
+
+# (a3) -h prints the whole header comment: its first line and its last.
+run -h
+[ "$rc" -eq 0 ] || fail "(a3) -h exited $rc, want 0"
+grep -q '^Usage: scripts/fetch-test-captures.sh' "$out" || fail "(a3) -h lacks the usage line"
+grep -q '^Exit status: 0 done, 1 failure' "$out" || fail "(a3) -h lacks the exit status line (the header is cut)"
+! grep -q 'set -euo pipefail' "$out" || fail "(a3) -h prints code"
+
 # (b) usage errors exit 2.
 run --bogus
 [ "$rc" -eq 2 ] || fail "(b) --bogus exited $rc, want 2"

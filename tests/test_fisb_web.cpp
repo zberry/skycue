@@ -6,6 +6,7 @@
 // fixtures/fisb/received-with-uplinks.jsonl (2015 uplinks) unpaced.
 
 #include "engine_test_support.hpp"
+#include "restricted_fixtures.hpp"
 
 #include "fisb/location_index.hpp"
 #include "runtime_config.hpp"
@@ -338,7 +339,7 @@ std::vector<std::pair<double, double>> positions(const pt::ptree& geometry)
 
 // /api/fisb/status after the replay: counts, stations, the regional mosaic,
 // and the same object in the WebSocket snapshot's "fisb".
-BOOST_AUTO_TEST_CASE(fisb_status_shape)
+BOOST_AUTO_TEST_CASE(fisb_status_shape, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     FisbWebFx f;
     BOOST_REQUIRE(f.waitReplayed());
@@ -410,7 +411,7 @@ BOOST_AUTO_TEST_CASE(fisb_status_shape)
     BOOST_TEST(get(f.port, "/api/fisb/nope").status == 404u);
 }
 
-BOOST_AUTO_TEST_CASE(text_filter_by_station)
+BOOST_AUTO_TEST_CASE(text_filter_by_station, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     FisbWebFx f;
     BOOST_REQUIRE(f.waitReplayed());
@@ -477,7 +478,7 @@ BOOST_AUTO_TEST_CASE(text_filter_by_station)
     BOOST_TEST(count(parseJson(get(f.port, "/api/fisb/text?station=QQQQ").body).get_child("records")) == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(shapes_geojson_valid)
+BOOST_AUTO_TEST_CASE(shapes_geojson_valid, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     FisbWebFx f;
     BOOST_REQUIRE(f.waitReplayed());
@@ -556,7 +557,8 @@ BOOST_AUTO_TEST_CASE(shapes_geojson_valid)
     BOOST_TEST(get(f.port, "/api/fisb/shapes?product=8,x").status == 400u);
 }
 
-BOOST_AUTO_TEST_CASE(radar_rle_expands_to_128_per_block)
+BOOST_AUTO_TEST_CASE(radar_rle_expands_to_128_per_block,
+                     *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     FisbWebFx f;
     BOOST_REQUIRE(f.waitReplayed());
@@ -613,7 +615,7 @@ BOOST_AUTO_TEST_CASE(radar_rle_expands_to_128_per_block)
     BOOST_TEST(get(f.port, "/api/fisb/radar?product=63").status == 200u);
 }
 
-BOOST_AUTO_TEST_CASE(radar_404_when_absent)
+BOOST_AUTO_TEST_CASE(radar_404_when_absent, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     {
         // No uplinks at all.
@@ -634,7 +636,8 @@ BOOST_AUTO_TEST_CASE(radar_404_when_absent)
     BOOST_TEST(has(r.body, "\"error\""));
 }
 
-BOOST_AUTO_TEST_CASE(fisb_disabled_status_enabled_false)
+BOOST_AUTO_TEST_CASE(fisb_disabled_status_enabled_false,
+                     *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     FisbWebFx f(FisbWebOptions{false, true, true});
     BOOST_REQUIRE(f.waitReplayed(0));  // FIS-B off: uplinks are not counted
@@ -655,7 +658,7 @@ BOOST_AUTO_TEST_CASE(fisb_disabled_status_enabled_false)
 // A client connected before the replay starts sees fisb_text and fisb_shape
 // items, then (once the store's 10 s quiescence passes on the data clock) a
 // fisb_radar notification without blocks.
-BOOST_AUTO_TEST_CASE(ws_fisb_events_on_replay)
+BOOST_AUTO_TEST_CASE(ws_fisb_events_on_replay, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     FisbWebFx f(FisbWebOptions{true, true, false});
     WsClient c(f.port);
@@ -774,7 +777,7 @@ BOOST_AUTO_TEST_CASE(event_json_items)
 
 // tg30.978 carries the rasters and a CONUS mosaic that the 2015 sample has
 // not: /api/fisb/raster with its legends, ?altitude=, and the CONUS palette.
-BOOST_AUTO_TEST_CASE(raster_routes_on_tg30)
+BOOST_AUTO_TEST_CASE(raster_routes_on_tg30, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     TempDir tmp;
     const std::string rec = tmp.path + "/tg30-received.jsonl";
@@ -877,7 +880,7 @@ FisbWebOptions tg30Options(const TempDir& dir, std::size_t& uplinks)
 }  // namespace
 
 // Every NOTAM point location in tg30 is learned, served and announced.
-BOOST_AUTO_TEST_CASE(locations_learned_on_tg30)
+BOOST_AUTO_TEST_CASE(locations_learned_on_tg30, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     TempDir dir;
     std::size_t uplinks = 0;
@@ -919,7 +922,7 @@ BOOST_AUTO_TEST_CASE(locations_learned_on_tg30)
 }
 
 // stop() saves fisb-locations.json; a fresh Engine on the same file serves it before any uplink.
-BOOST_AUTO_TEST_CASE(locations_persisted_and_reloaded)
+BOOST_AUTO_TEST_CASE(locations_persisted_and_reloaded, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     TempDir dir;
     const std::string file = dir.path + "/fisb-locations.json";
@@ -949,7 +952,7 @@ BOOST_AUTO_TEST_CASE(locations_persisted_and_reloaded)
 }
 
 // LOCATIONS_FILE rows fill in what was not learned; learned positions win; the operator rows are not saved.
-BOOST_AUTO_TEST_CASE(operator_file_merged_under_learned)
+BOOST_AUTO_TEST_CASE(operator_file_merged_under_learned, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     TempDir dir;
     std::size_t uplinks = 0;
@@ -1017,7 +1020,7 @@ std::size_t linesWith(const std::string& text, const std::string& needle)
 }
 
 // The 1 s tick saves once the interval has passed (0 here), before any stop().
-BOOST_AUTO_TEST_CASE(locations_saved_on_the_tick)
+BOOST_AUTO_TEST_CASE(locations_saved_on_the_tick, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     TempDir dir;
     std::size_t uplinks = 0;
@@ -1030,7 +1033,7 @@ BOOST_AUTO_TEST_CASE(locations_saved_on_the_tick)
 }
 
 // A save that keeps failing is warned about once, and the recovery is logged.
-BOOST_AUTO_TEST_CASE(locations_save_failure_warned_once)
+BOOST_AUTO_TEST_CASE(locations_save_failure_warned_once, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     TempDir dir;
     std::size_t uplinks = 0;
@@ -1080,7 +1083,7 @@ BOOST_AUTO_TEST_CASE(locations_paths_that_are_directories)
 }
 
 // A learned file that cannot be read is set aside, so the first save does not overwrite it.
-BOOST_AUTO_TEST_CASE(unreadable_locations_file_set_aside)
+BOOST_AUTO_TEST_CASE(unreadable_locations_file_set_aside, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     TempDir dir;
     std::size_t uplinks = 0;

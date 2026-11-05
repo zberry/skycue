@@ -8,6 +8,7 @@
 #include "engine_test_support.hpp"
 #include "filters.hpp"
 #include "inputs/dump978_input.hpp"
+#include "restricted_fixtures.hpp"
 #include "stats_store.hpp"
 #include "time_util.hpp"
 
@@ -265,7 +266,7 @@ BOOST_AUTO_TEST_CASE(reset_empties_and_saves)
     BOOST_TEST(aircraftInFile(path) == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(fisb_products_counted)
+BOOST_AUTO_TEST_CASE(fisb_products_counted, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     // The uplinks of the FIS-B fixture, fed through one input after an
     // observation started the data clock and a tick ran.
@@ -304,7 +305,8 @@ BOOST_AUTO_TEST_CASE(fisb_products_counted)
     BOOST_TEST(fx.t.call([&] { return fx.engine->statsStore().uatSeen(); }));
 }
 
-BOOST_AUTO_TEST_CASE(fisb_products_of_unpaced_replay_counted)
+BOOST_AUTO_TEST_CASE(fisb_products_of_unpaced_replay_counted,
+                     *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
 {
     // A replay of uplinks alone at speed 0 (as the UI suite's FIS-B daemons
     // run): every uplink is decoded before the engine's first tick, which

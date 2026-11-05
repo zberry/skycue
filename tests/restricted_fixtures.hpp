@@ -1,14 +1,15 @@
 #pragma once
-// Fixtures that the release source tarball leaves out (scripts/make-source-tarball.sh):
-// the third-party captures in fixtures/raw/ and the vendor ICD examples
-// fixtures/pingstation/icd-*.json (fixtures/README.md says why). A test case that
-// reads one declares it:
+// Fixtures that are not in every source tree: the third-party captures
+// (fixtures/raw/*, fisb/tg30.978 and the fisb/received-*.jsonl derived from
+// them), which scripts/fetch-test-captures.sh installs, and the vendor ICD
+// examples fixtures/pingstation/icd-*.json that the release source tarball leaves
+// out (fixtures/README.md says why). A test case that reads one declares it:
 //
 //   BOOST_AUTO_TEST_CASE(name, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 //
 // and Boost.Test skips that case, naming the file, when it is absent (on
-// Boost before 1.74 the case is disabled instead; see below). In a git
-// checkout the files are there and every case runs.
+// Boost before 1.74 the case is disabled instead; see below). With the files
+// in place every case runs.
 // The check uses stat(2), not std::filesystem: GCC 8 (EL8) keeps
 // std::filesystem in a separate libstdc++fs that the tests do not link.
 #include <boost/test/unit_test.hpp>
@@ -31,6 +32,9 @@ inline bool fixture_present(const std::string& rel)  // rel: relative to SKYCUE_
 
 inline std::string fixture_absent_message(const std::string& rel)
 {
+    // The captures can be fetched; the ICD examples are only in a git checkout.
+    if (rel.compare(0, 4, "raw/") == 0 || rel.compare(0, 5, "fisb/") == 0)
+        return "fixture " + rel + " not fetched: run scripts/fetch-test-captures.sh";
     return "fixture " + rel + " is not in this source tree (the release tarball leaves it out)";
 }
 

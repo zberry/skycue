@@ -82,7 +82,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^set -euo pipefail$/{/^set -euo pipefail$/!p}' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) usage ;;

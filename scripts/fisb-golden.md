@@ -1,15 +1,21 @@
-# The tg30 golden output (`tests/fixtures/fisb/tg30.golden.jsonl`)
+# The tg30 golden output (`tests/fixtures/fisb/tg30.golden.sha256`)
 
 ## What it is
 
-`tg30.golden.jsonl` is the output of
+The golden is the output of
 
     skycue-fisb --json --ref-date 2020-10-30 tests/fixtures/fisb/tg30.978
 
 (1772 lines, 1,729,462 bytes): every FIS-B store event, in the order the store
 emits it. It holds 1088 `fisb_text`, 562 `fisb_twgo`, 5 `fisb_radar`,
-28 `fisb_raster` and 89 `fisb_expired` records. The test `fisb_cli`
-(`tests/test_fisb_cli.sh`) compares a fresh run with it byte for byte.
+28 `fisb_raster` and 89 `fisb_expired` records. The repository keeps only its
+SHA-256, the single hex string in `tests/fixtures/fisb/tg30.golden.sha256`.
+The test `fisb_cli` (`tests/test_fisb_cli.sh`) hashes a fresh run and compares
+the hash, so the comparison is still byte for byte. It needs `tg30.978`, which
+`scripts/fetch-test-captures.sh` installs, and skips without it. The file
+itself is regenerated into a scratch directory when it is needed for the check
+below (see "Regenerating"). Wherever this document says "the golden" it means
+that regenerated file.
 Every time in the file, `received` included, comes from the input's `t=`
 stamps, so two runs are byte-identical. `--ref-date` does not matter for tg30, because every line has
 a `t=`.
@@ -58,14 +64,14 @@ no counterpart in our store.
 ## The check
 
 ```sh
-python3 -I scripts/fisb-golden-check.py "$W/l2.jsonl" tests/fixtures/fisb/tg30.golden.jsonl --examples 4
+python3 -I scripts/fisb-golden-check.py "$W/l2.jsonl" "$W/golden.jsonl" --examples 4
 ```
 
 The script first checks the golden against the store's own TWGO rules, and
 `--golden-only` runs just that part, without fisb-decode:
 
 ```sh
-python3 -I scripts/fisb-golden-check.py --golden-only tests/fixtures/fisb/tg30.golden.jsonl
+python3 -I scripts/fisb-golden-check.py --golden-only "$W/golden.jsonl"
 ```
 
 no `fisb_twgo` record whose report year is not its data clock's year (562
@@ -242,8 +248,17 @@ After an intended change to the decoder, store or JSON writers:
 
 ```sh
 skycue-fisb --json --ref-date 2020-10-30 tests/fixtures/fisb/tg30.978 \
-  > tests/fixtures/fisb/tg30.golden.jsonl
-python3 -I scripts/fisb-golden-check.py "$W/l2.jsonl" tests/fixtures/fisb/tg30.golden.jsonl
+  > "$W/golden.jsonl"
+python3 -I scripts/fisb-golden-check.py "$W/l2.jsonl" "$W/golden.jsonl"
 ```
 
-Then review the diff and adjudicate every new difference here.
+Review the difference from the previous output (`diff` against the file from
+the last regeneration, or against a run of the previous build) and adjudicate
+every new difference here. Then refresh the hash:
+
+```sh
+sha256sum "$W/golden.jsonl" | cut -d' ' -f1 > tests/fixtures/fisb/tg30.golden.sha256
+```
+
+Without a previous output to compare, the old hash only tells that something
+changed; keep the previous `golden.jsonl` with the adjudication notes.

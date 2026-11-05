@@ -5,6 +5,8 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 b=$here/scripts/build-package.sh
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: test_package_scripts: $*"; exit 1; }
+# The build container exports its own factor; the checks below set it themselves.
+unset SKYCUE_TEST_SLOW_FACTOR
 pv=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/CMakeLists.txt")
 [ -n "$pv" ] || fail "no version in CMakeLists.txt"
 bash "$b" nonsense >/dev/null 2>&1; [ $? -eq 2 ] || fail "bad target is not exit 2"

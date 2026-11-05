@@ -36,7 +36,13 @@ trap 'rm -rf "$work"' EXIT
 # so a work dir under a build* tree does not exclude the copy itself.
 name=$(basename "$skycue_dir")
 mkdir "$work/vendor"
-tar -C "$(dirname "$skycue_dir")" --anchored \
+# A build tree inside the source tree under another name (a Debian package
+# build uses obj-*, an RPM build redhat-linux-build or similar) holds the
+# work dir: leave out its top directory, or the copy would contain itself.
+inner_build=()
+rel=${work#"$(cd "$skycue_dir" && pwd -P)"/}
+if [[ $rel != "$work" ]]; then inner_build=(--exclude="$name/${rel%%/*}"); fi
+tar -C "$(dirname "$skycue_dir")" --anchored "${inner_build[@]}" \
     --exclude="$name/build*" --exclude="$name/.git" \
     --exclude="$name/www/tiles" --exclude="$name/www/vendor" \
     -cf - "$name" | tar -C "$work/vendor" -xf -

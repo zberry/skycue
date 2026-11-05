@@ -603,6 +603,10 @@ label.check input { width: auto; margin: 0; }
 .band input { flex: 1 1 0; width: 0; min-width: 0; }
 .band span { color: var(--muted); flex: none; }
 #view label.check { display: flex; margin: 6px 0 0; }
+/* The Trails group: a muted key and its control on each line. */
+.trail-row { align-items: center; flex-wrap: wrap; column-gap: 10px; row-gap: 2px; margin-top: 4px; }
+.trail-key { color: var(--muted); font-size: 12px; flex: none; min-width: 40px; }
+#view .trail-row label.check { margin: 0; color: var(--text); font-size: 13px; }
 /* "Colour trail by signal": the scale under the option, weak to strong. */
 .sig-legend { margin: 4px 0 0 22px; font-size: 11px; color: var(--muted); }
 .sig-scale { display: flex; height: 8px; border-radius: 2px; overflow: hidden; }

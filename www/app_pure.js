@@ -1375,8 +1375,12 @@
   var VIEW_DEFAULTS = Object.freeze({
     search: '', altMin: null, altMax: null, ground: true, gsMin: null, gsMax: null,
     rangeMin: null, rangeMax: null, decisions: Object.freeze(VIEW_DECISIONS.slice()),
-    classes: Object.freeze(CLASSES.slice()), emergency: false, category: '', country: '', mapMode: 'hide'
+    classes: Object.freeze(CLASSES.slice()), emergency: false, category: '', country: '', mapMode: 'hide',
+    trailShow: 'all'
   });
+  // The Trails group: which aircraft have a trail (every drawn one, only
+  // the selected one, none).
+  var TRAIL_SHOWS = ['all', 'selected', 'off'];
 
   function viewNumber(v) {
     if (typeof v === 'string') v = v.trim() === '' ? null : Number(v);
@@ -1411,8 +1415,14 @@
       emergency: viewBool(obj.emergency, false),
       category: cat === 'other' || cat === 'none' || VIEW_CATEGORIES.indexOf(cat) >= 0 ? cat : '',
       country: country === 'other' || ICAO_COUNTRIES.indexOf(country) >= 0 ? country : '',
-      mapMode: obj.mapMode === 'dim' ? 'dim' : 'hide'
+      mapMode: obj.mapMode === 'dim' ? 'dim' : 'hide',
+      trailShow: TRAIL_SHOWS.indexOf(obj.trailShow) >= 0 ? obj.trailShow : VIEW_DEFAULTS.trailShow
     };
+  }
+  // Whether the Trails group is at its defaults (Clear resets it; like the
+  // map mode it is not counted in the heading badge).
+  function viewTrailsDefault(v) {
+    return v.trailShow === VIEW_DEFAULTS.trailShow;
   }
 
   // Saved filter sets (spec 4): skycue.viewSets is {version: 1, sets:
@@ -1709,6 +1719,7 @@
     MILITARY_CALLSIGN_PREFIXES: MILITARY_CALLSIGN_PREFIXES, callsignKind: callsignKind,
     CLASSES: CLASSES, CATEGORY_LABELS: CATEGORY_LABELS, trackClass: trackClass, isEmergency: isEmergency, trackCountry: trackCountry,
     VIEW_DEFAULTS: VIEW_DEFAULTS, normalizeView: normalizeView, viewActiveCount: viewActiveCount,
+    TRAIL_SHOWS: TRAIL_SHOWS, viewTrailsDefault: viewTrailsDefault,
     VIEW_SETS_MAX: VIEW_SETS_MAX, VIEW_SET_NAME_MAX: VIEW_SET_NAME_MAX, viewSetName: viewSetName,
     normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches,

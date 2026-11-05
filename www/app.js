@@ -658,7 +658,6 @@
       select(key);
     });
     e.marker.addTo(map);
-    e.trail = L.polyline([], { className: 'trail', weight: 1.5, opacity: 0.6, interactive: false }).addTo(map);
   }
 
   function dropLayers(e) {
@@ -679,7 +678,12 @@
   // polylines in the same order: a new position extends the last run or
   // adds one, a prune trims the first ones (P.signalRunsAppend,
   // P.signalRunsTrim, updateTrail); drawTrail rebuilds only on a toggle, a
-  // (re)creation or an un-dimming. A dimmed entry draws no trail.
+  // (re)creation or an un-dimming.
+  // Which entries have a trail at all is the Trails group's "Show"
+  // (viewFilter.trailShow, trailShown): an entry without one has no
+  // polyline (e.trail null, removed from the map, not hidden), but its
+  // points are kept, so a trail drawn later (selecting it, Show back to
+  // "all") has the whole history at once. A dimmed entry has none either.
   var TRAIL_SIGNAL_KEY = 'skycue.trailSignal';
   var trailSignal = false;
 
@@ -716,9 +720,18 @@
     e.sigTrail = e.sigRuns = e.sigLayers = null;
   }
 
+  function trailShown(e) {
+    if (!e.marker || e.dimmed) return false;
+    var show = viewFilter.trailShow;
+    return show === 'all' || (show === 'selected' && e.key === selectedKey);
+  }
+
+  // The whole trail from e.pts: made when the entry should have one,
+  // removed when it should not.
   function drawTrail(e) {
-    if (!e.trail) return;
-    var pts = e.dimmed ? [] : e.pts;
+    if (!trailShown(e)) { removeTrail(e); return; }
+    if (!e.trail) e.trail = L.polyline([], { className: 'trail', weight: 1.5, opacity: 0.6, interactive: false }).addTo(map);
+    var pts = e.pts;
     e.trail.setLatLngs(pts.map(function (p) { return p.ll; }));
     var runs = trailSignal && pts.length > 1 ? P.signalRuns(pts.map(sigPoint)) : [];
     var any = runs.some(function (r) { return r.color !== null; });
@@ -766,6 +779,16 @@
     dropSigTrail(e);
     e.trail = null;
     e.trailStyle = null;
+  }
+
+  // The Trails group's settings live in the view (skycue.view, the filter
+  // sets, Clear); a change redraws every trail.
+  var TRAIL_FIELDS = ['trailShow'];
+  function trailOptionsChanged(a, b) {
+    return TRAIL_FIELDS.some(function (k) { return a[k] !== b[k]; });
+  }
+  function applyTrailOptions() {
+    if (map) tracks.forEach(drawTrail);
   }
 
   function setTrailSignal(on, initial) {
@@ -830,9 +853,13 @@
     ensureMarker(e);
     e.dimmed = !shows;
     var inPlace = observed && step !== 'break' && !e.dimmed && !fresh && !wasDimmed;
-    if (inPlace && step === 'skip') { if (pruned) updateTrail(e, pruned, false); }
+    // A trail that should come or go (dimming, Show "selected" and the
+    // selection moving) is drawn or removed whole; else updated in place.
+    if (trailShown(e) !== !!e.trail) drawTrail(e);
+    else if (!e.trail) { /* no trail: the points are kept, nothing drawn */ }
+    else if (inPlace && step === 'skip') { if (pruned) updateTrail(e, pruned, false); }
     else if (inPlace && e.pts[e.pts.length - 1] === pushed) updateTrail(e, pruned, true);
-    else if (e.dimmed ? fresh || !wasDimmed : observed || fresh || wasDimmed) drawTrail(e);
+    else if (observed || fresh || wasDimmed) drawTrail(e);
     styleMarker(e);
   }
 
@@ -883,13 +910,15 @@
     $('view-category').value = v.category;
     $('view-country').value = v.country;
     eachEl('input[name="view-map-mode"]', function (r) { r.checked = r.value === v.mapMode; });
+    eachEl('input[name="view-trail-show"]', function (r) { r.checked = r.value === v.trailShow; });
   }
   function readViewFromControls() {
     var o = {
       search: $('view-search').value, ground: $('view-ground').checked, emergency: $('view-emergency').checked,
       decisions: pillValues('view-decisions', 'data-decision'), classes: pillValues('view-classes', 'data-class'),
       category: $('view-category').value, country: $('view-country').value,
-      mapMode: (document.querySelector('input[name="view-map-mode"]:checked') || {}).value
+      mapMode: (document.querySelector('input[name="view-map-mode"]:checked') || {}).value,
+      trailShow: (document.querySelector('input[name="view-trail-show"]:checked') || {}).value
     };
     Object.keys(VIEW_NUMBERS).forEach(function (k) { o[k] = $(VIEW_NUMBERS[k]).value; });
     return P.normalizeView(o);
@@ -904,13 +933,16 @@
     var active = P.viewActiveCount(viewFilter);
     $('view-count').textContent = active > 0 ? 'showing ' + viewShownCount() + ' of ' + tracks.size : '';
     $('view-badge').textContent = active > 0 ? '· ' + active : '';
-    // Clear also resets the map mode, which is not counted in the badge.
-    $('view-clear').disabled = active === 0 && viewFilter.mapMode === 'hide';
+    // Clear also resets the map mode and the Trails group, which are not
+    // counted in the badge.
+    $('view-clear').disabled = active === 0 && viewFilter.mapMode === 'hide' && P.viewTrailsDefault(viewFilter);
   }
   // Merges `partial` into the view, persists and re-renders. `fromControls`:
   // the controls already show it (the operator is typing), leave them be.
   function setViewFilters(partial, fromControls) {
+    var before = viewFilter;
     viewFilter = P.normalizeView(Object.assign({}, viewFilter, partial));
+    if (trailOptionsChanged(before, viewFilter)) applyTrailOptions();
     if (!fromControls) applyViewToControls();
     saveView();
     tableDirty = true;
@@ -959,7 +991,7 @@
     ['view-ground', 'view-emergency', 'view-category', 'view-country'].forEach(function (id) {
       $(id).addEventListener('change', fromControls);
     });
-    eachEl('input[name="view-map-mode"]', function (r) { r.addEventListener('change', fromControls); });
+    eachEl('input[name="view-map-mode"], input[name="view-trail-show"]', function (r) { r.addEventListener('change', fromControls); });
     eachEl('#view-decisions button[data-decision]', function (b) {
       b.addEventListener('click', function () { togglePill('decisions', b.getAttribute('data-decision')); });
     });
@@ -1299,11 +1331,12 @@
         removeEntry(e.key);
         return;
       }
-      if (e.trail && e.pts.length) {
+      // The points age out with or without a trail drawn (a dimmed entry,
+      // Show "selected" or "off"); updateTrail does nothing without one.
+      if (e.pts.length) {
         var n = e.pts.length;
         pruneTrail(e);
-        // A dimmed entry's polyline stays empty (renderEntry refills it on un-dimming).
-        if (e.pts.length !== n && !e.dimmed) updateTrail(e, n - e.pts.length, false);
+        if (e.pts.length !== n) updateTrail(e, n - e.pts.length, false);
       }
     });
   }
@@ -3583,6 +3616,12 @@
     selected: function () {
       var e = selectedKey && tracks.get(selectedKey);
       return e ? e.t.hex : null;
+    },
+    // Selects the (first) aircraft with this hex, as a click on its marker would.
+    selectHex: function (hex) {
+      var key = null;
+      tracks.forEach(function (e) { if (key === null && e.t.hex === hex) key = e.key; });
+      if (key !== null) select(key);
     },
     connected: function () { return connected; },
     // The Config tab's "copy as text" (empty before GET /api/config answers).

@@ -1095,6 +1095,25 @@ test('normalizeView: defaults, partial, malformed', () => {
   assert.strictEqual(P.normalizeView({ mapMode: 'dim' }).mapMode, 'dim');
   assert.strictEqual(P.normalizeView(JSON.stringify(v)).altMin, 3000, 'accepts a JSON string');
 });
+test('normalizeView: the Trails group (show)', () => {
+  assert.deepStrictEqual(P.TRAIL_SHOWS, ['all', 'selected', 'off']);
+  assert.strictEqual(P.VIEW_DEFAULTS.trailShow, 'all');
+  ['all', 'selected', 'off'].forEach((s) => assert.strictEqual(P.normalizeView({ trailShow: s }).trailShow, s));
+  ['ALL', 'none', '', 1, null, ['off']].forEach((s) => assert.strictEqual(P.normalizeView({ trailShow: s }).trailShow, 'all', String(s)));
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView(null)), true);
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView({ trailShow: 'off' })), false);
+  assert.strictEqual(P.viewActiveCount(P.normalizeView({ trailShow: 'off' })), 0, 'not a filter: not in the badge');
+});
+test('view sets round-trip the Trails group', () => {
+  const v = P.normalizeView({ search: 'ual', trailShow: 'selected' });
+  const r = P.putViewSet(P.normalizeViewSets(null), 'T', v, false);
+  const back = P.normalizeViewSets(JSON.parse(JSON.stringify(r.store))).sets[0];
+  assert.deepStrictEqual(back.view, v);
+  assert.strictEqual(P.viewSetMatches(back, v, false), true);
+  assert.strictEqual(P.viewSetMatches(back, P.normalizeView({ search: 'ual' }), false), false, 'a different Show is a different state');
+  // A set saved before the group existed applies the defaults.
+  assert.strictEqual(P.normalizeViewSets({ sets: [{ name: 'old', view: { search: 'ual' } }] }).sets[0].view.trailShow, 'all');
+});
 test('normalizeView: copies arrays, never hands out the defaults', () => {
   assert.ok(Object.isFrozen(P.VIEW_DEFAULTS));
   const v = P.normalizeView(null);

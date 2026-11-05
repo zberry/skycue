@@ -193,6 +193,14 @@ block lists and Save as baseline: what is sent to cue clients), then `#view`
 per-browser view settings (`normalizeView`, localStorage `skycue.view`);
 `viewMatches` decides a track, `trackClass` and `trackCountry` estimate its class and
 country, and `viewShows` in `app.js` exempts the selected track.
+The Trails group (`#view-trails`) is part of the view: `trailShow`
+(`P.TRAIL_SHOWS`; `trailShown` in `app.js`) says which entries have a
+trail. An entry without one has no `path.trail` at all (`e.trail` null;
+`drawTrail` makes or removes it, `renderEntry` calls it when that changes,
+as on a selection with "selected"), while `e.pts` keeps filling and
+ageing out. `P.viewTrailsDefault` is what Clear's enabled state needs
+besides the badge count; a change to a Trails field redraws every trail
+(`applyTrailOptions`).
 "Colour trail by signal" (`#trail-signal`, localStorage
 `skycue.trailSignal`, not part of `skycue.view` or the filter sets) keeps
 each trail point's `rssi`; `drawTrail` in `app.js` lays `P.signalRuns` (runs

@@ -1263,6 +1263,77 @@ test('trail_breaks_on_impossible_jump', async ({ page }) => {
   await page.evaluate(() => window.skycueApp.setTrailSignal(false));
 });
 
+// Trails, Show: "selected" leaves only the selected aircraft's polyline on
+// the map (the others' removed, not hidden), "off" none, "all" every one
+// back; the points are kept throughout, so a trail drawn again has its
+// whole history. Remembered in skycue.view; Clear goes back to "all".
+async function trailCounts(page) {
+  return page.evaluate(() => {
+    const ms = window.skycueApp.markers();
+    return { dom: document.querySelectorAll('path.trail').length, markers: ms.length,
+      withTrail: ms.filter((m) => m.trail > 0).map((m) => m.hex).sort() };
+  });
+}
+test('trails_show_all_selected_off', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 3);
+  await expect(page.locator('input[name="view-trail-show"][value="all"]')).toBeChecked();
+  await injectSignalTrack(page);
+  await page.locator(`.ac-marker[data-hex="${SIG_HEX}"] .ac-glyph`).click();
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(SIG_HEX);
+  let c = await trailCounts(page);
+  expect(c.withTrail.length).toBeGreaterThan(1);
+  expect(c.dom).toBe(c.withTrail.length);
+
+  await page.locator('input[name="view-trail-show"][value="selected"]').check();
+  c = await trailCounts(page);
+  expect(c.withTrail).toEqual([SIG_HEX]);
+  expect(c.dom).toBe(1);
+  expect((await page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX)).points).toBe(12);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view'))).trailShow).toBe('selected');
+  // The selection moves: the trail goes with it, the new one's history at once.
+  const other = c.markers > 1 && (await page.evaluate((h) => window.skycueApp.markers().find((m) => m.hex !== h && !m.dimmed).hex, SIG_HEX));
+  await page.evaluate((h) => window.skycueApp.selectHex(h), other);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(other);
+  c = await trailCounts(page);
+  expect(c.withTrail).toEqual([other]);
+  expect(c.dom).toBe(1);
+  await page.evaluate((h) => window.skycueApp.selectHex(h), SIG_HEX);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(SIG_HEX);
+  expect((await page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX)).points).toBe(12);
+
+  await page.locator('input[name="view-trail-show"][value="off"]').check();
+  c = await trailCounts(page);
+  expect(c.withTrail).toEqual([]);
+  expect(c.dom).toBe(0);
+  expect(await page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX)).toBe(null);
+  // A new position while off: kept, drawn when the trails come back.
+  await page.evaluate((hex) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.24,
+    decision: 'send', track_deg: 90, rssi: -4, position_time: new Date(window.skycueApp.dataNow() - 18000).toISOString() }), SIG_HEX);
+  expect((await trailCounts(page)).dom).toBe(0);
+  await expect(page.locator('#view-clear')).toBeEnabled();
+
+  // Kept across a reload.
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await expect(page.locator('input[name="view-trail-show"][value="off"]')).toBeChecked();
+  await waitMarkers(page, 3);
+  expect((await trailCounts(page)).dom).toBe(0);
+  await injectSignalTrack(page);
+
+  await page.locator('input[name="view-trail-show"][value="all"]').check();
+  c = await trailCounts(page);
+  expect(c.withTrail.length).toBe(c.markers);
+  expect(c.dom).toBe(c.markers);
+  expect((await page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX)).points).toBe(12);
+  // Clear resets Show to "all".
+  await page.locator('input[name="view-trail-show"][value="selected"]').check();
+  await page.click('#view-clear');
+  await expect(page.locator('input[name="view-trail-show"][value="all"]')).toBeChecked();
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().trailShow)).toBe('all');
+  expect((await trailCounts(page)).dom).toBeGreaterThan(1);
+});
+
 // The ruler: away from the fixture's aircraft (around 38.9 N 77 W), two
 // clicks 300 px apart on one row at zoom 8 near 30 N are 84..88 nm
 // (611.5 m/px at the equator x cos(lat)), heading east.

@@ -1257,7 +1257,7 @@ test('signalColor: bounds, clamping, steps weak to strong', () => {
   const C = P.SIGNAL_COLORS;
   assert.ok(C.length >= 5 && C.length <= 7, 'steps ' + C.length);
   assert.strictEqual(P.signalColor(P.SIGNAL_MIN_DB), C[0]);
-  assert.strictEqual(P.signalColor(-80), C[0]);
+  assert.strictEqual(P.signalColor(-49.4), C[0]);
   assert.strictEqual(P.signalColor(P.SIGNAL_MAX_DB), C[C.length - 1]);
   assert.strictEqual(P.signalColor(0), C[C.length - 1]);
   assert.strictEqual(P.signalColor(P.SIGNAL_MAX_DB - 0.01), C[C.length - 1]);
@@ -1273,6 +1273,21 @@ test('signalColor: no signal is null', () => {
     assert.strictEqual(P.signalColor(v), null, String(v));
     assert.strictEqual(P.signalStep(v), -1, String(v));
   });
+});
+test('signalLevel: readsb\'s -49.5 and lower are no signal', () => {
+  assert.strictEqual(P.SIGNAL_NONE_DB, -49.5);
+  [-49.5, -50, -80].forEach((v) => {
+    assert.strictEqual(P.signalLevel(v), null, String(v));
+    assert.strictEqual(P.signalStep(v), -1, String(v));
+    assert.strictEqual(P.signalColor(v), null, String(v));
+  });
+  [undefined, null, NaN, '-20'].forEach((v) => assert.strictEqual(P.signalLevel(v), null, String(v)));
+  assert.strictEqual(P.signalLevel(-49.4), -49.4);
+  assert.strictEqual(P.signalColor(-49.4), P.SIGNAL_COLORS[0]);
+  assert.strictEqual(P.signalLevel(-20), -20);
+  // The trail builder: a -49.5 trail is one run without a colour.
+  assert.deepStrictEqual(P.signalRuns([{ lat: 0, lon: 0, sig: -49.5 }, { lat: 1, lon: 1, sig: -49.5 }, { lat: 2, lon: 2, sig: -49.5 }]),
+    [{ points: [[0, 0], [1, 1], [2, 2]], color: null }]);
 });
 test('signalLegend covers the scale contiguously', () => {
   const L = P.signalLegend();
@@ -1350,6 +1365,35 @@ test('signalRunsAppend / signalRunsTrim equal signalRuns over a random walk', ()
 });
 
 // Ruler: distance, initial bearing, the label.
+// Trail steps: join, skip a small step back in time, break on an implied
+// speed over TRAIL_MAX_KT (over at least 1 s) or a big step back.
+test('trailStep: impossible jumps break, small backsteps skip, normal moves join', () => {
+  assert.strictEqual(P.TRAIL_MAX_KT, 1500);
+  assert.strictEqual(P.TRAIL_BACKSTEP_S, 5);
+  const a = { lat: 39, lon: -77, ts: 1000000 };
+  const north = (nm, dtMs) => ({ lat: 39 + nm / 60, lon: -77, ts: a.ts + dtMs });
+  // 1 nm in 2 s is 1800 kt, over the limit; 1 nm in 3 s (1200 kt) joins.
+  assert.strictEqual(P.trailStep(a, north(1, 2000)), 'break', '1 nm in 2 s: 1800 kt');
+  assert.strictEqual(P.trailStep(a, north(1, 3000)), 'join', '1 nm in 3 s: 1200 kt');
+  assert.strictEqual(P.trailStep(a, north(0.5, 2000)), 'join', '0.5 nm in 2 s: 900 kt');
+  assert.strictEqual(P.trailStep(a, north(100, 2000)), 'break', '100 nm in 2 s');
+  assert.strictEqual(P.trailStep(a, north(200, 600000)), 'join', '200 nm in 10 min: 1200 kt');
+  assert.strictEqual(P.trailStep(a, north(300, 600000)), 'break', '300 nm in 10 min: 1800 kt');
+  // Equal times: the speed over 1 s (0.4 nm is 1440 kt; 1 nm would be 3600 kt).
+  assert.strictEqual(P.trailStep(a, north(0, 0)), 'join', 'same time, same place');
+  assert.strictEqual(P.trailStep(a, north(0.4, 0)), 'join', 'same time, 0.4 nm');
+  assert.strictEqual(P.trailStep(a, north(1, 0)), 'break', 'same time, 1 nm: 3600 kt over 1 s');
+  assert.strictEqual(P.trailStep(a, north(200, 0)), 'break', 'same time, 200 nm');
+  assert.strictEqual(P.trailStep(a, north(0.1, 100)), 'join', '0.1 nm in 100 ms: speed over 1 s');
+  // Back in time: up to 5 s skips (at any distance), more breaks.
+  assert.strictEqual(P.trailStep(a, north(0, -50)), 'skip', '50 ms earlier');
+  assert.strictEqual(P.trailStep(a, north(0, -2000)), 'skip', '2 s earlier');
+  assert.strictEqual(P.trailStep(a, north(0, -5000)), 'skip', '5 s earlier');
+  assert.strictEqual(P.trailStep(a, north(0, -10000)), 'break', '10 s earlier');
+  assert.strictEqual(P.trailStep(null, a), 'join');
+  assert.strictEqual(P.trailStep(a, { lat: 40, lon: -77, ts: NaN }), 'join', 'no usable time joins');
+});
+
 test('rulerMeasure LAX to JFK: 2144 nm, initial course 066', () => {
   // The Aviation Formulary's worked example (LAX 33°57'N 118°24'W, JFK
   // 40°38'N 73°47'W): 2144 nm, initial true course 66°. The formulary's

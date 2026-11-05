@@ -803,13 +803,20 @@
   // layers in "hide" mode, a dimmed marker without trail in "dim" mode; the
   // selected entry always matches). `observed`: add the position to the trail.
   function renderEntry(e, observed) {
-    var t = e.t;
+    var t = e.t, step = 'join';
     var drawable = typeof t.lat === 'number' && typeof t.lon === 'number' && P.decisionColor(t.decision) !== null;
     if (!drawable || !map) return;
     if (observed) {
       var ts = Date.parse(t.position_time);
-      var pushed = { ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon], sig: typeof t.rssi === 'number' ? t.rssi : null };
-      e.pts.push(pushed);
+      var pushed = { ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon], sig: P.signalLevel(t.rssi) };
+      // P.trailStep: an impossible jump (a looped replay restarting, a bad
+      // position, a reused hex) restarts the trail here instead of joining
+      // it; a small step back in time is left out.
+      var prev = e.pts[e.pts.length - 1];
+      step = prev ? P.trailStep({ lat: prev.ll[0], lon: prev.ll[1], ts: prev.ts },
+        { lat: t.lat, lon: t.lon, ts: pushed.ts }) : 'join';
+      if (step === 'break') e.pts.length = 0;
+      if (step !== 'skip') e.pts.push(pushed);
       var pruned = pruneTrail(e);
     }
     if (!P.trackVisible(t.decision, hideFiltered)) {
@@ -822,7 +829,9 @@
     var fresh = !e.marker, wasDimmed = !!e.dimmed;
     ensureMarker(e);
     e.dimmed = !shows;
-    if (observed && !e.dimmed && !fresh && !wasDimmed && e.pts[e.pts.length - 1] === pushed) updateTrail(e, pruned, true);
+    var inPlace = observed && step !== 'break' && !e.dimmed && !fresh && !wasDimmed;
+    if (inPlace && step === 'skip') { if (pruned) updateTrail(e, pruned, false); }
+    else if (inPlace && e.pts[e.pts.length - 1] === pushed) updateTrail(e, pruned, true);
     else if (e.dimmed ? fresh || !wasDimmed : observed || fresh || wasDimmed) drawTrail(e);
     styleMarker(e);
   }
@@ -1406,7 +1415,11 @@
     ['elevation_deg', 'Elevation', function (v) { return v.toFixed(2) + '°'; }],
     ['decision', 'Decision'], ['forwarded', 'Forwarded', yesNo],
     ['nic', 'NIC'], ['nac_p', 'NACp'],
-    ['rssi', 'RSSI', function (v) { return v.toFixed(1) + ' dBFS'; }],
+    ['rssi', 'RSSI', function (v) {
+      // readsb's -49.5: no level for the data (P.SIGNAL_NONE_DB), not a reading.
+      if (P.signalLevel(v) === null) return { text: '—', title: 'no signal level from the decoder' };
+      return v.toFixed(1) + ' dBFS';
+    }],
     ['first_seen', 'First seen', fmtTime], ['last_seen', 'Last seen', fmtTime]
   ];
 
@@ -1433,7 +1446,9 @@
       known[f[0]] = true;
       var v = t[f[0]];
       if (v === undefined || v === null) return;
-      rows.push([f[0], f[1], f[2] ? f[2](v) : String(v)]);
+      var shown = f[2] ? f[2](v) : String(v);   // a string, or {text, title}
+      if (typeof shown === 'string') rows.push([f[0], f[1], shown]);
+      else rows.push([f[0], f[1], shown.text, shown.title]);
     });
     Object.keys(t).forEach(function (k) {
       if (known[k] || k === 'type') return;
@@ -1441,7 +1456,8 @@
       rows.push([k, k, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
     });
     $('details-fields').tBodies[0].innerHTML = rows.map(function (row) {
-      return '<tr><th scope="row">' + esc(row[1]) + '</th><td data-field="' + esc(row[0]) + '">' + esc(row[2]) + '</td></tr>';
+      return '<tr><th scope="row">' + esc(row[1]) + '</th><td data-field="' + esc(row[0]) + '"' +
+        (row[3] ? ' title="' + esc(row[3]) + '"' : '') + '>' + esc(row[2]) + '</td></tr>';
     }).join('');
     renderActions(t);
   }
@@ -3553,7 +3569,8 @@
         (e.sigLayers || []).forEach(function (l) {
           runs.push({ id: L.stamp(l), n: l.getLatLngs().length, color: l.options.color, dashed: !!l.options.dashArray });
         });
-        out = { points: e.trail.getLatLngs().length, color: e.trail.options.color, opacity: e.trail.options.opacity, runs: runs };
+        out = { points: e.trail.getLatLngs().length, color: e.trail.options.color, opacity: e.trail.options.opacity,
+          weight: e.trail.options.weight, runs: runs };
       });
       return out;
     },

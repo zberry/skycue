@@ -1544,10 +1544,20 @@
   var SIGNAL_MAX_DB = -5;
   var SIGNAL_COLORS = ['#4657c0', '#7b45c8', '#b03fb0', '#e0457a', '#f2662f', '#ff9a1f'];
   var SIGNAL_STEP_DB = (SIGNAL_MAX_DB - SIGNAL_MIN_DB) / SIGNAL_COLORS.length;
+  // readsb reports -49.5 (its floor) when it has no signal level for the
+  // data: network-fed Beast or raw frames, replayed recordings. An rssi at
+  // or below it is "no signal", not the weakest step.
+  var SIGNAL_NONE_DB = -49.5;
 
-  // The step index of a signal, or -1 when it is not a finite number.
+  // A track's rssi as a signal level: the number, or null when it is not a
+  // finite number or is readsb's no-signal value (SIGNAL_NONE_DB or lower).
+  function signalLevel(rssi) {
+    if (typeof rssi !== 'number' || !isFinite(rssi) || rssi <= SIGNAL_NONE_DB) return null;
+    return rssi;
+  }
+  // The step index of a signal, or -1 when it is no signal (signalLevel).
   function signalStep(db) {
-    if (typeof db !== 'number' || !isFinite(db)) return -1;
+    if (signalLevel(db) === null) return -1;
     var i = Math.floor((db - SIGNAL_MIN_DB) / SIGNAL_STEP_DB);
     return Math.max(0, Math.min(SIGNAL_COLORS.length - 1, i));
   }
@@ -1610,6 +1620,31 @@
     var trimmed = runs.length > 0 && n > start;
     if (trimmed) runs[0].points.splice(0, n - start);
     return { dropped: dropped, trimmed: trimmed };
+  }
+
+  // ---- trail breaks -----------------------------------------------------------
+  // What a new position does to the trail, from the previous trail point
+  // (prev and next are {lat, lon, ts}, ts in ms):
+  // - 'break': the trail restarts at it. Its implied ground speed
+  //   (great-circle distance over the time between them, at least 1 s so
+  //   equal or near-equal times cannot hide a jump or magnify rounding) is
+  //   above TRAIL_MAX_KT, or it is more than TRAIL_BACKSTEP_S earlier: a
+  //   looped replay jumping back to its start, a bad position, a hex reused
+  //   by another aircraft.
+  // - 'skip': up to TRAIL_BACKSTEP_S earlier (readsb's position_time
+  //   wobbles by its seen_pos rounding; two inputs report out of order): not
+  //   added, so the trail stays in time order, and not a break.
+  // - 'join': otherwise, and when there is no previous point or no usable time.
+  var TRAIL_MAX_KT = 1500;
+  var TRAIL_BACKSTEP_S = 5;
+  function trailStep(prev, next) {
+    if (!prev || !next) return 'join';
+    var dt = next.ts - prev.ts;
+    if (typeof dt !== 'number' || !isFinite(dt)) return 'join';
+    if (dt < -TRAIL_BACKSTEP_S * 1000) return 'break';
+    if (dt < 0) return 'skip';
+    var nm = rangeNm(prev.lat, prev.lon, next.lat, next.lon);
+    return isFinite(nm) && nm / (Math.max(dt, 1000) / 3600000) > TRAIL_MAX_KT ? 'break' : 'join';
   }
 
   // ---- ruler ("Measure") -----------------------------------------------------
@@ -1678,8 +1713,10 @@
     normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches,
     SIGNAL_MIN_DB: SIGNAL_MIN_DB, SIGNAL_MAX_DB: SIGNAL_MAX_DB, SIGNAL_COLORS: SIGNAL_COLORS,
+    SIGNAL_NONE_DB: SIGNAL_NONE_DB, signalLevel: signalLevel,
     signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns,
     signalRunsAppend: signalRunsAppend, signalRunsTrim: signalRunsTrim,
+    TRAIL_MAX_KT: TRAIL_MAX_KT, TRAIL_BACKSTEP_S: TRAIL_BACKSTEP_S, trailStep: trailStep,
     rulerMeasure: rulerMeasure, rulerLabel: rulerLabel
   };
   root.skycuePure = api;

@@ -790,3 +790,42 @@ BOOST_AUTO_TEST_CASE(overrides_file_read_only_with_state_dir)
     std::remove(overrides.c_str());
     BOOST_TEST(skycued::parseConfigFile(conf).max_range_nm == 150);
 }
+
+BOOST_AUTO_TEST_CASE(main_file_valid_only_with_its_overrides_is_read)
+{
+    // STATE_DIR comes from the grammar pass alone: a skycue.conf whose own
+    // MAX_RANGE_NM is refused still finds the overrides file that replaces it.
+    ScratchDir tmp;
+    const std::string overrides = tmp.write("skycue.overrides.conf", "MAX_RANGE_NM=90\n");
+    const std::string conf =
+        tmp.write("skycue.conf", std::string(kLatLon) + "MAX_RANGE_NM=0\nSTATE_DIR=" + tmp.path + "/\n");
+    BOOST_TEST(skycued::overridesPathOf(conf) == overrides);
+    const Config c = skycued::parseConfigFile(conf);
+    BOOST_TEST(c.max_range_nm == 90);
+    BOOST_TEST(c.state_dir == tmp.path);
+    BOOST_TEST(c.override_keys.count("MAX_RANGE_NM") == 1u);
+    // The main file's values as written, whatever the overrides say.
+    BOOST_TEST(c.file_values.at("MAX_RANGE_NM") == "0");
+    BOOST_TEST(c.file_values.count("MIN_ELEVATION_DEG") == 0u);
+    // Without the overrides the main file's own value is refused, naming it.
+    std::remove(overrides.c_str());
+    try {
+        skycued::parseConfigFile(conf);
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& e) {
+        BOOST_TEST(std::string(e.what()).rfind(conf + ":3: MAX_RANGE_NM must be greater than 0", 0) == 0u, e.what());
+    }
+    // No STATE_DIR, or one that is not absolute (the conversion reports that): none.
+    tmp.write("skycue.conf", std::string(kLatLon));
+    BOOST_TEST(skycued::overridesPathOf(conf) == "");
+    tmp.write("skycue.conf", std::string(kLatLon) + "STATE_DIR=state\n");
+    BOOST_TEST(skycued::overridesPathOf(conf) == "");
+    // A grammar error is still an error.
+    tmp.write("skycue.conf", std::string(kLatLon) + "not a line\n");
+    try {
+        skycued::overridesPathOf(conf);
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& e) {
+        BOOST_TEST(std::string(e.what()).rfind(conf + ":3: malformed line", 0) == 0u, e.what());
+    }
+}

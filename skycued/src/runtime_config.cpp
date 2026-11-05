@@ -422,10 +422,11 @@ void RuntimeConfig::load()
 {
     // Stamps before reading: an edit in between is then seen again, never missed.
     conf_watch_.accept();
-    // skycue.conf alone says where the overrides file is (its STATE_DIR); then
-    // both are read once the overrides' stamp is taken. Again if STATE_DIR
-    // was edited in between.
-    std::string overrides = skycued::overridesPath(parseConfigFile(conf_path_, std::string()));
+    // skycue.conf alone says where the overrides file is (its STATE_DIR, from
+    // the grammar pass only: its values may be valid only with the
+    // overrides); then both are read once the overrides' stamp is taken.
+    // Again if STATE_DIR was edited in between.
+    std::string overrides = skycued::overridesPathOf(conf_path_);
     for (;;) {
         overrides_watch_ = SettledFile(overrides);
         overrides_watch_.accept();
@@ -681,7 +682,7 @@ std::string RuntimeConfig::promoteToBaseline()
 
     // Read back what was written (and anything edited by hand meanwhile).
     if (conf_written)
-        reloadConf();
+        reloadConf(running_.state_dir.empty() ? baseName(conf_path_) : std::string(kOverridesFileName));
     for (ListKind kind : {ListKind::allow, ListKind::block})
         if (list_written[kind == ListKind::allow ? 0 : 1])
             reloadList(kind);
@@ -723,11 +724,11 @@ void RuntimeConfig::poll()
 {
     bool quiet_change = false;  // a file reloaded without an Engine change
     if (conf_watch_.poll()) {
-        reloadConf();
+        reloadConf(baseName(conf_path_));
         quiet_change |= !applyEffective("file:" + baseName(conf_path_));
     }
     if (!overrides_watch_.path().empty() && overrides_watch_.poll()) {
-        reloadConf();
+        reloadConf(kOverridesFileName);
         quiet_change |= !applyEffective(std::string("file:") + kOverridesFileName);
     }
     if (overlay_watch_.poll()) {
@@ -746,7 +747,7 @@ void RuntimeConfig::poll()
         changed();
 }
 
-void RuntimeConfig::reloadConf()
+void RuntimeConfig::reloadConf(const std::string& edited)
 {
     Config c;
     try {
@@ -773,8 +774,19 @@ void RuntimeConfig::reloadConf()
     };
     for (const auto& o : overridden)
         if (o.second)
-            LOG_WARN("runtime: " << o.first << " edited in skycue.conf but overridden by " << kOverlayName
+            LOG_WARN("runtime: " << o.first << " edited in " << edited << " but overridden by " << kOverlayName
                                  << " (use the UI or \"save as baseline\")");
+    // An edit of skycue.conf that the overrides file replaces changes nothing
+    // either: one line per key, so the edit does not look ignored.
+    if (edited == baseName(conf_path_))
+        for (const auto& key : overridesFileKeys()) {
+            const auto now = c.file_values.find(key), before = file_conf_.file_values.find(key);
+            const bool same = (now == c.file_values.end()) == (before == file_conf_.file_values.end()) &&
+                              (now == c.file_values.end() || now->second == before->second);
+            if (!same && c.override_keys.count(key))
+                LOG_INFO("runtime: " << key << " edited in " << edited << " but " << kOverridesFileName
+                                     << " sets it (" << configValueText(c, key) << "); that value stays");
+        }
     // A relative list file resolves against STATE_DIR as running: a changed
     // STATE_DIR is a restart key, so it does not move the lists before then.
     c.allow_list_path = listFilePath(running_.state_dir, c.allow_list_file);

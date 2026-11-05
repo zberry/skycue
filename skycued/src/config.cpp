@@ -416,14 +416,18 @@ Config parseConfigLayers(const std::string& main_text, const std::string& main_n
     collectEntries(main_text, main_name, entries);
     collectEntries(overrides_text, overrides_name, overrides, &overridesFileKeys());
     std::set<std::string> main_keys, override_keys;
-    for (const auto& e : entries)
+    std::map<std::string, std::string> main_values;
+    for (const auto& e : entries) {
         main_keys.insert(e.first);
+        main_values[e.first] = e.second.value;
+    }
     for (auto& e : overrides) {
         override_keys.insert(e.first);
         entries[e.first] = std::move(e.second);
     }
     Config c = convertEntries(entries, main_name);
     c.file_keys = std::move(main_keys);
+    c.file_values = std::move(main_values);
     c.override_keys = std::move(override_keys);
     return c;
 }
@@ -526,6 +530,37 @@ std::string listFilePath(const std::string& state_dir, const std::string& value)
     return state_dir.empty() || value.empty() || value.front() == '/' ? value : underDir(state_dir, value);
 }
 
+namespace {
+
+// The overrides file of skycue.conf text: STATE_DIR from the grammar pass alone.
+std::string overridesPathOfText(const std::string& text, const std::string& name)
+{
+    std::map<std::string, Entry> entries;
+    collectEntries(text, name, entries);
+    const auto it = entries.find("STATE_DIR");
+    if (it == entries.end())
+        return std::string();
+    Config c;
+    c.state_dir = it->second.value;
+    if (c.state_dir.empty() || c.state_dir.front() != '/')
+        return std::string();
+    if (c.state_dir.size() > 1 && c.state_dir.back() == '/')  // as convertEntries does
+        c.state_dir.pop_back();
+    return overridesPath(c);
+}
+
+std::string readMainConfig(const std::string& path)
+{
+    std::string text;
+    if (!readConfigFile(path, text))
+        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
+    return text;
+}
+
+}  // namespace
+
+std::string overridesPathOf(const std::string& path) { return overridesPathOfText(readMainConfig(path), path); }
+
 Config parseConfigFile(const std::string& path, const std::string& overrides_path)
 {
     std::string text, overrides_text;
@@ -538,8 +573,15 @@ Config parseConfigFile(const std::string& path, const std::string& overrides_pat
 
 Config parseConfigFile(const std::string& path)
 {
-    // The main file alone first: its STATE_DIR says where the overrides are.
-    return parseConfigFile(path, overridesPath(parseConfigFile(path, std::string())));
+    // The main file's STATE_DIR says where the overrides are: from its
+    // grammar pass alone, so a value only the overrides make valid is no
+    // reason to refuse it. One read of the main file.
+    const std::string text = readMainConfig(path);
+    const std::string overrides_path = overridesPathOfText(text, path);
+    std::string overrides_text;
+    if (overrides_path.empty() || !readConfigFile(overrides_path, overrides_text))
+        return parseConfigText(text, path);
+    return parseConfigLayers(text, path, overrides_text, overrides_path);
 }
 
 }  // namespace skycued

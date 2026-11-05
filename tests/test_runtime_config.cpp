@@ -827,6 +827,79 @@ BOOST_AUTO_TEST_CASE(watch_detects_overrides_edit)
     BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 1.0; }, 4000ms));
 }
 
+BOOST_AUTO_TEST_CASE(conf_valid_only_with_its_overrides_survives_a_restart)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=150\n");
+    f.start(true);
+    Overlay d;
+    d.max_range_nm = 90;
+    f.applyUi(d);
+    BOOST_REQUIRE(f.promote() == "");
+    StderrCapture err(f.path("stderr.txt"));
+    // An edit that is valid only with the overrides file: accepted live...
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=0\n");
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "MAX_RANGE_NM edited in skycue.conf"); }, 4000ms));
+    BOOST_TEST(!has(err.text(), "keeping the previous configuration"));
+    BOOST_TEST(f.filters().max_range_nm == 90.0);
+    // ...and on a restart.
+    const double restarted = f.fx->t.call([&] {
+        RuntimeConfig again(f.fx->t.io, f.conf, *f.fx->engine);
+        again.load();
+        return again.effective().max_range_nm;
+    });
+    BOOST_TEST(restarted == 90.0);
+    BOOST_TEST(skycued::parseConfigFile(f.conf).max_range_nm == 90);
+}
+
+BOOST_AUTO_TEST_CASE(conf_edit_masked_by_overrides_logs_info)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(state + "/skycue.overrides.conf", "MAX_RANGE_NM=90\n");
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=150\nMIN_ELEVATION_DEG=0\n");
+    f.start(true);
+    BOOST_TEST(f.filters().max_range_nm == 90.0);
+    StderrCapture err(f.path("stderr.txt"));
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=120\nMIN_ELEVATION_DEG=2\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 2.0; }, 4000ms));
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "MAX_RANGE_NM edited in skycue.conf"); }, 500ms));
+    BOOST_TEST(f.filters().max_range_nm == 90.0);  // the overrides file still wins
+    // An edit of a key the overrides file does not set: no line for it.
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=120\nMIN_ELEVATION_DEG=3\n");
+    BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 3.0; }, 4000ms));
+    err.restore();
+    const std::string text = err.text();
+    BOOST_TEST(countOf(text, "INFO  runtime: MAX_RANGE_NM edited in skycue.conf but skycue.overrides.conf sets it "
+                             "(90); that value stays") == 1u, text);
+    BOOST_TEST(!has(text, "MIN_ELEVATION_DEG edited"), text);
+    BOOST_TEST(!has(text, "WARN"), text);
+}
+
+BOOST_AUTO_TEST_CASE(overrides_edit_overridden_by_overlay_names_the_overrides_file)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nMAX_RANGE_NM=150\n");
+    f.start(true);
+    Overlay d;
+    d.max_range_nm = 40;
+    f.applyUi(d);
+    StderrCapture err(f.path("stderr.txt"));
+    writeFile(state + "/skycue.overrides.conf", "MAX_RANGE_NM=99\n");
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "MAX_RANGE_NM edited in"); }, 4000ms));
+    err.restore();
+    const std::string text = err.text();
+    BOOST_TEST(countOf(text, "WARN  runtime: MAX_RANGE_NM edited in skycue.overrides.conf but overridden by "
+                             "skycue.runtime.json (use the UI or \"save as baseline\")") == 1u, text);
+    BOOST_TEST(!has(text, "edited in skycue.conf"), text);
+    BOOST_TEST(f.filters().max_range_nm == 40.0);
+}
+
 BOOST_AUTO_TEST_CASE(promote_without_state_dir_still_rewrites_conf)  // today's behaviour, explicitly
 {
     RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\n");

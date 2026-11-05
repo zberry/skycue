@@ -166,7 +166,8 @@ private:
     void writeFile(SettledFile& file, const std::string& text);  // throws; accepts our write
 
     // Watcher reloads: each logs its errors and keeps the previous values.
-    void reloadConf();
+    // `edited`: the base name of the file whose change this reads (for the log).
+    void reloadConf(const std::string& edited);
     void reloadOverlay();
     void reloadList(ListKind kind);
     void arm();

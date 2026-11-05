@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -50,6 +51,9 @@ struct Config {
     // Accepted (they are skycue-start.sh's), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";
     std::set<std::string> file_keys;  // the keys skycue.conf assigns (parseConfigLayers fills it)
+    // skycue.conf's own assignments as written (the last of a repeated key),
+    // whatever the overrides file replaces; parseConfigLayers fills it.
+    std::map<std::string, std::string> file_values;
     // The keys the overrides file (see overridesPath) assigns; its values
     // replace skycue.conf's. Empty when there is no such file.
     std::set<std::string> override_keys;
@@ -81,6 +85,12 @@ constexpr const char* kOverridesFileName = "skycue.overrides.conf";
 const std::vector<std::string>& overridesFileKeys();
 // kOverridesFileName under c.state_dir; "" when STATE_DIR is unset.
 std::string overridesPath(const Config& c);
+// The overrides file the skycue.conf at `path` names, from its STATE_DIR as
+// assigned: the grammar is checked, no value is converted, so a file valid
+// only together with its overrides (MAX_RANGE_NM=0 there, 90 in the
+// overrides) still finds them. "" when STATE_DIR is unset or not absolute
+// (the full parse reports that). Throws ConfigError (cannot open, grammar).
+std::string overridesPathOf(const std::string& path);
 // skycue.conf text, then overrides file text: each is checked by the grammar
 // under its own name (errors name that file and line), the overrides' keys
 // must be in overridesFileKeys(), and its assignments replace the main

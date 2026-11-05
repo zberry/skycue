@@ -551,3 +551,72 @@ BOOST_AUTO_TEST_CASE(config_copy_text_parses)
     BOOST_TEST((c.file_keys == std::set<std::string>{"RECEIVER_LAT", "RECEIVER_LON", "SDR_1090_SERIAL", "CUE_UDP_TARGETS",
                                                      "RECORD_DIR", "MAX_RANGE_NM", "ALLOW_LIST_FILE", "LOCATIONS_FILE"}));
 }
+
+BOOST_AUTO_TEST_CASE(new_keys_defaults)
+{
+    const Config c = parseConfigText(kLatLon, "t");
+    BOOST_TEST(c.state_dir == "");
+    BOOST_TEST(c.map_dir == "");
+    BOOST_TEST(c.readsb_host == "127.0.0.1");
+    BOOST_TEST(c.dump978_host == "127.0.0.1");
+    BOOST_TEST(c.dump978_enable);
+    using skycued::configValueText;
+    BOOST_TEST(configValueText(c, "STATE_DIR") == "");
+    BOOST_TEST(configValueText(c, "MAP_DIR") == "");
+    BOOST_TEST(configValueText(c, "READSB_HOST") == "127.0.0.1");
+    BOOST_TEST(configValueText(c, "DUMP978_HOST") == "127.0.0.1");
+    BOOST_TEST(configValueText(c, "DUMP978_ENABLE") == "yes");
+}
+
+BOOST_AUTO_TEST_CASE(new_keys_parsed)
+{
+    const Config c = parseConfigText(std::string(kLatLon) + "STATE_DIR=/var/lib/skycue\nMAP_DIR=/var/lib/skycue/maps\n"
+                                                            "READSB_HOST=ultrafeeder\nDUMP978_HOST=192.0.2.7\nDUMP978_ENABLE=no\n",
+                                     "t");
+    BOOST_TEST(c.state_dir == "/var/lib/skycue");
+    BOOST_TEST(c.map_dir == "/var/lib/skycue/maps");
+    BOOST_TEST(c.readsb_host == "ultrafeeder");
+    BOOST_TEST(c.dump978_host == "192.0.2.7");
+    BOOST_TEST(!c.dump978_enable);
+    BOOST_TEST(skycued::configValueText(c, "DUMP978_ENABLE") == "no");
+    BOOST_TEST(skycued::configValueText(c, "STATE_DIR") == "/var/lib/skycue");
+}
+
+BOOST_AUTO_TEST_CASE(state_dir_must_be_absolute)
+{
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "STATE_DIR=var/lib\n").what()) ==
+               "test.conf:3: STATE_DIR must be an absolute path, got 'var/lib'");
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "MAP_DIR=maps\n").what()) ==
+               "test.conf:3: MAP_DIR must be an absolute path, got 'maps'");
+}
+
+BOOST_AUTO_TEST_CASE(hosts_must_not_be_empty)  // like WEB_BIND
+{
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "READSB_HOST=\n").what()) ==
+               "test.conf:3: READSB_HOST must not be empty");
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "DUMP978_HOST=\n").what()) ==
+               "test.conf:3: DUMP978_HOST must not be empty");
+    BOOST_TEST(std::string(expectError(std::string(kLatLon) + "DUMP978_ENABLE=maybe\n").what()) ==
+               "test.conf:3: DUMP978_ENABLE must be yes or no, got 'maybe'");
+}
+
+BOOST_AUTO_TEST_CASE(state_paths_resolve_against_state_dir)
+{
+    Config c = parseConfigText(std::string(kLatLon) + "STATE_DIR=/s\nALLOW_LIST_FILE=allow.list\nBLOCK_LIST_FILE=/abs/b\n",
+                               "/etc/x/skycue.conf");
+    BOOST_TEST(c.allow_list_path == "/s/allow.list");
+    BOOST_TEST(c.block_list_path == "/abs/b");
+    BOOST_TEST(c.allow_list_file == "allow.list");  // as written, for /api/config
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "skycue.stats.json") == "/s/skycue.stats.json");
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "/abs/s.json") == "/abs/s.json");
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "") == "");
+    c.state_dir.clear();
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "skycue.stats.json") == "/etc/x/skycue.stats.json");
+}
+
+BOOST_AUTO_TEST_CASE(list_paths_unchanged_without_state_dir)  // today: as written (working-directory relative)
+{
+    const Config c = parseConfigText(std::string(kLatLon) + "ALLOW_LIST_FILE=allow.list\n", "/etc/x/skycue.conf");
+    BOOST_TEST(c.allow_list_path == "allow.list");
+    BOOST_TEST(c.block_list_path == "");
+}

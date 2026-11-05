@@ -24,14 +24,16 @@ const std::vector<std::string>& knownConfigKeys()
     static const std::vector<std::string> keys{
         "RECEIVER_LAT",    "RECEIVER_LON",      "RECEIVER_ALT_M",    "ANTENNA_HEIGHT_M",
         "SDR_1090_SERIAL", "SDR_978_SERIAL",    "GAIN_1090",         "GAIN_978",
-        "DUMP978_RAW_PORT", "DUMP978_JSON_PORT", "READSB_JSON_PORT", "WEB_PORT",
+        "DUMP978_RAW_PORT", "DUMP978_JSON_PORT", "READSB_JSON_PORT",
+        "READSB_HOST",     "DUMP978_HOST",      "DUMP978_ENABLE",    "WEB_PORT",
         "CUE_TCP_PORT",    "CUE_TCP_CONNECT",   "CUE_UDP_TARGETS",   "RECORD_DIR",
         "RECORD_FORMATS",
         "MAX_RANGE_NM",    "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE",   "BLOCK_LIST_FILE",
         "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
         "RECORD_RAW",
         "WEB_BIND",        "RECORD_MAX_GB",     "TRAIL_SECONDS",
-        "FISB_ENABLE",     "FISB_EXPERIMENTAL", "INPUTS_FILE",       "LOCATIONS_FILE",
+        "FISB_ENABLE",     "FISB_EXPERIMENTAL", "STATE_DIR",         "MAP_DIR",
+        "INPUTS_FILE",     "LOCATIONS_FILE",
         "STATS_FILE",      "STATS_AIRCRAFT_MAX", "STATS_SAVE_S",
     };
     return keys;
@@ -287,6 +289,29 @@ Config parseConfigText(const std::string& text, const std::string& name)
     conv.str("LOCATIONS_FILE", c.locations_file);
     conv.str("STATS_FILE", c.stats_file);
 
+    auto host = [&](const char* key, std::string& field) {  // like WEB_BIND
+        conv.str(key, field);
+        if (field.empty())
+            conv.fail(key, std::string(key) + " must not be empty");
+    };
+    host("READSB_HOST", c.readsb_host);
+    host("DUMP978_HOST", c.dump978_host);
+    conv.yesNo("DUMP978_ENABLE", c.dump978_enable);
+    auto absoluteDir = [&](const char* key, std::string& field) {  // "" (unset) or absolute
+        conv.str(key, field);
+        if (!field.empty() && field.front() != '/')
+            conv.fail(key, std::string(key) + " must be an absolute path, got '" + field + "'");
+    };
+    absoluteDir("STATE_DIR", c.state_dir);
+    absoluteDir("MAP_DIR", c.map_dir);
+    // The list files: under STATE_DIR when it is set, else as written (today's
+    // working-directory-relative behaviour).
+    auto listPath = [&](const std::string& value) {
+        return c.state_dir.empty() || value.empty() || value.front() == '/' ? value : c.state_dir + "/" + value;
+    };
+    c.allow_list_path = listPath(c.allow_list_file);
+    c.block_list_path = listPath(c.block_list_file);
+
     conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
     conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);
     if (auto e = conv.find("RECORD_FORMATS")) {
@@ -349,6 +374,9 @@ std::string configValueText(const Config& c, const std::string& key)
         {"DUMP978_RAW_PORT", [](const Config& x) { return std::to_string(x.dump978_raw_port); }},
         {"DUMP978_JSON_PORT", [](const Config& x) { return std::to_string(x.dump978_json_port); }},
         {"READSB_JSON_PORT", [](const Config& x) { return std::to_string(x.readsb_json_port); }},
+        {"READSB_HOST", [](const Config& x) { return x.readsb_host; }},
+        {"DUMP978_HOST", [](const Config& x) { return x.dump978_host; }},
+        {"DUMP978_ENABLE", [](const Config& x) { return yesNo(x.dump978_enable); }},
         {"WEB_PORT", [](const Config& x) { return std::to_string(x.web_port); }},
         {"CUE_TCP_PORT", [](const Config& x) { return std::to_string(x.cue_tcp_port); }},
         {"CUE_TCP_CONNECT", [](const Config& x) { return endpoints(x.cue_tcp_connect_targets); }},
@@ -375,6 +403,8 @@ std::string configValueText(const Config& c, const std::string& key)
         {"TRAIL_SECONDS", [](const Config& x) { return std::to_string(x.trail_seconds); }},
         {"FISB_ENABLE", [](const Config& x) { return yesNo(x.fisb_enable); }},
         {"FISB_EXPERIMENTAL", [](const Config& x) { return yesNo(x.fisb_experimental); }},
+        {"STATE_DIR", [](const Config& x) { return x.state_dir; }},
+        {"MAP_DIR", [](const Config& x) { return x.map_dir; }},
         {"INPUTS_FILE", [](const Config& x) { return x.inputs_file; }},
         {"LOCATIONS_FILE", [](const Config& x) { return x.locations_file; }},
         {"STATS_FILE", [](const Config& x) { return x.stats_file; }},
@@ -398,6 +428,15 @@ std::string resolveConfigRelative(const std::string& conf_path, const std::strin
         return value;
     const auto slash = conf_path.rfind('/');
     return slash == std::string::npos ? value : conf_path.substr(0, slash + 1) + value;
+}
+
+std::string resolveStatePath(const Config& c, const std::string& conf_path, const std::string& value)
+{
+    if (value.empty() || value.front() == '/')
+        return value;
+    if (!c.state_dir.empty())
+        return c.state_dir + "/" + value;
+    return resolveConfigRelative(conf_path, value);
 }
 
 Config parseConfigFile(const std::string& path)

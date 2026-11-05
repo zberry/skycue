@@ -637,6 +637,8 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     BOOST_TEST(restart_set.count("LOCATIONS_FILE") == 1u);
     for (const char* k : {"STATS_FILE", "STATS_AIRCRAFT_MAX", "STATS_SAVE_S"})
         BOOST_TEST(restart_set.count(k) == 1u, k);
+    for (const char* k : {"STATE_DIR", "MAP_DIR", "READSB_HOST", "DUMP978_HOST", "DUMP978_ENABLE"})
+        BOOST_TEST(restart_set.count(k) == 1u, k);
 
     // b differs from a in every field but the live four.
     skycued::Config a;
@@ -675,6 +677,11 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     b.sdr_978_serial = "s2";
     b.gain_1090 = "40";
     b.gain_978 = "41";
+    b.state_dir = "/s";
+    b.map_dir = "/m";
+    b.readsb_host = "h1";
+    b.dump978_host = "h2";
+    b.dump978_enable = false;
     const auto changed = skycued::restartKeysChanged(a, b);
     BOOST_TEST((std::set<std::string>(changed.begin(), changed.end()) == restart_set));
     BOOST_TEST(changed.size() == restart.size());

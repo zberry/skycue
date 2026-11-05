@@ -23,8 +23,18 @@ struct Config {
     // RECORD_RAW: skycue-start.sh runs skycue-rawrec; skycued writes the
     // pingStation JSON rawData frames to RECORD_DIR/raw-<id>-*.
     bool record_raw = false;
+    // READSB_HOST, DUMP978_HOST: where skycued finds the decoders' ports;
+    // DUMP978_ENABLE=no: no 978 MHz decoder to connect to.
+    std::string readsb_host = "127.0.0.1", dump978_host = "127.0.0.1";
+    bool dump978_enable = true;
     double max_range_nm = 150, min_elevation_deg = 0;
-    std::string allow_list_file, block_list_file;
+    std::string allow_list_file, block_list_file;  // as written
+    // The list files to read: a relative value is taken from STATE_DIR when it
+    // is set, else as written (the working directory). parseConfigText fills them.
+    std::string allow_list_path, block_list_path;
+    // STATE_DIR, MAP_DIR: absolute directories, "" when unset. STATE_DIR holds
+    // the relative state files (see resolveStatePath); MAP_DIR the map tiles.
+    std::string state_dir, map_dir;
     double min_interval_s = 1, max_interval_s = 10, track_timeout_s = 60, keyframe_interval_s = 10;
     std::string web_bind = "127.0.0.1";  // address the web UI listens on
     double record_max_gb = 0;            // recordings budget in GB; 0: unlimited
@@ -67,5 +77,11 @@ std::string resolveInputsFile(const std::string& conf_path, const std::string& v
 // config's directory when relative, `value` itself when absolute, "" when
 // empty. (resolveInputsFile is this with its default name.)
 std::string resolveConfigRelative(const std::string& conf_path, const std::string& value);
+
+// A state file (INPUTS_FILE, LOCATIONS_FILE, STATS_FILE) named in the config
+// at `conf_path`: "" when `value` is empty, `value` itself when absolute,
+// `value` under c.state_dir when STATE_DIR is set, else
+// resolveConfigRelative(conf_path, value).
+std::string resolveStatePath(const Config& c, const std::string& conf_path, const std::string& value);
 
 }  // namespace skycued

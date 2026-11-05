@@ -467,7 +467,11 @@ Then open <http://127.0.0.1:8080/>.
 
 ## The offline bundle
 
-A full-stack offline bundle that also builds the SDR decoders lives in a separate repository (the stack repository). For a machine without network access it carries every source tarball, builds the SDR libraries, readsb, dump978-fa and skycue into one relocatable prefix, and starts them together with `skycue-start.sh`. This repository builds and installs skycue alone, as described above.
+A full-stack offline bundle that also builds the SDR decoders lives in a separate repository (the stack repository). For a machine
+without network access it carries every source tarball, builds the SDR
+libraries, readsb, dump978-fa and skycue into one relocatable prefix, and
+starts them together with `skycue-start.sh`. This repository builds and
+installs skycue alone, as described above.
 
 ## Opening the page to the LAN
 

@@ -1,5 +1,11 @@
 # Operating skycue
 
+> **Note:** `skycue-start.sh` and `skycue-stop.sh` are the launcher of the
+> separate full-stack bundle (the stack repository). This repository's
+> packages and `cmake --install` do not install them. A packaged or
+> source-installed skycue runs the daemon through the `skycued` systemd unit
+> or `skycued --config <conf>` directly; see [installing.md](installing.md).
+
 How to run the receiver chain from an installed prefix (`/opt/skycue` below;
 `build/stage` works the same), replay recordings, and watch the cue stream.
 Building and installing the offline bundle are described in the stack
@@ -28,7 +34,13 @@ aircraft is worth a new cue, and forwards cues in the skycue wire protocol
 ([protocol.md](protocol.md)). It also reads dump978-fa's raw port, but only
 to count UAT uplinks.
 
-## Start, stop, status
+## Start, stop, status (stack bundle)
+
+> **Note:** The commands below are for the stack bundle. `skycue-start.sh` and `skycue-stop.sh` are the launcher of the
+> separate full-stack bundle (the stack repository). This repository's
+> packages and `cmake --install` do not install them. A packaged or
+> source-installed skycue runs the daemon through the `skycued` systemd unit
+> or `skycued --config <conf>` directly; see [installing.md](installing.md).
 
 ```sh
 cd /opt/skycue
@@ -195,7 +207,9 @@ which runs as the `skycue` user with only `/var/lib/skycue` writable,
 never rewrites it. To make a saved value part of `skycue.conf` again, copy
 it there and delete the line from `skycue.overrides.conf`.
 
-## Replaying a JSONL recording
+## Replaying a JSONL recording (stack bundle)
+
+These commands use the stack bundle's `skycue-start.sh`.
 
 ```sh
 bin/skycue-start.sh replay /data/rec/received-20261101-120000.jsonl            # real time
@@ -213,7 +227,9 @@ set. `--speed 1` (the default) keeps the recorded timing; `--speed 0` sends
 as fast as skycued can. The SDR keys are not needed, and a replay refuses to
 start while any part of the live chain runs.
 
-## Raw capture and replay-raw
+## Raw capture and replay-raw (stack bundle)
+
+These commands use the stack bundle's `skycue-start.sh`.
 
 With `RECORD_RAW=yes` (and `RECORD_DIR` set), `start` also runs
 `skycue-rawrec`, which records what the decoders produce before any
@@ -238,7 +254,9 @@ match the capture's region, or readsb cannot decode positions and the range
 filter drops everything: the bundled sample capture is European, so use
 `RECEIVER_LAT=52.0` / `RECEIVER_LON=4.5` for it.
 
-## IQ files: replay-iq
+## IQ files: replay-iq (stack bundle)
+
+These commands use the stack bundle's `skycue-start.sh`.
 
 ```sh
 bin/skycue-start.sh replay-iq /data/iq/sample.1090.cu8 /data/iq/sample.978.cu8
@@ -536,7 +554,7 @@ machine, as `http://<receiver address>:8080/`. There is no login: anyone who
 can reach the port can change the filters and lists, so open it only to a
 network you trust. `WEB_PORT=0` turns the page off. The page loads nothing
 from the internet; the API behind it is in [web-api.md](web-api.md).
-`skycue-start.sh` prints the page's address after `start` or a replay, and
+The stack bundle's `skycue-start.sh` prints the page's address after `start` or a replay, and
 `status` shows it; with `WEB_BIND=0.0.0.0` (or `::`) it prints this
 machine's host name instead, as `http://<host>:8080/ (WEB_BIND=0.0.0.0
 listens on all interfaces)`. The page's files are in `<prefix>/share/skycue/www`

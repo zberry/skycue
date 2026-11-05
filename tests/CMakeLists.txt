@@ -6,7 +6,8 @@ add_test(NAME smoke COMMAND test_smoke)
 
 add_executable(test_protocol test_protocol.cpp)
 target_link_libraries(test_protocol PRIVATE skycue::skycue Boost::unit_test_framework)
-target_compile_definitions(test_protocol PRIVATE BOOST_TEST_DYN_LINK)
+target_compile_definitions(test_protocol PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
 skycue_set_warnings(test_protocol)
 add_test(NAME protocol COMMAND test_protocol)
 
@@ -242,7 +243,8 @@ add_executable(test_web_server test_web_server.cpp)
 target_link_libraries(test_web_server PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
 target_compile_definitions(test_web_server PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
-  SKYCUED_EXE="$<TARGET_FILE:skycued>")
+  SKYCUED_EXE="$<TARGET_FILE:skycued>"
+  SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
 add_dependencies(test_web_server skycued)
 skycue_set_warnings(test_web_server)
 add_test(NAME web_server COMMAND test_web_server)

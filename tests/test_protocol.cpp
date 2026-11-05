@@ -3,6 +3,7 @@
 
 #include <skycue/protocol.hpp>
 #include <skycue/types.hpp>
+#include <skycue/version.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -341,4 +342,10 @@ BOOST_AUTO_TEST_CASE(track_id_ordering_and_hash)
     BOOST_TEST((b < c));
     BOOST_TEST(!(c < a));
     BOOST_TEST(std::hash<TrackId>{}(a) == std::hash<TrackId>{}(TrackId{0x10, AddressType::icao}));
+}
+
+BOOST_AUTO_TEST_CASE(version_header_matches_cmake)
+{
+    BOOST_TEST(std::string(skycue::kVersionString) == SKYCUE_CMAKE_VERSION);
+    BOOST_TEST(std::string(SKYCUE_VERSION_STRING) == SKYCUE_CMAKE_VERSION);
 }

@@ -21,6 +21,8 @@
 #include "web_config.hpp"
 #include "web_server.hpp"
 
+#include <skycue/version.hpp>
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -47,7 +49,7 @@ using namespace skycued;
 
 namespace {
 
-constexpr const char* kVersion = "skycued 0.1.0";
+constexpr const char* kVersion = "skycued " SKYCUE_VERSION_STRING;
 
 std::optional<LogLevel> parseLogLevel(const std::string& s)
 {

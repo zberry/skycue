@@ -1266,6 +1266,15 @@ BOOST_AUTO_TEST_CASE(web_bind_failure_exits_1)
     BOOST_TEST(has(readAll(log), "web: cannot listen on 127.0.0.1:" + std::to_string(busy.port())));
 }
 
+BOOST_AUTO_TEST_CASE(skycued_version_is_cmake_version)
+{
+    TempDir tmp;
+    const std::string log = tmp.path + "/log";
+    const pid_t pid = spawnSkycued({"--version"}, log);
+    BOOST_TEST(waitExit(pid, 5s) == 0);
+    BOOST_TEST(readAll(log) == std::string("skycued ") + SKYCUE_CMAKE_VERSION + "\n");
+}
+
 BOOST_AUTO_TEST_CASE(main_serves_with_overrides)
 {
     TempDir tmp;

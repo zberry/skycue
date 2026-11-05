@@ -85,6 +85,7 @@ if is_on "$system_files"; then
   for line in '[Unit]' '[Service]' '[Install]' Type=simple User=skycue Group=skycue \
               After=network-online.target Wants=network-online.target Restart=on-failure \
               RestartPreventExitStatus=2 ProtectSystem=strict StateDirectory=skycue ReadWritePaths=/var/lib/skycue \
+              ReadOnlyPaths=-/var/lib/skycue/maps \
               ProtectHome=yes PrivateTmp=yes NoNewPrivileges=yes WantedBy=multi-user.target; do
     [ "$(grep -cxF -- "$line" "$u")" = 1 ] || fail "$unit: want exactly one line $line"
   done

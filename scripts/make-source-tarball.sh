@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
 done
 
 version=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$repo/skycue/CMakeLists.txt")
-[ -n "$version" ] || die "cannot read the version from skycue/CMakeLists.txt"
+[ -n "$version" ] || die "cannot read the version from CMakeLists.txt"
 name=skycue-$version
 
 # Name and hash of a pinned source, from its skycue_declare_source line.
@@ -53,7 +53,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 git -C "$repo" archive --format=tar --prefix="$name/" HEAD >"$tmp/src.tar"
-# Left out of the public tarball: skycue/tests/fixtures/README.md says the
+# Left out of the public tarball: tests/fixtures/README.md says the
 # third-party captures in fixtures/raw/ must not ship in release bundles, and
 # the pingstation icd-*.json files are copied from a vendor document with no
 # stated licence. The fuzz seeds cut from them (docs/hardening.md, "Seeds") go

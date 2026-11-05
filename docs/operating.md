@@ -373,7 +373,7 @@ It reads one of two kinds of file:
   record's `t`.
 - `--as json FILE` or `--as cat021 FILE`: a received-stream recording
   (`received-*.jsonl`) or a capture of readsb's JSON port, such as
-  `skycue/tests/fixtures/readsb-sample.jsonl`. Each observation is
+  `tests/fixtures/readsb-sample.jsonl`. Each observation is
   synthesised as a pingStation JSON aircraft object, or as a one-record
   CAT021 edition 2.5 block, stamped with the time it is sent and paced by the
   observation times. Sent-stream records and uplinks are skipped.
@@ -419,10 +419,10 @@ bin/skycued --no-readsb --no-uat --inputs-file sim.inputs.json --config etc/skyc
 # (GPS 3D fix, receiver normal, firmware 1.0.0) and a device marker there.
 bin/skycue-pingsim --udp 127.0.0.1:4000 --as json --loop \
     --status-interval 10 --status-lat 38.9 --status-lon -77.0 \
-    skycue/tests/fixtures/readsb-sample.jsonl &
+    tests/fixtures/readsb-sample.jsonl &
 # CAT021 from the same recording, five times faster.
 bin/skycue-pingsim --udp 127.0.0.1:4001 --as cat021 --speed 5 --loop \
-    skycue/tests/fixtures/readsb-sample.jsonl
+    tests/fixtures/readsb-sample.jsonl
 ```
 
 The fixture's aircraft are around 38.9 N, 77.0 W, so `RECEIVER_LAT` and
@@ -1255,7 +1255,7 @@ already holds the three Natural Earth downloads:
 scripts/make-overlays.sh                                   # needs ogr2ogr (GDAL) on PATH
 scripts/make-overlays.sh --container ghcr.io/osgeo/gdal:ubuntu-small-3.9.3   # ogr2ogr in podman/docker
 scripts/make-overlays.sh --dry-run                         # print the commands only
-cp -r skycue/www/overlays build/stage/share/skycue/www/    # or <prefix>/share/skycue/www/, or MAP_DIR
+cp -r www/overlays build/stage/share/skycue/www/    # or <prefix>/share/skycue/www/, or MAP_DIR
 ```
 
 `make-overlays.sh [--cache DIR] [--out DIR] [--container IMAGE] [--dry-run]`
@@ -1266,7 +1266,7 @@ cache (default `build/naturalearth/`) once, and writes `admin0.json`,
 `admin1.json` and `cities.json` (compact GeoJSON, lines simplified to about
 1 km; about 1 MB in all) and `meta.json` (each file's source, version,
 SHA-256, feature count and size, and when it was made) to the output
-directory (default `skycue/www/overlays/`, git-ignored).
+directory (default `www/overlays/`, git-ignored).
 `SKYCUE_NE_VECTOR_URL` points it at a mirror of the same zip files. The
 offline bundle (`scripts/make-offline-bundle.sh`) carries the directory when
 it exists. skycued serves it like the rest of the page, so a reload picks it
@@ -1546,6 +1546,6 @@ or the offline bundle. Before changing a parser, the daemon's threading or
 anything that runs for days, run the checks in
 [hardening.md](hardening.md): `scripts/run-sanitizers.sh asan|tsan`,
 `scripts/run-fuzz.sh`, `scripts/run-static.sh` and
-`skycue/tests/soak/soak.sh`, with their options, skip rules and how to add a
+`tests/soak/soak.sh`, with their options, skip rules and how to add a
 fuzz harness for a new parser. What the first sweep found and fixed is in
 [hardening-report-2026-11-03.md](hardening-report-2026-11-03.md).

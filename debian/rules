@@ -1,5 +1,5 @@
 #!/usr/bin/make -f
-# skycue: the CMake project in skycue/ (the superbuild at the top is not used here).
+# skycue: the CMake project at the top of this tree.
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
@@ -12,7 +12,7 @@ SKYCUE_TEST_SLOW_FACTOR ?= 1
 SKYCUE_DEB_UNITDIR ?= /usr/lib/systemd/system
 
 %:
-	dh $@ --buildsystem=cmake --sourcedirectory=skycue
+	dh $@ --buildsystem=cmake
 
 # Leaflet and ECharts come from sources/ in the source tarball (no downloads at build time).
 override_dh_auto_configure:

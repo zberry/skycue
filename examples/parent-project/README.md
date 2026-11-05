@@ -57,7 +57,7 @@ pkg-config file is installed.
 ```sh
 cmake -S skycue -B build-lib -DSKYCUE_BUILD_DAEMON=OFF
 cmake --build build-lib && cmake --install build-lib --prefix /path/to/prefix
-cmake -S skycue/examples/parent-project -B build-client \
+cmake -S examples/parent-project -B build-client \
       -DCLIENT_DEMO_FIND_PACKAGE=ON -DCMAKE_PREFIX_PATH=/path/to/prefix
 cmake --build build-client
 ```
@@ -65,7 +65,7 @@ cmake --build build-client
 ## Building and running
 
 ```sh
-cmake -S skycue/examples/parent-project -B build-client \
+cmake -S examples/parent-project -B build-client \
       -DSKYCUE_SOURCE_DIR=/path/to/vendored/skycue   # optional
 cmake --build build-client
 build-client/client_demo --seconds 10                # TCP client to 127.0.0.1:30500

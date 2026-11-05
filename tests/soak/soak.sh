@@ -14,7 +14,7 @@
 #   --interval S    seconds between samples (default 60)
 #   --out DIR       where A.pid, B.pid, A.log, B.log, soak.csv and verdict.txt
 #                   go (default ./soak-<UTC timestamp>)
-#   --fixtures DIR  skycue/tests/fixtures (default: next to this script)
+#   --fixtures DIR  tests/fixtures (default: next to this script)
 #   --growth F      largest RSS growth over the window (default 0.05)
 #   --fd-tolerance N  largest fd count change over the window (default 2)
 #

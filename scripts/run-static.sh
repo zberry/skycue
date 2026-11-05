@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Static analysis of skycue's own sources: clang-tidy (skycue/.clang-tidy)
-# and cppcheck (skycue/cppcheck-suppressions.txt).
+# Static analysis of skycue's own sources: clang-tidy (.clang-tidy)
+# and cppcheck (cppcheck-suppressions.txt).
 #
 #   scripts/run-static.sh [--build-dir DIR] [-j N] [--tidy-only | --cppcheck-only]
 #
 # The tree is configured (not built: nothing is generated) into DIR, default
 # <repo>/build-static, with clang++ and CMAKE_EXPORT_COMPILE_COMMANDS=ON; the
 # files analysed are the translation units in its compile_commands.json under
-# skycue/skycued, skycue/libskycue and skycue/skycue-*/ (not tests/, not
+# skycued, libskycue and skycue-*/ (not tests/, not
 # fuzz/). -j defaults to the number of cores. DIR is run-static's own tree:
 # a directory other than <repo>/build-static that already holds a
 # CMakeCache.txt without the marker file .skycue-static-tree (another build,
@@ -101,7 +101,7 @@ fi
 echo "static: configuring $build_dir with $cxx"
 mkdir -p "$build_dir" || { status=1; summary; }
 : >"$marker" || { status=1; summary; }
-if ! cmake -S "$repo/skycue" -B "$build_dir" -DCMAKE_CXX_COMPILER="$cxx" \
+if ! cmake -S "$repo" -B "$build_dir" -DCMAKE_CXX_COMPILER="$cxx" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DSKYCUE_UI_TESTS=OFF >"$build_dir/configure.log" 2>&1; then
   cat "$build_dir/configure.log" >&2
   echo "static: configure failed" >&2
@@ -112,7 +112,7 @@ db="$build_dir/compile_commands.json"
 [ -f "$db" ] || { echo "static: no $db" >&2; status=1; summary; }
 
 # The translation units to analyse, one per line.
-mapfile -t files < <(python3 -I - "$db" "$repo/skycue" <<'EOF'
+mapfile -t files < <(python3 -I - "$db" "$repo" <<'EOF'
 import json, os, re, sys
 db, src = sys.argv[1], os.path.realpath(sys.argv[2])
 own = re.compile(re.escape(src) + r"/(skycued|libskycue|skycue-[^/]+)/")
@@ -132,10 +132,10 @@ fi
 echo "static: ${#files[@]} translation units"
 
 # count_findings LOG REGEX: the distinct "<file>:<line>:<col>: <kind>: ..."
-# lines in LOG whose file is under skycue/ (each header finding is reported
+# lines in LOG whose file is under the source tree (each header finding is reported
 # once per translation unit that includes it), printed and counted.
 count_findings() {
-  python3 -I - "$1" "$repo/skycue" "$2" <<'EOF'
+  python3 -I - "$1" "$repo" "$2" <<'EOF'
 import os, re, sys
 log, src, kinds = sys.argv[1], os.path.realpath(sys.argv[2]), sys.argv[3]
 line = re.compile(r"^(/[^:]+):(\d+):(\d+): (" + kinds + r"): (.*)$")
@@ -180,8 +180,8 @@ if [ "$have_cppcheck" = 1 ]; then
   log="$build_dir/cppcheck.log"
   echo "static: cppcheck, -j $jobs (log $log)"
   cppcheck --project="$db" --enable=warning,portability --std=c++17 \
-    --suppressions-list="$repo/skycue/cppcheck-suppressions.txt" \
-    --error-exitcode=1 -i "$repo/skycue/tests" -i "$repo/skycue/fuzz" \
+    --suppressions-list="$repo/cppcheck-suppressions.txt" \
+    --error-exitcode=1 -i "$repo/tests" -i "$repo/fuzz" \
     -j "$jobs" --quiet \
     --template='{file}:{line}:{column}: {severity}: {message} [{id}]' >"$log" 2>&1
   rc=$?

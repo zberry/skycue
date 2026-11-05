@@ -27,21 +27,21 @@ Comment: Apache ECharts 5.6.0 is Apache-2.0. The parts it embeds from d3.js
  /usr/share/skycue/www/vendor/echarts/, and the d3.js licence as
  /usr/share/skycue/www/vendor/echarts/licenses/LICENSE-d3.
 
-Files: skycue/tests/fixtures/fisb/*
+Files: tests/fixtures/fisb/*
 Copyright: 2020-2021 Michael Barnes
 License: BSD-2-Clause-Patent
 Comment: fisb-decode's test group tg30.978 and the files skycue derives from
  it (received-tg30.jsonl, tg30.golden.jsonl); the full licence text is also
- in skycue/tests/fixtures/fisb/LICENSE.fisb-decode. Test data only; not
+ in tests/fixtures/fisb/LICENSE.fisb-decode. Test data only; not
  installed.
 
-Files: skycue/tests/fixtures/fisb/gen_*.py
-       skycue/tests/fixtures/fisb/README.md
+Files: tests/fixtures/fisb/gen_*.py
+       tests/fixtures/fisb/README.md
 Copyright: 2026 skycue maintainers
 License: Apache-2.0
 Comment: skycue's own generator scripts and notes for the FIS-B fixtures.
 
-Files: skycue/tests/fixtures/fisb/received-with-uplinks.jsonl
+Files: tests/fixtures/fisb/received-with-uplinks.jsonl
 Copyright: 2015 Oliver Jowett
            2019 FlightAware LLC
 License: BSD-2-Clause
@@ -50,7 +50,7 @@ Comment: The 704 uplinks of dump978's sample-data.txt.gz, re-timed by
  lines. The dump978 sample itself is not in the source tarball. Test data
  only; not installed.
 
-Files: skycue/tests/fixtures/fisb/pireps.txt
+Files: tests/fixtures/fisb/pireps.txt
 Copyright: 2015 Christopher Young
            2020-2021 Michael Barnes
            2015 Oliver Jowett
@@ -58,7 +58,7 @@ Copyright: 2015 Christopher Young
 License: BSD-3-Clause and BSD-2-Clause-Patent and BSD-2-Clause
 Comment: PIREP texts decoded by skycue-fisb: lines 1-14 from a stratux UAT
  log (BSD-3-Clause), 15-17 from tg30.978 (BSD-2-Clause-Patent), 18-19 from
- the dump978 sample (BSD-2-Clause); skycue/tests/fixtures/README.md gives
+ the dump978 sample (BSD-2-Clause); tests/fixtures/README.md gives
  the origin of each line. Test data only; not installed.
 
 License: Apache-2.0
@@ -126,7 +126,7 @@ License: BSD-3-Clause
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Comment: Text of the d3.js licence (licenses/LICENSE-d3 in the ECharts
  tarball). The stratux licence reads the same with "the Christopher Young" in
- place of "the author"; its verbatim text is in skycue/tests/fixtures/README.md.
+ place of "the author"; its verbatim text is in tests/fixtures/README.md.
 
 License: BSD-2-Clause-Patent
  Redistribution and use in source and binary forms, with or without

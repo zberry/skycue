@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Builds the libFuzzer harnesses in skycue/fuzz and runs them.
+# Builds the libFuzzer harnesses in fuzz and runs them.
 #
 #   scripts/run-fuzz.sh [TARGET|all] [--seconds N] [--build-dir DIR] [--bin-dir DIR]
 #                       [--work DIR] [--findings DIR] [--canary] [--clean]
 #
 # TARGET is a harness name (readsb_line, ...; fuzz_<name> in the tree) or all
 # (the default). Defaults: --seconds 600, --build-dir <repo>/build-fuzz,
-# --work <build>/fuzz-work, --findings <repo>/skycue/fuzz/findings.
+# --work <build>/fuzz-work, --findings <repo>/fuzz/findings.
 #
 # Without --bin-dir the tree is configured once with clang++ and
 # -DSKYCUE_FUZZ=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo and only the fuzz_*
@@ -14,7 +14,7 @@
 # (ctest fuzz_smoke does this).
 #
 # Each target runs on the corpus <work>/corpus/<target> (its seeds from
-# skycue/fuzz/seeds/<target>/ copied in when empty) with artefacts in
+# fuzz/seeds/<target>/ copied in when empty) with artefacts in
 # <work>/artifacts/<target>/ (emptied first); each artefact is copied to
 # <findings>/<target>-<name>. Every harness gets SKYCUE_FUZZ_WORK=<work> (a
 # harness that needs files makes them under $SKYCUE_FUZZ_WORK/<target>/),
@@ -81,7 +81,7 @@ case "$seconds" in
 esac
 [ -n "$build_dir" ] || build_dir="$repo/build-fuzz"
 [ -n "$work" ] || work="$build_dir/fuzz-work"
-[ -n "$findings" ] || findings="$repo/skycue/fuzz/findings"
+[ -n "$findings" ] || findings="$repo/fuzz/findings"
 
 # Refuse --clean on a build dir that is not a CMake tree before doing anything,
 # so a mistyped --build-dir is never deleted.
@@ -148,7 +148,7 @@ if [ -z "$bin_dir" ]; then
   fi
   bin_dir="$build_dir/fuzz"
   if [ ! -f "$bin_dir/targets.txt" ]; then
-    echo "run-fuzz: $bin_dir/targets.txt missing (configure did not add skycue/fuzz)" >&2
+    echo "run-fuzz: $bin_dir/targets.txt missing (configure did not add fuzz)" >&2
     exit 1
   fi
   build_targets=()
@@ -158,7 +158,7 @@ if [ -z "$bin_dir" ]; then
   cmake --build "$build_dir" -j "$jobs" --target "${build_targets[@]}" || exit 1
 fi
 
-# The harnesses in bin_dir: targets.txt (written by skycue/fuzz/CMakeLists.txt),
+# The harnesses in bin_dir: targets.txt (written by fuzz/CMakeLists.txt),
 # else every fuzz_* executable there.
 known=()
 if [ -f "$bin_dir/targets.txt" ]; then
@@ -212,7 +212,7 @@ for t in "${targets[@]}"; do
     status=1
     continue
   fi
-  seeds="$repo/skycue/fuzz/seeds/$t"
+  seeds="$repo/fuzz/seeds/$t"
   if [ "$canary" = 1 ]; then
     corpus="$work/canary-corpus/$t"
     rm -rf "$corpus"

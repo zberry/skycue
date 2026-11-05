@@ -8,12 +8,12 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   fail "LICENSE is not the Apache-2.0 text"
 grep -q "Apache License, Version 2.0" "$here/NOTICE" || fail "NOTICE does not state skycue's licence"
 for w in Leaflet ECharts D3 "Natural Earth"; do grep -q "$w" "$here/NOTICE" || fail "NOTICE lacks $w"; done
-# The path skycue/CMakeLists.txt installs the D3 licence to.
+# The path CMakeLists.txt installs the D3 licence to.
 grep -q "www/vendor/echarts/licenses/LICENSE-d3" "$here/NOTICE" || fail "NOTICE does not name the installed LICENSE-d3 path"
 # deb822 fields with their continuation lines joined, one field per line.
 unfold() { awk '/^[ \t]/ { sub(/^[ \t]+/, " "); buf = buf $0; next } { if (buf != "") print buf; buf = $0 } END { if (buf != "") print buf }' "$1"; }
-v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/skycue/CMakeLists.txt")
-[ -n "$v" ] || fail "no version in skycue/CMakeLists.txt"
+v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/CMakeLists.txt")
+[ -n "$v" ] || fail "no version in CMakeLists.txt"
 id='skycue maintainers <skycue@users.noreply.github.com>'
 [ -f "$here/debian/control" ] || fail "debian/control missing"
 # The committed changelog's top entry is <v>-1. A package build prepends a <v>-1~debNNuM

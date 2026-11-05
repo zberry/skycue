@@ -66,8 +66,8 @@ for p in "${pkgs[@]}"; do
   abs+=("$(readlink -f "$p")")
 done
 
-v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$repo/skycue/CMakeLists.txt")
-[ -n "$v" ] || { echo "verify-package: no project(skycue VERSION ...) in skycue/CMakeLists.txt" >&2; exit 1; }
+v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$repo/CMakeLists.txt")
+[ -n "$v" ] || { echo "verify-package: no project(skycue VERSION ...) in CMakeLists.txt" >&2; exit 1; }
 source=${source:-$repo/dist/skycue-$v.tar.gz}
 [ -f "$source" ] || {
   echo "verify-package: no source tarball $source (make it with scripts/make-source-tarball.sh -o dist, or pass --source)" >&2

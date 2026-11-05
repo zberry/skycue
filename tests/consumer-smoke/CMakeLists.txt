@@ -1,8 +1,8 @@
 # A minimal libskycue consumer, built by consumer_smoke.sh in each supported
 # way:
-#   -DSKYCUE_CONSUMER_MODE=subdir  -DSKYCUE_LIB_DIR=<skycue/libskycue>
+#   -DSKYCUE_CONSUMER_MODE=subdir  -DSKYCUE_LIB_DIR=<libskycue>
 #   -DSKYCUE_CONSUMER_MODE=package (with CMAKE_PREFIX_PATH at an install)
-#   -DSKYCUE_CONSUMER_MODE=shared  -DSKYCUE_LIB_DIR=<skycue/libskycue>: as
+#   -DSKYCUE_CONSUMER_MODE=shared  -DSKYCUE_LIB_DIR=<libskycue>: as
 #     subdir with SKYCUE_INSTALL=OFF, linking libskycue into a SHARED library
 #     (which needs it to be position-independent) that the program uses.
 cmake_minimum_required(VERSION 3.16)
@@ -12,7 +12,7 @@ set(SKYCUE_CONSUMER_MODE "package" CACHE STRING "How to obtain libskycue: subdir
 
 if(SKYCUE_CONSUMER_MODE STREQUAL "subdir" OR SKYCUE_CONSUMER_MODE STREQUAL "shared")
   if(NOT SKYCUE_LIB_DIR)
-    message(FATAL_ERROR "subdir mode needs -DSKYCUE_LIB_DIR=<path to skycue/libskycue>")
+    message(FATAL_ERROR "subdir mode needs -DSKYCUE_LIB_DIR=<path to libskycue>")
   endif()
   add_subdirectory(${SKYCUE_LIB_DIR} skycue-lib)
 elseif(SKYCUE_CONSUMER_MODE STREQUAL "package")

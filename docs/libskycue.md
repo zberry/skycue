@@ -23,7 +23,7 @@ but built as position-independent code, so it can go into a shared library
 (a plugin) as well as an executable. CMake 3.16 or newer is enough for a
 consumer.
 
-**As a subdirectory** (copy or submodule `skycue/libskycue` into your tree;
+**As a subdirectory** (copy or submodule `libskycue` into your tree;
 it finds Boost and Threads itself if your project has not):
 
 ```cmake
@@ -51,14 +51,14 @@ target_link_libraries(cueing PRIVATE skycue::skycue)
 ```
 
 Both modes, and linking into a shared library, are exercised by
-`skycue/tests/consumer-smoke/` on every test run.
+`tests/consumer-smoke/` on every test run.
 
 ## Using skycue from your own CMake tree
 
 When your project vendors the whole `skycue/` directory (rather than only
-`skycue/libskycue`), add it with `add_subdirectory()` and switch off
+`libskycue`), add it with `add_subdirectory()` and switch off
 everything but the library. The worked example is
-[`skycue/examples/parent-project/`](../skycue/examples/parent-project/README.md):
+[`examples/parent-project/`](../examples/parent-project/README.md):
 a separate project (`client_demo`, CMake 3.25 minimum, its own C++17 and
 `-Wall -Wextra -Werror` settings) that is not part of the skycue build.
 
@@ -100,7 +100,7 @@ full table only at the sender's next periodic keyframe.
 
 ## A complete minimal example
 
-This is `skycue/examples/minimal_consumer.cpp`, built with the skycue
+This is `examples/minimal_consumer.cpp`, built with the skycue
 project (`SKYCUE_BUILD_EXAMPLES`, default `ON` when skycue is the top-level
 project) so it keeps compiling:
 
@@ -392,7 +392,7 @@ A Hello's keyframe interval (also clamped to at least 10 ms) replaces
   `LOCAL-DROP` for a drop the client made itself). Run it with the same
   transport and address as your program to see what you should be getting;
   `--timeout S` exits 3 if nothing arrives. Its source,
-  `skycue/skycue-dump/main.cpp`, shows poll mode and `onFrame` in use.
+  `skycue-dump/main.cpp`, shows poll mode and `onFrame` in use.
 
 ## Compatibility promises
 

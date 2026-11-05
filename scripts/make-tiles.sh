@@ -6,7 +6,7 @@
 #   BBOX  west,south,east,north in degrees, e.g. -10,35,30,60
 #   MINZ, MAXZ  zoom range, 0..18 (see scripts/make-tiles.md for sizes)
 #   --name NAME  the region's name in meta.json (default: default)
-#   --out DIR    tile directory (default: skycue/www/tiles in this repo)
+#   --out DIR    tile directory (default: www/tiles in this repo)
 #   --cache DIR  where the raster is kept (default: build/naturalearth)
 #   --container IMAGE  run gdal_translate and gdal2tiles.py in this GDAL
 #                image with podman (or docker), e.g. the one
@@ -55,7 +55,7 @@ EOF
   exit 3
 }
 
-out="$repo/skycue/www/tiles"
+out="$repo/www/tiles"
 cache="$repo/build/naturalearth"
 dry=0
 metaonly=0

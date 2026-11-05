@@ -4,9 +4,10 @@
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 for f in leaflet-1.9.4.tgz echarts-5.6.0.tgz; do
-  [ -f "$here/sources/$f" ] || { echo "SKIP test_source_tarball: sources/$f missing"; exit 0; }
+  [ -f "$here/sources/$f" ] || { echo "SKIP test_source_tarball: sources/$f missing"; exit 77; }
 done
-v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/skycue/CMakeLists.txt")
+v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/CMakeLists.txt")
+[ -e "$here/.git" ] || { echo "SKIP test_source_tarball: not a git checkout (make-source-tarball.sh archives HEAD)"; exit 77; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 bash "$here/scripts/make-source-tarball.sh" -o "$tmp/a" >/dev/null 2>&1 || { echo "FAIL: first run"; exit 1; }
 bash "$here/scripts/make-source-tarball.sh" -o "$tmp/b" >/dev/null 2>&1 || { echo "FAIL: second run"; exit 1; }
@@ -48,9 +49,9 @@ tar -xzf "$t" -C "$tmp"
 # removed and this checkout's script, the library tarballs copied in as 0600.
 c=$tmp/clone
 git clone -q --depth 1 "file://$here" "$c" 2>/dev/null || { echo "FAIL: cannot clone HEAD"; exit 1; }
-git -C "$c" rm -rq skycue/tests/fixtures/raw skycue/tests/fixtures/pingstation/icd-status.json \
-  skycue/tests/fixtures/pingstation/icd-status-verbatim.json skycue/tests/fixtures/pingstation/icd-traffic-1090.json \
-  skycue/fuzz/seeds/web/seed-13.json || { echo "FAIL: git rm in the clone"; exit 1; }
+git -C "$c" rm -rq tests/fixtures/raw tests/fixtures/pingstation/icd-status.json \
+  tests/fixtures/pingstation/icd-status-verbatim.json tests/fixtures/pingstation/icd-traffic-1090.json \
+  fuzz/seeds/web/seed-13.json || { echo "FAIL: git rm in the clone"; exit 1; }
 cp "$here/scripts/make-source-tarball.sh" "$c/scripts/" && git -C "$c" add scripts/make-source-tarball.sh
 git -C "$c" -c user.name=test -c user.email=test@invalid commit -qm "drop restricted files" ||
   { echo "FAIL: commit in the clone"; exit 1; }

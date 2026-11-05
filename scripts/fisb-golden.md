@@ -1,15 +1,15 @@
-# The tg30 golden output (`skycue/tests/fixtures/fisb/tg30.golden.jsonl`)
+# The tg30 golden output (`tests/fixtures/fisb/tg30.golden.jsonl`)
 
 ## What it is
 
 `tg30.golden.jsonl` is the output of
 
-    skycue-fisb --json --ref-date 2020-10-30 skycue/tests/fixtures/fisb/tg30.978
+    skycue-fisb --json --ref-date 2020-10-30 tests/fixtures/fisb/tg30.978
 
 (1772 lines, 1,729,462 bytes): every FIS-B store event, in the order the store
 emits it. It holds 1088 `fisb_text`, 562 `fisb_twgo`, 5 `fisb_radar`,
 28 `fisb_raster` and 89 `fisb_expired` records. The test `fisb_cli`
-(`skycue/tests/test_fisb_cli.sh`) compares a fresh run with it byte for byte.
+(`tests/test_fisb_cli.sh`) compares a fresh run with it byte for byte.
 Every time in the file, `received` included, comes from the input's `t=`
 stamps, so two runs are byte-identical. `--ref-date` does not matter for tg30, because every line has
 a `t=`.
@@ -43,7 +43,7 @@ cp -r "$FD/fisb" "$W/"                    # work on a copy of the package
 sed -i 's/^CALCULATE_RSR = True/CALCULATE_RSR = False/' "$W/fisb/level0/level0Config.py"
 cd "$W"                                   # the levels write LEVELn.ERR into the current directory
 export PYTHONPATH="$W"
-python3 fisb/level0/level0.py < skycue/tests/fixtures/fisb/tg30.978 > l0.jsonl   # path to this repo's fixture
+python3 fisb/level0/level0.py < tests/fixtures/fisb/tg30.978 > l0.jsonl   # path to this repo's fixture
 python3 fisb/level1/level1.py < l0.jsonl > l1.jsonl
 python3 fisb/level2/level2.py < l1.jsonl > l2.jsonl
 ```
@@ -58,14 +58,14 @@ no counterpart in our store.
 ## The check
 
 ```sh
-python3 -I scripts/fisb-golden-check.py "$W/l2.jsonl" skycue/tests/fixtures/fisb/tg30.golden.jsonl --examples 4
+python3 -I scripts/fisb-golden-check.py "$W/l2.jsonl" tests/fixtures/fisb/tg30.golden.jsonl --examples 4
 ```
 
 The script first checks the golden against the store's own TWGO rules, and
 `--golden-only` runs just that part, without fisb-decode:
 
 ```sh
-python3 -I scripts/fisb-golden-check.py --golden-only skycue/tests/fixtures/fisb/tg30.golden.jsonl
+python3 -I scripts/fisb-golden-check.py --golden-only tests/fixtures/fisb/tg30.golden.jsonl
 ```
 
 no `fisb_twgo` record whose report year is not its data clock's year (562
@@ -241,9 +241,9 @@ are unchanged: 381, 265, 175, 3 and 1.
 After an intended change to the decoder, store or JSON writers:
 
 ```sh
-skycue-fisb --json --ref-date 2020-10-30 skycue/tests/fixtures/fisb/tg30.978 \
-  > skycue/tests/fixtures/fisb/tg30.golden.jsonl
-python3 -I scripts/fisb-golden-check.py "$W/l2.jsonl" skycue/tests/fixtures/fisb/tg30.golden.jsonl
+skycue-fisb --json --ref-date 2020-10-30 tests/fixtures/fisb/tg30.978 \
+  > tests/fixtures/fisb/tg30.golden.jsonl
+python3 -I scripts/fisb-golden-check.py "$W/l2.jsonl" tests/fixtures/fisb/tg30.golden.jsonl
 ```
 
 Then review the diff and adjudicate every new difference here.

@@ -19,7 +19,7 @@ import sys
 ID_RE = re.compile(r"^[A-Z0-9]{2,5}$")
 SAME_PLACE_NM = 1.0
 # skycued reads at most this many LOCATIONS_FILE ids (kMaxOperatorRows in
-# skycue/skycued/src/fisb/location_index.hpp; the test pins the two).
+# skycued/src/fisb/location_index.hpp; the test pins the two).
 DAEMON_MAX_ROWS = 250000
 USAGE = "usage: make-locations.py AIRPORTS_CSV NAVAIDS_CSV [-o OUT]\n"
 EARTH_NM = 3440.065

@@ -22,8 +22,8 @@ set -u
 skycued=$1 fixtures=$2 www=$3 pingsim=$4
 shift 4
 here=$(cd "$(dirname "$0")" && pwd)
-shots_dir=${SKYCUE_UI_SCREENSHOTS:-"$here/../../../.superpowers/sdd/2026-11-01-skycue-ui/screenshots"}
-fisb_shots_dir=${SKYCUE_FISB_SCREENSHOTS:-"$here/../../../.superpowers/sdd/2026-11-02-skycue-fisb/screenshots"}
+shots_dir=${SKYCUE_UI_SCREENSHOTS:-"$www/../ui-screenshots"}
+fisb_shots_dir=${SKYCUE_FISB_SCREENSHOTS:-"$www/../fisb-screenshots"}
 
 # A whole-test skip exits 77, which ctest reports as skipped (SKIP_RETURN_CODE).
 node_modules=${SKYCUE_UI_NODE_MODULES:-$here/node_modules}

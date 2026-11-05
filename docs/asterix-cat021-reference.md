@@ -428,7 +428,7 @@ records have no lengths. Therefore:
 
 ## 5. Mapping to skycued's `TrackObservation`
 
-`TrackObservation` is defined in `skycue/skycued/src/observation.hpp`, merging happens in
+`TrackObservation` is defined in `skycued/src/observation.hpp`, merging happens in
 `track_table.hpp`, and the identity types are in `libskycue/include/skycue/types.hpp`.
 
 | Field | From | Notes |

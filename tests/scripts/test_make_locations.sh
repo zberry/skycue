@@ -8,7 +8,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: test_make_locations: $*"; [ -f "$tmp/out" ] && cat "$tmp/out"; [ -f "$tmp/err" ] && cat "$tmp/err"; exit 1; }
 [ -f "$script" ] || fail "scripts/make-locations.py missing"
-command -v python3 >/dev/null || { echo "SKIP test_make_locations: no python3"; exit 0; }
+command -v python3 >/dev/null || { echo "SKIP test_make_locations: no python3"; exit 77; }
 
 cat > "$tmp/airports.csv" <<'EOF'
 "id","ident","type","name","latitude_deg","longitude_deg","elevation_ft","continent","iso_country","iso_region","municipality","scheduled_service","gps_code","iata_code","local_code","home_link","wikipedia_link","keywords"
@@ -79,7 +79,7 @@ run --help
 grep -q "AIRPORTS_CSV NAVAIDS_CSV" "$tmp/out" || fail "--help: no usage on stdout"
 
 # The cap the script warns at is skycued's (kMaxOperatorRows).
-hpp="$here/skycue/skycued/src/fisb/location_index.hpp"
+hpp="$here/skycued/src/fisb/location_index.hpp"
 daemon_cap=$(sed -nE 's/^constexpr std::size_t kMaxOperatorRows = ([0-9]+);.*/\1/p' "$hpp")
 script_cap=$(sed -nE 's/^DAEMON_MAX_ROWS = ([0-9]+).*/\1/p' "$script")
 [ -n "$daemon_cap" ] && [ "$daemon_cap" = "$script_cap" ] || fail "cap: script $script_cap, skycued $daemon_cap"

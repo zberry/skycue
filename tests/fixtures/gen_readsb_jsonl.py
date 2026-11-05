@@ -5,7 +5,7 @@ output port (--net-json-port), one aircraft object per line with a leading
 
 Regenerate the committed fixture with (from the repository root):
 
-    python3 -I skycue/tests/fixtures/gen_readsb_jsonl.py > skycue/tests/fixtures/readsb-sample.jsonl
+    python3 -I tests/fixtures/gen_readsb_jsonl.py > tests/fixtures/readsb-sample.jsonl
 
 Standard library only and deterministic (random.seed(1)), so rerunning gives a
 byte-identical file.

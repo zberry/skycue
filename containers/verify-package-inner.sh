@@ -84,12 +84,12 @@ print("ok %d" % n if n >= int(sys.argv[2] if len(sys.argv) > 2 else 1) else "%d 
 [ -f /src.tar.gz ] || fail "no source tarball mounted at /src.tar.gz"
 command -v curl >/dev/null || fail "no curl in the image"
 # Under /work, not /tmp: the unit's PrivateTmp would hide /tmp from the daemon.
-if [ ! -d /work/skycue ]; then
+if [ ! -f /work/CMakeLists.txt ]; then
   mkdir -p /work
   tar -C /work --strip-components=1 -xzf /src.tar.gz || fail "unpacking /src.tar.gz"
   chmod -R a+rX /work
 fi
-fixture=/work/skycue/tests/fixtures/readsb-sample.jsonl
+fixture=/work/tests/fixtures/readsb-sample.jsonl
 [ -s "$fixture" ] || fail "no readsb fixture in the tarball"
 
 checks() {
@@ -196,7 +196,7 @@ checks() {
 
   # 8. A dev package: the parent project against the installed libskycue.
   if [ "$DEV" = 1 ]; then
-    cmake -S /work/skycue/examples/parent-project -B /tmp/pp -DCLIENT_DEMO_FIND_PACKAGE=ON \
+    cmake -S /work/examples/parent-project -B /tmp/pp -DCLIENT_DEMO_FIND_PACKAGE=ON \
       -DCLIENT_DEMO_WERROR=OFF || fail "8 parent project: configure"
     grep -q '^skycue_DIR:PATH=/usr/lib' /tmp/pp/CMakeCache.txt ||
       { grep '^skycue_DIR' /tmp/pp/CMakeCache.txt >&2; fail "8 parent project did not find the installed skycue"; }

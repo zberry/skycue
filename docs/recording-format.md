@@ -88,7 +88,7 @@ datagram is stored the same way, as the hex of its text. Each line is exactly:
 `t` is skycued's receive time (UTC, milliseconds), `transport` is `udp`,
 `tcp_connect` or `tcp_listen`, and `hex` is the bytes as received, lowercase. Readers
 accept the keys in any order and uppercase hex, and refuse a line whose `input` is not
-valid UTF-8 (`parseCaptureLine` in `skycue/skycued/src/asterix/capture_line.hpp`).
+valid UTF-8 (`parseCaptureLine` in `skycued/src/asterix/capture_line.hpp`).
 
 `skycue-dump --capture FILE` prints a capture with its CAT021 records decoded,
 and `skycue-pingsim --capture FILE --udp HOST:PORT` (or `--tcp`, `--tcp-listen`)
@@ -268,7 +268,7 @@ time,event,hex,addr_type,source,pos_time,lat,lon,on_ground,alt_is_geom,alt_baro_
 `ReplaySource` reads a received-stream JSONL file and rebuilds each `obs` record from the
 fields above (`raw` is carried along but never parsed, so hand-edited recordings work).
 A line that is instead a readsb JSON-port aircraft object (a numeric `"now"` and no
-`"time"`, as in `skycue/tests/fixtures/readsb-sample.jsonl`) is parsed as readsb output,
+`"time"`, as in `tests/fixtures/readsb-sample.jsonl`) is parsed as readsb output,
 so a plain capture of readsb's JSON port replays as well.
 `"time"` becomes the observation's receive time. A record needs a valid `"time"` and
 `hex`; any other key may be left out, but a key that is present must have the right type

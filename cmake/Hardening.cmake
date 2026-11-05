@@ -16,7 +16,7 @@ else()
 endif()
 
 option(SKYCUE_FUZZ
-  "Build the libFuzzer harnesses in skycue/fuzz (clang only; run with scripts/run-fuzz.sh)" OFF)
+  "Build the libFuzzer harnesses in fuzz (clang only; run with scripts/run-fuzz.sh)" OFF)
 if(SKYCUE_FUZZ)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "SKYCUE_FUZZ=ON needs clang (CMAKE_CXX_COMPILER_ID is ${CMAKE_CXX_COMPILER_ID})")

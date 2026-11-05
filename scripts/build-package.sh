@@ -16,7 +16,7 @@
 # is no timeout here. SKYCUE_TEST_SLOW_FACTOR (default 4 emulated, else 1)
 # scales the test timeouts of the build's ctest run.
 # A --source tarball named skycue-<version>.tar.gz must be the release in
-# skycue/CMakeLists.txt. The Debian revision carries the release:
+# CMakeLists.txt. The Debian revision carries the release:
 # skycue_<v>-1~deb12u1_<arch>.deb on Debian 12, ~deb13u1 on Debian 13 (the
 # inner script adds that changelog entry in its copy of the tree).
 # --dry-run prints each podman command as "would run: ..." and runs none.
@@ -73,8 +73,8 @@ EOF
 fi
 
 repo=$(dirname "$(dirname "$(readlink -f "$0")")")
-v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$repo/skycue/CMakeLists.txt")
-[ -n "$v" ] || { echo "build-package: no project(skycue VERSION ...) in skycue/CMakeLists.txt" >&2; exit 1; }
+v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$repo/CMakeLists.txt")
+[ -n "$v" ] || { echo "build-package: no project(skycue VERSION ...) in CMakeLists.txt" >&2; exit 1; }
 
 # run CMD...: runs CMD, or with --dry-run prints it.
 run() {
@@ -97,7 +97,7 @@ if [ -n "$source" ]; then
   case $(basename "$tarball") in
     skycue-*.tar.gz) tv=$(basename "$tarball" .tar.gz); tv=${tv#skycue-}
       if [[ $tv =~ ^[0-9][0-9.]*$ ]] && [ "$tv" != "$v" ]; then
-        echo "build-package: $source is release $tv but skycue/CMakeLists.txt is $v" >&2
+        echo "build-package: $source is release $tv but CMakeLists.txt is $v" >&2
         exit 2
       fi ;;
   esac

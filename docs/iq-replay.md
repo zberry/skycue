@@ -10,7 +10,7 @@ demodulator, decoder, skycued, cues on the wire.
 There are two sources of IQ files:
 
 - **`skycue-iqgen`** synthesises CU8 files from the recordings already in
-  `skycue/tests/fixtures/raw/`. You get exact ground truth and any length you
+  `tests/fixtures/raw/`. You get exact ground truth and any length you
   want.
 - **`scripts/fetch-iq-samples.sh`** fetches one public off-air 1090 MHz
   capture (Porto, Zenodo 23342598, CC BY 4.0) and resamples it for readsb.
@@ -144,13 +144,13 @@ These are counted as `unplaced_unclean`, not failed.
 
 ```sh
 # 1090: 5 s of the bundled Mode S capture, starting 1 s in
-bin/skycue-iqgen modes skycue/tests/fixtures/raw/modes-120s.csv.gz \
+bin/skycue-iqgen modes tests/fixtures/raw/modes-120s.csv.gz \
   --skip-seconds 1 --duration 5 -o /data/iq/sample.1090.cu8
 
 # 978: 5 s of the bundled UAT sample, and the longer stratux log
-bin/skycue-iqgen uat skycue/tests/fixtures/raw/uat-sample.txt.gz \
+bin/skycue-iqgen uat tests/fixtures/raw/uat-sample.txt.gz \
   --duration 5 -o /data/iq/sample.978.cu8
-bin/skycue-iqgen uat skycue/tests/fixtures/raw/stratux-uat-2015.log.gz \
+bin/skycue-iqgen uat tests/fixtures/raw/stratux-uat-2015.log.gz \
   --duration 60 -o /data/iq/stratux.978.cu8
 ```
 

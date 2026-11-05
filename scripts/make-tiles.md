@@ -4,7 +4,7 @@ The web UI (see `docs/operating.md`, "The web UI") works without tiles: it
 draws a plain dark background with a 1°/5° graticule, the range and
 elevation rings and a scale bar. Tiles add a coastline, terrain shading and
 land cover underneath. They are optional, never fetched at run time, and
-not part of the repository (`skycue/www/tiles/` is git-ignored).
+not part of the repository (`www/tiles/` is git-ignored).
 
 ## Making them (connected machine)
 
@@ -25,7 +25,7 @@ scripts/make-tiles.sh -10,35,30,60 0 8 --container ghcr.io/osgeo/gdal:ubuntu-sma
 2. Crops it to BBOX with `gdal_translate -projwin`.
 3. Cuts XYZ tiles with `gdal2tiles.py --xyz -z MINZ-MAXZ` into a staging
    directory in the cache (`stage-NAME`).
-4. Merges them into the output directory (default `skycue/www/tiles/`),
+4. Merges them into the output directory (default `www/tiles/`),
    laid out as `tiles/{z}/{x}/{y}.png`, which is what the page requests,
    with `scripts/tiles-merge.py`: a tile the directory does not have yet is
    moved in; a tile it already has keeps its pixels where they are opaque
@@ -126,13 +126,13 @@ go beyond 8.
 
 ## Taking them to the receiver
 
-`scripts/make-offline-bundle.sh` adds `skycue/www/tiles/` to the bundle when
+`scripts/make-offline-bundle.sh` adds `www/tiles/` to the bundle when
 it exists, prints its size, and warns when it is over 500 MB. On the
 receiver the build does not install tiles; after building, copy them next to
 the installed UI:
 
 ```sh
-cp -r skycue/www/tiles build/stage/share/skycue/www/     # or <prefix>/share/skycue/www/
+cp -r www/tiles build/stage/share/skycue/www/     # or <prefix>/share/skycue/www/
 ```
 
 skycued reads the directory on each `/api/tiles-available` request, so a

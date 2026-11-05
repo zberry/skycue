@@ -28,18 +28,18 @@ is not 0.
 Suppressions, each with its reason beside it. Today there are the four
 cppcheck entries and 45 clang-tidy `NOLINT` comments in the source
 (`grep -rc NOLINT skycue/ | awk -F: '{s+=$2} END{print s}'`), plus the
-checks turned off in `skycue/.clang-tidy`; TSan, LSan and fuzzing need
+checks turned off in `.clang-tidy`; TSan, LSan and fuzzing need
 none:
 
-- TSan: `skycue/tests/sanitizer/tsan.supp`, LSan:
-  `skycue/tests/sanitizer/lsan.supp`, in the sanitizers' own format
+- TSan: `tests/sanitizer/tsan.supp`, LSan:
+  `tests/sanitizer/lsan.supp`, in the sanitizers' own format
   (`race:<function or file>`, `leak:<function or library>`), one entry per
   line with a `# <reason>` line above it. The runner passes the file at test
   time when it exists (no reconfigure). Neither file exists.
 - clang-tidy: inline `// NOLINTNEXTLINE(<check>): <reason>`; a check turned
-  off in `skycue/.clang-tidy` has its reason there.
+  off in `.clang-tidy` has its reason there.
 - cppcheck: `<id>:<file>` under a `# <reason>` line in
-  `skycue/cppcheck-suppressions.txt`, no line number (below); no inline
+  `cppcheck-suppressions.txt`, no line number (below); no inline
   cppcheck suppressions.
 - Fuzzing has no suppressions: a finding is fixed and becomes a regression
   test.
@@ -48,7 +48,7 @@ none:
 
 ### Build options
 
-`skycue/cmake/Hardening.cmake` adds two cache options to the skycue
+`cmake/Hardening.cmake` adds two cache options to the skycue
 subproject:
 
 - `SKYCUE_SANITIZE`: `OFF` (default), `address,undefined` or `thread`.
@@ -61,17 +61,17 @@ subproject:
 - `SKYCUE_TEST_SLOW_FACTOR`: empty (default) means 4 in a sanitizer or fuzz
   build and 1 otherwise. In an instrumented build, and in any build where
   it is set (a slow or emulated build machine), every test in
-  `skycue/tests` and `skycue/examples` gets its ctest `TIMEOUT` (1500 s when it has none)
+  `tests` and `examples` gets its ctest `TIMEOUT` (1500 s when it has none)
   multiplied by the factor and `SKYCUE_TEST_SLOW=<factor>` in its
   environment. The C++ tests scale their upper-bound waits with
-  `slow()` from `skycue/tests/test_slow.hpp` (the shared `kWait`), and the
+  `slow()` from `tests/test_slow.hpp` (the shared `kWait`), and the
   Playwright config scales its `timeout` and `expect.timeout`. A check that
   something did *not* happen within a time is not scaled.
 
 CMake sets no `*_OPTIONS` variable and no suppression file. The sanitizer
 environment is exported by `scripts/run-sanitizers.sh` at test time and ctest
 passes it to every test, so a suppression file added later
-(`skycue/tests/sanitizer/tsan.supp`, `skycue/tests/sanitizer/lsan.supp`, each
+(`tests/sanitizer/tsan.supp`, `tests/sanitizer/lsan.supp`, each
 entry with a one-line reason) is used without reconfiguring.
 
 ### Running
@@ -122,10 +122,10 @@ also reads `UBSAN_OPTIONS`, and its `log_path` would win over
 # asan
 ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:log_path=<build>/sanitizer-logs/asan
 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:log_path=<build>/sanitizer-logs/ubsan
-LSAN_OPTIONS=suppressions=skycue/tests/sanitizer/lsan.supp   # only when that file exists
+LSAN_OPTIONS=suppressions=tests/sanitizer/lsan.supp   # only when that file exists
 # tsan
 TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1:log_path=<build>/sanitizer-logs/tsan
-#   plus :suppressions=skycue/tests/sanitizer/tsan.supp when that file exists
+#   plus :suppressions=tests/sanitizer/tsan.supp when that file exists
 # both
 SKYCUE_UI_SCREENSHOTS=<build>/ui-shots
 SKYCUE_FISB_SCREENSHOTS=<build>/ui-shots
@@ -144,7 +144,7 @@ counts files, so this changes nothing but the name.
 
 ### The canary
 
-`--canary` builds `sanitizer_canary` (`skycue/tests/sanitizer/canary.cpp`,
+`--canary` builds `sanitizer_canary` (`tests/sanitizer/canary.cpp`,
 `EXCLUDE_FROM_ALL`) and runs it under the same environment. Under ASan +
 UBSan its `main` forks two children, one per sanitizer, since
 `halt_on_error` stops a child at its first report: one does a signed
@@ -216,7 +216,7 @@ scripts/run-sanitizers.sh tsan
 ### Build option and harnesses
 
 `SKYCUE_FUZZ` (default `OFF`) builds the libFuzzer harnesses in
-`skycue/fuzz/`. It needs clang: with another compiler the configure stops
+`fuzz/`. It needs clang: with another compiler the configure stops
 with `SKYCUE_FUZZ=ON needs clang (CMAKE_CXX_COMPILER_ID is <id>)`, and with
 `SKYCUE_SANITIZE=thread` with
 `SKYCUE_FUZZ=ON cannot be combined with SKYCUE_SANITIZE=thread`. When on,
@@ -228,17 +228,17 @@ ordinary tests still build and run in the fuzz tree (with the slow factor,
 as in a sanitizer build). Only the harnesses link the libFuzzer driver.
 
 `skycue_add_fuzzer(<name> SOURCES <files...> [LIBS <targets...>])`
-(`skycue/cmake/Hardening.cmake`) adds the executable `fuzz_<name>` in
+(`cmake/Hardening.cmake`) adds the executable `fuzz_<name>` in
 `<build>/fuzz/`, linked with `skycued_core` and `LIBS` and
 `-fsanitize=fuzzer`, and appends `<name>` to the global property
-`SKYCUE_FUZZ_TARGETS`; `skycue/fuzz/CMakeLists.txt` also writes the names to
+`SKYCUE_FUZZ_TARGETS`; `fuzz/CMakeLists.txt` also writes the names to
 `<build>/fuzz/targets.txt` for the runner. Each harness calls a pure parser
 entry point, never a socket or a file, except `ws`, which runs a real
 WebServer on an ephemeral loopback port in its own process (below). A
 harness that needs files makes them under `$SKYCUE_FUZZ_WORK/<target>/` (set
 by the runner), or else under `std::filesystem::temp_directory_path()`.
 
-`skycue/fuzz/fuzz_util.hpp` (namespace `skycuefuzz`) holds the shared
+`fuzz/fuzz_util.hpp` (namespace `skycuefuzz`) holds the shared
 pieces: `FUZZ_CHECK(cond)` (prints `FUZZ_CHECK failed: <cond> at
 <file>:<line>` and aborts), `splitMode`, `chunked` (feeds a payload in chunks
 of 1 to 64 bytes from a xorshift32 seeded with `seed | 1`), `validUtf8`
@@ -254,37 +254,37 @@ mode byte: the whole input is the payload.
 **Seeds** are cut from fixtures already committed in the repo, one input per
 file, named `seed-<n>.<ext>`; they total well under 1 MB. Generated corpora,
 artefacts and work dirs stay in the build tree; findings are copied to
-`skycue/fuzz/findings/` (ignored by git except `.gitkeep` and its
+`fuzz/findings/` (ignored by git except `.gitkeep` and its
 `README.md`; the directory is never used as a corpus) and become regression
 tests.
 
 | Seeds | Cut from |
 |---|---|
-| `seeds/readsb_line/seed-1.jsonl` .. `seed-12.jsonl` | `skycue/tests/fixtures/readsb-sample.jsonl` lines 1-12 (one of each aircraft, with and without position, `alt_baro` "ground", a `~` TIS-B address) |
+| `seeds/readsb_line/seed-1.jsonl` .. `seed-12.jsonl` | `tests/fixtures/readsb-sample.jsonl` lines 1-12 (one of each aircraft, with and without position, `alt_baro` "ground", a `~` TIS-B address) |
 | `seeds/readsb_line/seed-13.jsonl` .. `seed-20.jsonl` | the same file, lines 1387-1394 (the last lines, including the two with the most keys) |
-| `seeds/raw_formats/seed-1.txt` .. `seed-6.txt` (mode 0) | `skycue/tests/fixtures/raw/uat-sample.txt.gz`, the first 6 lines |
-| `seeds/raw_formats/seed-7.txt` .. `seed-12.txt` (mode 0) | `skycue/tests/fixtures/raw/stratux-uat-2015.log.gz`, the first 6 non-blank lines (two `START,` headers, four offset lines) |
-| `seeds/raw_formats/seed-13.txt` .. `seed-18.txt` (mode 2) | `skycue/tests/fixtures/raw/modes-120s.csv.gz`, the first 6 lines |
-| `seeds/raw_formats/seed-19.txt` .. `seed-21.txt` (mode 1) | the AVR vectors of `avr_input_lines` in `skycue/tests/test_raw_formats.cpp` (`@` with CR/LF, `*`, a Mode A/C line) |
+| `seeds/raw_formats/seed-1.txt` .. `seed-6.txt` (mode 0) | `tests/fixtures/raw/uat-sample.txt.gz`, the first 6 lines |
+| `seeds/raw_formats/seed-7.txt` .. `seed-12.txt` (mode 0) | `tests/fixtures/raw/stratux-uat-2015.log.gz`, the first 6 non-blank lines (two `START,` headers, four offset lines) |
+| `seeds/raw_formats/seed-13.txt` .. `seed-18.txt` (mode 2) | `tests/fixtures/raw/modes-120s.csv.gz`, the first 6 lines |
+| `seeds/raw_formats/seed-19.txt` .. `seed-21.txt` (mode 1) | the AVR vectors of `avr_input_lines` in `tests/test_raw_formats.cpp` (`@` with CR/LF, `*`, a Mode A/C line) |
 | `seeds/raw_formats/seed-22.bin` .. `seed-24.bin` (mode 3) | the Beast streams of `splits_frames_with_escapes_at_any_chunking`, `skips_garbage_unknown_types_and_cut_frames` and `receiver_id_prefix_is_its_own_frame` in the same file |
-| `seeds/recording/seed-1.jsonl` .. `seed-6.jsonl` (mode 0) | `skycue/tests/fixtures/fisb/received-with-uplinks.jsonl` lines 1-6 (a `uat_uplink` record, five readsb lines) |
-| `seeds/recording/seed-7.jsonl` .. `seed-10.jsonl` (mode 1) | the capture lines of `capture_line_round_trip` (two) and `capture_line_rejects_bad_hex_and_missing_keys` (the good line and the `serial` transport) in `skycue/tests/test_capture.cpp` |
-| `seeds/fisb_decoder/seed-1.bin` .. `seed-6.bin` (mode 0, raw bytes) | `skycue/tests/fixtures/fisb/tg30.978` lines 1, 5, 59, 15, 365 and 631 (product 413 text; AIRMET 11; G-AIRMET 14; NOTAM 8; NEXRAD 63 and 64; icing and turbulence 70, 71, 90, 91), the hex decoded; decoder byte `0` except seeds 2 and 5 (`1`, experimental) |
+| `seeds/recording/seed-1.jsonl` .. `seed-6.jsonl` (mode 0) | `tests/fixtures/fisb/received-with-uplinks.jsonl` lines 1-6 (a `uat_uplink` record, five readsb lines) |
+| `seeds/recording/seed-7.jsonl` .. `seed-10.jsonl` (mode 1) | the capture lines of `capture_line_round_trip` (two) and `capture_line_rejects_bad_hex_and_missing_keys` (the good line and the `serial` transport) in `tests/test_capture.cpp` |
+| `seeds/fisb_decoder/seed-1.bin` .. `seed-6.bin` (mode 0, raw bytes) | `tests/fixtures/fisb/tg30.978` lines 1, 5, 59, 15, 365 and 631 (product 413 text; AIRMET 11; G-AIRMET 14; NOTAM 8; NEXRAD 63 and 64; icing and turbulence 70, 71, 90, 91), the hex decoded; decoder byte `0` except seeds 2 and 5 (`1`, experimental) |
 | `seeds/fisb_decoder/seed-7.txt` .. `seed-12.txt` (mode 1, the line) | the same file, lines 82, 42, 46, 701, 777 and 301 (413 with NOTAM 8; SIGMET 12; SUA 13; NEXRAD 63 with turbulence 91; cloud tops 84; lightning 103), whole lines with their `rs=`/`rssi=`/`t=` fields; seeds 8 and 11 experimental |
 | `seeds/iqgen_coding/seed-1.bin`, `seed-2.bin` (mode 0) | the first 18 and 34 payload bytes of `tg30.978` lines 1 and 5, after a code byte (downlink short, downlink long) and a corruption index |
-| `seeds/iqgen_coding/seed-3.bin` .. `seed-6.bin` (modes 1, 2) | the frames of `modes_crc_vectors` in `skycue/tests/test_iqgen.cpp`: `5D486258DD7987` and `8D4840D6202CC371C32CE0576098` as bytes (mode 1), `8D4840D6202CC371C32CE0576098` and `5f406a936f50f0` as text (mode 2) |
+| `seeds/iqgen_coding/seed-3.bin` .. `seed-6.bin` (modes 1, 2) | the frames of `modes_crc_vectors` in `tests/test_iqgen.cpp`: `5D486258DD7987` and `8D4840D6202CC371C32CE0576098` as bytes (mode 1), `8D4840D6202CC371C32CE0576098` and `5f406a936f50f0` as text (mode 2) |
 | `seeds/web/seed-1.txt` .. `seed-12.txt`, `seed-16.txt` .. `seed-25.txt` (mode 0) | requests on the routes of `docs/web-api.md`: GET `/api/state`, `/api/stats`, `/api/config`, `/api/filters/history`, `/api/fisb/text?type=METAR&station=KDCA`, `/index.html`, `/../etc/passwd`; PUT `/api/filters` with a JSON body; POST `/api/lists/allow`; POST `/api/inputs`; DELETE `/api/inputs/x`; a PUT with a foreign `Origin`; GET `/api/fisb/status`, `shapes`, `radar`, `raster`, `locations`, `/api/cues/clients`, `/api/tiles-available`, `/api/lists`, `/api/inputs/x/status`; POST `/api/filters/save-baseline` |
-| `seeds/web/seed-13.json` (mode 1) | `skycue/tests/fixtures/pingstation/icd-status.json` |
-| `seeds/web/seed-14.txt`, `seed-15.bin` (mode 2) | a string with UTF-8, a tab, quotes and a backslash; the invalid sequences of `json_writer_output_is_valid_utf8` in `skycue/tests/test_readsb_json.cpp` with a NUL and 0x1f |
+| `seeds/web/seed-13.json` (mode 1) | `tests/fixtures/pingstation/icd-status.json` |
+| `seeds/web/seed-14.txt`, `seed-15.bin` (mode 2) | a string with UTF-8, a tab, quotes and a backslash; the invalid sequences of `json_writer_output_is_valid_utf8` in `tests/test_readsb_json.cpp` with a NUL and 0x1f |
 | `seeds/ws/seed-1.bin` .. `seed-5.bin` (raw frames) | a masked text frame "hi", a ping, a close (1000), a binary frame header claiming 2^40 bytes, a text message in two fragments |
-| `seeds/pingstation/seed-1.json`, `seed-2.json` (mode 0) | `skycue/tests/fixtures/pingstation/icd-traffic-1090.json`, `uat-detail.json` |
+| `seeds/pingstation/seed-1.json`, `seed-2.json` (mode 0) | `tests/fixtures/pingstation/icd-traffic-1090.json`, `uat-detail.json` |
 | `seeds/pingstation/seed-3.json`, `seed-4.json` (mode 1) | the same directory's `icd-status.json`, `icd-status-verbatim.json` (curly quotes, rejected) |
-| `seeds/pingstation/seed-5.bin`, `seed-6.bin` (mode 2), `seed-7.bin` (mode 3) | the vectors of `skycue/tests/test_cat021.cpp`, edition byte 2.5: the the vendor interface document block (53 bytes); the datagram of `two_blocks_per_datagram`; the stream of `framer_resync_after_garbage` (`00 15 ff 7e`, the block) with the CAT 48 block of `framer_skips_other_category_in_sync` and the block again, other categories accepted |
-| `seeds/config_files/seed-1.conf` (mode 0) | `etc/skycue.conf.example` with `RECEIVER_LAT=51.5`, `RECEIVER_LON=-0.12` (the values of `parses_example_file` in `skycue/tests/test_config.cpp`) |
-| `seeds/config_files/seed-2.conf` (mode 0) | `skycue/tests/fixtures/config-copy.conf` |
-| `seeds/config_files/seed-3.json` (mode 1) | the inputs file of `inputs_file_round_trip` in `skycue/tests/test_input_def.cpp` (`ps-north`, `ps-south`, `rb2`; readsb on, dump978 off) |
-| `seeds/config_files/seed-4.json` (mode 2) | the overlay of `skycue/tests/test_runtime_config.cpp` (line 195) with a `min_elevation_deg`, without the unknown key |
-| `seeds/config_files/seed-5.json` (mode 3) | a `fisb-locations.json` of three ids (`KPRG` from `skycue/tests/test_location_index.cpp`, a centroid with count 0) |
+| `seeds/pingstation/seed-5.bin`, `seed-6.bin` (mode 2), `seed-7.bin` (mode 3) | the vectors of `tests/test_cat021.cpp`, edition byte 2.5: the the vendor interface document block (53 bytes); the datagram of `two_blocks_per_datagram`; the stream of `framer_resync_after_garbage` (`00 15 ff 7e`, the block) with the CAT 48 block of `framer_skips_other_category_in_sync` and the block again, other categories accepted |
+| `seeds/config_files/seed-1.conf` (mode 0) | `etc/skycue.conf.example` with `RECEIVER_LAT=51.5`, `RECEIVER_LON=-0.12` (the values of `parses_example_file` in `tests/test_config.cpp`) |
+| `seeds/config_files/seed-2.conf` (mode 0) | `tests/fixtures/config-copy.conf` |
+| `seeds/config_files/seed-3.json` (mode 1) | the inputs file of `inputs_file_round_trip` in `tests/test_input_def.cpp` (`ps-north`, `ps-south`, `rb2`; readsb on, dump978 off) |
+| `seeds/config_files/seed-4.json` (mode 2) | the overlay of `tests/test_runtime_config.cpp` (line 195) with a `min_elevation_deg`, without the unknown key |
+| `seeds/config_files/seed-5.json` (mode 3) | a `fisb-locations.json` of three ids (`KPRG` from `tests/test_location_index.cpp`, a centroid with count 0) |
 | `seeds/config_files/seed-6.csv` (mode 4) | five operator CSV lines from the same test: the header, a comment, `kprg`, `IND`, `BAD LINE` |
 | `seeds/config_files/seed-7.txt` (mode 5) | a five-line allow list: a comment, an address, an N-number, `G-ABCD`, an address |
 
@@ -313,7 +313,7 @@ Options: `[TARGET|all]` (default `all`), `--seconds N` (default 600),
 `--build-dir DIR` (default `<repo>/build-fuzz`), `--bin-dir DIR` (run the
 `fuzz_*` executables already in DIR instead of building), `--work DIR`
 (default `<build>/fuzz-work`), `--findings DIR` (default
-`skycue/fuzz/findings`), `--canary`, `--clean`.
+`fuzz/findings`), `--canary`, `--clean`.
 
 Without `--bin-dir` the script needs clang++ (else
 `SKIP: clang++ not found (fuzz harnesses need clang)`, exit 77) and a clang
@@ -370,7 +370,7 @@ its work and findings under `<build>/tests/fuzz-smoke/`.
 A new parser (the future frame decoder among them) brings its own harness
 in the same change:
 
-1. `skycue/fuzz/fuzz_<name>.cpp`: `LLVMFuzzerTestOneInput` calls
+1. `fuzz/fuzz_<name>.cpp`: `LLVMFuzzerTestOneInput` calls
    `skycuefuzz::canary(data, size)` first and `quietLogs()`, then the pure
    entry point of the parser. With more than one entry point, the first byte
    picks it (`splitMode`); a byte stream is fed through `chunked` so every
@@ -379,14 +379,14 @@ in the same change:
    fields), not only "does not crash". Catch only the exceptions the parser
    documents. No socket, no fixed path: files go under
    `$SKYCUE_FUZZ_WORK/<name>/`.
-2. `skycue/fuzz/CMakeLists.txt`: `skycue_add_fuzzer(<name> SOURCES
+2. `fuzz/CMakeLists.txt`: `skycue_add_fuzzer(<name> SOURCES
    fuzz_<name>.cpp [LIBS ...])`. The runner and `fuzz_smoke` pick it up from
    `targets.txt`; a larger `-max_len` than 4096 is a case in
    `scripts/run-fuzz.sh`.
-3. `skycue/fuzz/seeds/<name>/seed-<n>.<ext>`: cut from fixtures or test
+3. `fuzz/seeds/<name>/seed-<n>.<ext>`: cut from fixtures or test
    vectors already in the repo, mode byte first, and a row in the seeds
-   table above saying where each came from. Keep `skycue/fuzz/seeds` under
-   1 MiB in all (`du -sb skycue/fuzz/seeds`).
+   table above saying where each came from. Keep `fuzz/seeds` under
+   1 MiB in all (`du -sb fuzz/seeds`).
 4. Prove it: `scripts/run-fuzz.sh <name> --seconds 20 --canary --findings
    <scratch dir>` must end with `findings=1`, then
    `scripts/run-fuzz.sh <name>` (600 s) with `findings=0`.
@@ -415,7 +415,7 @@ clang 21, `build-fuzz` (RelWithDebInfo), one job per harness.
 | `fisb_decoder` | `fisb::FisbDecoder::feed`, `sweep` (`skycued/src/fisb/fisb_decoder.hpp`), products through `textRecordJson`, `twgoRecordJson`, `shapeJson` (`skycued/src/fisb/fisb_json.hpp`) | 1,718,350 | 1165 | 0 | none needed |
 | `web` | `webapi::makeApiRequest` + `handleApi` on a stubbed daemon, `staticPath` (`skycued/src/web_api.hpp`); `JsonObject`, `JsonWriter` (`skycued/src/json_lite.hpp`) | 5,153,330 | 2102 | 0 | none needed |
 | `ws` | the WebSocket inbound path of `WebServer` (`skycued/src/web_server.cpp` `WsSession::read`), over loopback | 590,648 | 711 | 2 harness faults, then 0 | none in the server: both were `connect` in the harness failing with EINTR (libFuzzer's timers); the harness now waits for an interrupted connect and retries poll/send/recv |
-| `iqgen_coding` | `iqgen::ReedSolomon` `parity`/`syndromes` with the UAT codes, `uatEncode`, `uatFrameBits`, `modesCrcResidual`, `parseHex`, `toHex` (`skycue/skycue-iqgen/`) | 25,775,026 | 127 | 0 | none needed |
+| `iqgen_coding` | `iqgen::ReedSolomon` `parity`/`syndromes` with the UAT codes, `uatEncode`, `uatFrameBits`, `modesCrcResidual`, `parseHex`, `toHex` (`skycue-iqgen/`) | 25,775,026 | 127 | 0 | none needed |
 | `pingstation` | `parsePingDatagram`, `parsePingStatusDocument` (`skycued/src/inputs/ping_json.hpp`); `asterix::splitBlocks`, `decodeBlock` (`skycued/src/asterix/cat021.hpp`), `Cat021StreamFramer` (`cat021_framer.hpp`) | 2,031,861 | 3840 | 1, then 0 | `parseDeviceTime` took any 4-digit year and overflowed the seconds to nanoseconds conversion (UBSan: `65479180292 * 1000000000 cannot be represented in type 'int64_t'`, a `timeStamp` in 4044); the year must be 1678 to 2261 (`fuzz_pingstation_device_time_out_of_range` in `tests/test_pingstation.cpp`). In review: `checkDeviceTime`'s `t - arrival` still overflowed for a 1678-1733 device time against a present-day arrival; the GPS offset and the difference are now overflow-checked and such an offset is rejected, computed in double (`fuzz_pingstation_clock_check_far_apart`, red under UBSan on the old code). A 120 s run on the committed seeds after the fix: 900,363 execs, corpus 1055, `findings=0`. The framer's buffer was already bounded (`framer_buffer_bounded_on_garbage` in `tests/test_cat021.cpp`) |
 | `config_files` | `parseConfigText` (`skycued/src/config.hpp`), `parseInputsFile`/`inputsFileJson` (`inputs/inputs_file.hpp`), `parseOverlay`/`overlayJson` (`runtime_config.hpp`), `fisb::LocationIndex::loadLearned`/`learnedJson`/`loadOperatorCsv` (`fisb/location_index.hpp`), `IdList::parse` (`filters.hpp`) | 4,499,704 | 8744 | 0 | none needed |
 
@@ -459,7 +459,7 @@ is the lowercased payload; when it fails, `out` is unchanged.
 `web` input: the mode byte, then the payload. Mode 0: raw request bytes
 through Beast's `request_parser<string_body>` (body limit 64 KiB), the
 request built with `makeApiRequest` as `WebServer` does. An `/api` path goes
-to `handleApi` on the stub of `skycue/fuzz/api_stub.hpp` (an Engine with no
+to `handleApi` on the stub of `fuzz/api_stub.hpp` (an Engine with no
 recorders, never started, an InputManager in replay mode so every
 `/api/inputs` write is a 409 and no listener opens, a Forwarder never
 started, a RuntimeConfig on its own `skycue.conf` under
@@ -636,11 +636,11 @@ scripts/run-static.sh --cppcheck-only -j 8 --build-dir /path/to/tree
 
 The script configures skycue (no build: nothing is generated) with clang++
 and `CMAKE_EXPORT_COMPILE_COMMANDS=ON`, and analyses the translation units in
-`compile_commands.json` under `skycue/skycued`, `skycue/libskycue` and
-`skycue/skycue-*/`; `tests/` and `fuzz/` are not analysed. clang-tidy runs
-through `run-clang-tidy` with `skycue/.clang-tidy`; cppcheck runs with
+`compile_commands.json` under `skycued`, `libskycue` and
+`skycue-*/`; `tests/` and `fuzz/` are not analysed. clang-tidy runs
+through `run-clang-tidy` with `.clang-tidy`; cppcheck runs with
 `--enable=warning,portability --std=c++17` and
-`skycue/cppcheck-suppressions.txt`. Each finding is printed once (a header's
+`cppcheck-suppressions.txt`. Each finding is printed once (a header's
 finding is not repeated per translation unit), and the last line is
 
     static: clang-tidy=<warnings|SKIP> cppcheck=<warnings|SKIP>
@@ -686,7 +686,7 @@ expressions such as `64 * 1024`.
 
 Suppressions: inline `// NOLINTNEXTLINE(<check>): <reason>` for clang-tidy,
 and an `<id>:<file>` entry under a `# <reason>` line in
-`skycue/cppcheck-suppressions.txt` for cppcheck (no inline cppcheck
+`cppcheck-suppressions.txt` for cppcheck (no inline cppcheck
 suppressions). The four cppcheck entries are structural false positives,
 so they name the file but no line, and do not go stale when the file is
 edited.
@@ -760,14 +760,14 @@ configures the bundle with it in the container (`VERIFY_WERROR=1` for
 
 ```sh
 cmake --install build --prefix "$PWD/stage-test"     # this tree's own stage
-skycue/tests/soak/soak.sh --stage "$PWD/stage-test" --out build-soak/run-4h
-skycue/tests/soak/soak.sh --skycued BIN --pingsim BIN --dump BIN --www DIR \
+tests/soak/soak.sh --stage "$PWD/stage-test" --out build-soak/run-4h
+tests/soak/soak.sh --skycued BIN --pingsim BIN --dump BIN --www DIR \
     --minutes 2 --interval 5 --growth 1.0 --out DIR   # what soak_short runs
 ```
 
 Options: `--minutes` (default 240), `--interval` seconds between samples
 (60), `--out` (`./soak-<UTC timestamp>`), `--fixtures`
-(`skycue/tests/fixtures`), `--growth` (0.05) and `--fd-tolerance` (2), the
+(`tests/fixtures`), `--growth` (0.05) and `--fd-tolerance` (2), the
 last two passed to `soak_eval.py` unchanged. Exit 0 PASS, 1 FAIL, 77 SKIP
 (no `node`, a `node` without the built-in WebSocket, or no `curl`), 2 on a
 usage error. `--stage` is the tree's own installed prefix, never another

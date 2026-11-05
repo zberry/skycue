@@ -30,7 +30,7 @@ Both are read at start; change them and restart skycued.
 ## What is decoded
 
 The status column says what backs each product: **fixture** means it is
-decoded from a real or test capture in `skycue/tests/fixtures/` and pinned
+decoded from a real or test capture in `tests/fixtures/` and pinned
 by a test; **vectors** means hand-built test vectors only. The fixtures are
 the 2015 dump978 sample (`raw/uat-sample.txt.gz`, 704 uplinks from one
 station near San Jose; its counts first) and `fisb/tg30.978`, a test group
@@ -294,17 +294,17 @@ for any recording with `uat_uplink` records
 
 ## For developers
 
-- Code: `skycue/skycued/src/fisb/` — `uplink_frame` (432-byte frame, header,
+- Code: `skycued/src/fisb/` — `uplink_frame` (432-byte frame, header,
   information frames), `apdu` (APDU header, times), `dlac` (6-bit text),
   `segment_assembler`, `twgo` and `text_products`, `global_block` (raster
   blocks), `fisb_decoder` (the pipeline), `fisb_store` (the rules above),
   `fisb_json` (the shared JSON writers). `web_fisb.cpp` serves the routes;
-  `skycue/www/app.js` draws the layers.
+  `www/app.js` draws the layers.
 - Tests: `test_fisb_frame`, `test_fisb_twgo`, `test_fisb_blocks`,
   `test_fisb_decoder`, `test_fisb_store`, `test_fisb_web`, `fisb_cli`
   (`skycue-fisb` against `tg30.golden.jsonl`, self-generated and
   cross-checked with fisb-decode), `stats_cli`, and the Playwright cases in
-  `skycue/tests/ui/` (replaying `received-with-uplinks.jsonl` and
+  `tests/ui/` (replaying `received-with-uplinks.jsonl` and
   `received-tg30.jsonl`).
 - A layout marked **[U]** in the reference stays behind
   `FISB_EXPERIMENTAL` until a capture confirms it; add the capture as a

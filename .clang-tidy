@@ -32,5 +32,5 @@ CheckOptions:
 WarningsAsErrors: ''
 # skycue's own sources only: not system headers, not the third-party
 # headers, not tests/ or fuzz/.
-HeaderFilterRegex: '.*/skycue/(skycued|libskycue|skycue-[a-z]+)/.*'
+HeaderFilterRegex: '.*/(skycued|libskycue|skycue-[a-z]+)/.*'
 FormatStyle: none

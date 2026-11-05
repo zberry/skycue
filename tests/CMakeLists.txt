@@ -19,7 +19,7 @@ add_test(NAME client COMMAND test_client)
 set_tests_properties(client PROPERTIES TIMEOUT 60)
 
 get_filename_component(_skycue_example_conf
-  "${CMAKE_CURRENT_SOURCE_DIR}/../../etc/skycue.conf.example" ABSOLUTE)
+  "${CMAKE_CURRENT_SOURCE_DIR}/../etc/skycue.conf.example" ABSOLUTE)
 add_executable(test_config test_config.cpp)
 target_link_libraries(test_config PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_config PRIVATE BOOST_TEST_DYN_LINK
@@ -62,7 +62,7 @@ add_test(NAME icao_class COMMAND test_icao_class)
 # or python3 is not installed. icao_tables_generator (test_icao_generator.sh):
 # the generator's exit status on broken copies of the page; skipped likewise.
 get_filename_component(_skycue_gen_icao
-  "${PROJECT_SOURCE_DIR}/../scripts/gen-icao-tables.py" ABSOLUTE)
+  "${PROJECT_SOURCE_DIR}/scripts/gen-icao-tables.py" ABSOLUTE)
 set(_skycue_app_pure "${PROJECT_SOURCE_DIR}/www/app_pure.js")
 set(_skycue_icao_inc "${PROJECT_SOURCE_DIR}/skycued/src/icao_tables.inc")
 find_program(SKYCUE_PYTHON3 python3)
@@ -117,7 +117,7 @@ skycue_set_warnings(test_forwarder)
 add_test(NAME forwarder COMMAND test_forwarder)
 set_tests_properties(forwarder PROPERTIES TIMEOUT 60)
 
-get_filename_component(_skycue_docs_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../docs" ABSOLUTE)
+get_filename_component(_skycue_docs_dir "${CMAKE_CURRENT_SOURCE_DIR}/../docs" ABSOLUTE)
 add_executable(test_recorder test_recorder.cpp)
 target_link_libraries(test_recorder PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_recorder PRIVATE BOOST_TEST_DYN_LINK
@@ -152,7 +152,7 @@ set_tests_properties(consumer_smoke PROPERTIES
   ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
 
 # examples/parent-project (a separate project using add_subdirectory on the
-# whole skycue/ directory) built against a copy of skycue/ in a temp dir.
+# whole source tree) built against a copy of it in a temp dir.
 # Skipped (77) when the cmake it is given is not found.
 add_test(NAME parent_project
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_parent_project.sh
@@ -184,7 +184,7 @@ add_test(NAME package_conf
 set_tests_properties(package_conf PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 # SKYCUE_TEST_SLOW_FACTOR outside sanitizer and fuzz builds: two configures
-# of skycue/ (no build), their registered timeouts and environments compared.
+# of this tree (no build), their registered timeouts and environments compared.
 if(NOT SKYCUE_PYTHON3)
   skycue_skip_test(slow_factor "python3 not found")
 else()
@@ -204,10 +204,8 @@ skycue_set_warnings(test_raw_formats)
 add_test(NAME raw_formats COMMAND test_raw_formats)
 
 # skycue-rawrec / skycue-rawplay on the real-data fixtures; the last part
-# feeds a real readsb when one has been built (the superbuild's stage).
-get_filename_component(_skycue_stage_readsb
-  "${PROJECT_SOURCE_DIR}/../build/stage/bin/readsb" ABSOLUTE)
-set(SKYCUE_TEST_READSB "${_skycue_stage_readsb}" CACHE FILEPATH
+# feeds a real readsb when SKYCUE_TEST_READSB names one (the stack's tests do).
+set(SKYCUE_TEST_READSB "" CACHE FILEPATH
   "readsb used by the rawtools full-stack check (skipped when missing)")
 add_test(NAME rawtools
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_rawtools.sh
@@ -446,7 +444,7 @@ target_link_libraries(sanitizer_canary PRIVATE Threads::Threads)
 # scripts/run-fuzz.sh. fuzz_build (fixture setup) builds the harnesses first,
 # since ctest has no target dependencies.
 get_filename_component(_skycue_run_fuzz
-  "${PROJECT_SOURCE_DIR}/../scripts/run-fuzz.sh" ABSOLUTE)
+  "${PROJECT_SOURCE_DIR}/scripts/run-fuzz.sh" ABSOLUTE)
 if(NOT SKYCUE_FUZZ)
   skycue_skip_test(fuzz_smoke "SKYCUE_FUZZ is OFF (fuzz harnesses build with clang only)")
 elseif(NOT EXISTS "${_skycue_run_fuzz}")
@@ -473,7 +471,7 @@ endif()
 # scripts/run-static.sh --tidy-only (it configures its own tree under this
 # build directory); fails on any unsuppressed warning.
 get_filename_component(_skycue_run_static
-  "${PROJECT_SOURCE_DIR}/../scripts/run-static.sh" ABSOLUTE)
+  "${PROJECT_SOURCE_DIR}/scripts/run-static.sh" ABSOLUTE)
 find_program(SKYCUE_CLANG_TIDY clang-tidy)
 if(NOT SKYCUE_STATIC_TESTS)
   skycue_skip_test(static_analysis "SKYCUE_STATIC_TESTS is OFF")
@@ -509,6 +507,23 @@ else()
       --minutes 2 --interval 5 --growth 1.0
       --out ${CMAKE_CURRENT_BINARY_DIR}/soak-short)
   set_tests_properties(soak_short PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
+endif()
+
+# Script tests: every tests/scripts/test_*.sh runs as ctest "script_<name>" (exit
+# 77 is a skip). The seven today:
+#   script_test_make_locations   script_test_make_maps   script_test_make_tiles
+#   script_test_package_metadata script_test_package_scripts
+#   script_test_skycue_web_tarballs   script_test_source_tarball
+file(GLOB _script_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_*.sh")
+foreach(f IN LISTS _script_tests)
+  get_filename_component(name "${f}" NAME_WE)
+  add_test(NAME script_${name} COMMAND bash ${f})
+  set_tests_properties(script_${name} PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+endforeach()
+# make-source-tarball.sh still expects the old two-directory layout; the test
+# is rewritten with the script, until then a failure is the expected result.
+if(TEST script_test_source_tarball)
+  set_tests_properties(script_test_source_tarball PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).

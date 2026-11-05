@@ -1,6 +1,6 @@
 #pragma once
 
-// Shared helpers for the libFuzzer harnesses in skycue/fuzz (docs/hardening.md
+// Shared helpers for the libFuzzer harnesses in fuzz (docs/hardening.md
 // "Fuzzing"). Header-only; every harness includes it.
 
 #include "log.hpp"

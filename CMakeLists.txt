@@ -45,7 +45,7 @@ set(SKYCUE_LEAFLET_DIR "" CACHE PATH
   "Leaflet's extracted dist/ directory (leaflet.js, leaflet.css, images/); staged and installed under www/vendor/leaflet")
 set(SKYCUE_ECHARTS_DIR "" CACHE PATH
   "ECharts' extracted npm package root (dist/echarts.min.js, LICENSE, NOTICE, licenses/LICENSE-d3); staged and installed under www/vendor/echarts")
-cmake_path(SET _skycue_default_source_cache NORMALIZE "${PROJECT_SOURCE_DIR}/../sources")
+cmake_path(SET _skycue_default_source_cache NORMALIZE "${PROJECT_SOURCE_DIR}/sources")
 set(SKYCUE_SOURCE_CACHE "${_skycue_default_source_cache}" CACHE PATH
   "Directory holding the pinned leaflet and echarts npm tarballs, used when SKYCUE_LEAFLET_DIR or SKYCUE_ECHARTS_DIR is empty")
 # Either directory left empty: the pinned tarball from SKYCUE_SOURCE_CACHE,
@@ -128,18 +128,18 @@ endif()
 
 # System files: the config, the skycued systemd unit, the map helpers and
 # bin/skycue-make-maps, their front.
-# They belong to the package shape and to a plain source install; the
-# superbuild turns them off, so the offline bundle's prefix is unchanged (it
-# keeps the config in its own etc/ and the helpers in scripts/). Their sources
-# live outside skycue/ (etc/, packaging/, scripts/), so each rule is skipped
-# when its file is not there (skycue/ copied on its own).
+# They belong to the package shape and to a plain source install. A parent
+# build that wants a smaller prefix turns them off (the offline bundle keeps
+# the config in its own etc/ and the helpers in scripts/). Their sources
+# (etc/, packaging/, scripts/) are optional: each rule is skipped when its
+# file is not there.
 option(SKYCUE_INSTALL_SYSTEM_FILES
   "Install the config, the skycued systemd unit and the map helper scripts (the superbuild turns this off)" ON)
 option(SKYCUE_PACKAGE_CONFIG
   "Install the packaged skycue.conf (STATE_DIR=/var/lib/skycue …) instead of skycue.conf.example" OFF)
 set(SKYCUE_SYSTEMD_UNITDIR "lib/systemd/system" CACHE PATH
   "Where skycued.service is installed: relative to CMAKE_INSTALL_PREFIX, or absolute (packages: /usr/lib/systemd/system)")
-get_filename_component(_skycue_repo_dir "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+set(_skycue_repo_dir "${PROJECT_SOURCE_DIR}")
 set(_skycue_conf_example "${_skycue_repo_dir}/etc/skycue.conf.example")
 set(_skycue_unit_template "${_skycue_repo_dir}/packaging/systemd/skycued.service.in")
 set(_skycue_map_scripts "${_skycue_repo_dir}/scripts/make-tiles.sh" "${_skycue_repo_dir}/scripts/make-overlays.sh")

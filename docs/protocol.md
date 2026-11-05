@@ -1,7 +1,7 @@
 # skycue wire protocol (version 1)
 
 skycued sends track data to clients as a stream of frames. The codec lives in
-`skycue/libskycue` (`skycue/protocol.hpp`).
+`libskycue` (`skycue/protocol.hpp`).
 
 All multi-byte integers are **little-endian**. Floats (`f32`) are IEEE 754
 single precision, sent as their 32-bit pattern in little-endian order. Strings

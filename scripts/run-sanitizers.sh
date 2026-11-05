@@ -92,8 +92,8 @@ read_log_dir
 # The environment every instrumented process runs with (H1, H2).
 env_lines() {
   local tsan="halt_on_error=1:second_deadlock_stack=1:log_path=$log_dir/tsan"
-  if [ -f "$repo/skycue/tests/sanitizer/tsan.supp" ]; then
-    tsan="$tsan:suppressions=$repo/skycue/tests/sanitizer/tsan.supp"
+  if [ -f "$repo/tests/sanitizer/tsan.supp" ]; then
+    tsan="$tsan:suppressions=$repo/tests/sanitizer/tsan.supp"
   fi
   # Only the mode's own variables: the TSan runtime also reads UBSAN_OPTIONS,
   # whose log_path would then win over TSAN_OPTIONS'.
@@ -101,8 +101,8 @@ env_lines() {
     echo 'unset TSAN_OPTIONS LSAN_OPTIONS'
     printf 'export ASAN_OPTIONS=%q\n' "detect_leaks=1:abort_on_error=1:log_path=$log_dir/asan"
     printf 'export UBSAN_OPTIONS=%q\n' "print_stacktrace=1:halt_on_error=1:log_path=$log_dir/ubsan"
-    if [ -f "$repo/skycue/tests/sanitizer/lsan.supp" ]; then
-      printf 'export LSAN_OPTIONS=%q\n' "suppressions=$repo/skycue/tests/sanitizer/lsan.supp"
+    if [ -f "$repo/tests/sanitizer/lsan.supp" ]; then
+      printf 'export LSAN_OPTIONS=%q\n' "suppressions=$repo/tests/sanitizer/lsan.supp"
     fi
   else
     echo 'unset ASAN_OPTIONS UBSAN_OPTIONS LSAN_OPTIONS'

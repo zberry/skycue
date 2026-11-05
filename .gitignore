@@ -4,11 +4,11 @@
 /dump1090/
 /dump978/
 *.tar.gz
-/skycue/www/tiles/
-/skycue/www/overlays/
-/skycue/www/vendor/
-/skycue/tests/ui/node_modules/
-/skycue/tests/ui/test-results/
+/www/tiles/
+/www/overlays/
+/www/vendor/
+/tests/ui/node_modules/
+/tests/ui/test-results/
 /docs/vendor/
 *.cu8
 __pycache__/
@@ -22,6 +22,6 @@ skycue.runtime.json.rejected
 *.unreadable-*
 # Fuzz findings are copied here by scripts/run-fuzz.sh; only the placeholder
 # and the README are tracked.
-/skycue/fuzz/findings/*
-!/skycue/fuzz/findings/.gitkeep
-!/skycue/fuzz/findings/README.md
+/fuzz/findings/*
+!/fuzz/findings/.gitkeep
+!/fuzz/findings/README.md

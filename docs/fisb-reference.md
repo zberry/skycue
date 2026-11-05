@@ -558,7 +558,7 @@ Examples decoded this session **[V]**:
 ---
 
 ## 9. Validation data
-- **Our fixture `skycue/tests/fixtures/raw/uat-sample.txt.gz` is byte-identical to dump978's
+- **Our fixture `tests/fixtures/raw/uat-sample.txt.gz` is byte-identical to dump978's
   `sample-data.txt.gz`**, in both MUT and FA: same gzip MD5 `28d6b169…`, and 1143 lines
   (704 `+` uplinks, 439 `-` downlinks) **[V]**.
   - Content: one ground station; dates in January 2015, i.e. pre-DO-358B, yet the TWGO

@@ -3,7 +3,7 @@
 
 Deterministic; no arguments; run from anywhere:
 
-    python3 skycue/tests/fixtures/fisb/gen_received_tg30.py
+    python3 tests/fixtures/fisb/gen_received_tg30.py
 
 Input (committed): tg30.978, dump978-fa raw lines
 `+<hex>;rs=<n>;rssi=<dBFS>;t=<unix seconds>.<ms>;` (the `#` comment lines are

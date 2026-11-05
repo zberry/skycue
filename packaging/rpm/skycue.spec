@@ -1,6 +1,6 @@
 # skycue for EL8 and EL9. Built from the release source tarball by
 # scripts/build-package.sh, which passes the version (read from
-# skycue/CMakeLists.txt) and, for slow builds, the test timeout factor:
+# CMakeLists.txt) and, for slow builds, the test timeout factor:
 #   rpmbuild -bb --define "skycue_version <v>" [--define "skycue_slow_factor N"]
 %{!?skycue_version:%{error:define skycue_version (scripts/build-package.sh does)}}
 
@@ -56,11 +56,10 @@ or configure it; this package only lets a client program talk to skycued.
 %autosetup -n skycue-%{version}
 
 %build
-# The CMake project is skycue/ (the superbuild at the top is not used here).
-%global _vpath_srcdir skycue
-# EL8's cmake-rpm-macros default to an in-source build, where %%cmake passes
-# no -S/-B and would configure the superbuild at the top; build out of source
-# (EL9's default) so _vpath_srcdir is used. %%ctest and %%cmake_install follow.
+# The CMake project is at the top of this tree (_vpath_srcdir stays at its
+# default, the source directory). EL8's cmake-rpm-macros default to an
+# in-source build; build out of source (EL9's default) so the build directory
+# is separate. %%ctest and %%cmake_install follow.
 %undefine __cmake_in_source_build
 # Leaflet and ECharts come from sources/ in the source tarball (no downloads
 # at build time). BUILD_SHARED_LIBS=ON from %%cmake does not touch the

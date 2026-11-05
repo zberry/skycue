@@ -5,8 +5,8 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 b=$here/scripts/build-package.sh
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: test_package_scripts: $*"; exit 1; }
-pv=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/skycue/CMakeLists.txt")
-[ -n "$pv" ] || fail "no version in skycue/CMakeLists.txt"
+pv=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/CMakeLists.txt")
+[ -n "$pv" ] || fail "no version in CMakeLists.txt"
 bash "$b" nonsense >/dev/null 2>&1; [ $? -eq 2 ] || fail "bad target is not exit 2"
 touch "$tmp/skycue-$pv.tar.gz"; mkdir "$tmp/nobinfmt"
 arch=$(uname -m); foreign=debian12-arm64; [ "$arch" = aarch64 ] && foreign=debian12-amd64
@@ -28,7 +28,7 @@ grep -q "would run: podman rmi .*skycue-pkg:$native" <<<"$out" || fail "image no
 # The Debian release (12 or 13) goes to the inner script, which puts it in the revision.
 grep -Eq "would run: podman run .* /build-package.sh deb /src/skycue-$pv.tar.gz $pv debian12$" <<<"$out" ||
   fail "deb build run does not pass the distro: $run"
-# A --source tarball named for another release than skycue/CMakeLists.txt: usage error, nothing run.
+# A --source tarball named for another release than CMakeLists.txt: usage error, nothing run.
 touch "$tmp/skycue-9.9.9.tar.gz"
 out=$(bash "$b" "$native" --source "$tmp/skycue-9.9.9.tar.gz" --dry-run 2>&1); rc=$?
 [ $rc -eq 2 ] || fail "tarball version mismatch: exit $rc, want 2"
@@ -60,8 +60,8 @@ fi
 # in this checkout's dist/): a failing podman or inner script is exit 1 whatever its status;
 # a build that leaves the packages prints their dist/ paths, the deb revision -1~debNNu1.
 fr=$tmp/repo
-mkdir -p "$fr/scripts" "$fr/skycue" "$fr/containers" "$tmp/pbin"
-cp "$b" "$fr/scripts/" && cp "$here/skycue/CMakeLists.txt" "$fr/skycue/" || fail "cannot copy the repo layout"
+mkdir -p "$fr/scripts" "$fr/containers" "$tmp/pbin"
+cp "$b" "$fr/scripts/" && cp "$here/CMakeLists.txt" "$fr/" || fail "cannot copy the repo layout"
 cat > "$tmp/pbin/podman" <<'EOS'
 #!/bin/bash
 # STUB_RUN_RC: the exit status of "podman run"; with 0 the packages named in STUB_PKGS appear in /out.

@@ -7,7 +7,7 @@
 #   cities.json  ne_10m_populated_places_simple: scalerank <= 7 worldwide
 #                and pop_max >= 50000 in USA/CAN/MEX; name, rank, pop
 #   --cache DIR        where the downloads are kept (default: build/naturalearth)
-#   --out DIR          output directory (default: skycue/www/overlays in this repo)
+#   --out DIR          output directory (default: www/overlays in this repo)
 #   --container IMAGE  run ogr2ogr in this GDAL image with podman (or docker),
 #                      e.g. ghcr.io/osgeo/gdal:ubuntu-small-3.9.3, instead of
 #                      the one on PATH (the default when ogr2ogr is missing
@@ -44,7 +44,7 @@ usage() {
 }
 bad() { echo "make-overlays: $*" >&2; usage; }
 
-out="$repo/skycue/www/overlays"
+out="$repo/www/overlays"
 cache="$repo/build/naturalearth"
 image=
 dry=0

@@ -3,7 +3,7 @@
 
 Deterministic; no arguments; run from anywhere:
 
-    python3 skycue/tests/fixtures/fisb/gen_received_with_uplinks.py
+    python3 tests/fixtures/fisb/gen_received_with_uplinks.py
 
 Inputs (both committed):
   ../raw/uat-sample.txt.gz   the 2015 dump978 sample; its 704 uplink ('+') lines

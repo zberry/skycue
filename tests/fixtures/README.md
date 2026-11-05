@@ -124,8 +124,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ```bash
 tmp=$(mktemp -d)
-zcat skycue/tests/fixtures/raw/stratux-uat-2015.log.gz | sed -n 's/^[0-9][0-9]*,\([+-]\)/\1/p' > "$tmp/stratux.txt"
-for f in "$tmp/stratux.txt" skycue/tests/fixtures/fisb/received-tg30.jsonl skycue/tests/fixtures/fisb/received-with-uplinks.jsonl; do
+zcat tests/fixtures/raw/stratux-uat-2015.log.gz | sed -n 's/^[0-9][0-9]*,\([+-]\)/\1/p' > "$tmp/stratux.txt"
+for f in "$tmp/stratux.txt" tests/fixtures/fisb/received-tg30.jsonl tests/fixtures/fisb/received-with-uplinks.jsonl; do
   build/stage/bin/skycue-fisb --json --ref-date 2015-09-02 "$f"
 done | python3 -I -c '
 import json, sys
@@ -139,8 +139,8 @@ for t in seen:
 ' > "$tmp/pireps.body"
 { printf '%s\n' '# Real PIREPs decoded by skycue-fisb: lines 1-14 from raw/stratux-uat-2015.log.gz (BSD-3-Clause,' \
     '# see tests/fixtures/README.md), 15-17 from fisb/received-tg30.jsonl, 18-19 from fisb/received-with-uplinks.jsonl.'; cat "$tmp/pireps.body"; } \
-  > skycue/tests/fixtures/fisb/pireps.txt
-grep -vc '^#' skycue/tests/fixtures/fisb/pireps.txt; rm -rf "$tmp"   # prints 19
+  > tests/fixtures/fisb/pireps.txt
+grep -vc '^#' tests/fixtures/fisb/pireps.txt; rm -rf "$tmp"   # prints 19
 ```
 
 - sha256: `56271e7acf2939e69e13a74f709bf5dbd3e2644604d9d7f28c6cfa508fef7d59`

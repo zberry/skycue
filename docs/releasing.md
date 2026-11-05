@@ -5,7 +5,7 @@ The checklist for one release, run on a developer machine with podman (and
 version throughout.
 
 1. **Bump the version.** The one version number is the `project()` line in
-   `skycue/CMakeLists.txt`:
+   `CMakeLists.txt`:
 
    ```cmake
    project(skycue VERSION 0.2.0 LANGUAGES CXX)

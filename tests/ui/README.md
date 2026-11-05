@@ -13,7 +13,7 @@ skipped (exit 77) when `node_modules/@playwright/test` is missing.
 ## One-time setup (needs the network)
 
 ```sh
-cd skycue/tests/ui
+cd tests/ui
 npm install                # @playwright/test, exact version from package.json / package-lock.json
 npx playwright install chromium   # only if the matching browser is not already installed
 ```
@@ -26,7 +26,7 @@ install` downloads nothing else. `node_modules/` is git-ignored.
 ## Running
 
 Through ctest, from a standalone skycue build configured with Leaflet and
-ECharts (`run.sh` says SKIP without either; see `skycue/www/README.md`):
+ECharts (`run.sh` says SKIP without either; see `www/README.md`):
 
 ```sh
 cmake -S skycue -B build-skycue -DSKYCUE_LEAFLET_DIR=/path/to/leaflet/package/dist \
@@ -48,7 +48,7 @@ however it ends, including on SIGINT, SIGTERM or SIGHUP.
 case kills skycued and starts it again with that command), runs `npx
 playwright test` (projects at 1280x720 and 1920x1080, one test at a time),
 stops skycued and copies the `skycue-*.png` screenshots to
-`.superpowers/sdd/2026-11-01-skycue-ui/screenshots/` (override with
+`<build>/ui-screenshots/` (override with
 `SKYCUE_UI_SCREENSHOTS`). Results go to `<build>/ui-test-results/`.
 
 For the FIS-B cases it starts two more skycueds, each replaying a received
@@ -60,7 +60,7 @@ as `SKYCUE_FISB_URL`, and `../fixtures/fisb/received-tg30.jsonl` (2020:
 NEXRAD regional and CONUS with echoes, rasters, AIRMETs; receiver at its
 ground station, 40.04 N 86.26 W, inside both mosaics) as
 `SKYCUE_RADAR_URL`. Their `fisb-*.png` screenshots go to
-`.superpowers/sdd/2026-11-02-skycue-fisb/screenshots/` (override with
+`<build>/fisb-screenshots/` (override with
 `SKYCUE_FISB_SCREENSHOTS`).
 
 For the Receiver tab cases it starts one more skycued, `--no-readsb

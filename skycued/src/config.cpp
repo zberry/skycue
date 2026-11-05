@@ -188,6 +188,12 @@ private:
     const std::map<std::string, Entry>& entries_;
 };
 
+// `name` in directory `dir` (absolute, no trailing slash unless it is "/").
+std::string underDir(const std::string& dir, const std::string& name)
+{
+    return (dir == "/" ? dir : dir + "/") + name;
+}
+
 }  // namespace
 
 Config parseConfigText(const std::string& text, const std::string& name)
@@ -297,20 +303,18 @@ Config parseConfigText(const std::string& text, const std::string& name)
     host("READSB_HOST", c.readsb_host);
     host("DUMP978_HOST", c.dump978_host);
     conv.yesNo("DUMP978_ENABLE", c.dump978_enable);
-    auto absoluteDir = [&](const char* key, std::string& field) {  // "" (unset) or absolute
+    // "" (unset) or absolute; one trailing slash dropped ("/" stays "/").
+    auto absoluteDir = [&](const char* key, std::string& field) {
         conv.str(key, field);
         if (!field.empty() && field.front() != '/')
             conv.fail(key, std::string(key) + " must be an absolute path, got '" + field + "'");
+        if (field.size() > 1 && field.back() == '/')
+            field.pop_back();
     };
     absoluteDir("STATE_DIR", c.state_dir);
     absoluteDir("MAP_DIR", c.map_dir);
-    // The list files: under STATE_DIR when it is set, else as written (today's
-    // working-directory-relative behaviour).
-    auto listPath = [&](const std::string& value) {
-        return c.state_dir.empty() || value.empty() || value.front() == '/' ? value : c.state_dir + "/" + value;
-    };
-    c.allow_list_path = listPath(c.allow_list_file);
-    c.block_list_path = listPath(c.block_list_file);
+    c.allow_list_path = listFilePath(c.state_dir, c.allow_list_file);
+    c.block_list_path = listFilePath(c.state_dir, c.block_list_file);
 
     conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
     conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);
@@ -417,9 +421,9 @@ std::string configValueText(const Config& c, const std::string& key)
     return it->second(c);
 }
 
-std::string resolveInputsFile(const std::string& conf_path, const std::string& value)
+std::string resolveInputsFile(const Config& c, const std::string& conf_path)
 {
-    return resolveConfigRelative(conf_path, value.empty() ? std::string("skycue.inputs.json") : value);
+    return resolveStatePath(c, conf_path, c.inputs_file.empty() ? std::string("skycue.inputs.json") : c.inputs_file);
 }
 
 std::string resolveConfigRelative(const std::string& conf_path, const std::string& value)
@@ -435,8 +439,13 @@ std::string resolveStatePath(const Config& c, const std::string& conf_path, cons
     if (value.empty() || value.front() == '/')
         return value;
     if (!c.state_dir.empty())
-        return c.state_dir + "/" + value;
+        return underDir(c.state_dir, value);
     return resolveConfigRelative(conf_path, value);
+}
+
+std::string listFilePath(const std::string& state_dir, const std::string& value)
+{
+    return state_dir.empty() || value.empty() || value.front() == '/' ? value : underDir(state_dir, value);
 }
 
 Config parseConfigFile(const std::string& path)

@@ -393,14 +393,29 @@ BOOST_AUTO_TEST_CASE(inputs_file_key)
 
 BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_the_config)
 {
-    using skycued::resolveInputsFile;
-    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "") == "/etc/skycue/skycue.inputs.json");
-    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "mine.json") == "/etc/skycue/mine.json");
-    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "sub/mine.json") == "/etc/skycue/sub/mine.json");
-    BOOST_TEST(resolveInputsFile("/etc/skycue/skycue.conf", "/srv/inputs.json") == "/srv/inputs.json");
-    BOOST_TEST(resolveInputsFile("skycue.conf", "") == "skycue.inputs.json");
-    BOOST_TEST(resolveInputsFile("skycue.conf", "mine.json") == "mine.json");
-    BOOST_TEST(resolveInputsFile("/skycue.conf", "") == "/skycue.inputs.json");
+    // INPUTS_FILE = `value`, STATE_DIR unset.
+    auto resolve = [](const std::string& conf_path, const std::string& value) {
+        Config c;
+        c.inputs_file = value;
+        return skycued::resolveInputsFile(c, conf_path);
+    };
+    BOOST_TEST(resolve("/etc/skycue/skycue.conf", "") == "/etc/skycue/skycue.inputs.json");
+    BOOST_TEST(resolve("/etc/skycue/skycue.conf", "mine.json") == "/etc/skycue/mine.json");
+    BOOST_TEST(resolve("/etc/skycue/skycue.conf", "sub/mine.json") == "/etc/skycue/sub/mine.json");
+    BOOST_TEST(resolve("/etc/skycue/skycue.conf", "/srv/inputs.json") == "/srv/inputs.json");
+    BOOST_TEST(resolve("skycue.conf", "") == "skycue.inputs.json");
+    BOOST_TEST(resolve("skycue.conf", "mine.json") == "mine.json");
+    BOOST_TEST(resolve("/skycue.conf", "") == "/skycue.inputs.json");
+}
+
+BOOST_AUTO_TEST_CASE(inputs_file_resolved_against_state_dir)
+{
+    Config c = parseConfigText(std::string(kLatLon) + "STATE_DIR=/var/lib/skycue\n", "/etc/skycue/skycue.conf");
+    BOOST_TEST(skycued::resolveInputsFile(c, "/etc/skycue/skycue.conf") == "/var/lib/skycue/skycue.inputs.json");
+    c.inputs_file = "mine.json";
+    BOOST_TEST(skycued::resolveInputsFile(c, "/etc/skycue/skycue.conf") == "/var/lib/skycue/mine.json");
+    c.inputs_file = "/srv/inputs.json";
+    BOOST_TEST(skycued::resolveInputsFile(c, "/etc/skycue/skycue.conf") == "/srv/inputs.json");
 }
 
 BOOST_AUTO_TEST_CASE(stats_keys_defaults_and_ranges)
@@ -612,6 +627,32 @@ BOOST_AUTO_TEST_CASE(state_paths_resolve_against_state_dir)
     BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "") == "");
     c.state_dir.clear();
     BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "skycue.stats.json") == "/etc/x/skycue.stats.json");
+}
+
+BOOST_AUTO_TEST_CASE(state_and_map_dir_lose_one_trailing_slash)
+{
+    const Config c = parseConfigText(std::string(kLatLon) + "STATE_DIR=/var/lib/skycue/\nMAP_DIR=/srv/maps/\n"
+                                                            "ALLOW_LIST_FILE=allow.list\n",
+                                     "/etc/x/skycue.conf");
+    BOOST_TEST(c.state_dir == "/var/lib/skycue");
+    BOOST_TEST(c.map_dir == "/srv/maps");
+    BOOST_TEST(skycued::resolveStatePath(c, "/etc/x/skycue.conf", "x") == "/var/lib/skycue/x");
+    BOOST_TEST(c.allow_list_path == "/var/lib/skycue/allow.list");
+    // The root stays the root, and a file under it gets one slash.
+    const Config root = parseConfigText(std::string(kLatLon) + "STATE_DIR=/\nMAP_DIR=/\n", "t");
+    BOOST_TEST(root.state_dir == "/");
+    BOOST_TEST(root.map_dir == "/");
+    BOOST_TEST(skycued::resolveStatePath(root, "t", "x") == "/x");
+}
+
+BOOST_AUTO_TEST_CASE(list_file_path_helper)
+{
+    using skycued::listFilePath;
+    BOOST_TEST(listFilePath("", "allow.list") == "allow.list");  // as written without STATE_DIR
+    BOOST_TEST(listFilePath("/s", "allow.list") == "/s/allow.list");
+    BOOST_TEST(listFilePath("/", "allow.list") == "/allow.list");
+    BOOST_TEST(listFilePath("/s", "/abs/allow.list") == "/abs/allow.list");
+    BOOST_TEST(listFilePath("/s", "") == "");
 }
 
 BOOST_AUTO_TEST_CASE(list_paths_unchanged_without_state_dir)  // today: as written (working-directory relative)

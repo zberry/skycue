@@ -4,10 +4,11 @@
 //
 //   1. The baseline: skycue.conf and the list files it names
 //      (ALLOW_LIST_FILE, BLOCK_LIST_FILE; an unset one is an empty list).
-//   2. The runtime overlay, skycue.runtime.json next to skycue.conf: filter
-//      values that replace the baseline's, and list entries added to or
-//      removed from the list files (schema in docs/web-api.md). The web UI
-//      changes only this layer (applyUi); it survives a restart.
+//   2. The runtime overlay, skycue.runtime.json in STATE_DIR (next to
+//      skycue.conf when STATE_DIR is unset): filter values that replace the
+//      baseline's, and list entries added to or removed from the list files
+//      (schema in docs/web-api.md). The web UI changes only this layer
+//      (applyUi); it survives a restart.
 //   3. Effective = baseline with the overlay applied: each list is the file's
 //      entries, minus the overlay's `remove`, plus its `add`.
 //
@@ -83,8 +84,9 @@ std::vector<std::string> restartKeysChanged(const Config& a, const Config& b);
 
 class RuntimeConfig {
 public:
-    // `conf_path` is skycue.conf; the overlay is skycue.runtime.json in the
-    // same directory.
+    // `conf_path` is skycue.conf; the overlay is skycue.runtime.json in its
+    // STATE_DIR as parsed by load(), or in the config's directory when that
+    // is unset (overlayPath() is the latter until load()).
     RuntimeConfig(boost::asio::io_context& io, std::string conf_path, Engine& engine);
     ~RuntimeConfig();
     RuntimeConfig(const RuntimeConfig&) = delete;

@@ -30,6 +30,7 @@
 
 #include <limits.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -96,11 +97,12 @@ int run(int argc, char** argv)
                                            "instead of connecting to readsb; no UAT")(
         "replay-speed", po::value(&replay_speed)->default_value(1.0), "replay pacing: 1 = real time, 0 = unpaced")(
         "replay-loop", "restart the replay at the end of the file")(
-        "readsb-host", po::value(&readsb_host)->default_value("127.0.0.1"), "host of readsb's JSON port")(
-        "dump978-host", po::value(&dump978_host)->default_value("127.0.0.1"), "host of dump978's raw port")(
-        "no-uat", "do not connect to dump978")("no-readsb", "do not connect to readsb")(
+        "readsb-host", po::value(&readsb_host), "host of readsb's JSON port (default: READSB_HOST, 127.0.0.1)")(
+        "dump978-host", po::value(&dump978_host), "host of dump978's raw port (default: DUMP978_HOST, 127.0.0.1)")(
+        "no-uat", "do not connect to dump978 (overrides DUMP978_ENABLE)")("no-readsb", "do not connect to readsb")(
         "inputs-file", po::value(&inputs_file),
-        "override INPUTS_FILE (default: skycue.inputs.json next to the config; empty: not persisted)")(
+        "override INPUTS_FILE (default: skycue.inputs.json in STATE_DIR, else next to the config; "
+        "empty: not persisted)")(
         "cue-tcp-port", po::value(&cue_tcp_port), "override CUE_TCP_PORT (0: no listener)")(
         "www-dir", po::value(&www_dir), "the web UI's files (default: <bin>/../share/skycue/www)")(
         "web-bind", po::value(&web_bind), "override WEB_BIND (numeric address)")(
@@ -157,6 +159,19 @@ int run(int argc, char** argv)
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
     }
+    if (!config.state_dir.empty()) {
+        struct stat st{};
+        if (::stat(config.state_dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
+            std::cerr << "skycued: STATE_DIR " << config.state_dir << " is not a directory\n";
+            return 2;
+        }
+    }
+    // A flag given on the command line overrides its key; an absent one defers to it.
+    if (!vm.count("readsb-host"))
+        readsb_host = config.readsb_host;
+    if (!vm.count("dump978-host"))
+        dump978_host = config.dump978_host;
+    const bool use_dump978 = !vm.count("no-uat") && config.dump978_enable;
     if (vm.count("cue-tcp-port"))
         config.cue_tcp_port = static_cast<uint16_t>(cue_tcp_port);
     if (vm.count("web-port"))
@@ -200,7 +215,7 @@ int run(int argc, char** argv)
     // The inputs: the built-ins (readsb and dump978, or the replay alone) and,
     // unless replaying, the user inputs of the inputs file.
     InputManagerConfig mc;
-    mc.inputs_file = vm.count("inputs-file") ? inputs_file : resolveInputsFile(config_path, config.inputs_file);
+    mc.inputs_file = vm.count("inputs-file") ? inputs_file : resolveInputsFile(config, config_path);
     const std::string inputs_path = mc.inputs_file;
     mc.record_dir = config.record_dir;
     mc.record_raw = config.record_raw;
@@ -229,7 +244,7 @@ int run(int argc, char** argv)
                         return std::make_unique<ReadsbJsonSource>(io, readsb_host, port);
                     })));
             }
-            if (!vm.count("no-uat"))
+            if (use_dump978)
                 inputs->addBuiltin(std::make_unique<Dump978Input>(
                     io, builtin("dump978", InputType::dump978, dump978_host, config.dump978_raw_port)));
         }
@@ -247,21 +262,21 @@ int run(int argc, char** argv)
         std::cerr << "skycued: " << config_path << ": " << e.what() << "\n";
         return 2;
     }
-    // The learned FIS-B report locations (fisb-locations.json next to the
-    // config) and LOCATIONS_FILE under them.
+    // The learned FIS-B report locations (fisb-locations.json in STATE_DIR,
+    // else next to the config) and LOCATIONS_FILE under them.
     try {
-        engine->loadLocations(resolveConfigRelative(config_path, "fisb-locations.json"),
-                              resolveConfigRelative(config_path, config.locations_file));
-        // The statistics (STATS_FILE, skycue.stats.json next to the config
-        // and the runtime overlay unless set; empty: not saved).
-        engine->loadStats(resolveConfigRelative(config_path, config.stats_file),
+        engine->loadLocations(resolveStatePath(config, config_path, "fisb-locations.json"),
+                              resolveStatePath(config, config_path, config.locations_file));
+        // The statistics (STATS_FILE, skycue.stats.json in STATE_DIR or next
+        // to the config unless set; empty: not saved).
+        engine->loadStats(resolveStatePath(config, config_path, config.stats_file),
                           std::chrono::seconds(config.stats_save_s));
     } catch (const std::exception& e) {
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
     }
-    // The runtime overlay (skycue.runtime.json) on top of skycue.conf, and
-    // hot reload of both and of the list files.
+    // The runtime overlay (skycue.runtime.json in STATE_DIR, else next to the
+    // config) on top of skycue.conf, and hot reload of both and of the list files.
     std::unique_ptr<RuntimeConfig> runtime;
     try {
         runtime = std::make_unique<RuntimeConfig>(io, config_path, *engine);
@@ -286,6 +301,12 @@ int run(int argc, char** argv)
         daemon.cli_overrides["WEB_BIND"] = web_bind;
     if (vm.count("inputs-file"))
         daemon.cli_overrides["INPUTS_FILE"] = inputs_file;
+    if (vm.count("readsb-host"))
+        daemon.cli_overrides["READSB_HOST"] = readsb_host;
+    if (vm.count("dump978-host"))
+        daemon.cli_overrides["DUMP978_HOST"] = dump978_host;
+    if (vm.count("no-uat"))
+        daemon.cli_overrides["DUMP978_ENABLE"] = "no";
     daemon.recorders = {{"received", received.get()}, {"sent", sent.get()}, {"fisb", fisb.get()}};
     if (replaying) {
         daemon.replay_file = replay_path;
@@ -293,7 +314,7 @@ int run(int argc, char** argv)
         daemon.replay_loop = vm.count("replay-loop") > 0;
     }
     daemon.readsb = !replaying && !vm.count("no-readsb");
-    daemon.dump978 = !replaying && !vm.count("no-uat");
+    daemon.dump978 = !replaying && use_dump978;
     // The web UI (WEB_BIND:WEB_PORT); WEB_PORT=0: none.
     std::unique_ptr<WebServer> web;
     if (config.web_port == 0) {

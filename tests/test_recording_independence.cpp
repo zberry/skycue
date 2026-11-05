@@ -36,7 +36,7 @@ BOOST_AUTO_TEST_CASE(received_stream_unaffected_by_filters)
             block << h << "\n";
     }
     Config cfg = baseConfig();
-    cfg.block_list_file = tmp.path + "/block.txt";
+    cfg.block_list_path = tmp.path + "/block.txt";
     {
         EngineFx fx(cfg, replay(0), 10s, tmp.path);  // unpaced: the whole capture at once
         const auto deadline = steady::now() + 10s;

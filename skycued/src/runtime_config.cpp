@@ -129,9 +129,10 @@ std::string readFile(const std::string& path)
 
 IdList loadList(const std::string& path) { return path.empty() ? IdList() : IdList::loadFile(path); }
 
-std::string overlayPathFor(const std::string& conf_path)
+// In STATE_DIR when it is set, else next to skycue.conf.
+std::string overlayPathFor(const std::string& conf_path, const std::string& state_dir)
 {
-    const std::string dir = dirOf(conf_path);
+    const std::string dir = state_dir.empty() ? dirOf(conf_path) : state_dir;
     return (dir == "/" ? dir : dir + "/") + kOverlayName;
 }
 
@@ -397,7 +398,7 @@ std::string overlayJson(const Overlay& o)
 
 RuntimeConfig::RuntimeConfig(boost::asio::io_context& io, std::string conf_path, Engine& engine)
     : conf_path_(std::move(conf_path)),
-      overlay_path_(overlayPathFor(conf_path_)),
+      overlay_path_(overlayPathFor(conf_path_, "")),
       engine_(engine),
       conf_watch_(conf_path_),
       overlay_watch_(overlay_path_),
@@ -414,7 +415,7 @@ RuntimeConfig::~RuntimeConfig()
 
 const std::string& RuntimeConfig::listPath(ListKind kind) const
 {
-    return kind == ListKind::allow ? file_conf_.allow_list_file : file_conf_.block_list_file;
+    return kind == ListKind::allow ? file_conf_.allow_list_path : file_conf_.block_list_path;
 }
 
 void RuntimeConfig::load()
@@ -423,6 +424,9 @@ void RuntimeConfig::load()
     conf_watch_.accept();
     file_conf_ = parseConfigFile(conf_path_);
     running_ = file_conf_;
+    // The overlay's directory follows STATE_DIR as parsed now (a restart key).
+    overlay_path_ = overlayPathFor(conf_path_, running_.state_dir);
+    overlay_watch_ = SettledFile(overlay_path_);
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         listWatch(kind) = SettledFile(listPath(kind));
         listWatch(kind).accept();
@@ -729,12 +733,18 @@ void RuntimeConfig::reloadConf()
         if (o.second)
             LOG_WARN("runtime: " << o.first << " edited in skycue.conf but overridden by " << kOverlayName
                                  << " (use the UI or \"save as baseline\")");
+    // A relative list file resolves against STATE_DIR as running: a changed
+    // STATE_DIR is a restart key, so it does not move the lists before then.
+    c.allow_list_path = listFilePath(running_.state_dir, c.allow_list_file);
+    c.block_list_path = listFilePath(running_.state_dir, c.block_list_file);
     const Config old = file_conf_;
     file_conf_ = c;
     running_.max_range_nm = c.max_range_nm;
     running_.min_elevation_deg = c.min_elevation_deg;
     running_.allow_list_file = c.allow_list_file;
     running_.block_list_file = c.block_list_file;
+    running_.allow_list_path = c.allow_list_path;
+    running_.block_list_path = c.block_list_path;
     // Whether the file sets a live key follows the file, like its value.
     for (const char* key : {"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}) {
         if (c.file_keys.count(key))
@@ -744,7 +754,7 @@ void RuntimeConfig::reloadConf()
     }
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         const bool allow = kind == ListKind::allow;
-        if ((allow ? old.allow_list_file : old.block_list_file) == listPath(kind))
+        if ((allow ? old.allow_list_path : old.block_list_path) == listPath(kind))
             continue;
         // A new list file: read it now and watch it from here on. If it
         // cannot be read the previous entries stay until it can.

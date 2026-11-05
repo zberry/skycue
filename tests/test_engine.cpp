@@ -92,8 +92,8 @@ BOOST_AUTO_TEST_CASE(filter_change_to_drop)
     }
     Config cfg = baseConfig();
     cfg.max_range_nm = 150;
-    cfg.allow_list_file = "";  // allow list empty
-    cfg.block_list_file = tmp.path + "/block.txt";
+    cfg.allow_list_path = "";  // allow list empty
+    cfg.block_list_path = tmp.path + "/block.txt";
     EngineFx fx(cfg, replay(50));  // 2.4 s
     Events ev;
     skycue::Client client(clientConfig(fx.port()));
@@ -413,8 +413,8 @@ BOOST_AUTO_TEST_CASE(startup_filter_change_records_list_sizes)
         std::ofstream(tmp.path + "/allow.txt") << "N512RG\nab12f0\n";
     }
     Config cfg = baseConfig();
-    cfg.block_list_file = tmp.path + "/block.txt";
-    cfg.allow_list_file = tmp.path + "/allow.txt";
+    cfg.block_list_path = tmp.path + "/block.txt";
+    cfg.allow_list_path = tmp.path + "/allow.txt";
     {
         EngineFx fx(
             cfg, [](asio::io_context&) -> std::unique_ptr<ObservationSource> { return std::make_unique<FakeSource>(); },

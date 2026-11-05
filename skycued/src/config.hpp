@@ -30,10 +30,11 @@ struct Config {
     double max_range_nm = 150, min_elevation_deg = 0;
     std::string allow_list_file, block_list_file;  // as written
     // The list files to read: a relative value is taken from STATE_DIR when it
-    // is set, else as written (the working directory). parseConfigText fills them.
+    // is set, else as written (the working directory). See listFilePath.
     std::string allow_list_path, block_list_path;
-    // STATE_DIR, MAP_DIR: absolute directories, "" when unset. STATE_DIR holds
-    // the relative state files (see resolveStatePath); MAP_DIR the map tiles.
+    // STATE_DIR, MAP_DIR: absolute directories without a trailing slash (but
+    // "/"), "" when unset. STATE_DIR holds the relative state files (see
+    // resolveStatePath); MAP_DIR the map tiles.
     std::string state_dir, map_dir;
     double min_interval_s = 1, max_interval_s = 10, track_timeout_s = 60, keyframe_interval_s = 10;
     std::string web_bind = "127.0.0.1";  // address the web UI listens on
@@ -68,14 +69,14 @@ const std::vector<std::string>& knownConfigKeys();  // exactly the keys of etc/s
 // string. Throws std::invalid_argument for a key not in knownConfigKeys().
 std::string configValueText(const Config& c, const std::string& key);
 
-// The inputs file for INPUTS_FILE `value` of the config at `conf_path`:
-// skycue.inputs.json next to the config when empty, `value` resolved against
-// the config's directory when relative, `value` itself when absolute.
-std::string resolveInputsFile(const std::string& conf_path, const std::string& value);
+// The inputs file of `c` (the config at `conf_path`): resolveStatePath of
+// c.inputs_file, or of skycue.inputs.json when INPUTS_FILE is empty (so under
+// STATE_DIR when it is set, else next to the config).
+std::string resolveInputsFile(const Config& c, const std::string& conf_path);
 
 // A file named in the config at `conf_path`: `value` resolved against the
 // config's directory when relative, `value` itself when absolute, "" when
-// empty. (resolveInputsFile is this with its default name.)
+// empty.
 std::string resolveConfigRelative(const std::string& conf_path, const std::string& value);
 
 // A state file (INPUTS_FILE, LOCATIONS_FILE, STATS_FILE) named in the config
@@ -83,5 +84,11 @@ std::string resolveConfigRelative(const std::string& conf_path, const std::strin
 // `value` under c.state_dir when STATE_DIR is set, else
 // resolveConfigRelative(conf_path, value).
 std::string resolveStatePath(const Config& c, const std::string& conf_path, const std::string& value);
+
+// A list file (ALLOW_LIST_FILE, BLOCK_LIST_FILE) `value`: under `state_dir`
+// when that is set and `value` is relative, else `value` as written (relative
+// to the working directory). parseConfigText fills Config::*_list_path with it;
+// a live reload passes the running STATE_DIR (a changed one needs a restart).
+std::string listFilePath(const std::string& state_dir, const std::string& value);
 
 }  // namespace skycued

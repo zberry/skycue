@@ -548,6 +548,55 @@ BOOST_AUTO_TEST_CASE(watch_detects_list_file_edit)
     BOOST_TEST(has(f.sent(), "file:skycue.runtime.json: "));
 }
 
+BOOST_AUTO_TEST_CASE(list_file_relative_to_state_dir)
+{
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    writeFile(state + "/allow.list", "a1b2c3\n");
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nALLOW_LIST_FILE=allow.list\n");
+    f.start();
+    BOOST_TEST(f.allow() == (Strings{"a1b2c3"}));
+    // The overlay lives in STATE_DIR too, not next to the config.
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->overlayPath(); }) == state + "/skycue.runtime.json");
+    Overlay d;
+    d.allow_add = {"N123AB"};
+    f.applyUi(d);
+    BOOST_TEST(f.allow() == (Strings{"a1b2c3", "N123AB"}));
+    BOOST_TEST(has(readAll(state + "/skycue.runtime.json"), "N123AB"));
+    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+    // Save as baseline appends to the list file in STATE_DIR.
+    BOOST_TEST(f.promote() == "");
+    BOOST_TEST(has(readAll(state + "/allow.list"), "N123AB"));
+    BOOST_TEST(!exists(f.path("allow.list")));
+}
+
+BOOST_AUTO_TEST_CASE(list_reload_resolves_against_the_running_state_dir)
+{
+    // A live reload of a changed list file name resolves it against STATE_DIR as
+    // at startup: a changed STATE_DIR takes effect only on a restart.
+    RtFx f{std::string(kConfHead)};
+    const std::string state = f.path("state"), moved = f.path("moved");
+    BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
+    BOOST_REQUIRE(::mkdir(moved.c_str(), 0755) == 0);
+    writeFile(state + "/allow.list", "a1b2c3\n");
+    writeFile(state + "/other.list", "beef01\n");
+    writeFile(moved + "/other.list", "dead01\n");
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + state + "\nALLOW_LIST_FILE=allow.list\n");
+    f.start(true);
+    StderrCapture err(f.path("stderr.txt"));
+    BOOST_TEST(f.allow() == (Strings{"a1b2c3"}));
+    writeFile(f.conf, std::string(kConfHead) + "STATE_DIR=" + moved + "\nALLOW_LIST_FILE=other.list\n");
+    BOOST_TEST(f.waitFor([&] { return f.allow() == (Strings{"beef01"}); }, 2600ms));
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "STATE_DIR differ"); }, 500ms));
+    // The new list file is watched at its resolved path.
+    writeFile(state + "/other.list", "beef01\nN99ZZ\n");
+    BOOST_TEST(f.waitFor([&] { return f.allow() == (Strings{"beef01", "N99ZZ"}); }, 2600ms));
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().allow_list_path; }) == state + "/other.list");
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().state_dir; }) == state);
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->overlayPath(); }) == state + "/skycue.runtime.json");
+}
+
 BOOST_AUTO_TEST_CASE(watch_debounces_partial_write)
 {
     RtFx f(std::string(kConfHead) + "MAX_RANGE_NM=150\n");

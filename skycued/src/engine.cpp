@@ -46,8 +46,8 @@ FilterSet makeFilters(const Config& c)
 {
     if (!std::isfinite(c.receiver_lat) || !std::isfinite(c.receiver_lon))
         throw std::runtime_error("the receiver position (RECEIVER_LAT, RECEIVER_LON) is required");
-    return FilterSet(makeReceiver(c), FilterConfig{c.max_range_nm, c.min_elevation_deg}, loadList(c.allow_list_file),
-                     loadList(c.block_list_file));
+    return FilterSet(makeReceiver(c), FilterConfig{c.max_range_nm, c.min_elevation_deg}, loadList(c.allow_list_path),
+                     loadList(c.block_list_path));
 }
 
 StatsLimits makeStatsLimits(const Config& c)
@@ -194,8 +194,8 @@ std::string Engine::filterDescription() const
        << " alt_m=" << (config_.receiver_alt_m + config_.antenna_height_m)
        << " max_range_nm=" << filters_.config().max_range_nm
        << " min_elevation_deg=" << filters_.config().min_elevation_deg << " allow_list="
-       << (config_.allow_list_file.empty() ? "none" : config_.allow_list_file) << " (" << filters_.allow().size()
-       << " entries) block_list=" << (config_.block_list_file.empty() ? "none" : config_.block_list_file) << " ("
+       << (config_.allow_list_path.empty() ? "none" : config_.allow_list_path) << " (" << filters_.allow().size()
+       << " entries) block_list=" << (config_.block_list_path.empty() ? "none" : config_.block_list_path) << " ("
        << filters_.block().size() << " entries)";
     return ss.str();
 }

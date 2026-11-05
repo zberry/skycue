@@ -1,0 +1,89 @@
+skycue is licensed under the Apache License, Version 2.0 (see LICENSE).
+Copyright the skycue authors. Source files carry no per-file licence headers;
+this notice and LICENSE apply to the whole tree.
+
+skycue superbuild
+=================
+
+The superbuild compiles the following third-party projects from their
+upstream source tarballs. Each keeps its own license:
+
+  rtl-sdr        GPL-2.0
+  SoapySDR       BSL-1.0
+  SoapyRTLSDR    MIT
+  dump978        BSD-2-Clause / GPL (per file, see the upstream repository)
+  readsb         GPL-3.0
+  dump1090       GPL-2.0
+
+These programs are built and run as separate processes. None of them is
+linked into skycue code.
+
+Web assets installed with skycue
+--------------------------------
+
+The skycue web console loads these third-party libraries from its own
+installation, with no network access at run time. Each is installed with its
+licence file beside it.
+
+Leaflet 1.9.4 (https://leafletjs.com), BSD-2-Clause, installed with its
+LICENSE under www/vendor/leaflet/. Copyright (c) 2010-2023, Volodymyr
+Agafonkin; Copyright (c) 2010-2011, CloudMade.
+
+Apache ECharts 5.6.0 (https://echarts.apache.org), Apache-2.0, installed under
+www/vendor/echarts/ with its LICENSE and NOTICE. Its NOTICE reads: Apache
+ECharts, Copyright 2017-2024 The Apache Software Foundation; this product
+includes software developed at The Apache Software Foundation
+(https://www.apache.org/).
+
+Parts of ECharts are derived from D3 (https://github.com/d3/d3), BSD-3-Clause,
+Copyright 2010-2016 Mike Bostock. All rights reserved. The D3-derived files
+are src/chart/treemap/treemapLayout.ts, src/chart/tree/layoutHelper.ts,
+src/chart/graph/forceHelper.ts and src/util/number.ts in the ECharts sources;
+the D3 licence text is installed as www/vendor/echarts/licenses/LICENSE-d3.
+
+Natural Earth (https://www.naturalearthdata.com) map data is in the public
+domain. skycue does not ship it: scripts that build the offline map tiles
+(skycue-make-maps) download it on demand.
+
+skycue source and test data
+---------------------------
+
+skycue/tests/fixtures/fisb/tg30.978 is a FIS-B test uplink file from
+fisb-decode (https://github.com/rand-projects/fisb-decode,
+tg/tg-source/generated/tg30.978), Copyright (C) 2020-2021 Michael Barnes,
+redistributed under the BSD-2-Clause Plus Patent License; the full licence
+text is in skycue/tests/fixtures/fisb/LICENSE.fisb-decode.
+
+skycue/tests/fixtures/raw/stratux-uat-2015.log.gz is a UAT receiver log from
+stratux (https://github.com/cyoung/stratux,
+test-data/cyoung-09062015-noproblem-stratux-uat.log, gzip-compressed),
+Copyright (c) 2015 Christopher Young, redistributed under the BSD-3-Clause
+License; the full licence text is in skycue/tests/fixtures/README.md. The
+files under skycue/tests/fixtures/raw/ are in the git repository only; the
+release source tarball leaves them out.
+
+The FIS-B decoder in skycue/skycued/src/fisb/ follows the field layouts and
+product handling of fisb-decode (same copyright and licence as above). It is
+an independent C++ implementation written from docs/fisb-reference.md; no
+fisb-decode source code is copied into it.
+
+The Mode S CRC and the UAT Reed-Solomon encoder in skycue/skycue-iqgen/ are
+written from the published definitions, with the Reed-Solomon parameters
+taken from dump978's uat_protocol.h and fec.cc (BSD-2-Clause); no readsb or
+libfec code is copied.
+
+Test data used locally, not distributed
+---------------------------------------
+
+"Automatic Dependent Surveillance Broadcast (ADSB) I/Q samples captured
+using a Software-Defined Radio (SDR)", by Conrado Guimarães da Costa, Luís
+Tiago Paiva and Fernando Fontes, Faculty of Engineering - University of
+Porto (FEUP), Zenodo, 2026, DOI 10.5281/zenodo.23342598
+(https://doi.org/10.5281/zenodo.23342598). Licensed under the Creative
+Commons Attribution 4.0 International licence (CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/legalcode) by Conrado Guimarães
+da Costa, Faculdade de Engenharia da Universidade do Porto. Its recording
+raw_data/recording.bin (1090 MHz, 2.0 MS/s, unsigned 8-bit I/Q) is
+downloaded on demand by scripts/fetch-iq-samples.sh and resampled from 2.0
+to 2.4 MS/s locally; that resampling is the only change made to it. It is
+not part of this repository or its bundles.

@@ -1,0 +1,13 @@
+# Package build environment for the skycue rpms on EL9 (Rocky Linux 9),
+# used by scripts/build-package.sh el9. The list mirrors BuildRequires in
+# packaging/rpm/skycue.spec (rpmbuild checks it, so drift fails the build);
+# systemd-rpm-macros carries the %{_unitdir} macros on EL9. curl (a ctest
+# uses it) comes with the base image (curl-minimal on EL9).
+# The package build run (scripts/build-package.sh) may use the network too;
+# nothing in it is meant to download, but it is not enforced.
+FROM docker.io/rockylinux/rockylinux:9
+RUN dnf -y install rpm-build gcc-c++ make cmake boost-devel zlib-devel python3 \
+        diffutils tar gzip systemd-rpm-macros \
+    && dnf clean all
+COPY build-package-inner.sh /build-package.sh
+RUN chmod 755 /build-package.sh

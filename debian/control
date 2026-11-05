@@ -1,0 +1,48 @@
+Source: skycue
+Section: misc
+Priority: optional
+Maintainer: skycue maintainers <skycue@users.noreply.github.com>
+Rules-Requires-Root: no
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.25),
+               g++,
+               libboost-system-dev,
+               libboost-program-options-dev,
+               libboost-test-dev,
+               zlib1g-dev,
+               python3,
+               curl
+Standards-Version: 4.6.2
+
+Package: skycue
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, adduser
+Recommends: python3, python3-pil, curl, unzip
+Suggests: readsb, dump978-fa, gdal-bin, python3-gdal
+Description: ADS-B and UAT operator console and forwarding bridge
+ skycue runs beside the reader's receiver stack (readsb for 1090 MHz,
+ dump978 for 978 MHz UAT) and reads the decoded traffic those programs
+ already publish. It does not feed, replace or configure them: no decoder
+ is a dependency, and nothing here edits their configuration or restarts
+ them.
+ .
+ The skycued daemon serves an offline web console with a map, a traffic
+ table and alerts, and sends cues to cue clients. Map tiles and
+ overlays are made on the machine with skycue-make-maps (needs GDAL or a
+ container runtime). The service is enabled but not started on install:
+ set RECEIVER_LAT and RECEIVER_LON in /etc/skycue/skycue.conf first, then
+ run "systemctl enable --now skycued".
+
+Package: libskycue-dev
+Architecture: any
+Section: libdevel
+Multi-Arch: same
+Depends: ${misc:Depends}, libboost-system-dev
+Description: skycue client library (static) and CMake package
+ libskycue is the static C++ client library for skycued's cue interface,
+ with its headers and a CMake package configuration for
+ find_package(skycue).
+ .
+ skycue runs beside the reader's receiver stack and does not feed,
+ replace or configure it; this package only lets a client program talk to
+ skycued.

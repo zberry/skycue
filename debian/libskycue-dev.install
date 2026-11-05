@@ -1,0 +1,3 @@
+usr/include/skycue
+usr/lib/*/libskycue.a
+usr/lib/*/cmake/skycue

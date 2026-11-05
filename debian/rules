@@ -1,0 +1,39 @@
+#!/usr/bin/make -f
+# skycue: the CMake project in skycue/ (the superbuild at the top is not used here).
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Task 15 sets this for emulated (foreign-architecture) builds; it scales the test timeouts.
+SKYCUE_TEST_SLOW_FACTOR ?= 1
+# Where the unit goes. Debian 13's debhelper finds it in /usr/lib/systemd/system;
+# Debian 12's (13.11.4) looks only in /lib/systemd/system, so
+# containers/build-package-inner.sh sets that for Debian 12 and rewrites the unit
+# line of debian/skycue.install in its copy of the tree.
+SKYCUE_DEB_UNITDIR ?= /usr/lib/systemd/system
+
+%:
+	dh $@ --buildsystem=cmake --sourcedirectory=skycue
+
+# Leaflet and ECharts come from sources/ in the source tarball (no downloads at build time).
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DCMAKE_INSTALL_SYSCONFDIR=/etc \
+		-DSKYCUE_UI_TESTS=OFF \
+		-DSKYCUE_PACKAGE_CONFIG=ON \
+		-DSKYCUE_SOURCE_CACHE=$(CURDIR)/sources \
+		-DSKYCUE_SYSTEMD_UNITDIR=$(SKYCUE_DEB_UNITDIR) \
+		-DSKYCUE_TEST_SLOW_FACTOR=$(or $(SKYCUE_TEST_SLOW_FACTOR),1)
+
+# Serially: some tests listen on fixed local ports. install_layout checks this package shape.
+override_dh_auto_test:
+	dh_auto_test --no-parallel
+
+# Enabled, not started: the configuration needs the receiver position first.
+# --no-start alone turns off the compat-13 default --restart-after-upgrade and
+# then stops the daemon in preinst on upgrade without starting it again. With
+# both, debhelper uses its restartnostart snippet: nothing is stopped before
+# the upgrade, postinst runs "try-restart" only when upgrading (a running
+# skycued comes back on the new binary, a stopped one stays stopped), and a
+# fresh install starts nothing.
+override_dh_installsystemd:
+	dh_installsystemd --no-start --restart-after-upgrade

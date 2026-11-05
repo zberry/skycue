@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        adduser --system --group --home /var/lib/skycue --no-create-home --quiet skycue
+        for d in /var/lib/skycue /var/lib/skycue/maps /var/lib/skycue/recordings; do
+            install -d -o skycue -g skycue -m 0755 "$d"
+        done
+        # skycued stops on a missing list file; an empty list means no entries.
+        for f in allow.list block.list; do
+            if [ ! -e "/var/lib/skycue/$f" ]; then
+                install -o skycue -g skycue -m 0644 /dev/null "/var/lib/skycue/$f"
+            fi
+        done
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

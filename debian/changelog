@@ -1,0 +1,6 @@
+skycue (0.1.0-1) unstable; urgency=medium
+
+  * First Debian package of skycue: skycue (daemon, tools, web console,
+    systemd unit, packaged configuration) and libskycue-dev.
+
+ -- skycue maintainers <skycue@users.noreply.github.com>  Wed, 04 Nov 2026 12:00:00 +0000

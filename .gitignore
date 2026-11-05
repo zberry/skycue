@@ -1,0 +1,27 @@
+/build*/
+/sources/
+/dist/
+/dump1090/
+/dump978/
+*.tar.gz
+/skycue/www/tiles/
+/skycue/www/overlays/
+/skycue/www/vendor/
+/skycue/tests/ui/node_modules/
+/skycue/tests/ui/test-results/
+/docs/vendor/
+*.cu8
+__pycache__/
+# State skycued writes next to a skycue.conf (e.g. etc/ when run from the
+# repo): learned locations, the runtime overlay, and their set-aside copies.
+fisb-locations.json
+fisb-locations.json.rejected
+fisb-locations.json.unreadable-*
+skycue.runtime.json
+skycue.runtime.json.rejected
+*.unreadable-*
+# Fuzz findings are copied here by scripts/run-fuzz.sh; only the placeholder
+# and the README are tracked.
+/skycue/fuzz/findings/*
+!/skycue/fuzz/findings/.gitkeep
+!/skycue/fuzz/findings/README.md

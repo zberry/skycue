@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+# dh_installsystemd --no-start adds no stop on remove, so stop skycued here:
+# on remove only (an upgrade try-restarts it in postinst), and only where
+# systemd is running.
+if [ "$1" = remove ] && [ -z "${DPKG_ROOT:-}" ] && [ -d /run/systemd/system ]; then
+    deb-systemd-invoke stop skycued.service >/dev/null || true
+fi
+
+#DEBHELPER#
+
+exit 0

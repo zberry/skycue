@@ -1,0 +1,4 @@
+usr/bin/*
+usr/share/skycue
+etc/skycue/skycue.conf
+usr/lib/systemd/system/skycued.service

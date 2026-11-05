@@ -1,0 +1,28 @@
+[Unit]
+Description=skycue operator console and forwarding bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=skycue
+Group=skycue
+ExecStart=@SKYCUE_UNIT_EXEC@
+Restart=on-failure
+# A configuration error (exit 2) is not retried: journalctl -u skycued shows the one-line reason.
+RestartPreventExitStatus=2
+ProtectSystem=strict
+# systemd creates /var/lib/skycue (owned by User=) when it is missing, as after a
+# source install; the packages also create it with maps/, recordings/ and the lists.
+StateDirectory=skycue
+ReadWritePaths=/var/lib/skycue
+# skycued only reads the maps. Read-only here, a compromised daemon cannot plant
+# symlinks for the root-run skycue-make-maps to write through. The "-" means a
+# missing maps/ is not an error.
+ReadOnlyPaths=-/var/lib/skycue/maps
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

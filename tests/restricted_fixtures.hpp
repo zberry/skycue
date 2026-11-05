@@ -54,16 +54,17 @@ inline boost::unit_test::decorator::precondition needs_fixture(std::string rel)
 #else
 // Older Boost.Test (1.66 on EL8) fails the whole module when a precondition
 // skips a case (exit 200), so there the case is disabled when it is
-// registered, and the reason printed.
-class needs_fixture : public boost::unit_test::decorator::enable_if_impl {
+// registered, and the reason printed. The status is set directly (not with
+// enable_if's apply_impl) so a case can name several fixtures.
+class needs_fixture : public boost::unit_test::decorator::base {
 public:
     explicit needs_fixture(std::string rel) : rel_(std::move(rel)) {}
     void apply(boost::unit_test::test_unit& tu) override
     {
-        const bool present = fixture_present(rel_);
-        if (!present)
-            std::cout << "Test case \"" << tu.p_name.get() << "\" is skipped: " << fixture_absent_message(rel_) << "\n";
-        apply_impl(tu, present);
+        if (fixture_present(rel_))
+            return;
+        std::cout << "Test case \"" << tu.p_name.get() << "\" is skipped: " << fixture_absent_message(rel_) << "\n";
+        tu.p_default_status.value = boost::unit_test::test_unit::RS_DISABLED;
     }
     boost::unit_test::decorator::base_ptr clone() const override
     {

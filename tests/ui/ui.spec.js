@@ -1166,7 +1166,7 @@ test('trail_signal_falls_back_when_signal_ages_out', async ({ page }) => {
     const at = (i, ms, rssi) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.6 + i * 0.005,
       decision: 'send', track_deg: 90, rssi, position_time: new Date(now - ms).toISOString() });
     for (let i = 0; i < 3; i++) at(i, 118000 - i * 1000, -20);   // just inside the 120 s trail, 1 s apart
-    for (let i = 3; i < 8; i++) at(i, 1000, undefined);
+    for (let i = 3; i < 8; i++) at(i, (8 - i) * 1000, undefined);   // 5..1 s ago
   }, SIG_HEX);
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX);
   let t = await trail();
@@ -1221,7 +1221,8 @@ test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
 // A position the aircraft could not have flown to (over P.TRAIL_MAX_KT
 // from the last trail point, as a looped replay jumping back to its start)
 // restarts the trail there instead of drawing a line across the map; so
-// does one earlier than the last. A normal move joins.
+// does one more than 5 s earlier than the last. One up to 5 s earlier is
+// left out; a normal move joins.
 test('trail_breaks_on_impossible_jump', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 1);
@@ -1238,18 +1239,27 @@ test('trail_breaks_on_impossible_jump', async ({ page }) => {
   expect((await trail()).points).toBe(1);
   await at(39.04 + 200 / 60 + 0.02, -77.3, 10000);
   expect((await trail()).points).toBe(2);
-  await at(39.04 + 200 / 60 + 0.03, -77.3, 12000);   // earlier than the last point
+  await at(39.04 + 200 / 60 + 0.03, -77.3, 12000);   // 2 s earlier than the last point: left out
+  expect((await trail()).points).toBe(2);
+  await at(39.04 + 200 / 60 + 0.03, -77.3, 40000);   // 30 s earlier: a break
   expect((await trail()).points).toBe(1);
-  // With the signal colouring on, the break drops the runs too.
+  // With the signal colouring on, the break drops the runs too; selected,
+  // the restarted trail keeps the selected weight.
   await page.evaluate(() => window.skycueApp.setTrailSignal(true));
   await at(39.04 + 200 / 60 + 0.05, -77.3, 8000);
   let t = await trail();
   expect(t.points).toBe(2);
   expect(t.runs.length).toBe(1);
+  await page.evaluate((lat) => window.skycueApp.setView(lat, -77.3, 8), 39.09 + 200 / 60);
+  await page.locator(`.ac-marker[data-hex="${hex}"] .ac-glyph`).click();
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
+  expect((await trail()).weight).toBe(3);
   await at(39.0, -77.3, 6000);   // back to the start: a looped replay
   t = await trail();
   expect(t.points).toBe(1);
   expect(t.runs).toEqual([]);
+  expect(t.weight).toBe(3);
+  expect(await page.evaluate(() => window.skycueApp.selected())).toBe(hex);
   await page.evaluate(() => window.skycueApp.setTrailSignal(false));
 });
 
@@ -1356,6 +1366,12 @@ test('ruler_toggle_matches_zoom_buttons_after_disarm', async ({ page }) => {
   const box = await page.locator('#map').boundingBox();
   const away = () => page.mouse.move(box.x + box.width / 2, box.y + box.height - 40);
   expect(await bg('#ruler-toggle')).toBe(zoom);
+  await page.locator('#ruler-toggle').hover();   // hover lightens, as on the zoom buttons
+  const hovered = await bg('#ruler-toggle');
+  await page.locator('a.leaflet-control-zoom-in').hover();
+  expect(await bg('a.leaflet-control-zoom-in')).toBe(hovered);
+  expect(hovered).not.toBe(zoom);
+  await away();
   await page.locator('#ruler-toggle').click();
   await away();
   await expect(page.locator('#ruler-toggle')).toHaveAttribute('aria-pressed', 'true');
@@ -1366,6 +1382,17 @@ test('ruler_toggle_matches_zoom_buttons_after_disarm', async ({ page }) => {
   expect(await page.evaluate(() => document.activeElement && document.activeElement.id)).toBe('ruler-toggle');
   expect(await bg('#ruler-toggle')).toBe(zoom);
   expect(await bg('a.leaflet-control-zoom-in')).toBe(zoom);
+  // At max zoom Leaflet disables zoom-in (#f4f4f4 of its own): dark, muted
+  // text, focused or not.
+  const fg = (sel) => page.locator(sel).evaluate((el) => getComputedStyle(el).color);
+  const idleText = await fg('a.leaflet-control-zoom-out');
+  await page.evaluate(() => window.skycueApp.setView(38.9, -77.0, 14));
+  await expect(page.locator('a.leaflet-control-zoom-in')).toHaveClass(/leaflet-disabled/);
+  expect(await bg('a.leaflet-control-zoom-in')).toBe(zoom);
+  expect(await fg('a.leaflet-control-zoom-in')).not.toBe(idleText);
+  await page.locator('a.leaflet-control-zoom-in').focus();
+  expect(await bg('a.leaflet-control-zoom-in')).toBe(zoom);
+  expect(await fg('a.leaflet-control-zoom-in')).not.toBe(idleText);
 });
 
 // The main daemon has no radar or raster: the opacity slider has nothing to

@@ -113,6 +113,9 @@ input.invalid { border-color: var(--blocked); }
 .leaflet-bar a:focus { background: var(--panel); color: var(--text); }
 .leaflet-bar a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .leaflet-bar a:hover { background: var(--panel-2); color: var(--text); }
+/* Leaflet's disabled zoom button (at min or max zoom) is #f4f4f4 too. */
+.leaflet-bar a.leaflet-disabled, .leaflet-bar a.leaflet-disabled:hover,
+.leaflet-bar a.leaflet-disabled:focus { background: var(--panel); color: var(--muted); }
 /* The ruler (app.js initRuler): a button under the zoom control, a crosshair
    while armed, the label a dark box that reads on either map style. */
 .leaflet-bar a.ruler-toggle { display: flex; align-items: center; justify-content: center; }

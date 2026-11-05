@@ -1623,21 +1623,28 @@
   }
 
   // ---- trail breaks -----------------------------------------------------------
-  // A trail restarts at a position it could not have flown to: one whose
-  // implied ground speed from the previous trail point (great-circle
-  // distance over the time between them) is above TRAIL_MAX_KT, or one
-  // earlier than it (a looped replay jumping back to its start, a bad
-  // position, a hex reused by another aircraft). prev and next are {lat,
-  // lon, ts} (ts in ms); equal times join, as do points without a usable time.
+  // What a new position does to the trail, from the previous trail point
+  // (prev and next are {lat, lon, ts}, ts in ms):
+  // - 'break': the trail restarts at it. Its implied ground speed
+  //   (great-circle distance over the time between them, at least 1 s so
+  //   equal or near-equal times cannot hide a jump or magnify rounding) is
+  //   above TRAIL_MAX_KT, or it is more than TRAIL_BACKSTEP_S earlier: a
+  //   looped replay jumping back to its start, a bad position, a hex reused
+  //   by another aircraft.
+  // - 'skip': up to TRAIL_BACKSTEP_S earlier (readsb's position_time
+  //   wobbles by its seen_pos rounding; two inputs report out of order): not
+  //   added, so the trail stays in time order, and not a break.
+  // - 'join': otherwise, and when there is no previous point or no usable time.
   var TRAIL_MAX_KT = 1500;
-  function trailBreaks(prev, next) {
-    if (!prev || !next) return false;
+  var TRAIL_BACKSTEP_S = 5;
+  function trailStep(prev, next) {
+    if (!prev || !next) return 'join';
     var dt = next.ts - prev.ts;
-    if (typeof dt !== 'number' || !isFinite(dt)) return false;
-    if (dt < 0) return true;
-    if (dt === 0) return false;
+    if (typeof dt !== 'number' || !isFinite(dt)) return 'join';
+    if (dt < -TRAIL_BACKSTEP_S * 1000) return 'break';
+    if (dt < 0) return 'skip';
     var nm = rangeNm(prev.lat, prev.lon, next.lat, next.lon);
-    return isFinite(nm) && nm / (dt / 3600000) > TRAIL_MAX_KT;
+    return isFinite(nm) && nm / (Math.max(dt, 1000) / 3600000) > TRAIL_MAX_KT ? 'break' : 'join';
   }
 
   // ---- ruler ("Measure") -----------------------------------------------------
@@ -1709,7 +1716,7 @@
     SIGNAL_NONE_DB: SIGNAL_NONE_DB, signalLevel: signalLevel,
     signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns,
     signalRunsAppend: signalRunsAppend, signalRunsTrim: signalRunsTrim,
-    TRAIL_MAX_KT: TRAIL_MAX_KT, trailBreaks: trailBreaks,
+    TRAIL_MAX_KT: TRAIL_MAX_KT, TRAIL_BACKSTEP_S: TRAIL_BACKSTEP_S, trailStep: trailStep,
     rulerMeasure: rulerMeasure, rulerLabel: rulerLabel
   };
   root.skycuePure = api;

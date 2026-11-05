@@ -1365,22 +1365,33 @@ test('signalRunsAppend / signalRunsTrim equal signalRuns over a random walk', ()
 });
 
 // Ruler: distance, initial bearing, the label.
-// Trail breaks: an implied speed over TRAIL_MAX_KT, or time going back.
-test('trailBreaks: impossible jumps break, normal moves and equal times join', () => {
+// Trail steps: join, skip a small step back in time, break on an implied
+// speed over TRAIL_MAX_KT (over at least 1 s) or a big step back.
+test('trailStep: impossible jumps break, small backsteps skip, normal moves join', () => {
   assert.strictEqual(P.TRAIL_MAX_KT, 1500);
+  assert.strictEqual(P.TRAIL_BACKSTEP_S, 5);
   const a = { lat: 39, lon: -77, ts: 1000000 };
   const north = (nm, dtMs) => ({ lat: 39 + nm / 60, lon: -77, ts: a.ts + dtMs });
   // 1 nm in 2 s is 1800 kt, over the limit; 1 nm in 3 s (1200 kt) joins.
-  assert.strictEqual(P.trailBreaks(a, north(1, 2000)), true, '1 nm in 2 s: 1800 kt');
-  assert.strictEqual(P.trailBreaks(a, north(1, 3000)), false, '1 nm in 3 s: 1200 kt');
-  assert.strictEqual(P.trailBreaks(a, north(100, 2000)), true, '100 nm in 2 s');
-  assert.strictEqual(P.trailBreaks(a, north(5, 0)), false, 'equal time joins');
-  assert.strictEqual(P.trailBreaks(a, north(0, -1000)), true, 'earlier time');
-  assert.strictEqual(P.trailBreaks(a, north(0.5, 2000)), false, '0.5 nm in 2 s: 900 kt');
-  assert.strictEqual(P.trailBreaks(a, north(200, 600000)), false, '200 nm in 10 min: 1200 kt');
-  assert.strictEqual(P.trailBreaks(a, north(300, 600000)), true, '300 nm in 10 min: 1800 kt');
-  assert.strictEqual(P.trailBreaks(null, a), false);
-  assert.strictEqual(P.trailBreaks(a, { lat: 40, lon: -77, ts: NaN }), false, 'no usable time joins');
+  assert.strictEqual(P.trailStep(a, north(1, 2000)), 'break', '1 nm in 2 s: 1800 kt');
+  assert.strictEqual(P.trailStep(a, north(1, 3000)), 'join', '1 nm in 3 s: 1200 kt');
+  assert.strictEqual(P.trailStep(a, north(0.5, 2000)), 'join', '0.5 nm in 2 s: 900 kt');
+  assert.strictEqual(P.trailStep(a, north(100, 2000)), 'break', '100 nm in 2 s');
+  assert.strictEqual(P.trailStep(a, north(200, 600000)), 'join', '200 nm in 10 min: 1200 kt');
+  assert.strictEqual(P.trailStep(a, north(300, 600000)), 'break', '300 nm in 10 min: 1800 kt');
+  // Equal times: the speed over 1 s (0.4 nm is 1440 kt; 1 nm would be 3600 kt).
+  assert.strictEqual(P.trailStep(a, north(0, 0)), 'join', 'same time, same place');
+  assert.strictEqual(P.trailStep(a, north(0.4, 0)), 'join', 'same time, 0.4 nm');
+  assert.strictEqual(P.trailStep(a, north(1, 0)), 'break', 'same time, 1 nm: 3600 kt over 1 s');
+  assert.strictEqual(P.trailStep(a, north(200, 0)), 'break', 'same time, 200 nm');
+  assert.strictEqual(P.trailStep(a, north(0.1, 100)), 'join', '0.1 nm in 100 ms: speed over 1 s');
+  // Back in time: up to 5 s skips (at any distance), more breaks.
+  assert.strictEqual(P.trailStep(a, north(0, -50)), 'skip', '50 ms earlier');
+  assert.strictEqual(P.trailStep(a, north(0, -2000)), 'skip', '2 s earlier');
+  assert.strictEqual(P.trailStep(a, north(0, -5000)), 'skip', '5 s earlier');
+  assert.strictEqual(P.trailStep(a, north(0, -10000)), 'break', '10 s earlier');
+  assert.strictEqual(P.trailStep(null, a), 'join');
+  assert.strictEqual(P.trailStep(a, { lat: 40, lon: -77, ts: NaN }), 'join', 'no usable time joins');
 });
 
 test('rulerMeasure LAX to JFK: 2144 nm, initial course 066', () => {

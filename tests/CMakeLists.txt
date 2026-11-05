@@ -520,11 +520,6 @@ foreach(f IN LISTS _script_tests)
   add_test(NAME script_${name} COMMAND bash ${f})
   set_tests_properties(script_${name} PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
 endforeach()
-# make-source-tarball.sh still expects the old two-directory layout; the test
-# is rewritten with the script, until then a failure is the expected result.
-if(TEST script_test_source_tarball)
-  set_tests_properties(script_test_source_tarball PROPERTIES WILL_FAIL TRUE)
-endif()
 
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

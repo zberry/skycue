@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # make-source-tarball.sh [-o OUTDIR]
 # Writes OUTDIR/skycue-<version>.tar.gz (default OUTDIR: dist/): the committed
-# tree (git archive HEAD) under skycue-<version>/ plus exactly the two pinned
-# web-library tarballs from sources/ (leaflet, echarts). File names and SHA-256
-# come from cmake/sources.cmake. Map tiles, overlays and every other file in
-# sources/ are left out, as are the restricted test fixtures and the fuzz seeds
-# cut from them. The output is reproducible for a given commit.
+# tree (git archive HEAD) directly under skycue-<version>/ plus exactly the two
+# pinned web-library tarballs from sources/ (leaflet, echarts). File names and
+# SHA-256 come from cmake/web-sources.cmake. Map tiles, overlays and every other
+# file in sources/ are left out. The archive is the tree: nothing is excluded.
+# Works whether this directory is a subdirectory of a git repository or its root.
+# The output is reproducible for a given commit.
 # The last line printed on stdout is the output path.
 set -euo pipefail
 
@@ -22,20 +23,20 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-version=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$repo/skycue/CMakeLists.txt")
+version=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$repo/CMakeLists.txt")
 [ -n "$version" ] || die "cannot read the version from CMakeLists.txt"
 name=skycue-$version
 
 # Name and hash of a pinned source, from its skycue_declare_source line.
 pin() { # <source name> <field: SHA256|FILE>
-  sed -n "s/^skycue_declare_source($1 .*$2 \"\\{0,1\\}\\([^ \"]*\\)\"\\{0,1\\}.*/\\1/p" "$repo/cmake/sources.cmake" | head -n1
+  sed -n "s/^skycue_declare_source($1 .*$2 \"\\{0,1\\}\\([^ \"]*\\)\"\\{0,1\\}.*/\\1/p" "$repo/cmake/web-sources.cmake" | head -n1
 }
 
 files=()
 for lib in leaflet echarts; do
   file=$(pin "$lib" FILE)
   sha=$(pin "$lib" SHA256)
-  [ -n "$file" ] && [ -n "$sha" ] || die "no $lib pin in cmake/sources.cmake"
+  [ -n "$file" ] && [ -n "$sha" ] || die "no $lib pin in cmake/web-sources.cmake"
   [ -f "$repo/sources/$file" ] || die "sources/$file is missing"
   got=$(sha256sum "$repo/sources/$file" | cut -d' ' -f1)
   [ "$got" = "$sha" ] || die "sources/$file has the wrong SHA-256 (expected $sha, got $got)"
@@ -52,20 +53,10 @@ mtime=$(git -C "$repo" log -1 --format=%ct HEAD)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-git -C "$repo" archive --format=tar --prefix="$name/" HEAD >"$tmp/src.tar"
-# Left out of the public tarball: tests/fixtures/README.md says the
-# third-party captures in fixtures/raw/ must not ship in release bundles, and
-# the pingstation icd-*.json files are copied from a vendor document with no
-# stated licence. The fuzz seeds cut from them (docs/hardening.md, "Seeds") go
-# too: raw_formats/seed-1..18 and pingstation/seed-1, 3, 4 and web/seed-13.
-# Only members the archive holds are deleted, so this keeps working once those
-# files are gone from git.
-excluded() { # reads tar -t names, prints the ones to delete
-  local f=$name/skycue/tests/fixtures s=$name/skycue/fuzz/seeds
-  grep -E "^($f/raw(/.*)?|$f/pingstation/icd-[^/]*\.json|$s/raw_formats/seed-([1-9]|1[0-8])\.[^/]*|$s/pingstation/seed-[134]\.[^/]*|$s/web/seed-13\.[^/]*)\$" || true
-}
-mapfile -t gone < <(tar -tf "$tmp/src.tar" | excluded)
-[ ${#gone[@]} -eq 0 ] || tar --delete --no-recursion -f "$tmp/src.tar" "${gone[@]}"
+prefix=$(git -C "$repo" rev-parse --show-prefix)
+# From the top level: inside a subdirectory git archive would filter by the cwd again.
+# A tree-ish has no commit time, so --mtime (git 2.39 or newer) pins it.
+git -C "$(git -C "$repo" rev-parse --show-toplevel)" archive --format=tar --mtime="@$mtime" --prefix="$name/" "HEAD:$prefix" >"$tmp/src.tar"
 for f in "${files[@]}"; do
   tar --append -f "$tmp/src.tar" -C "$repo" --transform "s,^sources/,$name/sources/," --format=gnu \
       --mtime="@$mtime" --mode=0644 --owner=0 --group=0 --numeric-owner "sources/$f"

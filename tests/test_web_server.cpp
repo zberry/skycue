@@ -4,6 +4,7 @@
 #include "engine_test_support.hpp"
 
 #include "icao_class.hpp"
+#include "inputs/inputs_file.hpp"
 #include "runtime_config.hpp"
 #include "stats_store.hpp"
 #include "time_util.hpp"
@@ -18,6 +19,7 @@
 #include <boost/property_tree/ptree.hpp>
 
 #include <signal.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <spawn.h>
 #include <sys/socket.h>
@@ -652,12 +654,43 @@ BOOST_AUTO_TEST_CASE(map_dir_ignores_www_tiles)
     BOOST_TEST(get(f.port, "/").status == 200u);
 }
 
+// Redirects stderr (the log) to a file until text() is called.
+struct StderrCapture {
+    std::string path;
+    int saved = -1;
+    explicit StderrCapture(std::string p) : path(std::move(p))
+    {
+        std::fflush(stderr);
+        saved = ::dup(2);
+        const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        ::dup2(fd, 2);
+        ::close(fd);
+    }
+    std::string text()
+    {
+        if (saved >= 0) {
+            std::fflush(stderr);
+            ::dup2(saved, 2);
+            ::close(saved);
+            saved = -1;
+        }
+        return readAll(path);
+    }
+    ~StderrCapture() { text(); }
+};
+
 BOOST_AUTO_TEST_CASE(map_dir_missing_api_still_works)
 {
     WebOptions o;
     o.map_dir = true;
     o.map_dir_missing = true;
+    TempDir logdir;
+    StderrCapture cap(logdir.path + "/stderr.txt");
     WebFx f(o);
+    const std::string log = cap.text();
+    BOOST_TEST(has(log, "WARN"));
+    BOOST_TEST(has(log, "MAP_DIR"));
+    BOOST_TEST(has(log, "map directory " + f.maps + " (MAP_DIR) does not exist"));
     BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
     BOOST_TEST(get(f.port, "/api/state").status == 200u);
     BOOST_TEST(get(f.port, "/tiles/7/37/49.png").status == 404u);
@@ -2175,4 +2208,128 @@ BOOST_AUTO_TEST_CASE(stats_summary_by_country_top20_and_other)
         }
         ++i;
     }
+}
+
+
+// ---- skycued --check-inputs ----
+
+namespace {
+
+uint16_t closedPort()
+{
+    asio::io_context io;
+    tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    return a.local_endpoint().port();  // closed again on return
+}
+
+std::string checkConf(const std::string& extra)
+{
+    return std::string(kConfHead) + "CUE_TCP_PORT=0\nWEB_PORT=0\n" + extra;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(check_inputs_exit_status)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    {
+        enginetest::TestServer s;
+        const std::string p = std::to_string(s.port());
+        writeFile(conf, checkConf("READSB_JSON_PORT=" + p + "\nDUMP978_ENABLE=no\n"));
+        const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log);
+        BOOST_TEST(waitExit(pid, 10s) == 0);
+        BOOST_TEST(readAll(log) == "readsb 127.0.0.1:" + p + ": connected\n");
+    }
+    const std::string cp = std::to_string(closedPort());
+    writeFile(conf, checkConf("READSB_JSON_PORT=" + cp + "\nDUMP978_ENABLE=no\n"));
+    const std::string log2 = tmp.path + "/log2";
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log2);
+    BOOST_TEST(waitExit(pid, 10s) == 1);
+    const auto out = lines(readAll(log2));
+    BOOST_REQUIRE(out.size() == 1u);
+    BOOST_TEST(out[0].rfind("readsb 127.0.0.1:" + cp + ": ", 0) == 0u);
+    BOOST_TEST(out[0] != "readsb 127.0.0.1:" + cp + ": connected");
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_uses_readsb_host_key)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    enginetest::TestServer s;
+    const std::string p = std::to_string(s.port());
+    writeFile(conf, checkConf("READSB_HOST=127.0.0.2\nREADSB_JSON_PORT=" + p + "\nDUMP978_ENABLE=no\n"));
+    const std::string log = tmp.path + "/log";
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log);
+    BOOST_TEST(waitExit(pid, 10s) == 1);
+    const auto out = lines(readAll(log));
+    BOOST_REQUIRE(out.size() == 1u);
+    BOOST_TEST(out[0].rfind("readsb 127.0.0.2:" + p + ": ", 0) == 0u);
+    const std::string log2 = tmp.path + "/log2";
+    const pid_t pid2 = spawnSkycued({"--config", conf, "--check-inputs", "--readsb-host", "127.0.0.1"}, log2);
+    BOOST_TEST(waitExit(pid2, 10s) == 0);
+    BOOST_TEST(readAll(log2) == "readsb 127.0.0.1:" + p + ": connected\n");
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_includes_dump978_and_user_inputs)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    enginetest::TestServer s1, s2, s3;
+    const std::string p1 = std::to_string(s1.port()), p2 = std::to_string(s2.port()), p3 = std::to_string(s3.port());
+    skycued::InputsFile file;
+    skycued::InputDef ps;
+    ps.id = "ps";
+    ps.type = skycued::InputType::pingstation_cat021;
+    ps.transport = skycued::InputTransport::tcp_connect;
+    ps.host = "127.0.0.1";
+    ps.port = s3.port();
+    skycued::InputDef pu;
+    pu.id = "pu";
+    pu.type = skycued::InputType::pingstation_json;
+    pu.transport = skycued::InputTransport::udp;
+    pu.port = 30999;
+    file.inputs = {ps, pu};
+    const std::string inputs = tmp.path + "/skycue.inputs.json";
+    writeFile(inputs, skycued::inputsFileJson(file));
+    writeFile(conf, checkConf("READSB_JSON_PORT=" + p1 + "\nDUMP978_RAW_PORT=" + p2 + "\n"));
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log);
+    BOOST_TEST(waitExit(pid, 10s) == 0);
+    const auto out = lines(readAll(log));
+    BOOST_REQUIRE(out.size() == 4u);
+    BOOST_TEST(out[0] == "readsb 127.0.0.1:" + p1 + ": connected");
+    BOOST_TEST(out[1] == "dump978 127.0.0.1:" + p2 + ": connected");
+    BOOST_TEST(out[2] == "ps 127.0.0.1:" + p3 + ": connected");
+    BOOST_TEST(out[3] == "pu: not checked (listens on 0.0.0.0:30999)");
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_creates_nothing)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    const std::string state = tmp.path + "/state";
+    ::mkdir(state.c_str(), 0755);
+    writeFile(conf, checkConf("RECORD_DIR=" + tmp.path + "/rec-new\nSTATE_DIR=" + state +
+                              "\nREADSB_JSON_PORT=" + std::to_string(closedPort()) + "\nDUMP978_ENABLE=no\n"));
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs"}, log);
+    BOOST_TEST(waitExit(pid, 10s) == 1);
+    struct stat st{};
+    BOOST_TEST(::stat((tmp.path + "/rec-new").c_str(), &st) != 0);
+    size_t entries = 0;
+    if (DIR* d = ::opendir(state.c_str())) {
+        while (const dirent* e = ::readdir(d))
+            if (std::string(e->d_name) != "." && std::string(e->d_name) != "..")
+                ++entries;
+        ::closedir(d);
+    }
+    BOOST_TEST(entries == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_with_replay_is_usage_error)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf", log = tmp.path + "/log";
+    writeFile(conf, checkConf(""));
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs", "--replay", kFixture}, log);
+    BOOST_TEST(waitExit(pid, 10s) == 2);
 }

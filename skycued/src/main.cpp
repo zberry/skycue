@@ -6,11 +6,13 @@
 // failure (a port that cannot be bound, a recording directory that cannot be
 // created), 2 on a usage or configuration error.
 
+#include "check_inputs.hpp"
 #include "config.hpp"
 #include "engine.hpp"
 #include "forwarder.hpp"
 #include "inputs/dump978_input.hpp"
 #include "inputs/input_manager.hpp"
+#include "inputs/inputs_file.hpp"
 #include "inputs/source_input.hpp"
 #include "log.hpp"
 #include "readsb_json_source.hpp"
@@ -38,12 +40,15 @@
 #include <csignal>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace po = boost::program_options;
 using namespace skycued;
@@ -82,6 +87,68 @@ std::string defaultWwwDir()
     return ::realpath(www.c_str(), real) ? std::string(real) : www;
 }
 
+// --check-inputs: one connection attempt per input, one line each on stdout.
+int runCheckInputs(const Config& config, const std::string& inputs_path, bool check_readsb,
+                   const std::string& readsb_host, bool check_dump978, const std::string& dump978_host)
+{
+    bool readsb_on = check_readsb, dump978_on = check_dump978;
+    std::vector<InputDef> user;
+    std::string text;
+    if (!inputs_path.empty()) {
+        std::ifstream in(inputs_path, std::ios::binary);
+        if (in) {
+            std::ostringstream ss;
+            ss << in.rdbuf();
+            text = ss.str();
+            if (text.size() > kMaxInputsFileBytes) {
+                std::cerr << "skycued: " << inputs_path << ": file is too large\n";
+                return 2;
+            }
+            try {
+                const InputsFile file = parseInputsFile(text);
+                validateInputSet(file.inputs);
+                const auto r = file.builtin_enabled.find("readsb");
+                if (r != file.builtin_enabled.end())
+                    readsb_on = readsb_on && r->second;
+                const auto d = file.builtin_enabled.find("dump978");
+                if (d != file.builtin_enabled.end())
+                    dump978_on = dump978_on && d->second;
+                user = file.inputs;
+            } catch (const std::exception& e) {
+                std::cerr << "skycued: " << inputs_path << ": " << e.what() << "\n";
+                return 2;
+            }
+        }
+    }
+    std::vector<InputCheck> checks;
+    if (readsb_on)
+        checks.push_back({"readsb", readsb_host, config.readsb_json_port});
+    if (dump978_on)
+        checks.push_back({"dump978", dump978_host, config.dump978_raw_port});
+    std::vector<std::string> unchecked;
+    for (const auto& d : user) {
+        if (!d.enabled)
+            continue;
+        if (d.transport == InputTransport::tcp_connect)
+            checks.push_back({d.id, d.host, d.port});
+        else
+            unchecked.push_back(d.id + ": not checked (listens on " + d.bind + ":" + std::to_string(d.port) + ")");
+    }
+    if (checks.empty() && unchecked.empty()) {
+        std::cout << "no inputs to check\n";
+        return 0;
+    }
+    bool ok = true;
+    for (const auto& r : checkInputs(checks, std::chrono::seconds(3))) {
+        std::cout << inputCheckLine(r) << "\n";
+        ok = ok && r.connected;
+    }
+    for (const auto& line : unchecked)
+        std::cout << line << "\n";
+    std::cout.flush();
+    return ok ? 0 : 1;
+}
+
 int run(int argc, char** argv)
 {
     const auto started = std::chrono::system_clock::now();
@@ -107,6 +174,11 @@ int run(int argc, char** argv)
         "www-dir", po::value(&www_dir), "the web UI's files (default: <bin>/../share/skycue/www)")(
         "web-bind", po::value(&web_bind), "override WEB_BIND (numeric address)")(
         "web-port", po::value(&web_port), "override WEB_PORT (0: no web UI)")(
+        "check-inputs",
+        "connect once to each configured TCP input (readsb, dump978, tcp_connect inputs of the inputs file), "
+        "print one line per input, exit 0 when all connected, 1 otherwise; starts nothing else. Each check "
+        "gives up after 3 s; a name lookup cannot be cancelled, so one that is still running then is "
+        "abandoned and ends on the system resolver's own timeout")(
         "log-level", po::value(&log_level)->default_value("info"), "debug, info, warn or error");
     po::variables_map vm;
     try {
@@ -147,6 +219,11 @@ int run(int argc, char** argv)
         return 2;
     }
     const bool replaying = vm.count("replay") > 0;
+    const bool check_only = vm.count("check-inputs") > 0;
+    if (check_only && replaying) {
+        std::cerr << "skycued: --check-inputs cannot be combined with --replay\n";
+        return 2;
+    }
     if (replaying && (!std::isfinite(replay_speed) || replay_speed < 0)) {
         std::cerr << "skycued: --replay-speed must be 0 (unpaced) or positive\n";
         return 2;
@@ -180,6 +257,10 @@ int run(int argc, char** argv)
         config.web_bind = web_bind;
     if (!vm.count("www-dir"))
         www_dir = defaultWwwDir();
+
+    if (check_only)
+        return runCheckInputs(config, vm.count("inputs-file") ? inputs_file : resolveInputsFile(config, config_path),
+                              vm.count("no-readsb") == 0, readsb_host, use_dump978, dump978_host);
 
     boost::asio::io_context io;
 

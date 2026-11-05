@@ -6,10 +6,13 @@
 # the key (what `journalctl -u skycued` shows); with the position set it parses
 # as a whole (--check-inputs gets as far as probing the inputs); and an example
 # that no longer has a line the script edits makes the script fail, naming it.
-# usage: test_package_conf.sh CMAKE PACKAGE_CONFIG_CMAKE EXAMPLE SKYCUED WORK_DIR
+# usage: test_package_conf.sh CMAKE PACKAGE_CONFIG_CMAKE EXAMPLE SKYCUED WORK_DIR PYTHON3
+#   PYTHON3: the interpreter that picks a closed port; when it is empty or
+#   not there (SKYCUE_PYTHON3-NOTFOUND) the test is skipped with exit 77.
 set -u
-cmake=$1 script=$2 example=$3 skycued=$4 work=$5
+cmake=$1 script=$2 example=$3 skycued=$4 work=$5 python3=${6:-}
 fail() { echo "FAIL: $*"; exit 1; }
+[ -n "$python3" ] && [ -x "$python3" ] || { echo "SKIP: python3 not found"; exit 77; }
 for f in "$script" "$example" "$skycued"; do [ -e "$f" ] || fail "$f missing"; done
 rm -rf "$work"
 mkdir -p "$work" || fail "cannot create $work"
@@ -59,7 +62,7 @@ grep -qxF "skycued: $out: missing required key RECEIVER_LAT" "$work/check.err" \
 
 # Position set, state under the work dir, both decoder ports closed: the file
 # parses as a whole and the probes run (exit 1, the readsb line).
-closed=$(python3 -I -c 'import socket
+closed=$("$python3" -I -c 'import socket
 s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
 mkdir -p "$work/state" "$work/maps"
 sed -e "s|^STATE_DIR=.*|STATE_DIR=$work/state|" -e "s|^MAP_DIR=.*|MAP_DIR=$work/maps|" \

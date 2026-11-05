@@ -175,12 +175,13 @@ add_test(NAME install_layout
 set_tests_properties(install_layout PROPERTIES TIMEOUT 120)
 
 # package_conf: cmake/PackageConfig.cmake on the example, and skycued on what
-# it writes.
+# it writes. It picks a closed port with python3, so it is skipped (exit 77)
+# without one.
 add_test(NAME package_conf
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_package_conf.sh ${CMAKE_COMMAND}
     ${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake ${_skycue_example_conf}
-    $<TARGET_FILE:skycued> ${CMAKE_CURRENT_BINARY_DIR}/package-conf-work)
-set_tests_properties(package_conf PROPERTIES TIMEOUT 60)
+    $<TARGET_FILE:skycued> ${CMAKE_CURRENT_BINARY_DIR}/package-conf-work "${SKYCUE_PYTHON3}")
+set_tests_properties(package_conf PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 # SKYCUE_TEST_SLOW_FACTOR outside sanitizer and fuzz builds: two configures
 # of skycue/ (no build), their registered timeouts and environments compared.

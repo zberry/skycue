@@ -78,3 +78,15 @@ from one ground station) is `../raw/uat-sample.txt.gz`. See
   the check script and the adjudicated differences are in
   `scripts/fisb-golden.md`. Derived from `tg30.978` (BSD-2-Clause Plus Patent,
   `LICENSE.fisb-decode`).
+
+## pireps-synthetic.txt
+
+- **Origin:** written by hand for this repository; no third-party data. Every
+  report value (times, flight levels, aircraft types, remarks) is invented.
+  Station and location identifiers are public aviation identifiers.
+- **Line format:** two `#` header lines, then 19 reports, one per line, in the
+  form skycue-fisb prints with decoder newlines replaced by spaces
+  (`PIREP <station> <ddhhmmZ> ... UA /OV ... /TM ...`).
+- **Used by:** `pirep_ov_forms_from_fixture` in `tests/js/app_pure.test.js`.
+  It covers the `/OV` forms: id, id + `rrrddd`, `id rrrddd`, a 4-character id,
+  a route (`SJX-GRB`) and free text (`4 W CVG`).

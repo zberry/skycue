@@ -753,7 +753,7 @@ test('nearest_winds_period', () => {
   assert.strictEqual(P.nearestWindsPeriod([], 0), null);
 });
 test('pirep_ov_forms_from_fixture', () => {
-  const lines = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'fisb', 'pireps.txt'), 'utf8')
+  const lines = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'fisb', 'pireps-synthetic.txt'), 'utf8')
     .split('\n').filter((l) => l && l[0] !== '#');
   assert.strictEqual(lines.length, 19);
   const parsed = lines.map(P.parsePirep);

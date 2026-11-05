@@ -118,7 +118,7 @@ fi
 
 iqgen=$here/build/stage/bin/skycue-iqgen
 if [ ! -x "$iqgen" ]; then
-  iqgen=$(command -v skycue-iqgen) || die "skycue-iqgen not found in $here/build/stage/bin or PATH; build the superbuild first"
+  iqgen=$(command -v skycue-iqgen) || die "skycue-iqgen not found in $here/build/stage/bin or PATH; build skycue first"
 fi
 command -v python3 >/dev/null || die "python3 is needed to read the zip"
 

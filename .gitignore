@@ -1,8 +1,6 @@
 /build*/
 /sources/
 /dist/
-/dump1090/
-/dump978/
 *.tar.gz
 /www/tiles/
 /www/overlays/

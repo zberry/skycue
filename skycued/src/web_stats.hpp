@@ -1,8 +1,8 @@
 #pragma once
 
 // The statistics part of the web API (docs/web-api.md "Statistics"): the
-// /api/stats/* routes over the Engine's StatsStore (spec
-// docs/superpowers/specs/2026-11-03-skycue-stats-view-design.md §4-§5).
+// /api/stats/* routes over the Engine's StatsStore (the
+// stats view design, §4-§5).
 // The exact path /api/stats (the engine's lifetime counters) is web_api's.
 //
 // Every route reads the store on the io thread, as the WebServer calls

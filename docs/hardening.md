@@ -2,7 +2,7 @@
 
 How the sanitizer, fuzz, static-analysis and soak runs are made, and what
 each run found. None of the instrumentation here is in the default
-configure, the superbuild or the offline bundle; the shipped binaries are
+configure or any release; the shipped binaries are
 built exactly as before. The first sweep's results, per part and with the
 regression test of each fix, are in
 [hardening-report-2026-11-03.md](hardening-report-2026-11-03.md); this file
@@ -171,7 +171,7 @@ clang 21, RelWithDebInfo, slow factor 4, `-j` = all cores.
 - Skipped inside passing tests, for reasons outside the sanitizer:
   `ui_playwright` (Playwright not installed in the tree), the Leaflet part of
   `web_ui` (Leaflet not staged), the readsb full-stack part of `rawtools`
-  (no superbuild readsb in the tree).
+  (no readsb in the tree).
 
 ### First TSan run (2026-11-03)
 
@@ -743,16 +743,14 @@ target. Whole tree (daemon, tools, tests, examples), Release, 2026-11-03:
   and `-Wc++20-extensions` (a lambda in `InputManager::applyFile` captured
   a structured binding, which C++17 does not allow: named references
   instead). Then clean.
-- gcc 8.5 (Rocky 8, Boost 1.66): proved on the sweep's final head by the
-  container run `scripts/verify-offline-build.sh 8 <bundle> --werror`
-  (`verify: OK rocky8`, 0 compiler warnings), and gcc 11 again in the
-  Rocky 9 container (`verify: OK rocky9`); both plain and with `--werror`.
+- gcc 8.5 (RHEL 8 compatible, Boost 1.66): proved on the sweep's final head by
+  the stack's clean-room build with `SKYCUE_WERROR=ON` (0 compiler
+  warnings), and gcc 11 again on RHEL 9 compatible; both plain and with
+  `SKYCUE_WERROR=ON`.
 
-The superbuild has its own `SKYCUE_WERROR` option (default `OFF`), passed on
-as `-DSKYCUE_WERROR=ON` to the skycue ExternalProject only when it is on, so
-the default argument list is unchanged. `verify-offline-build.sh --werror`
-configures the bundle with it in the container (`VERIFY_WERROR=1` for
-`containers/verify.sh`).
+`SKYCUE_WERROR` (default `OFF`) turns compiler warnings into errors; the
+default argument list is unchanged. `containers/verify.sh` takes
+`VERIFY_WERROR=1`.
 
 ## Soak
 

@@ -166,7 +166,7 @@ set_tests_properties(parent_project PROPERTIES
 # install_layout: `cmake --install` of this build tree into a DESTDIR, checked
 # against what this tree's configuration should produce (default source
 # install, package build with SKYCUE_PACKAGE_CONFIG and absolute
-# SKYCUE_SYSTEMD_UNITDIR, or SKYCUE_INSTALL_SYSTEM_FILES=OFF as the superbuild).
+# SKYCUE_SYSTEMD_UNITDIR, or SKYCUE_INSTALL_SYSTEM_FILES=OFF as a parent build).
 add_test(NAME install_layout
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_install_layout.sh ${CMAKE_COMMAND}
     ${PROJECT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/install-layout-work

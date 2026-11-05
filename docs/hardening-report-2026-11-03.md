@@ -15,7 +15,7 @@ another path is given, and case) and the subject of the commit that made it.
 ## Final reruns
 
 On the finished branch, each from a fresh build tree. The sanitizer runs,
-`run-static.sh`, the default suite and the superbuild scripts were run again
+`run-static.sh`, the default suite and the stack's clean-room builds were run again
 after the capture fix the fuzz rerun led to, with the same result lines.
 
 | run | result |
@@ -26,9 +26,9 @@ after the capture fix the fuzz rerun led to, with the same result lines.
 | `scripts/run-static.sh` | `static: clang-tidy=0 cppcheck=0` |
 | `ctest --test-dir build-fuzz -R fuzz_smoke` | `100% tests passed, 0 tests failed out of 2` (`fuzz_build`, `fuzz_smoke`: nine targets, 5 s each, `findings=0`) |
 | default suite, `ctest -j8` (with `SKYCUE_SOAK_TESTS=ON`) | `100% tests passed, 0 tests failed out of 51` (`soak_short` passed in 120 s, `PASS A: rss 8708 -> 9320 kB (+7.0%), fds 13..13, 19 window samples` and `PASS B: rss 7644 -> 7648 kB (+0.1%), fds 14..14, 19 window samples` at `--growth 1.0`, the last run, on the final code; `ui_playwright` passed; `fuzz_smoke` and `static_analysis` skipped, their options off in a default tree) |
-| `SKYCUE_STAGE=<the branch's stage-test> tests/superbuild/run.sh` | exit 0, every script PASS; `test_iq_replay.sh` SKIP (readsb is not in a skycue-only stage) |
-| Rocky 8 container (gcc 8.5, Boost 1.66): `scripts/verify-offline-build.sh 8 <bundle>`, plain and with `--werror` (`SKYCUE_WERROR=ON`), on the final head | both ended `verify: OK rocky8`; ctest 50/50 passed, 3 skipped as exit 77 (`fuzz_smoke`, `static_analysis`, `soak_short`); 0 compiler warnings in the tree; no `-fsanitize` and no `SKYCUE_FUZZ` in the configure; `test_receivers.sh` ok, `test_make_locations` PASS, the start-script test ran; in place and relocated |
-| Rocky 9 container (gcc 11, Boost 1.75): the same procedure, plain and with `--werror` | both ended `verify: OK rocky9`, with the same counts and checks |
+| the stack's script tests on the branch's stage | exit 0, every script PASS; the IQ replay test SKIP (readsb is not in a skycue-only stage) |
+| RHEL 8 compatible clean-room build (gcc 8.5, Boost 1.66): the stack's clean-room build, plain and with `SKYCUE_WERROR=ON`, on the final head | both ended `verify: OK`; ctest 50/50 passed, 3 skipped as exit 77 (`fuzz_smoke`, `static_analysis`, `soak_short`); 0 compiler warnings in the tree; no `-fsanitize` and no `SKYCUE_FUZZ` in the configure; `test_receivers.sh` ok, `test_make_locations` PASS, the start-script test ran; in place and relocated |
+| RHEL 9 compatible clean-room build (gcc 11, Boost 1.75): the same procedure, plain and with `SKYCUE_WERROR=ON` | both ended `verify: OK`, with the same counts and checks |
 
 `du -sb fuzz/seeds`: 82876 bytes (limit 1048576).
 
@@ -141,11 +141,11 @@ One row per ledger item; "how long" is "one change" (one small commit) or "no ch
 | inputs-file deletion test | no change | asked for | none | already resolved (`test_inputs.cpp`, the deletion case) |
 | `-Wconversion` test lines from the gcc 8.5 container run | no change | warnings in test code | none | already resolved (receivers branch; the `-Werror` pass above) |
 | `run-static.sh --build-dir` | one change | reconfigured a tree that was not its own (dropped `SKYCUE_UI_TESTS` from it) | fixed (no test: checked by hand, a foreign tree refused with its cache unchanged); "run-static: refuse to reconfigure a build tree that is not its own" | none |
-| Pillow check under `python3 -I` | one change | skipped with a user-site-only Pillow | `tests/superbuild/test_make_tiles.sh`; "tests: make_tiles runs the Pillow check without -I for a user-site Pillow" | documented: `scripts/make-tiles.sh --palette` needs Pillow for the isolated interpreter on the baking machine |
-| receivers compare: null altitude | one change | raised a TypeError | `tests/superbuild/test_receivers.sh`; "tests: receivers compare reports a null altitude as a mismatch" | none |
-| `do_status` uptime | one change | needed `ps` | `tests/superbuild/test_start_script.sh` step 9c; "skycue-start: status takes the uptime from /proc when ps has none" (step 9 no longer sources the script) | none |
-| symlinked `sources/` in the offline bundle | one change | the bundle stored only the link | fixed (no test: checked by hand, `tar -tf` lists the file through the link); "make-offline-bundle: dereference a symlinked sources/" | documented in `building-rhel.md` |
-| `make-locations.py` dropped rows | one change | rows skipped for a bad id or no position were not counted | `tests/superbuild/test_make_locations.sh`; "make-locations: count the rows skipped for a bad id or no position" | none |
+| Pillow check under `python3 -I` | one change | skipped with a user-site-only Pillow | `tests/scripts/test_make_tiles.sh`; "tests: make_tiles runs the Pillow check without -I for a user-site Pillow" | documented: `scripts/make-tiles.sh --palette` needs Pillow for the isolated interpreter on the baking machine |
+| receivers compare: null altitude | one change | raised a TypeError | the stack's receivers test; "tests: receivers compare reports a null altitude as a mismatch" | none |
+| `do_status` uptime | one change | needed `ps` | the stack's start-script test, step 9c; "skycue-start: status takes the uptime from /proc when ps has none" (step 9 no longer sources the script) | none |
+| symlinked `sources/` in the stack's bundle | one change | the bundle stored only the link | fixed in the stack (no test: checked by hand, `tar -tf` lists the file through the link) | documented in the stack repository |
+| `make-locations.py` dropped rows | one change | rows skipped for a bad id or no position were not counted | `tests/scripts/test_make_locations.sh`; "make-locations: count the rows skipped for a bad id or no position" | none |
 | `tests/ui/run.sh` whole-test SKIP; Playwright stdin | one change | a SKIP passed; the job read the terminal | ctest `ui_playwright` reports Skipped with an empty `SKYCUE_UI_NODE_MODULES`; "ui tests: a whole-test skip exits 77 and ctest reports it skipped" | none |
 | tile underlay below a region-edge tile; `failed` counter | one change | the underlay could be an edge tile too; pruned tiles counted as failed; a missing underlay fell to an edge level | `tests/js/app_pure.test.js` "nearestInsideAncestor skips region-edge ancestors" and Playwright tiles cases in `tests/ui/ui.spec.js` ("web: tile underlays come from the nearest ancestor inside a region"); "underlayNextLevel stays on ancestors inside a region" ("replay, web: zero loop shift never saturates; underlay and shown-report fixes") | none |
 | the report shown from the list and the 300-symbol cap | one change | the shown report could be cut; closing the card did not let it go | `tests/js/app_pure.test.js` "capSymbols keeps the shown report" ("web: the report shown from the list stays through the symbol cap"); "closeReportCard forgets the shown report" (same commit as the underlay) | none |

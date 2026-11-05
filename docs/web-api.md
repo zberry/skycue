@@ -1036,8 +1036,7 @@ data clock minus the newest NEXRAD product time.
 
 ## Statistics
 
-skycued keeps a statistics history (spec
-[2026-11-03-skycue-stats-view-design.md](superpowers/specs/2026-11-03-skycue-stats-view-design.md) §4):
+skycued keeps a statistics history (the stats view design, §4):
 per-minute (last 24 h) and per-hour (last 30 days) series, histograms,
 range coverage, a position grid, a signal-versus-range matrix, categorical
 counts and a ledger of every aircraft heard (at most `STATS_AIRCRAFT_MAX`,

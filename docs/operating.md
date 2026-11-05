@@ -2,8 +2,8 @@
 
 How to run the receiver chain from an installed prefix (`/opt/skycue` below;
 `build/stage` works the same), replay recordings, and watch the cue stream.
-Building and installing the offline bundle are in
-[building-rhel.md](building-rhel.md); the Debian and RHEL packages and the
+Building and installing the offline bundle are described in the stack
+repository; the Debian and RHEL packages and the
 plain CMake install, which run skycued alone beside decoders you already
 have (as the systemd unit `skycued`, with `/etc/skycue/skycue.conf`), are in
 [installing.md](installing.md). Where the two shapes keep their files
@@ -541,10 +541,8 @@ from the internet; the API behind it is in [web-api.md](web-api.md).
 machine's host name instead, as `http://<host>:8080/ (WEB_BIND=0.0.0.0
 listens on all interfaces)`. The page's files are in `<prefix>/share/skycue/www`
 (Leaflet under `vendor/leaflet/`, ECharts under `vendor/echarts/`); the
-clean-room build check
-(`scripts/verify-offline-build.sh`, see [building-rhel.md](building-rhel.md))
-fetches the page, Leaflet, ECharts and `/api/state` from a replaying skycued on
-Rocky 8 and 9.
+stack's clean-room build check fetches the page, Leaflet, ECharts and
+`/api/state` from a replaying skycued.
 
 The left panel has two groups: **Output filters** (what is sent to the
 cue clients: range, elevation and the allow and block lists, see
@@ -1185,7 +1183,7 @@ packages), else `<prefix>/share/skycue/www/`. The overlays
 never from the www directory, and a `MAP_DIR` that does not exist is
 logged as a WARN at start and the map has no tiles or overlays. See
 [scripts/make-tiles.md](../scripts/make-tiles.md) for the sizes and how
-the offline bundle carries them. The page picks them up on its next load.
+a full-stack bundle can carry them. The page picks them up on its next load.
 
 With the packages, or a source install of `skycue/`, `skycue-make-maps`
 makes both the tiles and the overlays straight into `MAP_DIR` (read from
@@ -1219,9 +1217,9 @@ is `/` or that already holds other files but neither `tiles/` nor
 `overlays/` (exit 2), checks that it can write the map directory before
 downloading anything (exit 1 otherwise), and as root hands the result to
 the `skycue` user (`--owner` for another). Exit status:
-0 done, 1 failure, 2 usage or config error, 3 a missing tool. With the
-offline bundle, run `scripts/make-tiles.sh` and `scripts/make-overlays.sh`
-from its source tree as above (`scripts/skycue-make-maps --map-dir DIR` works
+0 done, 1 failure, 2 usage or config error, 3 a missing tool. With a
+source tree, run `scripts/make-tiles.sh` and `scripts/make-overlays.sh`
+from it as above (`scripts/skycue-make-maps --map-dir DIR` works
 there too, with the scripts beside it).
 
 ### Map style and overlays
@@ -1267,9 +1265,8 @@ cache (default `build/naturalearth/`) once, and writes `admin0.json`,
 1 km; about 1 MB in all) and `meta.json` (each file's source, version,
 SHA-256, feature count and size, and when it was made) to the output
 directory (default `www/overlays/`, git-ignored).
-`SKYCUE_NE_VECTOR_URL` points it at a mirror of the same zip files. The
-offline bundle (`scripts/make-offline-bundle.sh`) carries the directory when
-it exists. skycued serves it like the rest of the page, so a reload picks it
+`SKYCUE_NE_VECTOR_URL` points it at a mirror of the same zip files. A
+full-stack bundle can carry the directory when it exists. skycued serves it like the rest of the page, so a reload picks it
 up without a restart.
 
 ## Watching the stream: skycue-dump
@@ -1542,7 +1539,7 @@ integration, the API, threading, drops and liveness: [libskycue.md](libskycue.md
 ## For developers: sanitizers, fuzzing, static analysis, soak
 
 None of this is needed to run skycue, and none of it is in the default build
-or the offline bundle. Before changing a parser, the daemon's threading or
+or any release. Before changing a parser, the daemon's threading or
 anything that runs for days, run the checks in
 [hardening.md](hardening.md): `scripts/run-sanitizers.sh asan|tsan`,
 `scripts/run-fuzz.sh`, `scripts/run-static.sh` and

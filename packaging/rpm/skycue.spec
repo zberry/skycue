@@ -9,6 +9,7 @@ Version:        %{skycue_version}
 Release:        1%{?dist}
 Summary:        ADS-B and UAT operator console and forwarding bridge
 License:        Apache-2.0
+URL:            https://github.com/zberry/skycue
 Source0:        skycue-%{version}.tar.gz
 
 BuildRequires:  gcc-c++ cmake >= 3.25 boost-devel zlib-devel python3 diffutils make

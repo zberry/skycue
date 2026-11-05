@@ -2,10 +2,11 @@
 
 The other replay modes feed the decoders data that has already been
 demodulated: Beast frames, dump978 text, readsb JSON. IQ replay goes one step
-earlier. It feeds raw radio samples to readsb's 2.4 MS/s Mode S demodulator
-and dump978-fa's 2.083 MS/s UAT demodulator, as built by the superbuild. That
-way the whole chain is exercised before a dongle is plugged in: samples,
-demodulator, decoder, skycued, cues on the wire.
+earlier. It makes raw radio samples that readsb's 2.4 MS/s Mode S demodulator
+and dump978-fa's 2.083 MS/s UAT demodulator can read. That way the whole
+chain can be exercised before a dongle is plugged in: samples, demodulator,
+decoder, skycued, cues on the wire. This page covers making the files; the
+stack repository that builds the decoders has the start script that plays them.
 
 There are two sources of IQ files:
 
@@ -16,7 +17,7 @@ There are two sources of IQ files:
   capture (Porto, Zenodo 23342598, CC BY 4.0) and resamples it for readsb.
   It gives an independent check on real signals.
 
-`skycue-start.sh replay-iq` runs the real decoders on either kind of file.
+The real decoders can read either kind of file.
 
 A pingStation 3 has no IQ stage to replay: it sends decoded traffic.
 `skycue-pingsim` stands in for one, from its capture files or from a readsb
@@ -122,7 +123,7 @@ frame is **optional**:
 Optional frames are placed like any other but are not counted. A UAT frame is
 expected unless it is overlapped.
 
-The decoder test counts recovery over expected frames only, frame by frame,
+A decoder test counts recovery over expected frames only, frame by frame,
 with readsb run with `--no-fix`. A 1090 frame counts when readsb sent the
 same payload, byte for byte, with a Beast timestamp at the frame's position:
 in ifile mode readsb stamps each frame on a 12 MHz clock derived from the
@@ -169,7 +170,7 @@ Any input may be gzip-compressed (`.gz` after the suffix).
 | `--level DBFS` | −12 | signal amplitude, see above |
 | `--snr DB` | 25 | A² over complex noise power; `none` for no noise |
 | `--cfo HZ` | 0 | constant carrier offset |
-| `--seed N` | 1 | noise seed; the same inputs and options give byte-identical output on the same libm and architecture (verified identical on the Rocky 8 and 9 builds) |
+| `--seed N` | 1 | noise seed; the same inputs and options give byte-identical output on the same libm and architecture (verified identical on RHEL 8 and 9 builds) |
 | `--limit N` | all | keep only the first N frames |
 | `--skip-seconds S` | 0 | drop the frames in the first S seconds of each timed input, on the recording's own clock (at most 31 622 400, 366 days; ignored with a warning for an untimed input) |
 | `--duration S` | all | keep only frames starting in the next S seconds (after `--skip-seconds`; at most 86 400) |
@@ -231,41 +232,6 @@ It prints `in_samples=… out_samples=…`.
 **`info`** prints the sample count, the duration at `--rate`, the mean and
 peak magnitude, and the DC offset of I and Q.
 
-## Running `replay-iq`
-
-```sh
-bin/skycue-start.sh replay-iq /data/iq/sample.1090.cu8 /data/iq/sample.978.cu8
-bin/skycue-start.sh replay-iq /data/iq/capture.cu8 --band 978 --loop
-bin/skycue-stop.sh
-```
-
-**Bands.** The band comes from the file name (`*.1090.cu8`, `*.978.cu8`),
-or from `--band 1090|978` for a single file named otherwise. Give at most
-one file per band.
-
-**Commands run.** readsb runs as `--device-type ifile --ifile FILE --iformat
-UC8 --throttle` and dump978-fa as `--file FILE --format CU8 --file-throttle`.
-Both use the usual ports, and skycued runs as in `start`, so the GUI and the
-cue outputs are the same as live. `--dry-run` prints the commands.
-
-**Real time only.** Playback runs at real time, and there is no `--speed`.
-
-**`--loop`.** Each decoder exits at the end of its file. With `--loop` it is
-started again while skycued keeps running.
-
-**978-only.** With only a 978 file, readsb runs network-only, merging
-dump978-fa's UAT. In that case `--loop` restarts dump978-fa only.
-
-**Receiver position.** The position in the config must match the
-recording's region, or readsb cannot place aircraft and the range filter
-drops them:
-
-- files made from the bundled Mode S capture: `RECEIVER_LAT=52.0` /
-  `RECEIVER_LON=4.5`;
-- the Porto capture: `RECEIVER_LAT=41.15` / `RECEIVER_LON=-8.61`.
-
-See [operating.md](operating.md) for the other replay modes.
-
 ## The real capture (Porto)
 
 The dataset is "Automatic Dependent Surveillance Broadcast (ADSB) I/Q samples
@@ -307,7 +273,7 @@ The script works in this order:
    output is byte-identical only on the same libm and architecture, so a
    mismatch here prints a warning with the expected and actual hashes, keeps
    the file and still exits 0.
-6. It prints the `replay-iq` command.
+6. It prints the `replay-iq` command for the stack's start script.
 
 A second run checks the cached files and downloads nothing.
 
@@ -318,145 +284,9 @@ downloads. If the zip is missing, it says so and exits 1.
 `skycue-iqgen` is taken from `build/stage/bin`, else from `PATH`. Exit
 codes: 0 done, 1 failure, 2 usage error.
 
-To replay the capture, set the receiver position near Porto (see above) and
-run `bin/skycue-start.sh replay-iq build/iq-samples/porto-awec2026.1090.cu8
--c CONFIG`.
-
-## Measured results
-
-All numbers below were **measured on the development build** with readsb
-3.16.21 and dump978-fa f40aa9a from the superbuild. They describe that build
-on these files. They are not a guarantee and not a performance
-specification.
-
-**Procedure** (as in `tests/superbuild/test_iq_replay.sh`):
-
-1. Feed the decoder the file on stdin, starting only once `skycue-rawrec` is
-   connected.
-2. Record the decoder's Beast or raw output with `skycue-rawrec`.
-3. Score the capture with `tests/superbuild/iq_compare.py`.
-
-readsb runs with `--no-fix` unless stated otherwise.
-
-### Synthetic 1090 (the `modes-120s` slice)
-
-The slice is `--skip-seconds 1 --duration 5`: 7461 frames placed, 1207
-expected lines, 837 distinct expected payloads. The level is −12 dBFS and the
-seed is 1.
-
-| run | frames recovered / expected | per frame | distinct payloads | distinct | unplaced (clean) | unplaced_unclean |
-|---|---|---|---|---|---|---|
-| default (25 dB) | 1206 / 1207 | 99.9 % | 836 / 837 | 99.9 % | 0 | 97 |
-| `--snr none` | 1207 / 1207 | 100 % | 837 / 837 | 100 % | 0 | 31 |
-| `--snr 12` | 748 / 1207 | 62.0 % | 522 / 837 | 62.4 % | 0 | 109 |
-| `--snr 6` | 0 / 1207 | 0.0 % | 5 / 837 | 0.6 % | 0 | 0 |
-
-At 6 dB the 5 distinct payloads were all decoded away from their expected
-positions, from optional copies: scored by position, no expected frame was
-recovered.
-
-At the default SNR, the 97 unclean unplaced payloads are 92 DF11 that differ
-from a placed DF11 only in the IID bits, plus 5 address-on-parity frames.
-Almost all come from optional frames.
-
-**Recovery against SNR** on the same slice:
-
-| SNR | 6 dB | 8 dB | 10 dB | 12 dB | 15 dB | 20 dB | 25 dB |
-|---|---|---|---|---|---|---|---|
-| per frame | 0.0 % | 1.4 % | 17.4 % | 62.0 % | 96.8 % | 99.8 % | 99.9 % |
-| distinct payloads | 0.6 % | 2.7 % | 19.4 % | 62.4 % | 97.0 % | 100 % | 99.9 % |
-
-readsb's knee on this SNR definition is about 11.5 dB, and
-`--preamble-threshold 40` does not move it. The test therefore requires
-≥ 50 % at 12 dB and ≤ 10 % at 6 dB per frame, which shows that the knob degrades
-decoding. It is not a sensitivity figure.
-
-### Synthetic 978
-
-| run | frames recovered / expected | distinct payloads | RS-corrected frames |
-|---|---|---|---|
-| `uat-sample.txt.gz --duration 5`, default level and SNR | 249 / 250 (99.6 %) | 113 / 113 (100 %) | 0 |
-| the same, `--snr none` | 249 / 250 (99.6 %) | 113 / 113 (100 %) | 0 |
-
-The one frame missing is dump978-fa's doing, not the file's: fed the same
-file with `<` (a regular file on stdin), dump978-fa decodes all 250; fed
-through a pipe, as the test does, it decodes 249 every time. The same holds
-with `--snr none`.
-
-**Reed–Solomon.** dump978-fa appends `;rs=N` to a frame only when it
-corrected N symbols. At the default SNR and with `--snr none`, none of the
-249 decoded frames carries it (`rs_corrected=0`), and the test requires
-that: dump978-fa accepted every frame's parity exactly as `skycue-iqgen`
-encoded it, so a wrong generator polynomial or symbol order would fail the
-test even where dump978-fa could still correct the frame.
-
-**Constant carrier offset** (`--cfo`), same file, decoded by dump978-fa
-(distinct payloads, measured before per-frame scoring):
-
-| CFO | 0 | 10 kHz | 25 kHz | 50 kHz | 100 kHz | 150 kHz |
-|---|---|---|---|---|---|---|
-| recovered | 113 / 113 | 113 / 113 | 113 / 113 | 113 / 113 | 113 / 113 | 113 / 113 |
-
-There were no unplaced decodes at any offset. On 1090 the offset has no
-effect, because readsb's detector works on magnitude.
-
-### The Porto capture
-
-**`info` on the files:**
-
-| file | `info` |
-|---|---|
-| raw recording (`--rate 2000000`) | `samples=36438016 seconds=18.219 mean_mag=1.231 peak_mag=22.561 dc_i=-0.633 dc_q=-0.633` |
-| resampled to 2.4 MS/s | `samples=43725619 seconds=18.219 mean_mag=1.246 peak_mag=22.472 dc_i=-0.632 dc_q=-0.632` |
-
-The resample prints `in_samples=36438016 out_samples=43725619`.
-
-**What readsb decodes from the resampled file** (18.219 s):
-
-| readsb | frames | distinct | ICAO addresses | DF17 | frames/s |
-|---|---|---|---|---|---|
-| `--no-fix` | 124 | 40 | 1 (407181) | 23 | 6.8 |
-| default (`--fix`) | 136 | 47 | 1 (407181) | 34 | 7.5 |
-
-Frames by DF with `--no-fix`: DF0 14, DF4 29, DF5 8, DF11 14, DF16 2, DF17 23,
-DF20 19, DF21 15. With `--fix`, DF11 is 15 and DF17 is 34; the rest are the
-same.
-
-readsb finds the same single aircraft as the dataset's own pipeline, which
-kept 122 messages, 22 of them DF17. The two counts are not the same measure:
-the dataset counts the messages it retained, and these tables count every
-frame readsb sent.
-
-**The resampler's cutoff is critical.** Before the cutoff rule above, the
-resampler's cutoff was 0.45 · min(rate), which is ±0.9 MHz for this file.
-With that cutoff, readsb decoded **2 frames** (DF0 and DF11, one address, no
-DF17) from the same capture. Opening the cutoff to the input's Nyquist
-frequency (±1 MHz) is what turns 2 frames into 124.
-
-**The same effect on synthetic data.** The 1090 slice above (25 dB) was
-resampled 2.4 → 2.0 → 2.4 MS/s with `skycue-iqgen resample`. Going down
-uses a 0.9 MHz cutoff, coming back up a 1.0 MHz one. Both filters have the
-transition band noted under `resample` (the flat passband at 2.0 MS/s ends
-near ±0.7 MHz), so the round-trip figures below partly measure the resampler,
-not only the 2.0 MS/s rate.
-
-| file | frames recovered / expected (`--no-fix`) | distinct payloads |
-|---|---|---|
-| generated at 2.4 MS/s | 1206 / 1207 (99.9 %) | 836 / 837 (99.9 %) |
-| round trip through 2.0 MS/s, current resampler | 310 / 1207 (25.7 %) | 206 / 837 (24.6 %) |
-| round trip through 2.0 MS/s, old 0.45 cutoff on the way up | not measured | 41 / 837 (4.9 %) |
-
-**Conclusion.** A 2.0 MS/s complex capture holds only ±1 MHz around
-1090 MHz. That is not the full bandwidth of Mode S's 0.5 µs PPM pulses. The
-results above are consistent with readsb's 2.4 MS/s demodulator relying on
-pulse edges beyond ±1 MHz. Recovery from such a capture was partial in our
-measurements: even synthetic frames with exact ground truth lose
-three-quarters of their recoveries after one pass through 2.0 MS/s. That
-24.6 % (25.7 % per frame) round-trip figure partly measures the resampler:
-its transition band narrows the usable band below ±1 MHz, so a sharper
-filter might recover more. How much of the loss is the 2.0 MS/s rate itself
-and how much is the filter was not separated. No real capture made at
-2.4 MS/s (the rate readsb uses live) was measured here.
+To replay the capture with the stack's start script, set the receiver
+position near Porto (`RECEIVER_LAT=41.15` / `RECEIVER_LON=-8.61`) and run
+`bin/skycue-start.sh replay-iq build/iq-samples/porto-awec2026.1090.cu8 -c CONFIG`.
 
 ## Limits
 

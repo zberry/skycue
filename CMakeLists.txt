@@ -50,7 +50,7 @@ set(SKYCUE_SOURCE_CACHE "${_skycue_default_source_cache}" CACHE PATH
   "Directory holding the pinned leaflet and echarts npm tarballs, used when SKYCUE_LEAFLET_DIR or SKYCUE_ECHARTS_DIR is empty")
 # Either directory left empty: the pinned tarball from SKYCUE_SOURCE_CACHE,
 # hash-checked and extracted in the build tree (cmake/VendoredWeb.cmake). A
-# directory that is given (the superbuild passes both) is used as it is.
+# directory that is given (a parent build passes both) is used as it is.
 if(NOT SKYCUE_LEAFLET_DIR OR NOT SKYCUE_ECHARTS_DIR)
   include(cmake/VendoredWeb.cmake)
   if(NOT SKYCUE_LEAFLET_DIR)
@@ -129,12 +129,12 @@ endif()
 # System files: the config, the skycued systemd unit, the map helpers and
 # bin/skycue-make-maps, their front.
 # They belong to the package shape and to a plain source install. A parent
-# build that wants a smaller prefix turns them off (the offline bundle keeps
+# build that wants a smaller prefix turns them off (a bundle can keep
 # the config in its own etc/ and the helpers in scripts/). Their sources
 # (etc/, packaging/, scripts/) are optional: each rule is skipped when its
 # file is not there.
 option(SKYCUE_INSTALL_SYSTEM_FILES
-  "Install the config, the skycued systemd unit and the map helper scripts (the superbuild turns this off)" ON)
+  "Install the config, the skycued systemd unit and the map helper scripts (a parent build may turn this off)" ON)
 option(SKYCUE_PACKAGE_CONFIG
   "Install the packaged skycue.conf (STATE_DIR=/var/lib/skycue …) instead of skycue.conf.example" OFF)
 set(SKYCUE_SYSTEMD_UNITDIR "lib/systemd/system" CACHE PATH

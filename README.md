@@ -1,5 +1,7 @@
 # skycue
 
+Source and releases: <https://github.com/zberry/skycue>
+
 skycue is an operator console and forwarding bridge for ADS-B and UAT
 receivers. It runs beside the receiver stack you already have (readsb, and
 optionally dump978-fa), reads what those decoders already decode, shows it
@@ -23,7 +25,7 @@ What it does:
 Debian and Raspberry Pi OS packages (arm64, amd64), RHEL 8 and 9 packages
 (x86_64), a plain CMake build from source, and how to turn on the decoder
 output skycue reads for readsb, ultrafeeder and PiAware:
-[docs/installing.md](docs/installing.md).
+[docs/installing.md](docs/installing.md). A full-stack offline bundle that also builds the SDR decoders lives in a separate repository.
 
 Running it, the configuration keys and the web page are described in
 [docs/operating.md](docs/operating.md); the HTTP API in

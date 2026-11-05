@@ -56,7 +56,7 @@ trap 'rm -rf "$tmp"' EXIT
 prefix=$(git -C "$repo" rev-parse --show-prefix)
 # From the top level: inside a subdirectory git archive would filter by the cwd again.
 # A tree-ish has no commit time, so --mtime (git 2.39 or newer) pins it.
-git -C "$(git -C "$repo" rev-parse --show-toplevel)" archive --format=tar --mtime="@$mtime" --prefix="$name/" "HEAD:$prefix" >"$tmp/src.tar"
+git -C "$(git -C "$repo" rev-parse --show-toplevel)" -c tar.umask=0022 archive --format=tar --mtime="@$mtime" --prefix="$name/" "HEAD:$prefix" >"$tmp/src.tar"
 for f in "${files[@]}"; do
   tar --append -f "$tmp/src.tar" -C "$repo" --transform "s,^sources/,$name/sources/," --format=gnu \
       --mtime="@$mtime" --mode=0644 --owner=0 --group=0 --numeric-owner "sources/$f"

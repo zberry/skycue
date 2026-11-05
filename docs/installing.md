@@ -214,9 +214,9 @@ Check:
 skycued --config /etc/skycue/skycue.conf --check-inputs
 ```
 
-#### skycue's own decoder stack (the offline bundle)
+#### skycue's own decoder stack (the stack repository)
 
-The superbuild of the [offline bundle](#the-offline-bundle) builds readsb
+The stack repository ([below](#the-offline-bundle)) builds readsb
 and dump978-fa itself and `skycue-start.sh` starts them with the options
 skycue needs; nothing to change. While it runs, from the install prefix:
 
@@ -405,7 +405,7 @@ sudo dnf install gcc-c++ make cmake boost-devel zlib-devel python3 diffutils fin
 ```
 
 skycue needs CMake 3.25 or newer. On RHEL 8 that is the cmake from a
-current minor release (a Rocky Linux 8 clean-room check got 3.26.5);
+current minor release (a RHEL 8 compatible build got 3.26.5);
 older RHEL 8 minor releases shipped a cmake that is too old, so update
 the system first (`sudo dnf update`) if `cmake --version` says less.
 
@@ -467,16 +467,7 @@ Then open <http://127.0.0.1:8080/>.
 
 ## The offline bundle
 
-For a machine without network access, the offline bundle
-(`skycue-src-<rev>.tar.gz`, made with `scripts/make-offline-bundle.sh` on a
-connected machine) carries every source tarball and builds the whole
-receiver chain, the SDR libraries, readsb, dump978-fa and skycue, into one
-relocatable prefix (`/opt/skycue`) on RHEL 8 or 9, started together by
-`skycue-start.sh`. It needs no package and keeps its own layout (state next
-to `etc/skycue/skycue.conf`, maps under `share/skycue/www`). Building it,
-installing it, the dongle setup and its clean-room check are in
-[building-rhel.md](building-rhel.md); running it is in
-[operating.md](operating.md).
+A full-stack offline bundle that also builds the SDR decoders lives in a separate repository (the stack repository). For a machine without network access it carries every source tarball, builds the SDR libraries, readsb, dump978-fa and skycue into one relocatable prefix, and starts them together with `skycue-start.sh`. This repository builds and installs skycue alone, as described above.
 
 ## Opening the page to the LAN
 

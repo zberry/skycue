@@ -6,7 +6,7 @@
 # them and run them, --dry-run, on the map dir it is given), the config (the
 # example, or with SKYCUE_PACKAGE_CONFIG the packaged skycue.conf) and the
 # skycued unit, whose ExecStart names this build's own bindir and sysconfdir;
-# without it none of those (the offline bundle's layout). Nothing is installed outside the prefix except the config
+# without it none of those (a parent build's layout). Nothing is installed outside the prefix except the config
 # and the unit, and no map tiles or overlays are installed at all.
 # The install goes to a DESTDIR, since the config and the unit may have
 # absolute destinations (/etc, /usr/lib/systemd/system).

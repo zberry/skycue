@@ -126,8 +126,8 @@ go beyond 8.
 
 ## Taking them to the receiver
 
-`scripts/make-offline-bundle.sh` adds `www/tiles/` to the bundle when
-it exists, prints its size, and warns when it is over 500 MB. On the
+A full-stack bundle can carry `www/tiles/` when it exists; keep it under
+about 500 MB. On the
 receiver the build does not install tiles; after building, copy them next to
 the installed UI:
 

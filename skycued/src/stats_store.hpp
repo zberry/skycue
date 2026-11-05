@@ -1,7 +1,7 @@
 #pragma once
 
-// StatsStore: the statistics view's aggregation inside skycued (spec
-// docs/superpowers/specs/2026-11-03-skycue-stats-view-design.md §4). The
+// StatsStore: the statistics view's aggregation inside skycued (the stats view
+// design, §4). The
 // Engine feeds it on its own thread; no I/O, no locking. Every time is the
 // data clock in whole seconds (floored), so a replay builds a sensible history.
 //

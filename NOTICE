@@ -2,22 +2,6 @@ skycue is licensed under the Apache License, Version 2.0 (see LICENSE).
 Copyright the skycue authors. Source files carry no per-file licence headers;
 this notice and LICENSE apply to the whole tree.
 
-skycue superbuild
-=================
-
-The superbuild compiles the following third-party projects from their
-upstream source tarballs. Each keeps its own license:
-
-  rtl-sdr        GPL-2.0
-  SoapySDR       BSL-1.0
-  SoapyRTLSDR    MIT
-  dump978        BSD-2-Clause / GPL (per file, see the upstream repository)
-  readsb         GPL-3.0
-  dump1090       GPL-2.0
-
-These programs are built and run as separate processes. None of them is
-linked into skycue code.
-
 Web assets installed with skycue
 --------------------------------
 
@@ -86,4 +70,4 @@ da Costa, Faculdade de Engenharia da Universidade do Porto. Its recording
 raw_data/recording.bin (1090 MHz, 2.0 MS/s, unsigned 8-bit I/Q) is
 downloaded on demand by scripts/fetch-iq-samples.sh and resampled from 2.0
 to 2.4 MS/s locally; that resampling is the only change made to it. It is
-not part of this repository or its bundles.
+not part of this repository or its releases.

@@ -39,7 +39,7 @@ function(_skycue_source_property name key out_var)
 endfunction()
 
 # What the missing-file and hash-mismatch errors tell the user to do. The
-# superbuild keeps these defaults; a project that includes this file without
+# default configure keeps these defaults; a project that includes this file without
 # a fetch target sets its own before calling. An empty
 # SKYCUE_SOURCE_MISMATCH_HINT ends the mismatch error after the two hashes.
 if(NOT DEFINED SKYCUE_SOURCE_MISSING_HINT)

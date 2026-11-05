@@ -12,7 +12,7 @@ version throughout.
    ```
 
    The daemon's `--version`, libskycue's CMake config version, the
-   superbuild, the source tarball's name and the rpm `Version:` all read it.
+   source tarball's name and the rpm `Version:` all read it.
    Update the date, the version and the `v=` lines of
    [installing.md](installing.md) and the status line of `README.md` to
    match.
@@ -22,17 +22,17 @@ version throughout.
    `skycue maintainers <skycue@users.noreply.github.com>`) and one at the top
    of `%changelog` in `packaging/rpm/skycue.spec`
    (`* <date> skycue maintainers <skycue@users.noreply.github.com> - 0.2.0-1`),
-   saying the same thing. The metadata test checks that both agree with the
+   saying the same thing. Run `scripts/fetch-test-captures.sh` first so the
+   suite runs the capture tests, then the full suite. The metadata test checks that both agree with the
    `project()` version:
 
    ```sh
-   bash tests/superbuild/test_package_metadata.sh
+   bash tests/scripts/test_package_metadata.sh
    ```
 
 3. **Commit and tag.** Commit the bump, the changelogs and the page
-   updates, then tag the commit (the offline bundle below takes its top
-   directory, `skycue-src-<git describe>`, from the tag, and so does its
-   file name unless `-o` names another; step 6 passes the same name):
+   updates, then tag the commit (the source tarball takes its name from the
+   version, and the stack repository pins the tarball of this tag):
 
    ```sh
    git tag -a v0.2.0 -m "skycue 0.2.0"
@@ -40,7 +40,8 @@ version throughout.
 
 4. **Make the source tarball.** `dist/skycue-0.2.0.tar.gz`: the tagged tree
    plus the Leaflet and ECharts tarballs from `sources/`. The package builds
-   below use it, and it is what a from-source reader downloads.
+   below use it, it is what a from-source reader downloads, and it is what
+   the stack repository pins.
 
    ```sh
    scripts/make-source-tarball.sh          # -o DIR for another directory than dist/
@@ -81,25 +82,13 @@ version throughout.
    targets cannot be built or verified, and the Raspberry Pi OS package
    would ship untested.
 
-6. **Build and verify the offline bundle.** It must still build in the
-   Rocky 8 and 9 clean rooms, plain and with `--werror`
-   ([building-rhel.md](building-rhel.md#clean-room-verification)):
-
-   ```sh
-   scripts/make-offline-bundle.sh -o dist/skycue-src-v0.2.0.tar.gz
-   for r in 8 9; do
-     scripts/verify-offline-build.sh "$r" dist/skycue-src-v0.2.0.tar.gz &&
-     scripts/verify-offline-build.sh "$r" dist/skycue-src-v0.2.0.tar.gz --werror || break
-   done
-   ```
-
-7. **Install on a real Raspberry Pi once.** Before the tag is pushed,
+6. **Install on a real Raspberry Pi once.** Before the tag is pushed,
    install `skycue_0.2.0-1~deb12u1_arm64.deb` on a Raspberry Pi running Raspberry Pi
    OS (64-bit) and follow [installing.md](installing.md) to the map: the
    emulated build cannot show what a real Pi does at boot, under its
    memory limits or with its own readsb.
 
-8. **Publish.** Push the commit and the tag, and attach to the release:
+7. **Publish.** Push the commit and the tag, and attach to the release:
 
    - `dist/skycue-0.2.0.tar.gz` (the source tarball)
    - from `dist/debian12-amd64/`, `dist/debian12-arm64/`,
@@ -108,13 +97,19 @@ version throughout.
      (NN is 12 or 13)
    - from `dist/el8/` and `dist/el9/`: `skycue-0.2.0-1.el<N>.x86_64.rpm` and
      `skycue-devel-0.2.0-1.el<N>.x86_64.rpm`
-   - `dist/skycue-src-v0.2.0.tar.gz` (the offline bundle, for the record)
 
    The Debian 12 and Debian 13 debs of one architecture are not
    interchangeable (each depends on its own release's Boost libraries); the
    `~deb12u1` / `~deb13u1` revision that `build-package.sh` gives them keeps
    their file names apart. The committed changelogs stay at `0.2.0-1`. Debian `-dbgsym` packages that land in `dist/<target>/`
    are not attached.
+
+8. **Update the stack's pin after tagging.** In the stack repository, point
+   its pin at the published tarball:
+
+   ```sh
+   scripts/pin-source.sh skycue <asset URL> skycue-0.2.0.tar.gz
+   ```
 
 This list is meant to become a GitHub Actions workflow later; the workflow
 will call the same scripts, so each step stays runnable by hand.

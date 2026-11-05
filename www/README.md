@@ -17,10 +17,9 @@ which the GitHub source archive does not; it is only extracted, never run
 through npm). It is not committed: the page loads it from
 `vendor/leaflet/leaflet.js` and `vendor/leaflet/leaflet.css`.
 
-- **Superbuild** (`cmake -S . -B build && cmake --build build`): the
-  `leaflet` step extracts the tarball and the skycue step installs
-  `dist/leaflet.js`, `dist/leaflet.css` and `dist/images/` into
-  `stage/share/skycue/www/vendor/leaflet/`, next to these files.
+- **Parent build** (the stack repository): a build step extracts the tarball
+  and the skycue step installs `dist/leaflet.js`, `dist/leaflet.css` and
+  `dist/images/` into `share/skycue/www/vendor/leaflet/`, next to these files.
 - **Standalone skycue build**: pass the extracted `dist/` directory,
   ```sh
   mkdir -p /tmp/leaflet && tar xzf sources/leaflet-1.9.4.tgz -C /tmp/leaflet package/dist
@@ -44,8 +43,9 @@ through npm). It is not committed: the page loads it from
 `vendor/echarts/echarts.min.js`, and `LICENSE`, `NOTICE` and
 `licenses/LICENSE-d3` are installed beside it.
 
-- **Superbuild**: the `echarts` step extracts the tarball and the skycue
-  step installs those files into `stage/share/skycue/www/vendor/echarts/`.
+- **Parent build** (the stack repository): a build step extracts the tarball
+  and the skycue step installs those files into
+  `share/skycue/www/vendor/echarts/`.
 - **Standalone skycue build**: pass the extracted package root,
   ```sh
   mkdir -p /tmp/echarts && tar xzf sources/echarts-5.6.0.tgz -C /tmp/echarts \

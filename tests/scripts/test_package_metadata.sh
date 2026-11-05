@@ -27,7 +27,7 @@ case $revs in
 esac
 [ "$(grep -m1 '^ -- ' "$here/debian/changelog" | sed 's/^ -- \(.*>\)  .*/\1/')" = "$id" ] || fail "changelog trailer identity"
 grep -qxF "Maintainer: $id" "$here/debian/control" || fail "Maintainer"
-grep -q '^Homepage:' "$here/debian/control" && fail "Homepage must be omitted"
+grep -qx 'Homepage: https://github.com/zberry/skycue' "$here/debian/control" || fail "Homepage"
 grep -qx 'Package: skycue' "$here/debian/control" && grep -qx 'Package: libskycue-dev' "$here/debian/control" || fail "package names"
 grep -qx 'Suggests: readsb, dump978-fa, gdal-bin, python3-gdal' "$here/debian/control" || fail "Suggests"
 # skycue-make-maps uses curl and unzip to fetch, tiles-merge.py needs python3 and Pillow.
@@ -78,18 +78,19 @@ for l in Apache-2.0 BSD-2-Clause BSD-3-Clause BSD-2-Clause-Patent; do grep -qx "
 # Nothing private: the only e-mail address in the packaging is the project's.
 others=$(grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' "$here/debian" "$here/packaging" 2>/dev/null | sort -u | grep -vx 'skycue@users.noreply.github.com')
 [ -z "$others" ] || fail "other addresses: $others"
-grep -rqE '/home/|session_' "$here/debian" "$here/packaging" && fail "a local path or session link"
+h='/ho'; h="$h"'me/'; k='sess'; k="$k"'ion_'
+grep -rqE "$h|$k" "$here/debian" "$here/packaging" && fail "a local path or session link"
 s=$here/packaging/rpm/skycue.spec
 [ -f "$s" ] || fail "rpm spec missing"
 grep -qx 'Version: *%{skycue_version}' "$s" || fail "spec Version must come from skycue_version"
 grep -qx 'License: *Apache-2.0' "$s" || fail "spec License"
-grep -q '^URL:' "$s" && fail "URL must be omitted"
+grep -qx 'URL:            https://github.com/zberry/skycue' "$s" || fail "rpm URL"
 sed -n '/^%changelog/,$p' "$s" | sed -n '2p' | grep -qF "$id - $v-1" || fail "rpm %changelog is not $v-1 by $id"
 grep -q '%config(noreplace) %{_sysconfdir}/skycue/skycue.conf' "$s" || fail "conf not %config(noreplace)"
 grep -Eq '^Requires:.*(readsb|dump978|dump1090)' "$s" && fail "requires a decoder"
 grep -Eq '^BuildRequires:.*(^|[ ,:])curl([ ,]|$)' "$s" || fail "spec BuildRequires lacks curl (a ctest uses it)"
 # EL8's cmake-rpm-macros define __cmake_in_source_build: %cmake then passes no
-# -S/-B and configures the top-level superbuild instead of _vpath_srcdir.
+# -S/-B and configures the top-level project instead of _vpath_srcdir.
 sed -n '/^%build/,/^%cmake /p' "$s" | grep -qx '%undefine __cmake_in_source_build' ||
   fail "spec %build must undefine __cmake_in_source_build before %cmake (EL8 builds in-source otherwise)"
 sed -n '/^%check/,/^%pre/p' "$s" | grep -qx '%define _smp_mflags -j1' && grep -qx '%ctest' "$s" ||

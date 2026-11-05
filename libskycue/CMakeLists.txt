@@ -10,7 +10,7 @@
 option(SKYCUE_INSTALL "Install libskycue" ON)
 
 # Install directories: lib, lib64 or lib/<multiarch> as the platform has it
-# (the offline bundle's superbuild passes CMAKE_INSTALL_LIBDIR=lib). Included
+# (a parent build may pass CMAKE_INSTALL_LIBDIR=lib). Included
 # here as well as in ../CMakeLists.txt so a consumer adding this directory
 # directly gets them too.
 include(GNUInstallDirs)

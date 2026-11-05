@@ -1,8 +1,7 @@
 include_guard(GLOBAL)
 
 # Instrumented builds for the hardening runs (docs/hardening.md). None of
-# this is on by default: the default configure, the superbuild and the
-# offline bundle build exactly what they built before.
+# this is on by default: the default configure builds exactly what it built before.
 
 set(SKYCUE_SANITIZE "OFF" CACHE STRING
   "Build skycue instrumented: address,undefined, thread or OFF (run with scripts/run-sanitizers.sh)")

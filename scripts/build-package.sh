@@ -6,8 +6,7 @@
 # The image skycue-pkg:<target> is built from containers/Containerfile.<distro>
 # (that build uses the network for the distro's packages); the package build
 # then runs in it from the source tarball (mounted read-only) and may use the
-# network, and leaves the packages in dist/<target>/. (Only the separate
-# offline-bundle verification, scripts/verify-offline-build.sh, runs without
+# network, and leaves the packages in dist/<target>/. (Only the checks after the install run without
 # network.) Without --source the
 # tarball is made first with scripts/make-source-tarball.sh -o dist.
 # A target whose architecture differs from this machine's runs under qemu

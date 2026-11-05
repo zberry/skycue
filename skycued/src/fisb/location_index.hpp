@@ -25,7 +25,7 @@ constexpr uint32_t kMaxSamples = 1000;        // the running mean stops weightin
 constexpr std::size_t kMaxLearnedIds = 20000;
 // Room for a world-wide make-locations.py file (about 100k ids from full
 // OurAirports data); scripts/make-locations.py warns past it and
-// tests/superbuild/test_make_locations.sh pins the two together.
+// tests/scripts/test_make_locations.sh pins the two together.
 constexpr std::size_t kMaxOperatorRows = 250000;
 
 class LocationIndex {

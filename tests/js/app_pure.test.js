@@ -1095,6 +1095,25 @@ test('normalizeView: defaults, partial, malformed', () => {
   assert.strictEqual(P.normalizeView({ mapMode: 'dim' }).mapMode, 'dim');
   assert.strictEqual(P.normalizeView(JSON.stringify(v)).altMin, 3000, 'accepts a JSON string');
 });
+test('normalizeView: the Trails group (show)', () => {
+  assert.deepStrictEqual(P.TRAIL_SHOWS, ['all', 'selected', 'off']);
+  assert.strictEqual(P.VIEW_DEFAULTS.trailShow, 'all');
+  ['all', 'selected', 'off'].forEach((s) => assert.strictEqual(P.normalizeView({ trailShow: s }).trailShow, s));
+  ['ALL', 'none', '', 1, null, ['off']].forEach((s) => assert.strictEqual(P.normalizeView({ trailShow: s }).trailShow, 'all', String(s)));
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView(null)), true);
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView({ trailShow: 'off' })), false);
+  assert.strictEqual(P.viewActiveCount(P.normalizeView({ trailShow: 'off' })), 0, 'not a filter: not in the badge');
+});
+test('view sets round-trip the Trails group', () => {
+  const v = P.normalizeView({ search: 'ual', trailShow: 'selected' });
+  const r = P.putViewSet(P.normalizeViewSets(null), 'T', v, false);
+  const back = P.normalizeViewSets(JSON.parse(JSON.stringify(r.store))).sets[0];
+  assert.deepStrictEqual(back.view, v);
+  assert.strictEqual(P.viewSetMatches(back, v, false), true);
+  assert.strictEqual(P.viewSetMatches(back, P.normalizeView({ search: 'ual' }), false), false, 'a different Show is a different state');
+  // A set saved before the group existed applies the defaults.
+  assert.strictEqual(P.normalizeViewSets({ sets: [{ name: 'old', view: { search: 'ual' } }] }).sets[0].view.trailShow, 'all');
+});
 test('normalizeView: copies arrays, never hands out the defaults', () => {
   assert.ok(Object.isFrozen(P.VIEW_DEFAULTS));
   const v = P.normalizeView(null);
@@ -1362,6 +1381,191 @@ test('signalRunsAppend / signalRunsTrim equal signalRuns over a random walk', ()
     }
     if (pts.length >= 2) assert.deepStrictEqual(runs, P.signalRuns(pts), 'step ' + step);
   }
+});
+
+// Trails, Colour by altitude: the scale and the generalised run builder.
+test('altitudeStep / altitudeColor: 7 steps, bounds belong to the step below, no altitude is null', () => {
+  assert.deepStrictEqual(P.ALT_BOUNDS_FT, [1000, 5000, 10000, 20000, 30000, 40000]);
+  assert.strictEqual(P.ALT_COLORS.length, 7);
+  assert.strictEqual(new Set(P.ALT_COLORS).size, 7, 'distinct colours');
+  P.ALT_COLORS.forEach((c) => assert.ok(P.SIGNAL_COLORS.indexOf(c) < 0, c + ' is not a signal colour'));
+  const cases = [[-200, 0], [0, 0], [1000, 0], [1001, 1], [5000, 1], [5001, 2], [10000, 2], [15000, 3],
+    [20000, 3], [25000, 4], [30000, 4], [35000, 5], [40000, 5], [40001, 6], [60000, 6]];
+  cases.forEach(([ft, i]) => {
+    assert.strictEqual(P.altitudeStep(ft), i, ft + ' ft');
+    assert.strictEqual(P.altitudeColor(ft), P.ALT_COLORS[i], ft + ' ft');
+  });
+  [undefined, null, NaN, Infinity, '35000', {}].forEach((v) => {
+    assert.strictEqual(P.altitudeStep(v), -1, String(v));
+    assert.strictEqual(P.altitudeColor(v), null, String(v));
+  });
+});
+test('altitudeLegend: the bounds, contiguous, open at both ends', () => {
+  const L = P.altitudeLegend();
+  assert.strictEqual(L.length, 7);
+  assert.deepStrictEqual(L[0], { color: P.ALT_COLORS[0], from: null, to: 1000 });
+  assert.deepStrictEqual(L[6], { color: P.ALT_COLORS[6], from: 40000, to: null });
+  for (let i = 1; i < L.length; i++) assert.strictEqual(L[i].from, L[i - 1].to);
+  assert.deepStrictEqual(L.slice(1, 6).map((s) => [s.from, s.to]),
+    [[1000, 5000], [5000, 10000], [10000, 20000], [20000, 30000], [30000, 40000]]);
+});
+test('altitudeRuns: a climb in steps, missing altitude, coalescing', () => {
+  const C = P.ALT_COLORS;
+  const p = (lon, alt) => ({ lat: 0, lon, alt });
+  assert.deepStrictEqual(P.altitudeRuns([]), []);
+  assert.deepStrictEqual(P.altitudeRuns([p(0, 500)]), [{ points: [[0, 0]], color: C[0] }]);
+  const climb = [p(0, 0), p(1, 800), p(2, 1000), p(3, 3000), p(4, 4000), p(5), p(6, 12000), p(7, 12500)];
+  assert.deepStrictEqual(P.altitudeRuns(climb), [
+    { points: [[0, 0], [0, 1], [0, 2]], color: C[0] },          // ground to 1000 ft: one run
+    { points: [[0, 2], [0, 3], [0, 4]], color: C[1] },
+    { points: [[0, 4], [0, 5]], color: null },                    // no altitude: the caller draws it dim
+    { points: [[0, 5], [0, 6], [0, 7]], color: C[3] }
+  ]);
+  // The same runs through the generic builder and the colour function the page uses.
+  assert.deepStrictEqual(P.trailRuns(climb, P.trailRunColor('altitude')), P.altitudeRuns(climb));
+  assert.deepStrictEqual(P.trailRuns(climb.map((x) => ({ lat: x.lat, lon: x.lon, sig: -20 })), P.trailRunColor('signal')),
+    [{ points: climb.map((x) => [x.lat, x.lon]), color: P.signalColor(-20) }]);
+  assert.strictEqual(P.trailRunColor('decision'), null);
+  assert.strictEqual(P.trailRunColor('bogus'), null);
+});
+test('trailRunsAppend / trailRunsTrim with the altitude colours equal trailRuns over a random walk', () => {
+  const colorOf = P.trailRunColor('altitude');
+  let seed = 11;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const pts = [];
+  let runs = null, lon = 0, alt = 0;
+  for (let step = 0; step < 2000; step++) {
+    if (rnd() < 0.7 || pts.length < 2) {
+      alt = Math.max(0, alt + (rnd() - 0.4) * 6000);
+      const pt = { lat: 1, lon: lon++, alt: rnd() < 0.1 ? null : alt };
+      pts.push(pt);
+      if (pts.length === 2) runs = P.trailRuns(pts, colorOf);
+      else if (pts.length > 2) P.trailRunsAppend(runs, pts[pts.length - 2], pt, colorOf);
+    } else {
+      const n = 1 + Math.floor(rnd() * (pts.length - 2));
+      pts.splice(0, n);
+      P.trailRunsTrim(runs, n);
+    }
+    if (pts.length >= 2) assert.deepStrictEqual(runs, P.trailRuns(pts, colorOf), 'step ' + step);
+  }
+  assert.strictEqual(P.signalRunsTrim, P.trailRunsTrim);
+});
+test('normalizeView: the Trails group (colour by)', () => {
+  assert.deepStrictEqual(P.TRAIL_COLOR_BY, ['decision', 'signal', 'altitude']);
+  assert.strictEqual(P.VIEW_DEFAULTS.trailColor, 'decision');
+  P.TRAIL_COLOR_BY.forEach((c) => assert.strictEqual(P.normalizeView({ trailColor: c }).trailColor, c));
+  ['Signal', 'rssi', '', 0, null, true].forEach((c) => assert.strictEqual(P.normalizeView({ trailColor: c }).trailColor, 'decision', String(c)));
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView({ trailColor: 'altitude' })), false);
+  assert.strictEqual(P.viewActiveCount(P.normalizeView({ trailColor: 'altitude' })), 0);
+  const v = P.normalizeView({ trailShow: 'off', trailColor: 'altitude' });
+  const back = P.normalizeViewSets(JSON.stringify(P.putViewSet(P.normalizeViewSets(null), 'A', v, true).store)).sets[0];
+  assert.deepStrictEqual(back.view, v);
+  assert.strictEqual(P.viewSetMatches(back, P.normalizeView({ trailShow: 'off', trailColor: 'signal' }), true), false);
+});
+
+// Trails, Project ahead: the point, the length, the line.
+test('projectPoint: 60 nm due north is +1 deg of latitude; east on the equator; the ruler agrees', () => {
+  // 60 nm is 1 deg of arc to 0.07 % on rangeNm's sphere (1852 m per nm,
+  // 1 deg = 111.195 km): 0.99932 deg.
+  const n = P.projectPoint(39, -77, 0, 60);
+  between(n[0], 39 + 0.9990, 39 + 0.9996, 'north lat');
+  between(n[1], -77.000001, -76.999999, 'north lon');
+  const e = P.projectPoint(0, 0, 90, 60);
+  between(e[0], -1e-9, 1e-9, 'east lat');
+  between(e[1], 0.9990, 0.9996, 'east lon');
+  const s = P.projectPoint(39, -77, 180, 30);
+  between(s[0], 38.5, 38.501, 'south lat');
+  const m = P.rulerMeasure(39.7, -86.3, ...P.projectPoint(39.7, -86.3, 237, 16));
+  between(m.nm, 15.999, 16.001, 'distance back');
+  between(m.bearing, 236.99, 237.01, 'bearing back');
+  assert.deepStrictEqual(P.projectPoint(10, 20, 45, 0), [10, 20]);
+});
+test('aheadNm: ground speed times minutes', () => {
+  assert.strictEqual(P.aheadNm(480, 2), 16);
+  assert.strictEqual(P.aheadNm(600, 5), 50);
+  assert.strictEqual(P.aheadNm(120, 1), 2);
+  assert.strictEqual(P.aheadNm(0, 5), 0);
+});
+test('projectAhead: from the position along the track, great-circle points, null without one', () => {
+  const t = { lat: 39, lon: -77, track_deg: 45, gs_kt: 480 };
+  const line = P.projectAhead(t, 2);
+  assert.deepStrictEqual(line[0], [39, -77], 'starts at the position');
+  assert.strictEqual(line.length, 3, '16 nm: two steps of at most 10 nm');
+  const far = P.rulerMeasure(39, -77, ...line[line.length - 1]);
+  between(far.nm, 15.999, 16.001, 'length');
+  between(far.bearing, 44.99, 45.01, 'initial bearing');
+  // Every point is on the great circle: the bearing from the start stays the track's.
+  const mid = P.rulerMeasure(39, -77, ...line[1]);
+  between(mid.nm, 7.999, 8.001, 'mid distance');
+  between(mid.bearing, 44.99, 45.01, 'mid bearing');
+  assert.strictEqual(P.projectAhead(Object.assign({}, t, { gs_kt: 600 }), 5).length, 6, '50 nm: 5 steps');
+  assert.strictEqual(P.projectAhead(Object.assign({}, t, { gs_kt: 60 }), 1).length, 2, '1 nm: one step');
+  assert.strictEqual(P.projectAhead(t, 0), null, 'off');
+  [{ track_deg: undefined }, { track_deg: null }, { gs_kt: undefined }, { gs_kt: 0 }, { gs_kt: -5 }, { gs_kt: NaN },
+    { on_ground: true }, { lat: undefined }, { lon: null }].forEach((o) => {
+    assert.strictEqual(P.projectAhead(Object.assign({}, t, o), 2), null, JSON.stringify(o));
+  });
+  assert.strictEqual(P.projectAhead(null, 2), null);
+});
+test('normalizeView: the Trails group (project ahead), all three in a set', () => {
+  assert.deepStrictEqual(P.TRAIL_AHEAD_MIN, [0, 1, 2, 5]);
+  assert.strictEqual(P.VIEW_DEFAULTS.trailAhead, 0);
+  [0, 1, 2, 5].forEach((m) => assert.strictEqual(P.normalizeView({ trailAhead: m }).trailAhead, m));
+  assert.strictEqual(P.normalizeView({ trailAhead: '5' }).trailAhead, 5, 'the select gives a string');
+  [3, 10, -1, 2.5, '', 'off', null, true, [2]].forEach((m) => assert.strictEqual(P.normalizeView({ trailAhead: m }).trailAhead, 0, String(m)));
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView({ trailAhead: 1 })), false);
+  assert.strictEqual(P.viewActiveCount(P.normalizeView({ trailAhead: 5 })), 0);
+  const v = P.normalizeView({ classes: ['airline'], trailShow: 'selected', trailColor: 'altitude', trailAhead: '2' });
+  assert.deepStrictEqual([v.trailShow, v.trailColor, v.trailAhead], ['selected', 'altitude', 2]);
+  const store = P.putViewSet(P.normalizeViewSets(null), 'Trails', v, false).store;
+  const back = P.normalizeViewSets(JSON.parse(JSON.stringify(store))).sets[0];
+  assert.deepStrictEqual(back.view, v);
+  assert.strictEqual(P.viewSetMatches(back, v, false), true);
+  assert.strictEqual(P.viewSetMatches(back, P.normalizeView(Object.assign({}, v, { trailAhead: 5 })), false), false);
+  assert.strictEqual(P.viewTrailsDefault(P.normalizeView(P.VIEW_DEFAULTS)), true);
+});
+
+test('viewSetsFillTrails: old sets get the current Trails fields once; newer sets are left alone', () => {
+  assert.deepStrictEqual(P.TRAIL_FIELDS, ['trailShow', 'trailColor', 'trailAhead']);
+  const cur = P.normalizeView({ trailShow: 'selected', trailColor: 'signal', trailAhead: 5 });
+  const raw = { version: 1, sets: [
+    { name: 'Old', view: { search: 'ual' }, hideFiltered: true },
+    { name: 'Part', view: { trailColor: 'altitude' } },
+    { name: 'New', view: { trailShow: 'off', trailColor: 'decision', trailAhead: 0 } },
+    { name: 'NoView' }
+  ] };
+  const r = P.viewSetsFillTrails(JSON.stringify(raw), cur);
+  assert.strictEqual(r.filled, 3);
+  const t = (s) => [s.view.trailShow, s.view.trailColor, s.view.trailAhead];
+  assert.deepStrictEqual(r.store.sets.map((s) => s.name), ['Old', 'Part', 'New', 'NoView']);
+  assert.deepStrictEqual(t(r.store.sets[0]), ['selected', 'signal', 5]);
+  assert.strictEqual(r.store.sets[0].view.search, 'ual');
+  assert.strictEqual(r.store.sets[0].hideFiltered, true);
+  assert.deepStrictEqual(t(r.store.sets[1]), ['selected', 'altitude', 5], 'a field the set has is kept');
+  assert.deepStrictEqual(t(r.store.sets[2]), ['off', 'decision', 0]);
+  assert.deepStrictEqual(t(r.store.sets[3]), ['selected', 'signal', 5]);
+  // Once filled (stored again), nothing more to fill: the second load is a no-op.
+  const again = P.viewSetsFillTrails(r.store, P.normalizeView(null));
+  assert.strictEqual(again.filled, 0);
+  assert.deepStrictEqual(again.store, r.store);
+  assert.deepStrictEqual(P.viewSetsFillTrails(null, cur), { store: { version: 1, sets: [] }, filled: 0 });
+  assert.deepStrictEqual(P.viewSetsFillTrails('{', cur), { store: { version: 1, sets: [] }, filled: 0 });
+  assert.strictEqual(raw.sets[0].view.trailShow, undefined, 'the input is not changed');
+});
+test('TRAIL_NONE_COLOR is neutral: not a scale or a decision colour', () => {
+  const c = P.TRAIL_NONE_COLOR;
+  assert.ok(/^#[0-9a-f]{6}$/.test(c));
+  assert.ok(P.SIGNAL_COLORS.indexOf(c) < 0 && P.ALT_COLORS.indexOf(c) < 0);
+  assert.ok(Object.values(P.DECISION_COLORS).indexOf(c) < 0);
+  const rgb = [1, 3, 5].map((i) => parseInt(c.substr(i, 2), 16));
+  assert.ok(Math.max(...rgb) - Math.min(...rgb) <= 24, 'grey');
+});
+test('ALT_COLORS: at least 3:1 against the Light tiles\' land', () => {
+  const lum = (h) => [1, 3, 5].map((i) => parseInt(h.substr(i, 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)))
+    .reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  P.ALT_COLORS.forEach((c) => assert.ok(ratio(c, '#f2efe9') >= 3, c + ' ' + ratio(c, '#f2efe9').toFixed(2)));
 });
 
 // Ruler: distance, initial bearing, the label.

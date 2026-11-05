@@ -193,17 +193,40 @@ block lists and Save as baseline: what is sent to cue clients), then `#view`
 per-browser view settings (`normalizeView`, localStorage `skycue.view`);
 `viewMatches` decides a track, `trackClass` and `trackCountry` estimate its class and
 country, and `viewShows` in `app.js` exempts the selected track.
-"Colour trail by signal" (`#trail-signal`, localStorage
-`skycue.trailSignal`, not part of `skycue.view` or the filter sets) keeps
-each trail point's `rssi`; `drawTrail` in `app.js` lays `P.signalRuns` (runs
-of one `P.signalColor` step, `SIGNAL_COLORS` from `SIGNAL_MIN_DB` to
-`SIGNAL_MAX_DB`) as `path.trail-sig` polylines over the decision-coloured
-`path.trail`, which is then transparent (a run without a signal is dashed in
-the decision colour; a trail with no signal at all has no runs);
-`#trail-signal-legend` is `P.signalLegend`. The runs are kept up to date in
-place (`updateTrail`: `P.signalRunsAppend` on a new position,
-`P.signalRunsTrim` on a prune), and rebuilt only on a toggle, a new marker
-or an un-dimming.
+The Trails group (`#view-trails`) is part of the view: `trailShow`
+(`P.TRAIL_SHOWS`; `trailShown` in `app.js`) says which entries have a
+trail. An entry without one has no `path.trail` at all (`e.trail` null;
+`drawTrail` makes or removes it, `renderEntry` calls it when that changes,
+as on a selection with "selected"), while `e.pts` keeps filling and
+ageing out. `P.viewTrailsDefault` is what Clear's enabled state needs
+besides the badge count; a change to a Trails field redraws every trail
+(`applyTrailOptions`).
+Colour by (`#view-trail-color`, `trailColor`, `P.TRAIL_COLOR_BY`): each
+trail point keeps its `rssi` (`P.signalLevel`) and its altitude
+(`P.trackAlt`); with "signal" or "altitude" `drawTrail` lays
+`P.trailRuns(points, P.trailRunColor(mode))` (runs of one step of
+`P.signalColor`, `SIGNAL_COLORS` from `SIGNAL_MIN_DB` to `SIGNAL_MAX_DB`, or
+of `P.altitudeColor`, `ALT_COLORS` split at `ALT_BOUNDS_FT`) as
+`path.trail-run` polylines over the decision-coloured `path.trail`, which is
+then transparent. A run without a value is solid in `P.TRAIL_NONE_COLOR`
+(neutral grey) at a lower opacity; no trail polyline is dashed.
+`P.viewSetsFillTrails` (in `initTrails`, after the `skycue.trailSignal`
+take-over) gives stored sets without the Trails fields the current ones,
+once, and saves the store. `#trail-signal-legend` is
+`P.signalLegend`, `#trail-alt-legend` `P.altitudeLegend`. The runs are kept
+up to date in place (`updateTrail`: `P.trailRunsAppend` on a new position,
+`P.trailRunsTrim` on a prune), and rebuilt only on a Trails change, a new
+marker, an un-dimming or a trail of two points or fewer. The old
+checkbox's localStorage `skycue.trailSignal` is read once (`initTrails`:
+"1" becomes "signal" unless the stored view already has a `trailColor`)
+and removed.
+Project ahead (`#view-trail-ahead`, `trailAhead`, minutes in
+`P.TRAIL_AHEAD_MIN`, 0 off) is `e.ahead`, a dashed `path.trail-ahead` of
+`P.projectAhead(track, minutes)`: from the position along `track_deg` for
+`P.aheadNm(gs_kt, minutes)`, great-circle points (`P.projectPoint`, which
+is `destinationPoint`) at most `AHEAD_STEP_NM` apart. `updateAhead` makes,
+moves or removes it on every `renderEntry` and `drawTrail`; only an entry
+with a trail has one, and `removeTrail` takes it too.
 
 ## Ruler
 

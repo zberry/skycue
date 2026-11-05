@@ -1064,11 +1064,13 @@ async function clickableIndex(page, selector) {
   }, selector);
 }
 
-// "Colour trail by signal": an injected aircraft flying east with its
+// Trails, Colour by "signal": an injected aircraft flying east with its
 // signal rising from weak to strong, positions 6 s apart (0.03° of
 // longitude, about 835 kt: under P.TRAIL_MAX_KT, so the trail joins),
 // the last 24 s ago so later steps fit before now.
 const SIG_HEX = 'fff0a1';
+// A stretch without a value (no signal, no altitude): P.TRAIL_NONE_COLOR.
+const NONE_GREY = '#78808a';
 async function injectSignalTrack(page) {
   await page.evaluate((hex) => {
     const now = window.skycueApp.dataNow();
@@ -1081,7 +1083,7 @@ async function injectSignalTrack(page) {
 test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 10);
-  await expect(page.locator('#trail-signal')).not.toBeChecked();
+  await expect(page.locator('#view-trail-color')).toHaveValue('decision');
   await expect(page.locator('#trail-signal-legend')).toBeHidden();
   await injectSignalTrack(page);
   await page.locator(`.ac-marker[data-hex="${SIG_HEX}"] .ac-glyph`).click();
@@ -1091,10 +1093,12 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   expect(off.points).toBe(12);
   expect(off.runs).toEqual([]);
   expect(off.opacity).toBe(0.6);
-  expect(await page.locator('path.trail-sig').count()).toBe(0);
+  expect(await page.locator('path.trail-run').count()).toBe(0);
 
-  await page.locator('#trail-signal').check();
+  await page.locator('#view-trail-color').selectOption('signal');
   await expect(page.locator('#trail-signal-legend')).toBeVisible();
+  await expect(page.locator('#trail-alt-legend')).toBeHidden();
+  await expect(page.locator('#trail-signal-legend')).toContainText('faint grey: no signal');
   await expect(page.locator('#trail-signal-legend .sig-scale i')).toHaveCount(6);
   await expect(page.locator('#trail-signal-legend')).toContainText('≤ −35 dBFS');
   await expect(page.locator('#trail-signal-legend')).toContainText('≥ −5 dBFS');
@@ -1106,16 +1110,16 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   expect(on.runs[on.runs.length - 1].color).toBe(colors[colors.length - 1]);
   const steps = on.runs.map((r) => colors.indexOf(r.color));
   expect(steps).toEqual([...steps].sort((a, b) => a - b));
-  expect(on.runs.every((r) => !r.dashed)).toBe(true);
+  expect(on.runs.every((r) => !r.dashed && r.opacity === 0.9)).toBe(true);
   // Every segment drawn once, the decision-coloured polyline transparent under the runs.
   expect(on.runs.reduce((n, r) => n + r.n - 1, 0)).toBe(11);
   expect(on.opacity).toBe(0);
-  expect(await page.locator('path.trail-sig').count()).toBeGreaterThanOrEqual(on.runs.length);
-  expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe('1');
+  expect(await page.locator('path.trail-run').count()).toBeGreaterThanOrEqual(on.runs.length);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view'))).trailColor).toBe('signal');
 
   // A new position updates the runs in place: one as strong extends the
   // last run (the same layer), a weak one adds a run, one without a signal
-  // a dashed run in the decision colour.
+  // a run in the decision colour, solid and dim.
   const step = (lon, rssi, ago) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
     lat: 39.3, lon: a.lon, decision: 'send', track_deg: 90, rssi: a.rssi,
     position_time: new Date(window.skycueApp.dataNow() - a.ago).toISOString() }), { hex: SIG_HEX, lon, rssi, ago });
@@ -1132,35 +1136,52 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   expect(lastOf(t)).toMatchObject({ n: 2, color: colors[0], dashed: false });
   await step(-77.18, undefined, 6000);
   t = await trail();
-  expect(lastOf(t)).toMatchObject({ n: 2, color: off.color, dashed: true });
+  expect(lastOf(t)).toMatchObject({ n: 2, color: NONE_GREY, dashed: false, opacity: 0.35 });
   expect(t.runs.reduce((n, r) => n + r.n - 1, 0)).toBe(14);
   expect(t.points).toBe(15);
-  await page.locator('#trail-signal').uncheck();
+  expect(await page.locator('path.trail-run[stroke-dasharray]').count()).toBe(0);   // trails are never dashed
+  await page.locator('#view-trail-color').selectOption('decision');
   const back = await trail();
   expect(back.runs).toEqual([]);
   expect(back.opacity).toBe(0.6);
-  expect(await page.locator('path.trail-sig').count()).toBe(0);
+  expect(await page.locator('path.trail-run').count()).toBe(0);
   await expect(page.locator('#trail-signal-legend')).toBeHidden();
 
   // Kept in this browser across a reload, then cleared again.
-  await page.locator('#trail-signal').check();
+  await page.locator('#view-trail-color').selectOption('signal');
   await page.reload();
   await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
-  await expect(page.locator('#trail-signal')).toBeChecked();
+  await expect(page.locator('#view-trail-color')).toHaveValue('signal');
   await expect(page.locator('#trail-signal-legend')).toBeVisible();
-  expect(await page.evaluate(() => window.skycueApp.getTrailSignal())).toBe(true);
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().trailColor)).toBe('signal');
   // The fixture's own tracks are drawn in runs too (their updates carry rssi).
-  await expect.poll(() => page.locator('path.trail-sig').count(), { timeout: 20000 }).toBeGreaterThan(0);
-  await page.locator('#trail-signal').uncheck();
-  expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe('0');
+  await expect.poll(() => page.locator('path.trail-run').count(), { timeout: 20000 }).toBeGreaterThan(0);
+  await page.locator('#view-trail-color').selectOption('decision');
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view'))).trailColor).toBe('decision');
 });
 
-// Once every position with a signal has aged out of the trail, it is the
-// plain solid trail again, not dashed no-signal runs.
-test('trail_signal_falls_back_when_signal_ages_out', async ({ page }) => {
+// The old "Colour trail by signal" checkbox's setting (skycue.trailSignal)
+// becomes Colour by "signal" once, and the old key goes.
+test('trail_signal_old_setting_carries_over', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('seeded')) return;
+    sessionStorage.setItem('seeded', '1');
+    localStorage.setItem('skycue.trailSignal', '1');
+    localStorage.setItem('skycue.view', JSON.stringify({ search: '' }));
+  });
+  await openPage(page);
+  await expect(page.locator('#view-trail-color')).toHaveValue('signal');
+  expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe(null);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view'))).trailColor).toBe('signal');
+  await page.locator('#view-trail-color').selectOption('decision');
+});
+
+// Once every position with a signal has aged out of the trail, the whole
+// trail is one dim solid run in the decision colour (no signal), in place.
+test('trail_signal_dims_when_signal_ages_out', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 1);
-  await page.evaluate(() => window.skycueApp.setTrailSignal(true));
+  await page.evaluate(() => window.skycueApp.setViewFilters({ trailColor: 'signal' }));
   await page.evaluate((hex) => {
     const now = window.skycueApp.dataNow();
     const at = (i, ms, rssi) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.6 + i * 0.005,
@@ -1170,8 +1191,9 @@ test('trail_signal_falls_back_when_signal_ages_out', async ({ page }) => {
   }, SIG_HEX);
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX);
   let t = await trail();
-  expect(t.runs.some((r) => !r.dashed)).toBe(true);
-  expect(t.runs.some((r) => r.dashed)).toBe(true);
+  expect(t.runs.map((r) => r.opacity)).toEqual([0.9, 0.35]);
+  expect(t.runs.every((r) => !r.dashed)).toBe(true);
+  const dimId = t.runs[1].id;
   expect(t.opacity).toBe(0);
   // The signal positions leave the 120 s window; the prune trims them.
   await expect.poll(async () => {
@@ -1179,19 +1201,19 @@ test('trail_signal_falls_back_when_signal_ages_out', async ({ page }) => {
     return (await trail()).points;
   }, { timeout: 10000 }).toBe(5);
   t = await trail();
-  expect(t.runs).toEqual([]);
-  expect(t.opacity).toBe(0.6);
-  await page.evaluate(() => window.skycueApp.setTrailSignal(false));
+  expect(t.runs).toEqual([{ id: dimId, n: 5, color: NONE_GREY, opacity: 0.35, dashed: false }]);
+  expect(t.opacity).toBe(0);
+  await page.evaluate(() => window.skycueApp.setViewFilters({ trailColor: 'decision' }));
 });
 
 // readsb's rssi of -49.5 means "no signal level" (replays, network-fed
 // inputs): not the weakest colour but no signal. A trail of only those is
-// the plain trail; once a real signal arrives they are its dashed
-// decision-coloured run. The detail row shows a dash, not -49.5 dBFS.
+// one dim solid run in the decision colour; a real signal adds a coloured
+// run after it, in place. The detail row shows a dash, not -49.5 dBFS.
 test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 1);
-  await page.locator('#trail-signal').check();
+  await page.locator('#view-trail-color').selectOption('signal');
   const hex = 'fff0a2';
   const at = (i, rssi) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
     lat: 39.35, lon: -77.6 + a.i * 0.005, decision: 'send', track_deg: 90, rssi: a.rssi,
@@ -1200,22 +1222,26 @@ test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
   let t = await trail();
   expect(t.points).toBe(6);
-  expect(t.runs).toEqual([]);
-  expect(t.opacity).toBe(0.6);
+  expect(t.runs).toEqual([{ id: t.runs[0].id, n: 6, color: NONE_GREY, opacity: 0.35, dashed: false }]);
+  expect(t.opacity).toBe(0);
+  const dimId = t.runs[0].id;
   await at(6, -20);
   t = await trail();
   expect(t.runs.length).toBe(2);
-  expect(t.runs[0]).toMatchObject({ n: 6, color: t.color, dashed: true });
-  expect(t.runs[1]).toMatchObject({ n: 2, dashed: false });
+  expect(t.runs[0]).toMatchObject({ id: dimId, n: 6, color: NONE_GREY, opacity: 0.35, dashed: false });
+  expect(t.runs[1]).toMatchObject({ n: 2, opacity: 0.9, dashed: false });
   expect(t.runs[1].color).not.toBe(t.color);
-  expect(t.runs.filter((r) => !r.dashed).length).toBe(1);
+  expect(await page.evaluate(() => window.skycuePure.TRAIL_NONE_COLOR)).toBe(NONE_GREY);
+  // As rendered: the dim run's SVG path is grey at the dim opacity, not dashed.
+  expect(await page.locator(`path.trail-run[stroke="${NONE_GREY}"][stroke-opacity="0.35"]:not([stroke-dasharray])`).count())
+    .toBeGreaterThanOrEqual(1);
   await at(7, -49.5);
   await page.locator(`.ac-marker[data-hex="${hex}"] .ac-glyph`).click();
   await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
   const cell = page.locator('#details-fields td[data-field="rssi"]');
   await expect(cell).toHaveText('—');
   await expect(cell).toHaveAttribute('title', 'no signal level from the decoder');
-  await page.locator('#trail-signal').uncheck();
+  await page.locator('#view-trail-color').selectOption('decision');
 });
 
 // A position the aircraft could not have flown to (over P.TRAIL_MAX_KT
@@ -1245,7 +1271,7 @@ test('trail_breaks_on_impossible_jump', async ({ page }) => {
   expect((await trail()).points).toBe(1);
   // With the signal colouring on, the break drops the runs too; selected,
   // the restarted trail keeps the selected weight.
-  await page.evaluate(() => window.skycueApp.setTrailSignal(true));
+  await page.evaluate(() => window.skycueApp.setViewFilters({ trailColor: 'signal' }));
   await at(39.04 + 200 / 60 + 0.05, -77.3, 8000);
   let t = await trail();
   expect(t.points).toBe(2);
@@ -1260,7 +1286,267 @@ test('trail_breaks_on_impossible_jump', async ({ page }) => {
   expect(t.runs).toEqual([]);
   expect(t.weight).toBe(3);
   expect(await page.evaluate(() => window.skycueApp.selected())).toBe(hex);
-  await page.evaluate(() => window.skycueApp.setTrailSignal(false));
+  await page.evaluate(() => window.skycueApp.setViewFilters({ trailColor: 'decision' }));
+});
+
+// Trails, Colour by "altitude": an injected aircraft climbing from the
+// ground to 45,000 ft (the same timing as the signal track), then one
+// position without an altitude. The runs follow P.ALT_COLORS low to high;
+// the legend shows the bounds.
+test('trail_altitude_colours_climb', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 1);
+  const hex = 'fff0a4';
+  const alts = [0, 500, 3000, 4500, 8000, 9000, 15000, 25000, 28000, 35000, 42000, 45000];
+  await page.evaluate((a) => {
+    const now = window.skycueApp.dataNow();
+    a.alts.forEach((alt, i) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao', lat: 39.25,
+      lon: -77.6 + i * 0.03, decision: 'send', track_deg: 90, gs_kt: 450, rssi: -20, on_ground: i === 0,
+      alt_baro_ft: i === 0 || i === 3 ? undefined : alt, alt_geom_ft: i === 3 ? alt : undefined,
+      position_time: new Date(now - 30000 - (11 - i) * 6000).toISOString() }));
+  }, { hex, alts });
+  await page.locator('#view-trail-color').selectOption('altitude');
+  const legend = page.locator('#trail-alt-legend');
+  await expect(legend).toBeVisible();
+  await expect(page.locator('#trail-signal-legend')).toBeHidden();
+  await expect(legend.locator('.sig-scale i')).toHaveCount(7);
+  await expect(legend).toContainText('ground–1,000 ft');
+  await expect(legend).toContainText('> 40,000 ft');
+  await expect(legend).toContainText('1k · 5k · 10k · 20k · 30k · 40k ft');
+  await expect(legend).toContainText('faint grey: no altitude');
+  expect(await legend.locator('.sig-scale i').nth(3).getAttribute('title')).toBe('10,000 to 20,000 ft');
+  const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
+  const colors = await page.evaluate(() => window.skycuePure.ALT_COLORS);
+  let t = await trail();
+  expect(t.points).toBe(12);
+  expect(t.opacity).toBe(0);
+  // ground, 500 | 3000, 4500 (geometric) | 8000, 9000 | 15000 | 25000, 28000 | 35000 | 42000, 45000
+  expect(t.runs.map((r) => colors.indexOf(r.color))).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  expect(t.runs.map((r) => r.n)).toEqual([2, 3, 3, 2, 3, 2, 3]);
+  expect(t.runs.every((r) => !r.dashed && r.opacity === 0.9)).toBe(true);
+  // No altitude at all: a dim solid run in the decision colour, appended in place.
+  const lastId = t.runs[6].id;
+  await page.evaluate((h) => window.skycueApp.injectTestMarker({ hex: h, addr_type: 'icao', lat: 39.25, lon: -77.24,
+    decision: 'send', track_deg: 90, gs_kt: 450, rssi: -20,
+    position_time: new Date(window.skycueApp.dataNow() - 24000).toISOString() }), hex);
+  t = await trail();
+  expect(t.runs.length).toBe(8);
+  expect(t.runs[6].id).toBe(lastId);
+  expect(t.runs[7]).toMatchObject({ n: 2, color: NONE_GREY, opacity: 0.35, dashed: false });
+  await page.locator('#view-trail-color').selectOption('decision');
+  await expect(legend).toBeHidden();
+  expect((await trail()).runs).toEqual([]);
+});
+
+// Trails, Show: "selected" leaves only the selected aircraft's polyline on
+// the map (the others' removed, not hidden), "off" none, "all" every one
+// back; the points are kept throughout, so a trail drawn again has its
+// whole history. Remembered in skycue.view; Clear goes back to "all".
+async function trailCounts(page) {
+  return page.evaluate(() => {
+    const ms = window.skycueApp.markers();
+    return { dom: document.querySelectorAll('path.trail').length, markers: ms.length,
+      withTrail: ms.filter((m) => m.trail > 0).map((m) => m.hex).sort() };
+  });
+}
+test('trails_show_all_selected_off', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 3);
+  await expect(page.locator('input[name="view-trail-show"][value="all"]')).toBeChecked();
+  await injectSignalTrack(page);
+  await page.locator(`.ac-marker[data-hex="${SIG_HEX}"] .ac-glyph`).click();
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(SIG_HEX);
+  let c = await trailCounts(page);
+  expect(c.withTrail.length).toBeGreaterThan(1);
+  expect(c.dom).toBe(c.withTrail.length);
+
+  await page.locator('input[name="view-trail-show"][value="selected"]').check();
+  c = await trailCounts(page);
+  expect(c.withTrail).toEqual([SIG_HEX]);
+  expect(c.dom).toBe(1);
+  expect((await page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX)).points).toBe(12);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view'))).trailShow).toBe('selected');
+  // The selection moves: the trail goes with it, the new one's history at once.
+  const other = c.markers > 1 && (await page.evaluate((h) => window.skycueApp.markers().find((m) => m.hex !== h && !m.dimmed).hex, SIG_HEX));
+  await page.evaluate((h) => window.skycueApp.selectHex(h), other);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(other);
+  c = await trailCounts(page);
+  expect(c.withTrail).toEqual([other]);
+  expect(c.dom).toBe(1);
+  await page.evaluate((h) => window.skycueApp.selectHex(h), SIG_HEX);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(SIG_HEX);
+  expect((await page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX)).points).toBe(12);
+
+  await page.locator('input[name="view-trail-show"][value="off"]').check();
+  c = await trailCounts(page);
+  expect(c.withTrail).toEqual([]);
+  expect(c.dom).toBe(0);
+  expect(await page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX)).toBe(null);
+  // A new position while off: kept, drawn when the trails come back.
+  await page.evaluate((hex) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.24,
+    decision: 'send', track_deg: 90, rssi: -4, position_time: new Date(window.skycueApp.dataNow() - 18000).toISOString() }), SIG_HEX);
+  expect((await trailCounts(page)).dom).toBe(0);
+  await expect(page.locator('#view-clear')).toBeEnabled();
+
+  // Kept across a reload.
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await expect(page.locator('input[name="view-trail-show"][value="off"]')).toBeChecked();
+  await waitMarkers(page, 3);
+  expect((await trailCounts(page)).dom).toBe(0);
+  await injectSignalTrack(page);
+
+  await page.locator('input[name="view-trail-show"][value="all"]').check();
+  c = await trailCounts(page);
+  expect(c.withTrail.length).toBe(c.markers);
+  expect(c.dom).toBe(c.markers);
+  expect((await page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX)).points).toBe(12);
+  // Clear resets Show to "all".
+  await page.locator('input[name="view-trail-show"][value="selected"]').check();
+  await page.click('#view-clear');
+  await expect(page.locator('input[name="view-trail-show"][value="all"]')).toBeChecked();
+  expect(await page.evaluate(() => window.skycueApp.getViewFilters().trailShow)).toBe('all');
+  expect((await trailCounts(page)).dom).toBeGreaterThan(1);
+});
+
+// Trails, Project ahead: a dashed line from the marker along track_deg for
+// gs_kt x the minutes (480 kt for 2 min: 16 nm), in the decision colour;
+// moved with the aircraft, gone without a speed or on the ground, following
+// Show; "off" removes every one.
+test('trail_project_ahead', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 3);
+  const hex = 'fff0a5';
+  const at = (o) => page.evaluate((a) => window.skycueApp.injectTestMarker(Object.assign({ hex: a.hex, addr_type: 'icao',
+    decision: 'send', track_deg: 60, gs_kt: 480, rssi: -20, alt_baro_ft: 12000,
+    position_time: new Date(window.skycueApp.dataNow() - a.ago).toISOString() }, a.o)), { hex, o, ago: o.ago || 10000 });
+  await at({ lat: 39.2, lon: -77.5, ago: 16000 });
+  await at({ lat: 39.21, lon: -77.48, ago: 10000 });
+  const ahead = () => page.evaluate((h) => window.skycueApp.ahead(h), hex);
+  expect(await ahead()).toBe(null);
+  expect(await page.locator('path.trail-ahead').count()).toBe(0);
+
+  await page.locator('#view-trail-ahead').selectOption('2');
+  let a = await ahead();
+  expect(a.dashed).toBe(true);
+  expect(a.points[0]).toEqual(a.marker);
+  expect(a.points[0]).toEqual([39.21, -77.48]);
+  const far = await page.evaluate((p) => window.skycuePure.rulerMeasure(p[0][0], p[0][1], p[p.length - 1][0], p[p.length - 1][1]), a.points);
+  expect(Math.abs(far.nm - 16)).toBeLessThan(0.05);
+  expect(Math.abs(far.bearing - 60)).toBeLessThan(0.2);
+  expect(a.color).toBe((await page.evaluate((h) => window.skycueApp.trail(h), hex)).color);
+  expect(a.weight).toBe(1.5);
+  // The fixture's aircraft with a track and a speed get one too: one dashed line per aircraft.
+  const total = await page.locator('path.trail-ahead').count();
+  expect(total).toBeGreaterThan(1);
+  expect(await page.locator('path.trail[stroke-dasharray], path.trail-run[stroke-dasharray]').count()).toBe(0);
+
+  // The aircraft moves: the line starts at the new position; slower, shorter.
+  await at({ lat: 39.22, lon: -77.46, gs_kt: 240, ago: 5000 });
+  a = await ahead();
+  expect(a.points[0]).toEqual([39.22, -77.46]);
+  const far2 = await page.evaluate((p) => window.skycuePure.rulerMeasure(p[0][0], p[0][1], p[p.length - 1][0], p[p.length - 1][1]), a.points);
+  expect(Math.abs(far2.nm - 8)).toBeLessThan(0.05);
+  // A new track: the line turns with it.
+  await at({ lat: 39.225, lon: -77.455, gs_kt: 240, track_deg: 150, ago: 4500 });
+  a = await ahead();
+  const far3 = await page.evaluate((p) => window.skycuePure.rulerMeasure(p[0][0], p[0][1], p[p.length - 1][0], p[p.length - 1][1]), a.points);
+  expect(Math.abs(far3.bearing - 150)).toBeLessThan(0.2);
+  // No ground speed, or on the ground: no line; back when it has one again.
+  await at({ lat: 39.23, lon: -77.44, gs_kt: undefined, ago: 4000 });
+  expect(await ahead()).toBe(null);
+  await at({ lat: 39.231, lon: -77.439, on_ground: true, ago: 3000 });
+  expect(await ahead()).toBe(null);
+  await at({ lat: 39.232, lon: -77.438, ago: 2000 });
+  expect(await ahead()).not.toBe(null);
+
+  // Show "selected": the selected aircraft's line only; "off": none.
+  await page.evaluate((h) => window.skycueApp.selectHex(h), hex);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
+  expect((await ahead()).weight).toBe(3);
+  await page.locator('input[name="view-trail-show"][value="selected"]').check();
+  expect(await page.locator('path.trail-ahead').count()).toBe(1);
+  expect(await ahead()).not.toBe(null);
+  // Nothing selected: no trail and no projection at all.
+  await page.keyboard.press('Escape');
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(null);
+  expect(await page.locator('path.trail').count()).toBe(0);
+  expect(await page.locator('path.trail-ahead').count()).toBe(0);
+  expect(await ahead()).toBe(null);
+  await page.evaluate((h) => window.skycueApp.selectHex(h), hex);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
+  expect(await page.locator('path.trail-ahead').count()).toBe(1);
+  await page.locator('input[name="view-trail-show"][value="off"]').check();
+  expect(await page.locator('path.trail-ahead').count()).toBe(0);
+  await page.locator('input[name="view-trail-show"][value="all"]').check();
+  expect(await page.locator('path.trail-ahead').count()).toBeGreaterThan(1);
+
+  await page.locator('#view-trail-ahead').selectOption('0');
+  expect(await page.locator('path.trail-ahead').count()).toBe(0);
+  expect(await ahead()).toBe(null);
+});
+
+// A filter set saved before the Trails group (no trail fields) gets the
+// Trails settings the page loads with, once, so pressing its number key
+// keeps them instead of resetting Trails.
+test('trails_old_sets_keep_current_trails', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('seeded')) return;
+    sessionStorage.setItem('seeded', '1');
+    localStorage.setItem('skycue.view', JSON.stringify({ trailShow: 'selected', trailColor: 'altitude', trailAhead: 2 }));
+    localStorage.setItem('skycue.viewSets', JSON.stringify({ version: 1, sets: [{ name: 'Old', view: { search: 'ual' }, hideFiltered: false }] }));
+  });
+  await openPage(page);
+  const set = JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets[0].view;
+  expect([set.search, set.trailShow, set.trailColor, set.trailAhead]).toEqual(['ual', 'selected', 'altitude', 2]);
+  await page.locator('body').press('1');
+  const v = await page.evaluate(() => window.skycueApp.getViewFilters());
+  expect([v.search, v.trailShow, v.trailColor, v.trailAhead]).toEqual(['ual', 'selected', 'altitude', 2]);
+  await page.locator('body').press('0');
+});
+
+// The three Trails settings in a saved filter set (the number keys too),
+// cleared by 0, and kept in skycue.view across a reload.
+test('trails_settings_in_sets_and_reload', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await page.locator('input[name="view-trail-show"][value="selected"]').check();
+  await page.locator('#view-trail-color').selectOption('altitude');
+  await page.locator('#view-trail-ahead').selectOption('5');
+  await expect(page.locator('#view-clear')).toBeEnabled();
+  page.once('dialog', (d) => d.accept('Trails'));
+  await page.click('#view-set-save');
+  const saved = JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets[0].view;
+  expect([saved.trailShow, saved.trailColor, saved.trailAhead]).toEqual(['selected', 'altitude', 5]);
+
+  await page.locator('body').press('0');
+  await expect(page.locator('input[name="view-trail-show"][value="all"]')).toBeChecked();
+  await expect(page.locator('#view-trail-color')).toHaveValue('decision');
+  await expect(page.locator('#view-trail-ahead')).toHaveValue('0');
+  await expect(page.locator('#trail-alt-legend')).toBeHidden();
+  await expect(page.locator('#view-clear')).toBeDisabled();
+
+  await page.locator('body').press('1');
+  await expect(page.locator('input[name="view-trail-show"][value="selected"]')).toBeChecked();
+  await expect(page.locator('#view-trail-color')).toHaveValue('altitude');
+  await expect(page.locator('#view-trail-ahead')).toHaveValue('5');
+  await expect(page.locator('#trail-alt-legend')).toBeVisible();
+  expect(await setSelectedText(page)).toBe('Trails');
+  // A Trails change alone makes the set "(modified)".
+  await page.locator('#view-trail-ahead').selectOption('1');
+  expect(await setSelectedText(page)).toBe('Trails (modified)');
+  await page.locator('#view-trail-ahead').selectOption('5');
+  expect(await setSelectedText(page)).toBe('Trails');
+
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await expect(page.locator('input[name="view-trail-show"][value="selected"]')).toBeChecked();
+  await expect(page.locator('#view-trail-color')).toHaveValue('altitude');
+  await expect(page.locator('#view-trail-ahead')).toHaveValue('5');
+  await expect(page.locator('#trail-alt-legend')).toBeVisible();
+  const v = await page.evaluate(() => window.skycueApp.getViewFilters());
+  expect([v.trailShow, v.trailColor, v.trailAhead]).toEqual(['selected', 'altitude', 5]);
+  await page.locator('body').press('0');
 });
 
 // The ruler: away from the fixture's aircraft (around 38.9 N 77 W), two

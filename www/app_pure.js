@@ -1375,8 +1375,16 @@
   var VIEW_DEFAULTS = Object.freeze({
     search: '', altMin: null, altMax: null, ground: true, gsMin: null, gsMax: null,
     rangeMin: null, rangeMax: null, decisions: Object.freeze(VIEW_DECISIONS.slice()),
-    classes: Object.freeze(CLASSES.slice()), emergency: false, category: '', country: '', mapMode: 'hide'
+    classes: Object.freeze(CLASSES.slice()), emergency: false, category: '', country: '', mapMode: 'hide',
+    trailShow: 'all', trailColor: 'decision', trailAhead: 0
   });
+  // The Trails group: which aircraft have a trail (every drawn one, only
+  // the selected one, none) and what colours it (the decision; the signal
+  // or the altitude of each position, trailRunColor) and how many minutes
+  // ahead the projection reaches (0: none; projectAhead).
+  var TRAIL_SHOWS = ['all', 'selected', 'off'];
+  var TRAIL_COLOR_BY = ['decision', 'signal', 'altitude'];
+  var TRAIL_AHEAD_MIN = [0, 1, 2, 5];
 
   function viewNumber(v) {
     if (typeof v === 'string') v = v.trim() === '' ? null : Number(v);
@@ -1411,8 +1419,17 @@
       emergency: viewBool(obj.emergency, false),
       category: cat === 'other' || cat === 'none' || VIEW_CATEGORIES.indexOf(cat) >= 0 ? cat : '',
       country: country === 'other' || ICAO_COUNTRIES.indexOf(country) >= 0 ? country : '',
-      mapMode: obj.mapMode === 'dim' ? 'dim' : 'hide'
+      mapMode: obj.mapMode === 'dim' ? 'dim' : 'hide',
+      trailShow: TRAIL_SHOWS.indexOf(obj.trailShow) >= 0 ? obj.trailShow : VIEW_DEFAULTS.trailShow,
+      trailColor: TRAIL_COLOR_BY.indexOf(obj.trailColor) >= 0 ? obj.trailColor : VIEW_DEFAULTS.trailColor,
+      trailAhead: TRAIL_AHEAD_MIN.indexOf(viewNumber(obj.trailAhead)) >= 0 ? viewNumber(obj.trailAhead) : VIEW_DEFAULTS.trailAhead
     };
+  }
+  // Whether the Trails group is at its defaults (Clear resets it; like the
+  // map mode it is not counted in the heading badge).
+  function viewTrailsDefault(v) {
+    return v.trailShow === VIEW_DEFAULTS.trailShow && v.trailColor === VIEW_DEFAULTS.trailColor &&
+      v.trailAhead === VIEW_DEFAULTS.trailAhead;
   }
 
   // Saved filter sets (spec 4): skycue.viewSets is {version: 1, sets:
@@ -1441,6 +1458,31 @@
       sets.push({ name: name, view: normalizeView(s.view), hideFiltered: viewBool(s.hideFiltered, false) });
     }
     return { version: 1, sets: sets };
+  }
+  // Sets saved before the Trails group existed lack its fields; applying
+  // one would put Trails back to the defaults. `raw` is the stored store
+  // (object or JSON text): each set's view missing one of TRAIL_FIELDS gets
+  // it from `view` (the current settings), once. {store (normalised),
+  // filled: how many sets were given a field}.
+  var TRAIL_FIELDS = ['trailShow', 'trailColor', 'trailAhead'];
+  function viewSetsFillTrails(raw, view) {
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch (e) { raw = null; }
+    }
+    var filled = 0, cur = normalizeView(view);
+    if (raw && typeof raw === 'object' && Array.isArray(raw.sets)) {
+      raw = { version: raw.version, sets: raw.sets.map(function (s) {
+        if (!s || typeof s !== 'object') return s;
+        var v = s.view && typeof s.view === 'object' && !Array.isArray(s.view) ? s.view : {};
+        var missing = TRAIL_FIELDS.filter(function (k) { return !Object.prototype.hasOwnProperty.call(v, k); });
+        if (!missing.length) return s;
+        var nv = Object.assign({}, v);
+        missing.forEach(function (k) { nv[k] = cur[k]; });
+        filled++;
+        return Object.assign({}, s, { view: nv });
+      }) };
+    }
+    return { store: normalizeViewSets(raw), filled: filled };
   }
   // Whether the current state (a view and the Hide filtered flag) is the set's.
   function viewSetMatches(set, view, hideFiltered) {
@@ -1533,7 +1575,7 @@
     return true;
   }
 
-  // ---- signal-coloured trail ("Colour trail by signal") ----------------------
+  // ---- signal-coloured trail (Trails, Colour by "signal") --------------------
   // A track's RSSI (dBFS, `rssi`) on a fixed scale of SIGNAL_COLORS.length
   // steps of SIGNAL_STEP_DB from SIGNAL_MIN_DB (weak: cool and dim) to
   // SIGNAL_MAX_DB (strong: warm and bright); values outside are clamped to the
@@ -1571,19 +1613,22 @@
       return { color: c, from: SIGNAL_MIN_DB + i * SIGNAL_STEP_DB, to: SIGNAL_MIN_DB + (i + 1) * SIGNAL_STEP_DB };
     });
   }
-  // [{lat, lon, sig}] (oldest first) as polyline runs [{points: [[lat, lon], ...],
-  // color}]: the segment into each point takes that point's colour (the
-  // signal it was received at), consecutive segments of one colour make one
-  // run, and adjacent runs share their boundary point so the line is
-  // unbroken. color is null for a point without a signal (the caller draws
-  // those in the normal trail colour). One point: one run of one point.
-  function signalRuns(pts) {
+  // ---- coloured trail runs (Trails, "Colour by") -------------------------------
+  // [{lat, lon, ...}] (oldest first) as polyline runs [{points: [[lat, lon],
+  // ...], color}], `colorOf(point)` giving a point's colour (a step of a
+  // fixed scale) or null when the point has no value: the segment into each
+  // point takes that point's colour (the signal it was received at, the
+  // altitude it was at), consecutive segments of one colour make one run,
+  // and adjacent runs share their boundary point so the line is unbroken.
+  // A null run is a stretch without a value (the caller draws it dim in
+  // the decision colour). One point: one run of one point.
+  function trailRuns(pts, colorOf) {
     var out = [];
     if (!Array.isArray(pts) || !pts.length) return out;
     var ll = function (p) { return [p.lat, p.lon]; };
-    if (pts.length === 1) return [{ points: [ll(pts[0])], color: signalColor(pts[0].sig) }];
+    if (pts.length === 1) return [{ points: [ll(pts[0])], color: colorOf(pts[0]) }];
     for (var i = 1; i < pts.length; i++) {
-      var c = signalColor(pts[i].sig), last = out[out.length - 1];
+      var c = colorOf(pts[i]), last = out[out.length - 1];
       if (last && last.color === c) last.points.push(ll(pts[i]));
       else out.push({ points: [ll(pts[i - 1]), ll(pts[i])], color: c });
     }
@@ -1591,15 +1636,16 @@
   }
 
   // The same runs kept up to date as a trail moves, instead of rebuilt:
-  // signalRunsAppend adds the segment from `prev` to `pt` (both {lat, lon,
-  // sig}) to `runs` in place, extending the last run when the colour is the
-  // same; it returns true when it extended one, false when it pushed a new
-  // run. signalRunsTrim drops the trail's first `n` points from `runs` in
-  // place and returns {dropped, trimmed}: how many leading runs went whole,
-  // and whether the first remaining run lost points from its front. After
-  // either, `runs` equals signalRuns of the trail's points (2 or more).
-  function signalRunsAppend(runs, prev, pt) {
-    var c = signalColor(pt.sig), last = runs[runs.length - 1];
+  // trailRunsAppend adds the segment from `prev` to `pt` to `runs` in
+  // place, extending the last run when the colour is the same; it returns
+  // true when it extended one, false when it pushed a new run.
+  // trailRunsTrim drops the trail's first `n` points from `runs` in place
+  // and returns {dropped, trimmed}: how many leading runs went whole, and
+  // whether the first remaining run lost points from its front (it needs
+  // no colours). After either, `runs` equals trailRuns of the trail's
+  // points (2 or more).
+  function trailRunsAppend(runs, prev, pt, colorOf) {
+    var c = colorOf(pt), last = runs[runs.length - 1];
     if (last && last.color === c) {
       last.points.push([pt.lat, pt.lon]);
       return true;
@@ -1607,7 +1653,12 @@
     runs.push({ points: [[prev.lat, prev.lon], [pt.lat, pt.lon]], color: c });
     return false;
   }
-  function signalRunsTrim(runs, n) {
+
+  // The signal runs: trailRuns on [{lat, lon, sig}].
+  function sigOf(p) { return signalColor(p.sig); }
+  function signalRuns(pts) { return trailRuns(pts, sigOf); }
+  function signalRunsAppend(runs, prev, pt) { return trailRunsAppend(runs, prev, pt, sigOf); }
+  function trailRunsTrim(runs, n) {
     var dropped = 0, start = 0;
     if (!(n > 0)) return { dropped: 0, trimmed: false };
     while (runs.length) {
@@ -1620,6 +1671,75 @@
     var trimmed = runs.length > 0 && n > start;
     if (trimmed) runs[0].points.splice(0, n - start);
     return { dropped: dropped, trimmed: trimmed };
+  }
+  var signalRunsTrim = trailRunsTrim;
+  // A run without a value (no signal, no altitude) is drawn in this
+  // neutral grey (dim), never in a scale or decision colour, so it cannot
+  // be read as a step: 3.5:1 on the Light land, 3.6:1 on the Dark style.
+  var TRAIL_NONE_COLOR = '#78808a';
+
+  // The altitude scale: a position's altitude (trackAlt: 0 on the ground,
+  // else barometric, else geometric; feet) in one of ALT_COLORS.length
+  // steps with the upper bounds ALT_BOUNDS_FT (a bound belongs to the step
+  // below it: 1000 ft is the first step, 1001 the second). Green (low)
+  // through yellow, orange and red to magenta and violet (high): the
+  // conventional low-to-high progression, no blue, so nothing like the
+  // signal scale's blue-to-orange start. Every step is at least 3.1:1
+  // against the Light tiles' land (#f2efe9) and 2.8:1 against the Dark
+  // style (#262a30; 3.6:1 against the no-tile background).
+  var ALT_BOUNDS_FT = [1000, 5000, 10000, 20000, 30000, 40000];
+  var ALT_COLORS = ['#1f8a5a', '#4f8f00', '#a87800', '#e8590c', '#e03131', '#c92a8a', '#8a4fe0'];
+  // The step index of an altitude, or -1 when there is none.
+  function altitudeStep(ft) {
+    if (typeof ft !== 'number' || !isFinite(ft)) return -1;
+    var i = 0;
+    while (i < ALT_BOUNDS_FT.length && ft > ALT_BOUNDS_FT[i]) i++;
+    return i;
+  }
+  function altitudeColor(ft) {
+    var i = altitudeStep(ft);
+    return i < 0 ? null : ALT_COLORS[i];
+  }
+  // The legend: one {color, from, to} per step, feet, low first; from is
+  // null on the first step (the ground and below 1000 ft), to null on the last.
+  function altitudeLegend() {
+    return ALT_COLORS.map(function (c, i) {
+      return { color: c, from: i ? ALT_BOUNDS_FT[i - 1] : null, to: i < ALT_BOUNDS_FT.length ? ALT_BOUNDS_FT[i] : null };
+    });
+  }
+  function altOf(p) { return altitudeColor(p.alt); }
+  // The altitude runs: trailRuns on [{lat, lon, alt}].
+  function altitudeRuns(pts) { return trailRuns(pts, altOf); }
+
+  // A Colour by mode's point colour function for trailRuns and
+  // trailRunsAppend, on points {lat, lon, sig, alt}; null for 'decision'
+  // (one plain trail in the decision colour, no runs).
+  function trailRunColor(mode) {
+    return mode === 'signal' ? sigOf : mode === 'altitude' ? altOf : null;
+  }
+
+  // ---- projection ahead (Trails, "Project ahead") ------------------------------
+  // Dead reckoning: where an aircraft is `minutes` from now if it keeps its
+  // track and ground speed, on the great circle (destinationPoint's sphere;
+  // the track is true). projectPoint is that point; aheadNm the distance,
+  // ground speed (kt) times the time. Straight flight only: a turn or a
+  // speed change is not predicted.
+  function projectPoint(lat, lon, trackDeg, distanceNm) { return destinationPoint(lat, lon, trackDeg, distanceNm); }
+  function aheadNm(gsKt, minutes) { return gsKt * minutes / 60; }
+  // The great-circle line from the track's position along its track_deg
+  // for aheadNm(gs_kt, minutes), as [[lat, lon], ...] from the position to
+  // the far end with a point every AHEAD_STEP_NM at most (Leaflet joins
+  // points with straight lines on the map); null without a projection:
+  // minutes 0, no position, no track_deg or gs_kt (or not above 0), or on
+  // the ground.
+  var AHEAD_STEP_NM = 10;
+  function projectAhead(t, minutes) {
+    var fin = function (v) { return typeof v === 'number' && isFinite(v); };
+    if (!(minutes > 0) || !t || t.on_ground) return null;
+    if (!fin(t.lat) || !fin(t.lon) || !fin(t.track_deg) || !fin(t.gs_kt) || !(t.gs_kt > 0)) return null;
+    var nm = aheadNm(t.gs_kt, minutes), n = Math.max(1, Math.ceil(nm / AHEAD_STEP_NM)), out = [[t.lat, t.lon]];
+    for (var i = 1; i <= n; i++) out.push(projectPoint(t.lat, t.lon, t.track_deg, nm * i / n));
+    return out;
   }
 
   // ---- trail breaks -----------------------------------------------------------
@@ -1709,6 +1829,9 @@
     MILITARY_CALLSIGN_PREFIXES: MILITARY_CALLSIGN_PREFIXES, callsignKind: callsignKind,
     CLASSES: CLASSES, CATEGORY_LABELS: CATEGORY_LABELS, trackClass: trackClass, isEmergency: isEmergency, trackCountry: trackCountry,
     VIEW_DEFAULTS: VIEW_DEFAULTS, normalizeView: normalizeView, viewActiveCount: viewActiveCount,
+    TRAIL_SHOWS: TRAIL_SHOWS, TRAIL_COLOR_BY: TRAIL_COLOR_BY, TRAIL_AHEAD_MIN: TRAIL_AHEAD_MIN,
+    viewTrailsDefault: viewTrailsDefault,
+    projectPoint: projectPoint, aheadNm: aheadNm, AHEAD_STEP_NM: AHEAD_STEP_NM, projectAhead: projectAhead,
     VIEW_SETS_MAX: VIEW_SETS_MAX, VIEW_SET_NAME_MAX: VIEW_SET_NAME_MAX, viewSetName: viewSetName,
     normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches,
@@ -1716,6 +1839,10 @@
     SIGNAL_NONE_DB: SIGNAL_NONE_DB, signalLevel: signalLevel,
     signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns,
     signalRunsAppend: signalRunsAppend, signalRunsTrim: signalRunsTrim,
+    TRAIL_NONE_COLOR: TRAIL_NONE_COLOR, TRAIL_FIELDS: TRAIL_FIELDS, viewSetsFillTrails: viewSetsFillTrails,
+    trailRuns: trailRuns, trailRunsAppend: trailRunsAppend, trailRunsTrim: trailRunsTrim, trailRunColor: trailRunColor,
+    ALT_BOUNDS_FT: ALT_BOUNDS_FT, ALT_COLORS: ALT_COLORS, altitudeStep: altitudeStep, altitudeColor: altitudeColor,
+    altitudeLegend: altitudeLegend, altitudeRuns: altitudeRuns,
     TRAIL_MAX_KT: TRAIL_MAX_KT, TRAIL_BACKSTEP_S: TRAIL_BACKSTEP_S, trailStep: trailStep,
     rulerMeasure: rulerMeasure, rulerLabel: rulerLabel
   };

@@ -1,6 +1,8 @@
 #define BOOST_TEST_MODULE iqgen
 #include <boost/test/unit_test.hpp>
 
+#include "restricted_fixtures.hpp"
+
 #include "gz_line_reader.hpp"
 
 #include "bits.hpp"
@@ -184,7 +186,7 @@ BOOST_AUTO_TEST_CASE(rs_known_answer_parity)
 // Every line of raw/uat-sample.txt.gz:
 // downlink: codeword = payload + parity, all syndromes 0, first k bytes == payload;
 // uplink: each block j (bytes 72j..72j+71 + its 20 parity bytes) has all 20 syndromes 0.
-BOOST_AUTO_TEST_CASE(rs_every_fixture_codeword_has_zero_syndromes)
+BOOST_AUTO_TEST_CASE(rs_every_fixture_codeword_has_zero_syndromes, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto all = fixturePayloads();
     std::size_t n_short = 0, n_long = 0, n_up = 0;
@@ -224,7 +226,7 @@ BOOST_AUTO_TEST_CASE(rs_every_fixture_codeword_has_zero_syndromes)
 
 // One codeword of each kind: every single-byte corruption at every position
 // leaves a non-zero syndrome, and the parity is no longer the data's parity.
-BOOST_AUTO_TEST_CASE(rs_corrupted_codeword_has_nonzero_syndrome)
+BOOST_AUTO_TEST_CASE(rs_corrupted_codeword_has_nonzero_syndrome, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto all = fixturePayloads();
     for (UatKind kind : {UatKind::downlink_short, UatKind::downlink_long, UatKind::uplink}) {
@@ -305,7 +307,7 @@ BOOST_AUTO_TEST_CASE(uat_lengths)
 }
 
 // The first 36 bits are the sync word MSB first, then each transmitted byte MSB first.
-BOOST_AUTO_TEST_CASE(uat_sync_word_first)
+BOOST_AUTO_TEST_CASE(uat_sync_word_first, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto all = fixturePayloads();
     for (UatKind kind : {UatKind::downlink_short, UatKind::downlink_long, UatKind::uplink}) {
@@ -322,7 +324,7 @@ BOOST_AUTO_TEST_CASE(uat_sync_word_first)
     }
 }
 
-BOOST_AUTO_TEST_CASE(uplink_interleave)
+BOOST_AUTO_TEST_CASE(uplink_interleave, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto all = fixturePayloads();
     const auto& p = firstOfKind(all, UatKind::uplink);
@@ -509,7 +511,7 @@ BOOST_AUTO_TEST_CASE(synth_ring_bounds)
     BOOST_CHECK_NO_THROW(u.addFrame(10, bits));
 }
 
-BOOST_AUTO_TEST_CASE(uat_cpfsk_phase_steps)
+BOOST_AUTO_TEST_CASE(uat_cpfsk_phase_steps, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto all = fixturePayloads();
     const std::vector<uint8_t>* payload = nullptr;

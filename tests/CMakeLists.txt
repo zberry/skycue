@@ -213,7 +213,7 @@ add_test(NAME rawtools
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_rawtools.sh
     $<TARGET_FILE:skycue-rawrec> $<TARGET_FILE:skycue-rawplay>
     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_TEST_READSB})
-set_tests_properties(rawtools PROPERTIES TIMEOUT 120)
+set_tests_properties(rawtools PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
 add_executable(test_engine test_engine.cpp)
 target_link_libraries(test_engine PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
@@ -271,7 +271,7 @@ set_tests_properties(stats_cli PROPERTIES TIMEOUT 120)
 add_test(NAME fisb_cli
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_fisb_cli.sh
     $<TARGET_FILE:skycue-fisb> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(fisb_cli PROPERTIES TIMEOUT 60)
+set_tests_properties(fisb_cli PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 add_executable(test_web_server test_web_server.cpp)
 target_link_libraries(test_web_server PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
@@ -375,7 +375,7 @@ add_test(NAME iqgen COMMAND test_iqgen)
 add_test(NAME iqgen_cli
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
     $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180)
+set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
 # ASTERIX CAT021 decoder, test encoder and TCP stream framer (pure).
 add_executable(test_cat021 test_cat021.cpp)

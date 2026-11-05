@@ -1,6 +1,8 @@
 #define BOOST_TEST_MODULE skycued_fisb_twgo
 #include <boost/test/unit_test.hpp>
 
+#include "restricted_fixtures.hpp"
+
 #include "gz_line_reader.hpp"
 #include "fisb/apdu.hpp"
 #include "fisb/fisb_time.hpp"
@@ -304,7 +306,7 @@ BOOST_AUTO_TEST_CASE(utc_resolution_picks_the_closest_candidate)
                "2015-01-10T00:00:00.000Z");
 }
 
-BOOST_AUTO_TEST_CASE(segmented_notam_from_sample_reassembles)
+BOOST_AUTO_TEST_CASE(segmented_notam_from_sample_reassembles, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     auto segs = sampleNotamSegments();
     BOOST_REQUIRE_EQUAL(segs.size(), 3u);
@@ -373,7 +375,7 @@ BOOST_AUTO_TEST_CASE(segmented_notam_from_sample_reassembles)
     BOOST_TEST(tfr == 1);
 }
 
-BOOST_AUTO_TEST_CASE(segments_complete_on_later_cycle)
+BOOST_AUTO_TEST_CASE(segments_complete_on_later_cycle, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     auto segs = sampleNotamSegments();
     BOOST_REQUIRE_EQUAL(segs.size(), 3u);
@@ -457,7 +459,8 @@ BOOST_AUTO_TEST_CASE(segment_cap_512_and_rejects)
     BOOST_TEST((u->payload == pl));
 }
 
-BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_fixtures_consumes_exact_length)
+BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_fixtures_consumes_exact_length,
+                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     struct Want {
         std::string path;
@@ -513,7 +516,7 @@ BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_fixtures_consumes_exact_length)
     }
 }
 
-BOOST_AUTO_TEST_CASE(twgo_polygon_circle_prism_geometry)
+BOOST_AUTO_TEST_CASE(twgo_polygon_circle_prism_geometry, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto ref = sampleRef();
     auto items = fixtureTwgo(kSample, ref);
@@ -640,7 +643,7 @@ BOOST_AUTO_TEST_CASE(twgo_polygon_circle_prism_geometry)
     BOOST_TEST(merged == 6);
 }
 
-BOOST_AUTO_TEST_CASE(twgo_key_fields)
+BOOST_AUTO_TEST_CASE(twgo_key_fields, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     auto items = fixtureTwgo(kSample, sampleRef());
     std::map<TwgoKey, int> text_keys;
@@ -768,7 +771,7 @@ BOOST_AUTO_TEST_CASE(twgo_cancel_and_status13)
     BOOST_TEST(skycued::formatIso8601Ms(*tg->end) == "2026-11-02T12:30:00.000Z");
 }
 
-BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds)
+BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     struct Want {
         std::string path;
@@ -841,7 +844,7 @@ BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds)
     BOOST_TEST(parseTextProduct(h, nullptr, 0, ref).empty());
 }
 
-BOOST_AUTO_TEST_CASE(winds_period_parsed)
+BOOST_AUTO_TEST_CASE(winds_period_parsed, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     BOOST_TEST(*windsPeriod(2, 600) == 6u);
     BOOST_TEST(*windsPeriod(1, 1200) == 12u);
@@ -904,7 +907,7 @@ BOOST_AUTO_TEST_CASE(winds_period_parsed)
     BOOST_TEST(seen["CSG"] >= 1);
 }
 
-BOOST_AUTO_TEST_CASE(fuzz_twgo_no_throw)
+BOOST_AUTO_TEST_CASE(fuzz_twgo_no_throw, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     std::mt19937 rng(20261102);
     std::uniform_int_distribution<int> byte(0, 255);

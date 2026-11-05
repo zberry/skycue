@@ -13,7 +13,11 @@ stratux="$fixtures/raw/stratux-uat-2015.log.gz"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-for f in "$iqgen" "$modes" "$uat" "$stratux"; do [ -e "$f" ] || fail "$f missing"; done
+for f in "$modes" "$uat" "$stratux"; do
+  # fixtures/raw/ is left out of the release tarball (fixtures/README.md).
+  [ -e "$f" ] || { echo "SKIP: $f missing (not in the release tarball)"; exit 77; }
+done
+[ -e "$iqgen" ] || fail "$iqgen missing"
 
 # expect_exit CODE NAME CMD...: runs CMD (stdout/stderr to $tmp/NAME.out/.err).
 expect_exit() {

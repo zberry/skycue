@@ -1,6 +1,8 @@
 #define BOOST_TEST_MODULE skycued_capture
 #include <boost/test/unit_test.hpp>
 
+#include "restricted_fixtures.hpp"
+
 #include "asterix/capture_line.hpp"
 #include "asterix/cat021.hpp"
 #include "asterix/cat021_encode.hpp"
@@ -323,7 +325,7 @@ BOOST_AUTO_TEST_CASE(capture_line_deep_nesting_refused_without_parsing)
 
 // ---------------------------------------------------------------- capture from inputs
 
-BOOST_AUTO_TEST_CASE(capture_input_writes_datagrams)
+BOOST_AUTO_TEST_CASE(capture_input_writes_datagrams, *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     TempDir tmp;
     IoThread t;
@@ -400,7 +402,8 @@ BOOST_AUTO_TEST_CASE(capture_tcp_writes_framed_blocks_only)
 
 // ---------------------------------------------------------------- RECORD_RAW
 
-BOOST_AUTO_TEST_CASE(raw_frames_written_in_rawplay_formats)
+BOOST_AUTO_TEST_CASE(raw_frames_written_in_rawplay_formats,
+                     *skycue_test::needs_fixture("pingstation/icd-traffic-1090.json"))
 {
     TempDir tmp;
     {

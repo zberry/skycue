@@ -1,6 +1,8 @@
 #define BOOST_TEST_MODULE skycued_fisb_blocks
 #include <boost/test/unit_test.hpp>
 
+#include "restricted_fixtures.hpp"
+
 #include "gz_line_reader.hpp"
 #include "fisb/apdu.hpp"
 #include "fisb/global_block.hpp"
@@ -176,7 +178,8 @@ BOOST_AUTO_TEST_CASE(every_rle_block_in_tg30_totals_128)
     BOOST_TEST(empty == 2934u + 381u);
 }
 
-BOOST_AUTO_TEST_CASE(empty_block_lists_decode_including_last_byte_case)
+BOOST_AUTO_TEST_CASE(empty_block_lists_decode_including_last_byte_case,
+                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     // Hand-built: L = 0, the high nibble alone lists b+1..b+4 (MUT/STX emit
     // nothing for this; §5.4).

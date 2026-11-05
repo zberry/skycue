@@ -17,7 +17,11 @@ cleanup() {
 }
 trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-for f in "$rawrec" "$rawplay" "$csv" "$uat" "$stratux"; do [ -e "$f" ] || fail "$f missing"; done
+for f in "$csv" "$uat" "$stratux"; do
+  # fixtures/raw/ is left out of the release tarball (fixtures/README.md).
+  [ -e "$f" ] || { echo "SKIP: $f missing (not in the release tarball)"; exit 77; }
+done
+for f in "$rawrec" "$rawplay"; do [ -e "$f" ] || fail "$f missing"; done
 
 now() { date +%s.%N; }
 wait_file() { # wait_file FILE TENTHS: until FILE is non-empty

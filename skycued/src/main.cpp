@@ -218,6 +218,14 @@ int run(int argc, char** argv)
         std::cerr << "skycued: --web-bind must not be empty\n";
         return 2;
     }
+    // As for the READSB_HOST and DUMP978_HOST keys: an empty host is an error, not "use the key".
+    for (const auto& [flag, value] : {std::pair<const char*, const std::string*>{"readsb-host", &readsb_host},
+                                      {"dump978-host", &dump978_host}}) {
+        if (vm.count(flag) && value->empty()) {
+            std::cerr << "skycued: --" << flag << " must not be empty\n";
+            return 2;
+        }
+    }
     const bool replaying = vm.count("replay") > 0;
     const bool check_only = vm.count("check-inputs") > 0;
     if (check_only && replaying) {

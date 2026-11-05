@@ -1416,6 +1416,28 @@ BOOST_AUTO_TEST_CASE(skycued_version_is_cmake_version)
     BOOST_TEST(readAll(log) == std::string("skycued ") + SKYCUE_CMAKE_VERSION + "\n");
 }
 
+// An explicitly empty --readsb-host or --dump978-host is a usage error (exit 2,
+// one line), as an empty READSB_HOST or DUMP978_HOST key is; also with
+// --check-inputs, which would otherwise probe an empty host.
+BOOST_AUTO_TEST_CASE(empty_host_flag_exits_2)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    writeFile(conf, std::string(kConfHead) + "WEB_PORT=0\nCUE_TCP_PORT=0\n");
+    int n = 0;
+    for (const std::string flag : {"--readsb-host", "--dump978-host"}) {
+        for (const bool check : {false, true}) {
+            const std::string log = tmp.path + "/log" + std::to_string(n++);
+            std::vector<std::string> args{"--config", conf, flag, ""};
+            if (check)
+                args.push_back("--check-inputs");
+            const pid_t pid = spawnSkycued(args, log);
+            BOOST_TEST(waitExit(pid, 5s) == 2, flag << (check ? " --check-inputs" : ""));
+            BOOST_TEST(readAll(log) == "skycued: " + flag + " must not be empty\n", flag);
+        }
+    }
+}
+
 BOOST_AUTO_TEST_CASE(main_serves_with_overrides)
 {
     TempDir tmp;

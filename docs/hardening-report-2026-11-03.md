@@ -9,7 +9,7 @@ was a separate build directory, and the default build configuration is
 unchanged. The fixes do change behaviour in places; they are listed under
 [Behaviour changes](#behaviour-changes).
 
-Each fix names its regression test (file under `skycue/tests/` unless
+Each fix names its regression test (file under `tests/` unless
 another path is given, and case) and the subject of the commit that made it.
 
 ## Final reruns
@@ -30,7 +30,7 @@ after the capture fix the fuzz rerun led to, with the same result lines.
 | Rocky 8 container (gcc 8.5, Boost 1.66): `scripts/verify-offline-build.sh 8 <bundle>`, plain and with `--werror` (`SKYCUE_WERROR=ON`), on the final head | both ended `verify: OK rocky8`; ctest 50/50 passed, 3 skipped as exit 77 (`fuzz_smoke`, `static_analysis`, `soak_short`); 0 compiler warnings in the tree; no `-fsanitize` and no `SKYCUE_FUZZ` in the configure; `test_receivers.sh` ok, `test_make_locations` PASS, the start-script test ran; in place and relocated |
 | Rocky 9 container (gcc 11, Boost 1.75): the same procedure, plain and with `--werror` | both ended `verify: OK rocky9`, with the same counts and checks |
 
-`du -sb skycue/fuzz/seeds`: 82876 bytes (limit 1048576).
+`du -sb fuzz/seeds`: 82876 bytes (limit 1048576).
 
 ## Behaviour changes
 
@@ -154,7 +154,7 @@ One row per ledger item; "how long" is "one change" (one small commit) or "no ch
 | `tileMissing` growth | no change | the map of missing tiles | none | accepted (entries expire on lookup; bounded by the tiles visited) |
 | antimeridian culling of weather symbols | no change | symbols across 180 degrees | none | accepted (FIS-B coverage never crosses 180 degrees) |
 | exact UDP counts in `test_receivers.sh` | no change | could fail on a loopback drop | none | accepted (no drop seen; a drop fails with a clear message) |
-| `run.sh` Playwright process group; `test_parent_project.sh` exit 77 | no change | asked for | none | already resolved (`skycue/tests/ui/run.sh` stops Playwright as a process group, "ui tests: run.sh stops Playwright as a process group"; `skycue/tests/test_parent_project.sh` exits 77 and `parent_project` has `SKIP_RETURN_CODE 77` in `skycue/tests/CMakeLists.txt`) |
+| `run.sh` Playwright process group; `test_parent_project.sh` exit 77 | no change | asked for | none | already resolved (`tests/ui/run.sh` stops Playwright as a process group, "ui tests: run.sh stops Playwright as a process group"; `tests/test_parent_project.sh` exits 77 and `parent_project` has `SKIP_RETURN_CODE 77` in `tests/CMakeLists.txt`) |
 | `soak.sh` on a node without WebSocket; literal `/tmp` work dir; header comment | one change | the run failed late instead of skipping; a `${TMPDIR:-/tmp}` fallback; a stale comment | fixed (no ctest: checked once with a node that fails the probe, exit 77, nothing started); "soak: skip without node's WebSocket, work dir under --out; comment notes" | none |
 | `JsonObject` keys with '.' | one change | lookup rule unstated | none (comment) | documented (header comment: looked up literally, no path syntax) |
 | `skycue-dump` invalid UTF-8 | one change | a behaviour change from the shared escaper | none (docs) | documented: U+FFFD instead of the bytes ([operating.md](operating.md), skycue-dump) |

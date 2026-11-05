@@ -141,7 +141,7 @@ if [ -z "$bin_dir" ]; then
     fi
   else
     echo "run-fuzz: configuring $build_dir ($cxx, -DSKYCUE_FUZZ=ON)"
-    cmake -S "$repo/skycue" -B "$build_dir" \
+    cmake -S "$repo" -B "$build_dir" \
       -DCMAKE_CXX_COMPILER="$cxx" \
       -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DSKYCUE_FUZZ=ON || exit 1

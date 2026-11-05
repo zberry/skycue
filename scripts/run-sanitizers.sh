@@ -146,7 +146,7 @@ if [ -f "$build_dir/CMakeCache.txt" ]; then
   fi
 else
   echo "run-sanitizers: configuring $build_dir ($cxx, -fsanitize=$sanitize)"
-  cmake -S "$repo/skycue" -B "$build_dir" \
+  cmake -S "$repo" -B "$build_dir" \
     -DCMAKE_CXX_COMPILER="$cxx" \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DSKYCUE_BUILD_TESTS=ON \

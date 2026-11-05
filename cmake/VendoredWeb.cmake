@@ -15,10 +15,11 @@ if(NOT EXISTS "${_skycue_repo_dir}/cmake/sources.cmake"
   message(FATAL_ERROR " skycue: SKYCUE_LEAFLET_DIR and SKYCUE_ECHARTS_DIR are not set and ${_skycue_repo_dir}/cmake/sources.cmake is not there to find the pinned tarballs; set both")
 endif()
 
-# The superbuild's errors suggest its fetch mode, which skycue/ does not
-# have: point at the release source tarball and the two variables instead.
+# skycue/ has no fetch mode of its own (skycue_vendored_web_dir() forces
+# SKYCUE_FETCH_SOURCES off): point at the release source tarball, the
+# top-level superbuild's fetch mode, and the two variables.
 set(SKYCUE_SOURCE_MISSING_HINT
-  "it ships in the release source tarball (skycue-${PROJECT_VERSION}.tar.gz), or set SKYCUE_LEAFLET_DIR and SKYCUE_ECHARTS_DIR")
+  "it ships in the release source tarball (skycue-${PROJECT_VERSION}.tar.gz), or fill sources/ with the top-level -DSKYCUE_FETCH_SOURCES=ON on a connected machine, or set SKYCUE_LEAFLET_DIR and SKYCUE_ECHARTS_DIR")
 set(SKYCUE_SOURCE_MISMATCH_HINT "")
 include("${_skycue_repo_dir}/cmake/SkycueSources.cmake")
 # A parent build that already read the manifest must not declare it twice.
@@ -39,6 +40,9 @@ function(skycue_vendored_web_dir name out_var)
   else()
     message(FATAL_ERROR "skycue: skycue_vendored_web_dir: unknown name ${name}")
   endif()
+  # Nothing is downloaded here: a -DSKYCUE_FETCH_SOURCES=ON given to skycue/
+  # must not skip the missing-file check (function scope only).
+  set(SKYCUE_FETCH_SOURCES OFF)
   skycue_check_source(${name} tarball)
   skycue_source_sha256(${name} sha)
   set(dest "${PROJECT_BINARY_DIR}/web-tarballs/${name}")

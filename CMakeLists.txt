@@ -45,7 +45,8 @@ set(SKYCUE_LEAFLET_DIR "" CACHE PATH
   "Leaflet's extracted dist/ directory (leaflet.js, leaflet.css, images/); staged and installed under www/vendor/leaflet")
 set(SKYCUE_ECHARTS_DIR "" CACHE PATH
   "ECharts' extracted npm package root (dist/echarts.min.js, LICENSE, NOTICE, licenses/LICENSE-d3); staged and installed under www/vendor/echarts")
-set(SKYCUE_SOURCE_CACHE "${PROJECT_SOURCE_DIR}/../sources" CACHE PATH
+cmake_path(SET _skycue_default_source_cache NORMALIZE "${PROJECT_SOURCE_DIR}/../sources")
+set(SKYCUE_SOURCE_CACHE "${_skycue_default_source_cache}" CACHE PATH
   "Directory holding the pinned leaflet and echarts npm tarballs, used when SKYCUE_LEAFLET_DIR or SKYCUE_ECHARTS_DIR is empty")
 # Either directory left empty: the pinned tarball from SKYCUE_SOURCE_CACHE,
 # hash-checked and extracted in the build tree (cmake/VendoredWeb.cmake). A

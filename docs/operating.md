@@ -36,11 +36,8 @@ to count UAT uplinks.
 
 ## Start, stop, status (stack bundle)
 
-> **Note:** The commands below are for the stack bundle. `skycue-start.sh` and `skycue-stop.sh` are the launcher of the
-> separate full-stack bundle (the stack repository). This repository's
-> packages and `cmake --install` do not install them. A packaged or
-> source-installed skycue runs the daemon through the `skycued` systemd unit
-> or `skycued --config <conf>` directly; see [installing.md](installing.md).
+> **Note:** The commands below are for the stack bundle; see the note at the
+> top of this page.
 
 ```sh
 cd /opt/skycue
@@ -279,7 +276,7 @@ replays it refuses to start while any part of the live chain runs.
 
 Playback is real time only (the decoders' own throttling; there is no
 `--speed`). Each decoder exits at the end of its file; with `--loop` it is
-started again (by an internal `skycue-start.sh _respawn` wrapper, which
+started again (by an internal wrapper of the stack bundle's launcher, which
 `status` and `stop` see as the decoder) while skycued keeps running, and
 `stop` stops the wrapper and the decoder together (a decoder that ignores
 TERM is killed after 3 s). With only a 978 file, `--loop` restarts
@@ -296,7 +293,7 @@ what the decoders recovered from both are described in
 ## The inputs file
 
 skycued's inputs are the two built-ins, `readsb` and `dump978` (the decoders
-`skycue-start.sh` launches; a built-in whose decoder is not launched is
+the stack bundle's launcher starts; a built-in whose decoder is not launched is
 absent, see [Running without SDR dongles](#running-without-sdr-dongles)), plus any inputs you add, such as a pingStation 3.
 The added inputs and the enabled state of the built-ins are kept in
 `skycue.inputs.json` in `STATE_DIR` when that is set (`/var/lib/skycue` in

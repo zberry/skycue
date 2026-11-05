@@ -286,7 +286,8 @@ codes: 0 done, 1 failure, 2 usage error.
 
 To replay the capture with the stack's start script, set the receiver
 position near Porto (`RECEIVER_LAT=41.15` / `RECEIVER_LON=-8.61`) and run
-`bin/skycue-start.sh replay-iq build/iq-samples/porto-awec2026.1090.cu8 -c CONFIG`.
+`bin/skycue-start.sh replay-iq build/iq-samples/porto-awec2026.1090.cu8 -c CONFIG`
+(stack bundle launcher; it is in the stack repository, not in this one).
 
 ## Limits
 

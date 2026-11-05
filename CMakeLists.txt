@@ -126,7 +126,8 @@ if(SKYCUE_ECHARTS_DIR)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/echarts/licenses)
 endif()
 
-# System files: the config, the skycued systemd unit and the map helpers.
+# System files: the config, the skycued systemd unit, the map helpers and
+# bin/skycue-make-maps, their front.
 # They belong to the package shape and to a plain source install; the
 # superbuild turns them off, so the offline bundle's prefix is unchanged (it
 # keeps the config in its own etc/ and the helpers in scripts/). Their sources
@@ -143,6 +144,8 @@ set(_skycue_conf_example "${_skycue_repo_dir}/etc/skycue.conf.example")
 set(_skycue_unit_template "${_skycue_repo_dir}/packaging/systemd/skycued.service.in")
 set(_skycue_map_scripts "${_skycue_repo_dir}/scripts/make-tiles.sh" "${_skycue_repo_dir}/scripts/make-overlays.sh")
 set(_skycue_map_merger "${_skycue_repo_dir}/scripts/tiles-merge.py")
+set(_skycue_map_common "${_skycue_repo_dir}/scripts/lib/skycue-common.sh")
+set(_skycue_make_maps "${_skycue_repo_dir}/scripts/skycue-make-maps")
 # The full sysconfdir, so that /usr gives /etc (GNUInstallDirs) and the
 # config lands where the unit's ExecStart looks for it.
 cmake_path(SET _skycue_sysconfdir NORMALIZE "${CMAKE_INSTALL_FULL_SYSCONFDIR}")
@@ -173,6 +176,13 @@ if(SKYCUE_INSTALL_SYSTEM_FILES)
   endforeach()
   if(EXISTS "${_skycue_map_merger}")
     install(FILES "${_skycue_map_merger}" DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/scripts)
+  endif()
+  if(EXISTS "${_skycue_map_common}")
+    install(FILES "${_skycue_map_common}" DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/scripts/lib)
+  endif()
+  # The front for the helpers above; it finds them at ../share/skycue/scripts.
+  if(EXISTS "${_skycue_make_maps}")
+    install(PROGRAMS "${_skycue_make_maps}" DESTINATION ${CMAKE_INSTALL_BINDIR})
   endif()
 endif()
 

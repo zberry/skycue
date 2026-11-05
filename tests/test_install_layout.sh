@@ -2,10 +2,11 @@
 # What `cmake --install` puts where, for the configuration of this build tree:
 # binaries, the web UI with its vendored libraries and their licences, the
 # headers and the CMake package config always; with SKYCUE_INSTALL_SYSTEM_FILES
-# also the map scripts, the config (the example, or with SKYCUE_PACKAGE_CONFIG
-# the packaged skycue.conf) and the skycued unit, whose ExecStart names this
-# build's own bindir and sysconfdir; without it none of those (the offline
-# bundle's layout). Nothing is installed outside the prefix except the config
+# also the map scripts with their front bin/skycue-make-maps (which must find
+# them and run them, --dry-run, on the map dir it is given), the config (the
+# example, or with SKYCUE_PACKAGE_CONFIG the packaged skycue.conf) and the
+# skycued unit, whose ExecStart names this build's own bindir and sysconfdir;
+# without it none of those (the offline bundle's layout). Nothing is installed outside the prefix except the config
 # and the unit, and no map tiles or overlays are installed at all.
 # The install goes to a DESTDIR, since the config and the unit may have
 # absolute destinations (/etc, /usr/lib/systemd/system).
@@ -50,10 +51,21 @@ fi
 scripts=share/skycue/scripts
 
 if is_on "$system_files"; then
-  need $scripts/make-tiles.sh $scripts/make-overlays.sh $scripts/tiles-merge.py
-  for f in make-tiles.sh make-overlays.sh; do
-    [ -x "$p/$scripts/$f" ] || fail "$prefix/$scripts/$f is not executable"
+  need $scripts/make-tiles.sh $scripts/make-overlays.sh $scripts/tiles-merge.py \
+    $scripts/lib/skycue-common.sh bin/skycue-make-maps
+  for f in $scripts/make-tiles.sh $scripts/make-overlays.sh bin/skycue-make-maps; do
+    [ -x "$p/$f" ] || fail "$prefix/$f is not executable"
   done
+  # The installed front finds the installed helpers and gives them the map
+  # dir and the cache (their own defaults would point into share/skycue/www).
+  mm=$("$p/bin/skycue-make-maps" --map-dir "$work/maps" --cache "$work/cache" --preset world \
+         --container img:1 --dry-run 2>&1) || fail "installed skycue-make-maps --dry-run: $mm"
+  grep -qxF "would add to $work/maps/tiles/meta.json: {\"name\":\"global\",\"bbox\":[-180,-85,180,85],\"minZoom\":0,\"maxZoom\":5}" <<<"$mm" \
+    || fail "installed skycue-make-maps: no global region for $work/maps/tiles: $mm"
+  grep -qF "would write: $work/maps/overlays/admin0.json" <<<"$mm" \
+    || fail "installed skycue-make-maps: overlays not for $work/maps/overlays: $mm"
+  grep -q 'share/skycue/www' <<<"$mm" && fail "installed skycue-make-maps: a helper default leaked in: $mm"
+  [ -e "$work/maps" ] && fail "installed skycue-make-maps --dry-run created the map dir"
   [ -f "$root$conf" ] || fail "not installed: $conf"
   [ -e "$root$other" ] && fail "installed $other as well as $conf"
   grep -q '^RECEIVER_LAT=$' "$root$conf" || fail "$conf has no empty RECEIVER_LAT="

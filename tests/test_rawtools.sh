@@ -17,9 +17,12 @@ cleanup() {
 }
 trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
+# fixtures/raw/ is left out of the release tarball (fixtures/README.md):
+# without it the sections that replay those captures, (a)-(c2) and the full
+# stack, are skipped and the rest still runs.
+have_raw=1
 for f in "$csv" "$uat" "$stratux"; do
-  # fixtures/raw/ is left out of the release tarball (fixtures/README.md).
-  [ -e "$f" ] || { echo "SKIP: $f missing (not in the release tarball)"; exit 77; }
+  [ -e "$f" ] || { have_raw=0; echo "SKIP (a)-(c2) and full stack: $f missing (not in the release tarball)"; break; }
 done
 for f in "$rawrec" "$rawplay"; do [ -e "$f" ] || fail "$f missing"; done
 
@@ -77,6 +80,7 @@ play_to_sink() {
   awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.3f\n", b - a }'
 }
 
+if [ "$have_raw" = 1 ]; then  # (a)-(c2) replay fixtures/raw/
 # ---- (a) CSV at speed 0: every capture line becomes an "@" AVR line ---------
 play_to_sink "$tmp/a.out" --raw-in --speed 0 "$csv" >/dev/null
 total=$(wc -l < "$tmp/a.out")
@@ -168,6 +172,7 @@ wall=$(play_uat "$tmp/stx2s.out" --speed 1 "$tmp/stx2s.log")
 cmp -s "$tmp/stx2s.out" "$tmp/stx7.want" || { head -c 300 "$tmp/stx2s.out"; fail "(c2) two sessions not replayed in file order"; }
 awk -v w="$wall" 'BEGIN { exit !(w >= 2.1 && w <= 4.0) }' || fail "(c2) two sessions (2.2 s) took ${wall}s"
 echo "ok (c2) two stratux sessions in file order, 1 s apart, no burst (${wall}s)"
+fi  # have_raw
 
 # ---- (d) rawrec: byte-identical Beast capture across a reconnect; UAT lines ----
 # beast_server.py PORTFILE SENT FRAMES CONNS: serve CONNS connections, each
@@ -334,6 +339,10 @@ grep -q 'done: 110 frames sent, 9 bytes skipped' "$tmp/play.err" || { cat "$tmp/
 echo "ok (h) rawplay resyncs after a truncated frame: 110 frames, 9 bytes skipped"
 
 # ---- full stack: the capture through a real readsb -----------------------------
+if [ "$have_raw" = 0 ]; then
+  echo "PASS (fixture sections skipped)"
+  exit 0
+fi
 if [ -z "$readsb" ] || [ ! -x "$readsb" ]; then
   echo "SKIP full-stack check: readsb not built (${readsb:-no path given})"
   echo PASS

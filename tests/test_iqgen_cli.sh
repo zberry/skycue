@@ -13,11 +13,20 @@ stratux="$fixtures/raw/stratux-uat-2015.log.gz"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
+# fixtures/raw/ is left out of the release tarball (fixtures/README.md):
+# without it the sections that read those captures are skipped and the
+# checks on generated inputs still run.
+have_raw=1
 for f in "$modes" "$uat" "$stratux"; do
-  # fixtures/raw/ is left out of the release tarball (fixtures/README.md).
-  [ -e "$f" ] || { echo "SKIP: $f missing (not in the release tarball)"; exit 77; }
+  [ -e "$f" ] || { have_raw=0; echo "SKIP the fixture sections: $f missing (not in the release tarball)"; break; }
 done
 [ -e "$iqgen" ] || fail "$iqgen missing"
+# A Mode S input for the usage and option errors, which do not need the capture.
+any=$modes
+if [ "$have_raw" = 0 ]; then
+  any=$tmp/one.avr
+  printf '@000000000000%s;\n' 8D4840D6202CC371C32CE0576098 >"$any"
+fi
 
 # expect_exit CODE NAME CMD...: runs CMD (stdout/stderr to $tmp/NAME.out/.err).
 expect_exit() {
@@ -41,10 +50,11 @@ grep -qF 'min(0.5 * IN_RATE, 0.45 * --out-rate)' "$tmp/help_resample.out" || fai
 expect_exit 2 noargs "$iqgen"
 expect_exit 2 unknown "$iqgen" frobnicate
 grep -q "frobnicate" "$tmp/unknown.err" || fail "unknown command not named"
-expect_exit 2 no_o "$iqgen" modes "$modes"
-expect_exit 2 badopt "$iqgen" modes "$modes" -o "$tmp/x.cu8" --no-such-option
+expect_exit 2 no_o "$iqgen" modes "$any"
+expect_exit 2 badopt "$iqgen" modes "$any" -o "$tmp/x.cu8" --no-such-option
 [ -e "$tmp/x.cu8" ] && fail "usage error wrote an output"
 
+if [ "$have_raw" = 1 ]; then  # up to the stratux summary: fixtures/raw/
 # ---- modes: a 1 s slice -------------------------------------------------------
 start=$(date +%s%N)
 expect_exit 0 a "$iqgen" modes "$modes" --duration 1 -o "$tmp/a.1090.cu8"
@@ -193,6 +203,7 @@ grep -qE '^frames=101 expected=78 overlaps=15 clipped=0 skipped=4 seconds=5\.[0-
   "$tmp/s.out" || { cat "$tmp/s.out" "$tmp/s.err"; fail "stratux summary"; }
 grep -q 'untimed' "$tmp/s.err" && { cat "$tmp/s.err"; fail "stratux lines placed untimed"; }
 rm -f "$tmp/s.978.cu8"
+fi  # have_raw
 # Sessions in file order, each 1 s after the one before: 5.0/5.2 s, a START, 1.0 s
 # (session 2 at 6.2 s), then a backward jump to 0.5 s (session 3 at 7.2 s).
 p18=$(printf '0a%.0s' {1..18})
@@ -205,6 +216,7 @@ expect_exit 0 stratux_sessions "$iqgen" uat "$tmp/stx_two.log" -o "$tmp/stx_two.
 grep -q ' skipped=1 ' "$tmp/stratux_sessions.out" || { cat "$tmp/stratux_sessions.out"; fail "stratux_sessions: START not counted"; }
 rm -f "$tmp/stx_two.cu8"
 
+if [ "$have_raw" = 1 ]; then  # resamples the 1 s slice
 # ---- resample ---------------------------------------------------------------------
 expect_exit 0 r "$iqgen" resample "$tmp/a.1090.cu8" 2400000 -o "$tmp/r.cu8" --out-rate 2000000
 grep -qE '^in_samples=[0-9]+ out_samples=[0-9]+$' "$tmp/r.out" || { cat "$tmp/r.out"; fail "resample line"; }
@@ -220,6 +232,7 @@ grep -q 2083333 "$tmp/r_ratio.err" && grep -q 2400000 "$tmp/r_ratio.err" || { ca
 [ -e "$tmp/r3.cu8" ] && fail "refused ratio wrote an output"
 expect_exit 2 r_zero "$iqgen" resample "$tmp/r.cu8" 0 -o "$tmp/r3.cu8"
 rm -f "$tmp/r.cu8" "$tmp/r2.cu8"
+fi  # have_raw
 
 # ---- input error paths --------------------------------------------------------------
 printf -- '-%s;\n' "$(printf 'ab%.0s' {1..20})" >"$tmp/bad.txt"   # 20 bytes: no UAT length
@@ -230,7 +243,7 @@ expect_exit 2 bad_suffix "$iqgen" modes "$tmp/in.xyz" -o "$tmp/e.cu8"
 grep -q 'in.xyz' "$tmp/bad_suffix.err" || { cat "$tmp/bad_suffix.err"; fail "unknown suffix not named"; }
 expect_exit 2 missing "$iqgen" modes "$tmp/nope.csv" -o "$tmp/e.cu8"
 grep -q 'nope.csv' "$tmp/missing.err" || { cat "$tmp/missing.err"; fail "missing input not named"; }
-expect_exit 2 snr "$iqgen" modes "$modes" --snr loud -o "$tmp/e.cu8"
+expect_exit 2 snr "$iqgen" modes "$any" --snr loud -o "$tmp/e.cu8"
 grep -q -- '--snr' "$tmp/snr.err" || { cat "$tmp/snr.err"; fail "--snr loud: option not named"; }
 [ -e "$tmp/e.cu8" ] && fail "an input error wrote an output"
 
@@ -275,6 +288,7 @@ grep -q 'warning: .*mixed.avr: 1 of 2 lines untimed' "$tmp/mixed.err" || { cat "
 [ "$(awk 'NR == 2 { print $1 }' "$tmp/mixed.frames.txt")" -eq $((120000 + 4800)) ] || fail "mixed file not placed untimed"
 rm -f "$tmp/mixed.cu8"
 
+if [ "$have_raw" = 1 ]; then  # writes 1 s of the capture
 # ---- write failure ----------------------------------------------------------------------
 expect_exit 1 full "$iqgen" modes "$modes" --duration 0.1 -o /dev/full
 grep -q '^skycue-iqgen: writing /dev/full: ' "$tmp/full.err" || { cat "$tmp/full.err"; fail "/dev/full: error not named"; }
@@ -292,5 +306,10 @@ echo keep >"$tmp/old.cu8"
 [ $? -eq 1 ] || fail "file limit over an existing file: not exit 1"
 [ "$(cat "$tmp/old.cu8")" = keep ] || fail "a failed run changed the existing output"
 ls "$tmp" | grep -qE '^old\.(frames|cu8\.tmp)' && { ls "$tmp"; fail "file limit: files left next to old.cu8"; }
+fi  # have_raw
 
-echo "iqgen_cli: all checks passed"
+if [ "$have_raw" = 1 ]; then
+  echo "iqgen_cli: all checks passed"
+else
+  echo "iqgen_cli: all checks on generated inputs passed (fixture sections skipped)"
+fi

@@ -14,6 +14,8 @@
 # the compiler and Boost match the enclosing build), CMAKE_BUILD_PARALLEL_LEVEL
 # (default: nproc).
 set -euo pipefail
+# The "built nothing else" checks below pass silently if find is missing.
+command -v find >/dev/null || { echo "test_parent_project: find (findutils) not found" >&2; exit 1; }
 
 skycue_dir=$1
 work_base=$2

@@ -33,7 +33,7 @@ option(SKYCUE_SOAK_TESTS
   "Register the ctest soak_short (tests/soak/soak.sh for 2 minutes; needs node and curl)" OFF)
 
 set(SKYCUE_TEST_SLOW_FACTOR "" CACHE STRING
-  "Multiplier for test timeouts and waits (SKYCUE_TEST_SLOW); empty = 4 in a sanitizer or fuzz build, else 1")
+  "Multiplier for test timeouts and waits (SKYCUE_TEST_SLOW), in any build; empty = 4 in a sanitizer or fuzz build, else unscaled")
 if(NOT SKYCUE_TEST_SLOW_FACTOR STREQUAL "")
   if(NOT SKYCUE_TEST_SLOW_FACTOR MATCHES "^[1-9][0-9]*$")
     message(FATAL_ERROR "SKYCUE_TEST_SLOW_FACTOR must be a whole number of at least 1")
@@ -92,6 +92,30 @@ function(skycue_add_fuzzer name)
     RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/fuzz)
   skycue_set_warnings(fuzz_${name})
   set_property(GLOBAL APPEND PROPERTY SKYCUE_FUZZ_TARGETS ${name})
+endfunction()
+
+# skycue_scale_test_timeouts(): called at the end of each directory that
+# registers tests. In instrumented builds (SKYCUE_SANITIZE or SKYCUE_FUZZ),
+# and in any build given SKYCUE_TEST_SLOW_FACTOR (a slow or emulated build
+# machine), every test of the calling directory gets its timeout (1500 s when
+# it sets none) and its waits (SKYCUE_TEST_SLOW, tests/test_slow.hpp) scaled
+# by the slow factor. Otherwise tests keep their own timeouts. The sanitizer
+# options and suppression files are not set here: scripts/run-sanitizers.sh
+# exports them at test time and ctest passes them on.
+function(skycue_scale_test_timeouts)
+  if(NOT (_skycue_sanitize OR SKYCUE_FUZZ OR NOT SKYCUE_TEST_SLOW_FACTOR STREQUAL ""))
+    return()
+  endif()
+  get_property(_tests DIRECTORY PROPERTY TESTS)
+  foreach(_t IN LISTS _tests)
+    get_test_property(${_t} TIMEOUT _timeout)
+    if(NOT _timeout)
+      set(_timeout 1500)
+    endif()
+    math(EXPR _timeout "${_timeout} * ${_skycue_slow_factor}")
+    set_tests_properties(${_t} PROPERTIES TIMEOUT ${_timeout})
+    set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT "SKYCUE_TEST_SLOW=${_skycue_slow_factor}")
+  endforeach()
 endfunction()
 
 # skycue_skip_test(<name> <reason>): a test that prints "SKIP: <reason>"

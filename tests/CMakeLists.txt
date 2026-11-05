@@ -163,6 +163,20 @@ set_tests_properties(parent_project PROPERTIES
   SKIP_RETURN_CODE 77
   ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
 
+# SKYCUE_TEST_SLOW_FACTOR outside sanitizer and fuzz builds: two configures
+# of skycue/ (no build), their registered timeouts and environments compared.
+if(NOT SKYCUE_PYTHON3)
+  skycue_skip_test(slow_factor "python3 not found")
+else()
+  add_test(NAME slow_factor
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_slow_factor.sh
+      ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/slow-factor-work ${SKYCUE_PYTHON3}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(slow_factor PROPERTIES
+    TIMEOUT 300
+    ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CTEST=${CMAKE_CTEST_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
+endif()
+
 add_executable(test_raw_formats test_raw_formats.cpp)
 target_link_libraries(test_raw_formats PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_raw_formats PRIVATE BOOST_TEST_DYN_LINK)
@@ -477,19 +491,5 @@ else()
   set_tests_properties(soak_short PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 endif()
 
-# Instrumented builds (SKYCUE_SANITIZE or SKYCUE_FUZZ): every test gets its
-# timeout and its waits (SKYCUE_TEST_SLOW, tests/test_slow.hpp) scaled by the
-# slow factor. The sanitizer options and suppression files are not set here:
-# scripts/run-sanitizers.sh exports them at test time and ctest passes them on.
-if(_skycue_sanitize OR SKYCUE_FUZZ)
-  get_property(_skycue_all_tests DIRECTORY PROPERTY TESTS)
-  foreach(_t IN LISTS _skycue_all_tests)
-    get_test_property(${_t} TIMEOUT _timeout)
-    if(NOT _timeout)
-      set(_timeout 1500)
-    endif()
-    math(EXPR _timeout "${_timeout} * ${_skycue_slow_factor}")
-    set_tests_properties(${_t} PROPERTIES TIMEOUT ${_timeout})
-    set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT "SKYCUE_TEST_SLOW=${_skycue_slow_factor}")
-  endforeach()
-endif()
+# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
+skycue_scale_test_timeouts()

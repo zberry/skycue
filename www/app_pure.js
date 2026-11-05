@@ -1537,11 +1537,12 @@
   // A track's RSSI (dBFS, `rssi`) on a fixed scale of SIGNAL_COLORS.length
   // steps of SIGNAL_STEP_DB from SIGNAL_MIN_DB (weak: cool and dim) to
   // SIGNAL_MAX_DB (strong: warm and bright); values outside are clamped to the
-  // end steps. Mid-saturation colours, drawn opaque, readable on the Light
-  // and Dark map styles alike.
+  // end steps. Blue through violet and magenta to orange: no green (the
+  // Light tiles' land and the `sent` colour) and no pale step, checked on
+  // the Light tiles and the Dark style.
   var SIGNAL_MIN_DB = -35;
   var SIGNAL_MAX_DB = -5;
-  var SIGNAL_COLORS = ['#5b6bb5', '#2f8fd8', '#1aa89a', '#8ab92d', '#f0a020', '#f2552c'];
+  var SIGNAL_COLORS = ['#4657c0', '#7b45c8', '#b03fb0', '#e0457a', '#f2662f', '#ff9a1f'];
   var SIGNAL_STEP_DB = (SIGNAL_MAX_DB - SIGNAL_MIN_DB) / SIGNAL_COLORS.length;
 
   // The step index of a signal, or -1 when it is not a finite number.
@@ -1577,6 +1578,38 @@
       else out.push({ points: [ll(pts[i - 1]), ll(pts[i])], color: c });
     }
     return out;
+  }
+
+  // The same runs kept up to date as a trail moves, instead of rebuilt:
+  // signalRunsAppend adds the segment from `prev` to `pt` (both {lat, lon,
+  // sig}) to `runs` in place, extending the last run when the colour is the
+  // same; it returns true when it extended one, false when it pushed a new
+  // run. signalRunsTrim drops the trail's first `n` points from `runs` in
+  // place and returns {dropped, trimmed}: how many leading runs went whole,
+  // and whether the first remaining run lost points from its front. After
+  // either, `runs` equals signalRuns of the trail's points (2 or more).
+  function signalRunsAppend(runs, prev, pt) {
+    var c = signalColor(pt.sig), last = runs[runs.length - 1];
+    if (last && last.color === c) {
+      last.points.push([pt.lat, pt.lon]);
+      return true;
+    }
+    runs.push({ points: [[prev.lat, prev.lon], [pt.lat, pt.lon]], color: c });
+    return false;
+  }
+  function signalRunsTrim(runs, n) {
+    var dropped = 0, start = 0;
+    if (!(n > 0)) return { dropped: 0, trimmed: false };
+    while (runs.length) {
+      var end = start + runs[0].points.length - 1;   // the index of the run's last point
+      if (end > n) break;
+      runs.shift();
+      dropped++;
+      start = end;                                    // the next run starts on that point
+    }
+    var trimmed = runs.length > 0 && n > start;
+    if (trimmed) runs[0].points.splice(0, n - start);
+    return { dropped: dropped, trimmed: trimmed };
   }
 
   // ---- ruler ("Measure") -----------------------------------------------------
@@ -1646,6 +1679,7 @@
     trackAlt: trackAlt, searchMatches: searchMatches, viewMatches: viewMatches,
     SIGNAL_MIN_DB: SIGNAL_MIN_DB, SIGNAL_MAX_DB: SIGNAL_MAX_DB, SIGNAL_COLORS: SIGNAL_COLORS,
     signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns,
+    signalRunsAppend: signalRunsAppend, signalRunsTrim: signalRunsTrim,
     rulerMeasure: rulerMeasure, rulerLabel: rulerLabel
   };
   root.skycuePure = api;

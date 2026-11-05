@@ -198,16 +198,22 @@ country, and `viewShows` in `app.js` exempts the selected track.
 each trail point's `rssi`; `drawTrail` in `app.js` lays `P.signalRuns` (runs
 of one `P.signalColor` step, `SIGNAL_COLORS` from `SIGNAL_MIN_DB` to
 `SIGNAL_MAX_DB`) as `path.trail-sig` polylines over the decision-coloured
-`path.trail`, which is then transparent; `#trail-signal-legend` is
-`P.signalLegend`.
+`path.trail`, which is then transparent (a run without a signal is dashed in
+the decision colour; a trail with no signal at all has no runs);
+`#trail-signal-legend` is `P.signalLegend`. The runs are kept up to date in
+place (`updateTrail`: `P.signalRunsAppend` on a new position,
+`P.signalRunsTrim` on a prune), and rebuilt only on a toggle, a new marker
+or an un-dimming.
 
 ## Ruler
 
 The "Measure" button (`#ruler-toggle`, a `leaflet-bar` control top left,
 under the zoom buttons, so the alert strip's lift of `.leaflet-bottom` never
-reaches it) arms `ruler` in `app.js`: the map's and the markers' click
-handlers give their point to `rulerClick` instead of selecting, the
-document's Escape clears it before it would close the panel, and the label
+reaches it) arms `ruler` in `app.js`: every click handler on the map (the map, the
+aircraft, the FIS-B shapes and symbols, the device and station markers)
+asks `rulerTakes` first, which gives the point to `rulerClick` instead,
+the document's Escape clears it instead of closing the panel, `showMain`
+clears it when the map is covered, and the label
 is `P.rulerLabel(P.rulerMeasure(...))` (`rangeNm` and `bearingDeg`).
 
 ## Cues tab

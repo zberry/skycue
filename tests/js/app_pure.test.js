@@ -1311,6 +1311,44 @@ test('signalRuns: runs coalesce and share their boundary points', () => {
   assert.strictEqual(runs.reduce((n, r) => n + r.points.length - 1, 0), pts.length - 1);
 });
 
+test('signalRunsAppend / signalRunsTrim: extend, new run, trim inside a run and across runs', () => {
+  const p = (lon, sig) => ({ lat: 0, lon, sig });
+  const runs = [];
+  assert.strictEqual(P.signalRunsAppend(runs, p(0, -6), p(1, -34)), false);
+  assert.strictEqual(P.signalRunsAppend(runs, p(1, -34), p(2, -33)), true);
+  assert.strictEqual(P.signalRunsAppend(runs, p(2, -33), p(3, -6)), false);
+  assert.strictEqual(P.signalRunsAppend(runs, p(3, -6), p(4)), false);
+  assert.deepStrictEqual(runs, P.signalRuns([p(0, -6), p(1, -34), p(2, -33), p(3, -6), p(4)]));
+  // Point 0 goes: the first run loses its front.
+  assert.deepStrictEqual(P.signalRunsTrim(runs, 1), { dropped: 0, trimmed: true });
+  assert.deepStrictEqual(runs, P.signalRuns([p(1, -34), p(2, -33), p(3, -6), p(4)]));
+  // Points 1 and 2 go: the weak run and the strong one (it ended on point 3) go whole.
+  assert.deepStrictEqual(P.signalRunsTrim(runs, 2), { dropped: 2, trimmed: false });
+  assert.deepStrictEqual(runs, P.signalRuns([p(3, -6), p(4)]));
+  assert.deepStrictEqual(P.signalRunsTrim(runs, 0), { dropped: 0, trimmed: false });
+  assert.deepStrictEqual(P.signalRunsTrim(runs, 5), { dropped: 1, trimmed: false });
+  assert.deepStrictEqual(runs, []);
+});
+test('signalRunsAppend / signalRunsTrim equal signalRuns over a random walk', () => {
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const pts = [];
+  let runs = null, lon = 0;
+  for (let step = 0; step < 2000; step++) {
+    if (rnd() < 0.7 || pts.length < 2) {
+      const pt = { lat: 1, lon: lon++, sig: rnd() < 0.1 ? null : -40 + rnd() * 40 };
+      pts.push(pt);
+      if (pts.length === 2) runs = P.signalRuns(pts);              // the page builds the first time
+      else if (pts.length > 2) P.signalRunsAppend(runs, pts[pts.length - 2], pt);
+    } else {
+      const n = 1 + Math.floor(rnd() * (pts.length - 2));         // leaves 2 or more points
+      pts.splice(0, n);
+      P.signalRunsTrim(runs, n);
+    }
+    if (pts.length >= 2) assert.deepStrictEqual(runs, P.signalRuns(pts), 'step ' + step);
+  }
+});
+
 // Ruler: distance, initial bearing, the label.
 test('rulerMeasure LAX to JFK: 2144 nm, initial course 066', () => {
   // The Aviation Formulary's worked example (LAX 33°57'N 118°24'W, JFK

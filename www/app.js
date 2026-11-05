@@ -241,7 +241,7 @@
     }
     L.control.scale({ position: 'bottomleft' }).addTo(map);
     map.on('click', function (ev) {
-      if (ruler.armed) { rulerClick(ev.latlng); return; }
+      if (rulerTakes(ev)) return;
       deselect();
     });
     initRuler();
@@ -343,14 +343,19 @@
           L.DomEvent.preventDefault(ev);
           if (ruler.armed) clearRuler(); else armRuler();
         });
+        // The fixed measurement, for screen readers (the live one would chatter).
+        ruler.live = L.DomUtil.create('span', 'sr-only', div);
+        ruler.live.setAttribute('aria-live', 'polite');
         ruler.button = a;
         return div;
       }
     });
     new RulerControl().addTo(map);
-    map.on('mousemove', function (ev) {
+    // On the container, not the map: markers do not pass their mousemove on.
+    L.DomEvent.on(map.getContainer(), 'mousemove', function (ev) {
       if (!ruler.armed || !ruler.start || ruler.fixed) return;
-      ruler.end = ev.latlng;
+      if (ev.target.closest && ev.target.closest('.leaflet-control')) return;
+      ruler.end = map.mouseEventToLatLng(ev);
       drawRuler();
     });
   }
@@ -369,12 +374,22 @@
     ruler.line = ruler.dot = ruler.label = null;
     ruler.start = ruler.end = null;
     ruler.fixed = false;
+    if (ruler.live) ruler.live.textContent = '';
     if (!ruler.armed) return;
     ruler.armed = false;
     ruler.button.setAttribute('aria-pressed', 'false');
     ruler.button.classList.remove('active');
     map.getContainer().classList.remove('ruler-armed');
     if (ruler.dblZoom) map.doubleClickZoom.enable();
+  }
+
+  // Every click handler on the map asks this first: while armed the click
+  // is a ruler point (at `ll`, else where it was) and goes no further.
+  function rulerTakes(ev, ll) {
+    if (!ruler.armed) return false;
+    L.DomEvent.stopPropagation(ev);
+    rulerClick(ll || ev.latlng);
+    return true;
   }
 
   // A click while armed, at a map point or an aircraft's position.
@@ -409,13 +424,19 @@
     var text = P.rulerLabel(P.rulerMeasure(s.lat, s.lng, e.lat, e.lng));
     if (!ruler.label) {
       ruler.label = L.marker(e, {
-        icon: L.divIcon({ className: 'ruler-label', html: '<span></span>', iconSize: null, iconAnchor: [-10, 10] }),
+        icon: L.divIcon({ className: 'ruler-label', html: '<span></span>', iconSize: [0, 0], iconAnchor: [0, 0] }),
         interactive: false, keyboard: false
       }).addTo(map);
     } else ruler.label.setLatLng(e);
-    var span = ruler.label.getElement().querySelector('span');
+    var box = ruler.label.getElement(), span = box.querySelector('span');
     if (span.textContent !== text) span.textContent = text;
-    ruler.label.getElement().classList.toggle('fixed', ruler.fixed);
+    box.classList.toggle('fixed', ruler.fixed);
+    // Right of and above the end, flipped left near the right edge and
+    // below near the top so it stays on the map.
+    var pt = map.latLngToContainerPoint(e), size = map.getSize();
+    box.classList.toggle('flip-x', pt.x + 14 + span.offsetWidth > size.x - 4);
+    box.classList.toggle('flip-y', pt.y - 14 - span.offsetHeight < 4);
+    if (ruler.fixed && ruler.live) ruler.live.textContent = 'Measured ' + text;
   }
 
   function setMapStyle(style, initial) {
@@ -632,8 +653,8 @@
       keyboard: false, riseOnHover: true
     });
     var key = e.key;
-    e.marker.on('click', function () {
-      if (ruler.armed) { rulerClick(e.marker.getLatLng()); return; }
+    e.marker.on('click', function (ev) {
+      if (rulerTakes(ev, e.marker.getLatLng())) return;
       select(key);
     });
     e.marker.addTo(map);
@@ -653,47 +674,96 @@
   // group of runs, e.sigTrail, is drawn over it instead (the polyline is
   // then transparent but kept): each run coloured by the RSSI its points
   // were received at (P.signalRuns), a run without one in the decision
-  // colour. A dimmed entry draws no trail.
+  // colour, dashed, at the trail's usual opacity; a trail with no signal
+  // at all has no group. e.sigRuns holds the runs, e.sigLayers their
+  // polylines in the same order: a new position extends the last run or
+  // adds one, a prune trims the first ones (P.signalRunsAppend,
+  // P.signalRunsTrim, updateTrail); drawTrail rebuilds only on a toggle, a
+  // (re)creation or an un-dimming. A dimmed entry draws no trail.
   var TRAIL_SIGNAL_KEY = 'skycue.trailSignal';
   var trailSignal = false;
 
   function trailColor(e) { return P.DECISION_COLORS[P.decisionColor(e.t.decision) || 'unknown']; }
   function trailWeight(e) { return e.key === selectedKey ? 3 : 1.5; }
+  function sigPoint(p) { return { lat: p.ll[0], lon: p.ll[1], sig: p.sig }; }
 
+  // Restyles the trail only when its colour, weight or mode changed (it is
+  // called on every renderEntry through styleMarker).
   function styleTrail(e) {
     if (!e.trail) return;
     var color = trailColor(e), weight = trailWeight(e);
+    var key = color + '|' + weight + '|' + (e.sigTrail ? 1 : 0);
+    if (e.trailStyle === key) return;
+    e.trailStyle = key;
     e.trail.setStyle({ color: color, weight: weight, opacity: e.sigTrail ? 0 : 0.6 });
-    if (e.sigTrail) {
-      e.sigTrail.eachLayer(function (l) { l.setStyle({ color: l.sigColor || color, weight: weight }); });
+    if (e.sigLayers) {
+      e.sigLayers.forEach(function (l) { l.setStyle({ color: l.sigColor || color, weight: weight }); });
     }
+  }
+
+  function runLayer(e, r) {
+    var l = L.polyline(r.points, {
+      className: 'trail-sig', interactive: false, color: r.color || trailColor(e), weight: trailWeight(e),
+      opacity: r.color ? 0.9 : 0.6, dashArray: r.color ? null : '2 5'
+    });
+    l.sigColor = r.color;
+    e.sigTrail.addLayer(l);
+    return l;
+  }
+
+  function dropSigTrail(e) {
+    if (e.sigTrail) map.removeLayer(e.sigTrail);
+    e.sigTrail = e.sigRuns = e.sigLayers = null;
   }
 
   function drawTrail(e) {
     if (!e.trail) return;
     var pts = e.dimmed ? [] : e.pts;
     e.trail.setLatLngs(pts.map(function (p) { return p.ll; }));
-    if (trailSignal && pts.length > 1) {
+    var runs = trailSignal && pts.length > 1 ? P.signalRuns(pts.map(sigPoint)) : [];
+    var any = runs.some(function (r) { return r.color !== null; });
+    if (any) {
       if (!e.sigTrail) e.sigTrail = L.layerGroup().addTo(map);
       else e.sigTrail.clearLayers();
-      var runs = P.signalRuns(pts.map(function (p) { return { lat: p.ll[0], lon: p.ll[1], sig: p.sig }; }));
-      runs.forEach(function (r) {
-        var l = L.polyline(r.points, { className: 'trail-sig', opacity: 0.9, interactive: false });
-        l.sigColor = r.color;
-        e.sigTrail.addLayer(l);
-      });
-    } else if (e.sigTrail) {
-      map.removeLayer(e.sigTrail);
-      e.sigTrail = null;
-    }
+      e.sigRuns = runs;
+      e.sigLayers = runs.map(function (r) { return runLayer(e, r); });
+    } else dropSigTrail(e);
+    e.trailStyle = null;
     styleTrail(e);
+  }
+
+  // The trail after `pruned` points went from its front and, with
+  // `appended`, the newest point was added: the polyline and the runs are
+  // updated in place, not rebuilt.
+  function updateTrail(e, pruned, appended) {
+    if (!e.trail) return;
+    var n = e.pts.length, last = e.pts[n - 1];
+    if (appended && !pruned) e.trail.addLatLng(last.ll);
+    else e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
+    if (!trailSignal) return;
+    if (!e.sigTrail) {
+      // No signal on the trail so far: a group once a position brings one.
+      if (appended && n > 1 && last.sig !== null) drawTrail(e);
+      return;
+    }
+    if (n < 2) { drawTrail(e); return; }   // no segment left: drops the group
+    if (pruned) {
+      var cut = P.signalRunsTrim(e.sigRuns, pruned);
+      e.sigLayers.splice(0, cut.dropped).forEach(function (l) { e.sigTrail.removeLayer(l); });
+      if (cut.trimmed) e.sigLayers[0].setLatLngs(e.sigRuns[0].points);
+    }
+    if (!appended) return;
+    if (!e.sigRuns.length) { drawTrail(e); return; }
+    if (P.signalRunsAppend(e.sigRuns, sigPoint(e.pts[n - 2]), sigPoint(last))) {
+      e.sigLayers[e.sigLayers.length - 1].addLatLng(last.ll);
+    } else e.sigLayers.push(runLayer(e, e.sigRuns[e.sigRuns.length - 1]));
   }
 
   function removeTrail(e) {
     if (e.trail) map.removeLayer(e.trail);
-    if (e.sigTrail) map.removeLayer(e.sigTrail);
+    dropSigTrail(e);
     e.trail = null;
-    e.sigTrail = null;
+    e.trailStyle = null;
   }
 
   function setTrailSignal(on, initial) {
@@ -707,20 +777,21 @@
   function initTrailSignal() {
     var legend = $('trail-signal-legend');
     var scale = P.signalLegend();
+    var db = function (v) { return v < 0 ? '−' + -v : String(v); };   // a minus sign, as the docs write it
     var bar = el('div', 'sig-scale');
     scale.forEach(function (s) {
       var sw = el('i', null);
       sw.style.background = s.color;
-      sw.title = s.from + ' to ' + s.to + ' dBFS';
+      sw.title = db(s.from) + ' to ' + db(s.to) + ' dBFS';
       bar.appendChild(sw);
     });
     var ends = el('div', 'sig-ends');
-    ends.appendChild(el('span', null, '≤ ' + P.SIGNAL_MIN_DB + ' dBFS'));
-    ends.appendChild(el('span', null, 'weak · strong'));
-    ends.appendChild(el('span', null, '≥ ' + P.SIGNAL_MAX_DB));
+    ends.appendChild(el('span', null, '≤ ' + db(P.SIGNAL_MIN_DB) + ' dBFS'));
+    ends.appendChild(el('span', null, '≥ ' + db(P.SIGNAL_MAX_DB) + ' dBFS'));
     legend.textContent = '';
     legend.appendChild(bar);
     legend.appendChild(ends);
+    legend.appendChild(el('div', 'sig-none', 'dashed: no signal'));
     $('trail-signal').addEventListener('change', function () { setTrailSignal($('trail-signal').checked); });
     setTrailSignal(storeGet(TRAIL_SIGNAL_KEY) === '1', true);
   }
@@ -735,8 +806,9 @@
     if (!drawable || !map) return;
     if (observed) {
       var ts = Date.parse(t.position_time);
-      e.pts.push({ ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon], sig: typeof t.rssi === 'number' ? t.rssi : null });
-      pruneTrail(e);
+      var pushed = { ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon], sig: typeof t.rssi === 'number' ? t.rssi : null };
+      e.pts.push(pushed);
+      var pruned = pruneTrail(e);
     }
     if (!P.trackVisible(t.decision, hideFiltered)) {
       dropLayers(e);
@@ -748,7 +820,8 @@
     var fresh = !e.marker, wasDimmed = !!e.dimmed;
     ensureMarker(e);
     e.dimmed = !shows;
-    if (e.dimmed ? fresh || !wasDimmed : observed || fresh || wasDimmed) drawTrail(e);
+    if (observed && !e.dimmed && !fresh && !wasDimmed && e.pts[e.pts.length - 1] === pushed) updateTrail(e, pruned, true);
+    else if (e.dimmed ? fresh || !wasDimmed : observed || fresh || wasDimmed) drawTrail(e);
     styleMarker(e);
   }
 
@@ -1135,6 +1208,7 @@
     var i = 0;
     while (i < e.pts.length && e.pts[i].ts < cutoff) i++;
     if (i) e.pts.splice(0, i);
+    return i;
   }
 
   function removeEntry(key) {
@@ -1218,7 +1292,7 @@
         var n = e.pts.length;
         pruneTrail(e);
         // A dimmed entry's polyline stays empty (renderEntry refills it on un-dimming).
-        if (e.pts.length !== n && !e.dimmed) drawTrail(e);
+        if (e.pts.length !== n && !e.dimmed) updateTrail(e, n - e.pts.length, false);
       }
     });
   }
@@ -1593,6 +1667,7 @@
     if (which !== 'table' && (which !== 'stats' || !statsView)) which = 'map';
     var prev = mainView;
     mainView = which;
+    if (which !== 'map' && map) clearRuler();   // the table and Stats cover the map
     $('table-view').hidden = which !== 'table';
     $('stats-view').hidden = which !== 'stats';
     [['table-toggle', 'table', 'Table'], ['stats-toggle', 'stats', 'Stats']].forEach(function (b) {
@@ -1959,6 +2034,7 @@
       });
     });
     layer.on('click', function (ev) {
+      if (rulerTakes(ev)) return;
       L.DomEvent.stopPropagation(ev);
       showShape(key);
     });
@@ -2277,6 +2353,7 @@
         var m = L.marker([s.lat, s.lon], { pane: 'fisbWx', icon: wxIcon(s), title: s.station, keyboard: false });
         m.on('add', function () { m.getElement().setAttribute('data-station', s.station); });
         m.on('click', function (ev) {
+          if (rulerTakes(ev, m.getLatLng())) return;
           L.DomEvent.stopPropagation(ev);
           showReport(s.key);
         });
@@ -2740,6 +2817,7 @@
           icon: L.divIcon({ className: 'device-marker', html: DEVICE_SVG, iconSize: [16, 16], iconAnchor: [8, 8] }),
           title: title, keyboard: false, zIndexOffset: -500
         }).addTo(map);
+        m.on('click', function (ev) { rulerTakes(ev, m.getLatLng()); });
         rx.devices.set(inp.id, m);
       } else {
         m.setLatLng(ll);
@@ -2765,6 +2843,7 @@
           icon: L.divIcon({ className: 'station-marker', html: STATION_SVG, iconSize: [16, 16], iconAnchor: [8, 8] }),
           title: 'FIS-B ground station ' + s.site_id, keyboard: false, zIndexOffset: -600
         }).addTo(map);
+        m.on('click', function (ev) { rulerTakes(ev, m.getLatLng()); });
         rx.stations.set(s.site_id, m);
       } else {
         m.setLatLng([s.lat, s.lon]);
@@ -3409,8 +3488,11 @@
       if (tr) select(tr.getAttribute('data-key'));
     });
     document.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape' && ruler.armed) clearRuler();   // the ruler only, not the panel too
-      else if (ev.key === 'Escape') { setViewSetMenu(false); closePanel(); }
+      if (ev.key === 'Escape') {
+        setViewSetMenu(false);
+        if (ruler.armed) clearRuler();   // the ruler, not the panel too
+        else closePanel();
+      }
       else if (!slashFocusesSearch(ev)) digitAppliesSet(ev);
     });
     setInterval(prune, 2000);
@@ -3455,7 +3537,8 @@
         label: lab ? lab.textContent : '' };
     },
     // "Colour trail by signal": the option, and one aircraft's trail as drawn
-    // (its points, and the stroke colour of each signal run; [] when off).
+    // (its points, and each signal run's layer id, points, stroke colour and
+    // dashing; [] when off or when no position has a signal).
     setTrailSignal: function (on) { setTrailSignal(on); },
     getTrailSignal: function () { return trailSignal; },
     trail: function (hex) {
@@ -3463,7 +3546,9 @@
       tracks.forEach(function (e) {
         if (e.t.hex !== hex || !e.trail) return;
         var runs = [];
-        if (e.sigTrail) e.sigTrail.eachLayer(function (l) { runs.push({ n: l.getLatLngs().length, color: l.options.color }); });
+        (e.sigLayers || []).forEach(function (l) {
+          runs.push({ id: L.stamp(l), n: l.getLatLngs().length, color: l.options.color, dashed: !!l.options.dashArray });
+        });
         out = { points: e.trail.getLatLngs().length, color: e.trail.options.color, opacity: e.trail.options.opacity, runs: runs };
       });
       return out;

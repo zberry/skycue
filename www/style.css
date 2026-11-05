@@ -113,12 +113,19 @@ input.invalid { border-color: var(--blocked); }
 .leaflet-bar a.ruler-toggle { display: flex; align-items: center; justify-content: center; }
 .leaflet-bar a.ruler-toggle.active { color: var(--accent); background: var(--panel-2); }
 #map.ruler-armed, #map.ruler-armed .leaflet-interactive { cursor: crosshair; }
+/* The label's box sits on the end point (0 x 0); the span is placed right
+   of and above it, or left (flip-x) / below (flip-y) near an edge. */
 .ruler-label { pointer-events: none; }
 .ruler-label span {
+  position: absolute; left: 0; top: 0; transform: translate(10px, calc(-100% - 10px));
   display: inline-block; white-space: nowrap; padding: 2px 6px; border-radius: 3px; font-size: 12px;
   font-variant-numeric: tabular-nums; background: rgba(13, 17, 23, .85); color: var(--text); border: 1px dashed #ff4fa3;
 }
 .ruler-label.fixed span { border-style: solid; }
+.ruler-label.flip-x span { transform: translate(calc(-100% - 10px), calc(-100% - 10px)); }
+.ruler-label.flip-y span { transform: translate(10px, 10px); }
+.ruler-label.flip-x.flip-y span { transform: translate(calc(-100% - 10px), 10px); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .graticule-label { color: #3d5268; font-size: 11px; white-space: nowrap; pointer-events: none; }
 
 /* aircraft */
@@ -593,6 +600,7 @@ label.check input { width: auto; margin: 0; }
 .sig-scale { display: flex; height: 8px; border-radius: 2px; overflow: hidden; }
 .sig-scale i { flex: 1 1 0; }
 .sig-ends { display: flex; justify-content: space-between; gap: 4px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.sig-none { margin-top: 1px; }
 .pills { display: flex; flex-wrap: wrap; gap: 4px; }
 .pills button {
   display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 2px;

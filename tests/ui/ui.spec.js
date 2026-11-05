@@ -1094,19 +1094,45 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   await page.locator('#trail-signal').check();
   await expect(page.locator('#trail-signal-legend')).toBeVisible();
   await expect(page.locator('#trail-signal-legend .sig-scale i')).toHaveCount(6);
-  await expect(page.locator('#trail-signal-legend')).toContainText('-35 dBFS');
+  await expect(page.locator('#trail-signal-legend')).toContainText('≤ −35 dBFS');
+  await expect(page.locator('#trail-signal-legend')).toContainText('≥ −5 dBFS');
   const on = await trail();
   expect(new Set(on.runs.map((r) => r.color)).size).toBeGreaterThan(1);
+  // The colours follow the signal: rising from the weakest step to the strongest.
+  const colors = await page.evaluate(() => window.skycuePure.SIGNAL_COLORS);
+  expect(on.runs[0].color).toBe(colors[0]);
+  expect(on.runs[on.runs.length - 1].color).toBe(colors[colors.length - 1]);
+  const steps = on.runs.map((r) => colors.indexOf(r.color));
+  expect(steps).toEqual([...steps].sort((a, b) => a - b));
+  expect(on.runs.every((r) => !r.dashed)).toBe(true);
   // Every segment drawn once, the decision-coloured polyline transparent under the runs.
   expect(on.runs.reduce((n, r) => n + r.n - 1, 0)).toBe(11);
   expect(on.opacity).toBe(0);
   expect(await page.locator('path.trail-sig').count()).toBeGreaterThanOrEqual(on.runs.length);
   expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe('1');
 
-  // A new position redraws the runs; off restores the one colour.
-  await page.evaluate((hex) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.0,
-    decision: 'send', track_deg: 90, rssi: -40, position_time: new Date(window.skycueApp.dataNow()).toISOString() }), SIG_HEX);
-  expect((await trail()).runs.reduce((n, r) => n + r.n - 1, 0)).toBe(12);
+  // A new position updates the runs in place: one as strong extends the
+  // last run (the same layer), a weak one adds a run, one without a signal
+  // a dashed run in the decision colour.
+  const step = (lon, rssi) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
+    lat: 39.3, lon: a.lon, decision: 'send', track_deg: 90, rssi: a.rssi,
+    position_time: new Date(window.skycueApp.dataNow()).toISOString() }), { hex: SIG_HEX, lon, rssi });
+  const lastOf = (t) => t.runs[t.runs.length - 1];
+  await step(-77.0, -4);
+  let t = await trail();
+  expect(t.runs.length).toBe(on.runs.length);
+  expect(lastOf(t).id).toBe(lastOf(on).id);
+  expect(lastOf(t).n).toBe(lastOf(on).n + 1);
+  expect(t.runs[0].id).toBe(on.runs[0].id);
+  await step(-76.95, -40);
+  t = await trail();
+  expect(t.runs.length).toBe(on.runs.length + 1);
+  expect(lastOf(t)).toMatchObject({ n: 2, color: colors[0], dashed: false });
+  await step(-76.9, undefined);
+  t = await trail();
+  expect(lastOf(t)).toMatchObject({ n: 2, color: off.color, dashed: true });
+  expect(t.runs.reduce((n, r) => n + r.n - 1, 0)).toBe(14);
+  expect(t.points).toBe(15);
   await page.locator('#trail-signal').uncheck();
   const back = await trail();
   expect(back.runs).toEqual([]);
@@ -1164,6 +1190,14 @@ test('ruler_measures_without_touching_selection', async ({ page }) => {
   expect(brg).toBeLessThanOrEqual(92);
   await expect(page.locator('.ruler-label')).toHaveText(r.label);
   await expect(page.locator('path.ruler-line')).toHaveCount(1);
+  // Its label stays on the map near the right edge (flipped to the left).
+  await page.mouse.click(cx - 150, cy);
+  await page.mouse.move(box.x + box.width - 20, cy, { steps: 3 });
+  const lb = await page.locator('.ruler-label span').boundingBox();
+  expect(lb.x).toBeGreaterThanOrEqual(box.x);
+  expect(lb.x + lb.width).toBeLessThanOrEqual(box.x + box.width);
+  await page.mouse.click(cx + 150, cy);
+  expect((await ruler()).label).toBe(r.label);
   // The map clicks neither deselected nor closed the panel; the mouse no
   // longer moves a fixed ruler.
   expect(await page.evaluate(() => window.skycueApp.selected())).toBe(TARGET);
@@ -1171,8 +1205,12 @@ test('ruler_measures_without_touching_selection', async ({ page }) => {
   await page.mouse.move(cx, cy + 100);
   expect((await ruler()).label).toBe(r.label);
 
-  // Escape clears and disarms, the panel stays.
+  // Escape clears and disarms, the panel stays; an open set menu closes too.
+  await page.locator('#view-set-more').click();
+  await expect(page.locator('#view-set-menu')).toBeVisible();
+  await page.evaluate(() => document.activeElement.blur());   // the menu's own Escape handler is not asked
   await page.keyboard.press('Escape');
+  await expect(page.locator('#view-set-menu')).toBeHidden();
   r = await ruler();
   expect(r).toEqual({ armed: false, start: null, end: null, fixed: false, label: '' });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -1191,10 +1229,18 @@ test('ruler_measures_without_touching_selection', async ({ page }) => {
   expect(Math.abs(r.start.lat - other.lat)).toBeLessThan(0.05);
   expect(Math.abs(r.start.lon - other.lon)).toBeLessThan(0.05);
   expect(await page.evaluate(() => window.skycueApp.selected())).toBe(TARGET);
-  // The button again clears and disarms; a map click deselects as before.
+  // The button again clears and disarms.
   await toggle.click();
   expect((await ruler()).armed).toBe(false);
   await expect(page.locator('.ruler-dot')).toHaveCount(0);
+  // Covering the map with the table clears it too.
+  await toggle.click();
+  await page.mouse.click(cx - 150, cy);
+  expect((await ruler()).start).not.toBeNull();
+  await page.locator('#table-toggle').click();
+  expect(await ruler()).toEqual({ armed: false, start: null, end: null, fixed: false, label: '' });
+  await page.locator('#table-toggle').click();
+  // Disarmed, a map click deselects as before.
   await page.evaluate(() => window.skycueApp.setView(30, -90, 8));
   await page.mouse.click(cx - 150, cy);
   await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBeNull();
@@ -1455,6 +1501,43 @@ test.describe('fisb radar (tg30)', () => {
     await expect(page.locator('#shape-title')).toHaveText('METAR KCVG');
     await expect(page.locator('#shape-details .shape-text')).toContainText('METAR KCVG 300852Z');
     await expect(page.locator('#shape-fields')).toContainText('MVFR');
+  });
+  // While the ruler is armed a weather symbol or an airspace shape is a
+  // ruler point, not a click that opens the Weather tab.
+  test('ruler_takes_symbol_and_shape_clicks', async ({ page }) => {
+    await openFisbPage(page);
+    const sym = page.locator('.wx-sym.wx-metar[data-station="KCVG"]');
+    await expect(sym).toBeVisible();
+    const pos = (await page.evaluate(() => window.skycueApp.wxSymbols())).find((x) => x.kind === 'metar' && x.station === 'KCVG');
+    const ruler = () => page.evaluate(() => window.skycueApp.ruler());
+    await page.locator('#ruler-toggle').click();
+    await sym.click();
+    let r = await ruler();
+    expect(Math.abs(r.start.lat - pos.lat)).toBeLessThan(1e-6);
+    expect(Math.abs(r.start.lon - pos.lon)).toBeLessThan(1e-6);
+    await expect(page.locator('#details')).toBeHidden();
+    const key = '8-20-997-ZID-1';
+    const sq = [[pos.lon + 0.6, pos.lat - 0.3], [pos.lon + 1.2, pos.lat - 0.3], [pos.lon + 1.2, pos.lat + 0.3],
+      [pos.lon + 0.6, pos.lat + 0.3], [pos.lon + 0.6, pos.lat - 0.3]];
+    await page.evaluate((it) => window.skycueApp.injectFisbItems([it]), {
+      type: 'fisb_shape', product: 8, key, features: [{ type: 'Feature', id: key + '/0',
+        geometry: { type: 'Polygon', coordinates: [sq] },
+        properties: { key, product: 8, name: 'NOTAM', text: 'RULER TEST', geom: 'polygon', cancelled: false, agl: false, shape: 0 } }]
+    });
+    await layerToggle(page, 'NOTAM / TFR').check();
+    const shape = page.locator(`path.fisb-tfr[data-key="${key}"]`);
+    await expect(shape).toHaveCount(1);
+    await shape.click();
+    r = await ruler();
+    expect(r.fixed).toBe(true);
+    expect(r.label).toMatch(/ nm · .* km · \d{3}°T$/);
+    await expect(page.locator('#details')).toBeHidden();
+    await page.keyboard.press('Escape');
+    expect((await ruler()).armed).toBe(false);
+    // Disarmed, the same click opens the shape again.
+    await shape.click();
+    await expect(page.locator('#shape-details')).toBeVisible();
+    await layerToggle(page, 'NOTAM / TFR').uncheck();
   });
   test('reports_toggle_and_filter_apply_to_symbols', async ({ page }) => {
     await openFisbPage(page);

@@ -1069,6 +1069,8 @@ async function clickableIndex(page, selector) {
 // longitude, about 835 kt: under P.TRAIL_MAX_KT, so the trail joins),
 // the last 24 s ago so later steps fit before now.
 const SIG_HEX = 'fff0a1';
+// A stretch without a value (no signal, no altitude): P.TRAIL_NONE_COLOR.
+const NONE_GREY = '#78808a';
 async function injectSignalTrack(page) {
   await page.evaluate((hex) => {
     const now = window.skycueApp.dataNow();
@@ -1096,7 +1098,7 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   await page.locator('#view-trail-color').selectOption('signal');
   await expect(page.locator('#trail-signal-legend')).toBeVisible();
   await expect(page.locator('#trail-alt-legend')).toBeHidden();
-  await expect(page.locator('#trail-signal-legend')).toContainText('dim: no signal');
+  await expect(page.locator('#trail-signal-legend')).toContainText('faint grey: no signal');
   await expect(page.locator('#trail-signal-legend .sig-scale i')).toHaveCount(6);
   await expect(page.locator('#trail-signal-legend')).toContainText('≤ −35 dBFS');
   await expect(page.locator('#trail-signal-legend')).toContainText('≥ −5 dBFS');
@@ -1134,7 +1136,7 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   expect(lastOf(t)).toMatchObject({ n: 2, color: colors[0], dashed: false });
   await step(-77.18, undefined, 6000);
   t = await trail();
-  expect(lastOf(t)).toMatchObject({ n: 2, color: off.color, dashed: false, opacity: 0.35 });
+  expect(lastOf(t)).toMatchObject({ n: 2, color: NONE_GREY, dashed: false, opacity: 0.35 });
   expect(t.runs.reduce((n, r) => n + r.n - 1, 0)).toBe(14);
   expect(t.points).toBe(15);
   expect(await page.locator('path.trail-run[stroke-dasharray]').count()).toBe(0);   // trails are never dashed
@@ -1199,7 +1201,7 @@ test('trail_signal_dims_when_signal_ages_out', async ({ page }) => {
     return (await trail()).points;
   }, { timeout: 10000 }).toBe(5);
   t = await trail();
-  expect(t.runs).toEqual([{ id: dimId, n: 5, color: t.color, opacity: 0.35, dashed: false }]);
+  expect(t.runs).toEqual([{ id: dimId, n: 5, color: NONE_GREY, opacity: 0.35, dashed: false }]);
   expect(t.opacity).toBe(0);
   await page.evaluate(() => window.skycueApp.setViewFilters({ trailColor: 'decision' }));
 });
@@ -1220,15 +1222,19 @@ test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
   let t = await trail();
   expect(t.points).toBe(6);
-  expect(t.runs).toEqual([{ id: t.runs[0].id, n: 6, color: t.color, opacity: 0.35, dashed: false }]);
+  expect(t.runs).toEqual([{ id: t.runs[0].id, n: 6, color: NONE_GREY, opacity: 0.35, dashed: false }]);
   expect(t.opacity).toBe(0);
   const dimId = t.runs[0].id;
   await at(6, -20);
   t = await trail();
   expect(t.runs.length).toBe(2);
-  expect(t.runs[0]).toMatchObject({ id: dimId, n: 6, color: t.color, opacity: 0.35, dashed: false });
+  expect(t.runs[0]).toMatchObject({ id: dimId, n: 6, color: NONE_GREY, opacity: 0.35, dashed: false });
   expect(t.runs[1]).toMatchObject({ n: 2, opacity: 0.9, dashed: false });
   expect(t.runs[1].color).not.toBe(t.color);
+  expect(await page.evaluate(() => window.skycuePure.TRAIL_NONE_COLOR)).toBe(NONE_GREY);
+  // As rendered: the dim run's SVG path is grey at the dim opacity, not dashed.
+  expect(await page.locator(`path.trail-run[stroke="${NONE_GREY}"][stroke-opacity="0.35"]:not([stroke-dasharray])`).count())
+    .toBeGreaterThanOrEqual(1);
   await at(7, -49.5);
   await page.locator(`.ac-marker[data-hex="${hex}"] .ac-glyph`).click();
   await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
@@ -1307,7 +1313,7 @@ test('trail_altitude_colours_climb', async ({ page }) => {
   await expect(legend).toContainText('ground–1,000 ft');
   await expect(legend).toContainText('> 40,000 ft');
   await expect(legend).toContainText('1k · 5k · 10k · 20k · 30k · 40k ft');
-  await expect(legend).toContainText('dim: no altitude');
+  await expect(legend).toContainText('faint grey: no altitude');
   expect(await legend.locator('.sig-scale i').nth(3).getAttribute('title')).toBe('10,000 to 20,000 ft');
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
   const colors = await page.evaluate(() => window.skycuePure.ALT_COLORS);
@@ -1326,7 +1332,7 @@ test('trail_altitude_colours_climb', async ({ page }) => {
   t = await trail();
   expect(t.runs.length).toBe(8);
   expect(t.runs[6].id).toBe(lastId);
-  expect(t.runs[7]).toMatchObject({ n: 2, color: t.color, opacity: 0.35, dashed: false });
+  expect(t.runs[7]).toMatchObject({ n: 2, color: NONE_GREY, opacity: 0.35, dashed: false });
   await page.locator('#view-trail-color').selectOption('decision');
   await expect(legend).toBeHidden();
   expect((await trail()).runs).toEqual([]);
@@ -1441,6 +1447,11 @@ test('trail_project_ahead', async ({ page }) => {
   expect(a.points[0]).toEqual([39.22, -77.46]);
   const far2 = await page.evaluate((p) => window.skycuePure.rulerMeasure(p[0][0], p[0][1], p[p.length - 1][0], p[p.length - 1][1]), a.points);
   expect(Math.abs(far2.nm - 8)).toBeLessThan(0.05);
+  // A new track: the line turns with it.
+  await at({ lat: 39.225, lon: -77.455, gs_kt: 240, track_deg: 150, ago: 4500 });
+  a = await ahead();
+  const far3 = await page.evaluate((p) => window.skycuePure.rulerMeasure(p[0][0], p[0][1], p[p.length - 1][0], p[p.length - 1][1]), a.points);
+  expect(Math.abs(far3.bearing - 150)).toBeLessThan(0.2);
   // No ground speed, or on the ground: no line; back when it has one again.
   await at({ lat: 39.23, lon: -77.44, gs_kt: undefined, ago: 4000 });
   expect(await ahead()).toBe(null);
@@ -1456,6 +1467,15 @@ test('trail_project_ahead', async ({ page }) => {
   await page.locator('input[name="view-trail-show"][value="selected"]').check();
   expect(await page.locator('path.trail-ahead').count()).toBe(1);
   expect(await ahead()).not.toBe(null);
+  // Nothing selected: no trail and no projection at all.
+  await page.keyboard.press('Escape');
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(null);
+  expect(await page.locator('path.trail').count()).toBe(0);
+  expect(await page.locator('path.trail-ahead').count()).toBe(0);
+  expect(await ahead()).toBe(null);
+  await page.evaluate((h) => window.skycueApp.selectHex(h), hex);
+  await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
+  expect(await page.locator('path.trail-ahead').count()).toBe(1);
   await page.locator('input[name="view-trail-show"][value="off"]').check();
   expect(await page.locator('path.trail-ahead').count()).toBe(0);
   await page.locator('input[name="view-trail-show"][value="all"]').check();
@@ -1464,6 +1484,25 @@ test('trail_project_ahead', async ({ page }) => {
   await page.locator('#view-trail-ahead').selectOption('0');
   expect(await page.locator('path.trail-ahead').count()).toBe(0);
   expect(await ahead()).toBe(null);
+});
+
+// A filter set saved before the Trails group (no trail fields) gets the
+// Trails settings the page loads with, once, so pressing its number key
+// keeps them instead of resetting Trails.
+test('trails_old_sets_keep_current_trails', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('seeded')) return;
+    sessionStorage.setItem('seeded', '1');
+    localStorage.setItem('skycue.view', JSON.stringify({ trailShow: 'selected', trailColor: 'altitude', trailAhead: 2 }));
+    localStorage.setItem('skycue.viewSets', JSON.stringify({ version: 1, sets: [{ name: 'Old', view: { search: 'ual' }, hideFiltered: false }] }));
+  });
+  await openPage(page);
+  const set = JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets[0].view;
+  expect([set.search, set.trailShow, set.trailColor, set.trailAhead]).toEqual(['ual', 'selected', 'altitude', 2]);
+  await page.locator('body').press('1');
+  const v = await page.evaluate(() => window.skycueApp.getViewFilters());
+  expect([v.search, v.trailShow, v.trailColor, v.trailAhead]).toEqual(['ual', 'selected', 'altitude', 2]);
+  await page.locator('body').press('0');
 });
 
 // The three Trails settings in a saved filter set (the number keys too),

@@ -1459,6 +1459,31 @@
     }
     return { version: 1, sets: sets };
   }
+  // Sets saved before the Trails group existed lack its fields; applying
+  // one would put Trails back to the defaults. `raw` is the stored store
+  // (object or JSON text): each set's view missing one of TRAIL_FIELDS gets
+  // it from `view` (the current settings), once. {store (normalised),
+  // filled: how many sets were given a field}.
+  var TRAIL_FIELDS = ['trailShow', 'trailColor', 'trailAhead'];
+  function viewSetsFillTrails(raw, view) {
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch (e) { raw = null; }
+    }
+    var filled = 0, cur = normalizeView(view);
+    if (raw && typeof raw === 'object' && Array.isArray(raw.sets)) {
+      raw = { version: raw.version, sets: raw.sets.map(function (s) {
+        if (!s || typeof s !== 'object') return s;
+        var v = s.view && typeof s.view === 'object' && !Array.isArray(s.view) ? s.view : {};
+        var missing = TRAIL_FIELDS.filter(function (k) { return !Object.prototype.hasOwnProperty.call(v, k); });
+        if (!missing.length) return s;
+        var nv = Object.assign({}, v);
+        missing.forEach(function (k) { nv[k] = cur[k]; });
+        filled++;
+        return Object.assign({}, s, { view: nv });
+      }) };
+    }
+    return { store: normalizeViewSets(raw), filled: filled };
+  }
   // Whether the current state (a view and the Hide filtered flag) is the set's.
   function viewSetMatches(set, view, hideFiltered) {
     return JSON.stringify(normalizeView(set.view)) === JSON.stringify(normalizeView(view)) &&
@@ -1648,6 +1673,10 @@
     return { dropped: dropped, trimmed: trimmed };
   }
   var signalRunsTrim = trailRunsTrim;
+  // A run without a value (no signal, no altitude) is drawn in this
+  // neutral grey (dim), never in a scale or decision colour, so it cannot
+  // be read as a step: 3.5:1 on the Light land, 3.6:1 on the Dark style.
+  var TRAIL_NONE_COLOR = '#78808a';
 
   // The altitude scale: a position's altitude (trackAlt: 0 on the ground,
   // else barometric, else geometric; feet) in one of ALT_COLORS.length
@@ -1655,11 +1684,11 @@
   // below it: 1000 ft is the first step, 1001 the second). Green (low)
   // through yellow, orange and red to magenta and violet (high): the
   // conventional low-to-high progression, no blue, so nothing like the
-  // signal scale's blue-to-orange start; every step at least about 2.2:1
-  // against the Light tiles' land and 2.9:1 against the Dark style and
-  // the no-tile background.
+  // signal scale's blue-to-orange start. Every step is at least 3.1:1
+  // against the Light tiles' land (#f2efe9) and 2.8:1 against the Dark
+  // style (#262a30; 3.6:1 against the no-tile background).
   var ALT_BOUNDS_FT = [1000, 5000, 10000, 20000, 30000, 40000];
-  var ALT_COLORS = ['#1f8a5a', '#66a80f', '#c48f00', '#e8590c', '#e03131', '#c92a8a', '#8a4fe0'];
+  var ALT_COLORS = ['#1f8a5a', '#4f8f00', '#a87800', '#e8590c', '#e03131', '#c92a8a', '#8a4fe0'];
   // The step index of an altitude, or -1 when there is none.
   function altitudeStep(ft) {
     if (typeof ft !== 'number' || !isFinite(ft)) return -1;
@@ -1810,6 +1839,7 @@
     SIGNAL_NONE_DB: SIGNAL_NONE_DB, signalLevel: signalLevel,
     signalStep: signalStep, signalColor: signalColor, signalLegend: signalLegend, signalRuns: signalRuns,
     signalRunsAppend: signalRunsAppend, signalRunsTrim: signalRunsTrim,
+    TRAIL_NONE_COLOR: TRAIL_NONE_COLOR, TRAIL_FIELDS: TRAIL_FIELDS, viewSetsFillTrails: viewSetsFillTrails,
     trailRuns: trailRuns, trailRunsAppend: trailRunsAppend, trailRunsTrim: trailRunsTrim, trailRunColor: trailRunColor,
     ALT_BOUNDS_FT: ALT_BOUNDS_FT, ALT_COLORS: ALT_COLORS, altitudeStep: altitudeStep, altitudeColor: altitudeColor,
     altitudeLegend: altitudeLegend, altitudeRuns: altitudeRuns,

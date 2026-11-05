@@ -1525,6 +1525,49 @@ test('normalizeView: the Trails group (project ahead), all three in a set', () =
   assert.strictEqual(P.viewTrailsDefault(P.normalizeView(P.VIEW_DEFAULTS)), true);
 });
 
+test('viewSetsFillTrails: old sets get the current Trails fields once; newer sets are left alone', () => {
+  assert.deepStrictEqual(P.TRAIL_FIELDS, ['trailShow', 'trailColor', 'trailAhead']);
+  const cur = P.normalizeView({ trailShow: 'selected', trailColor: 'signal', trailAhead: 5 });
+  const raw = { version: 1, sets: [
+    { name: 'Old', view: { search: 'ual' }, hideFiltered: true },
+    { name: 'Part', view: { trailColor: 'altitude' } },
+    { name: 'New', view: { trailShow: 'off', trailColor: 'decision', trailAhead: 0 } },
+    { name: 'NoView' }
+  ] };
+  const r = P.viewSetsFillTrails(JSON.stringify(raw), cur);
+  assert.strictEqual(r.filled, 3);
+  const t = (s) => [s.view.trailShow, s.view.trailColor, s.view.trailAhead];
+  assert.deepStrictEqual(r.store.sets.map((s) => s.name), ['Old', 'Part', 'New', 'NoView']);
+  assert.deepStrictEqual(t(r.store.sets[0]), ['selected', 'signal', 5]);
+  assert.strictEqual(r.store.sets[0].view.search, 'ual');
+  assert.strictEqual(r.store.sets[0].hideFiltered, true);
+  assert.deepStrictEqual(t(r.store.sets[1]), ['selected', 'altitude', 5], 'a field the set has is kept');
+  assert.deepStrictEqual(t(r.store.sets[2]), ['off', 'decision', 0]);
+  assert.deepStrictEqual(t(r.store.sets[3]), ['selected', 'signal', 5]);
+  // Once filled (stored again), nothing more to fill: the second load is a no-op.
+  const again = P.viewSetsFillTrails(r.store, P.normalizeView(null));
+  assert.strictEqual(again.filled, 0);
+  assert.deepStrictEqual(again.store, r.store);
+  assert.deepStrictEqual(P.viewSetsFillTrails(null, cur), { store: { version: 1, sets: [] }, filled: 0 });
+  assert.deepStrictEqual(P.viewSetsFillTrails('{', cur), { store: { version: 1, sets: [] }, filled: 0 });
+  assert.strictEqual(raw.sets[0].view.trailShow, undefined, 'the input is not changed');
+});
+test('TRAIL_NONE_COLOR is neutral: not a scale or a decision colour', () => {
+  const c = P.TRAIL_NONE_COLOR;
+  assert.ok(/^#[0-9a-f]{6}$/.test(c));
+  assert.ok(P.SIGNAL_COLORS.indexOf(c) < 0 && P.ALT_COLORS.indexOf(c) < 0);
+  assert.ok(Object.values(P.DECISION_COLORS).indexOf(c) < 0);
+  const rgb = [1, 3, 5].map((i) => parseInt(c.substr(i, 2), 16));
+  assert.ok(Math.max(...rgb) - Math.min(...rgb) <= 24, 'grey');
+});
+test('ALT_COLORS: at least 3:1 against the Light tiles\' land', () => {
+  const lum = (h) => [1, 3, 5].map((i) => parseInt(h.substr(i, 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)))
+    .reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  P.ALT_COLORS.forEach((c) => assert.ok(ratio(c, '#f2efe9') >= 3, c + ' ' + ratio(c, '#f2efe9').toFixed(2)));
+});
+
 // Ruler: distance, initial bearing, the label.
 // Trail steps: join, skip a small step back in time, break on an implied
 // speed over TRAIL_MAX_KT (over at least 1 s) or a big step back.

@@ -709,13 +709,13 @@
     e.trailStyle = key;
     e.trail.setStyle({ color: color, weight: weight, opacity: e.runGroup ? 0 : TRAIL_OPACITY });
     if (e.runLayers) {
-      e.runLayers.forEach(function (l) { l.setStyle({ color: l.runColor || color, weight: weight }); });
+      e.runLayers.forEach(function (l) { l.setStyle({ weight: weight }); });
     }
   }
 
   function runLayer(e, r) {
     var l = L.polyline(r.points, {
-      className: 'trail-run', interactive: false, color: r.color || trailColor(e), weight: trailWeight(e),
+      className: 'trail-run', interactive: false, color: r.color || P.TRAIL_NONE_COLOR, weight: trailWeight(e),
       opacity: r.color ? RUN_OPACITY : RUN_DIM_OPACITY
     });
     l.runColor = r.color;
@@ -749,16 +749,24 @@
     } else dropRuns(e);
     e.trailStyle = null;
     styleTrail(e);
-    updateAhead(e);
   }
 
   // The projection ahead from the current position, made, moved, restyled
-  // or removed (no trail, Project ahead off, no track or speed, on the ground).
-  var AHEAD_OPACITY = 0.8;
+  // or removed (no trail, Project ahead off, no track or speed, on the
+  // ground); recomputed only when what it depends on changed (e.aheadKey).
+  var AHEAD_OPACITY = 0.6;
   function updateAhead(e) {
-    var pts = e.trail ? P.projectAhead(e.t, viewFilter.trailAhead) : null;
-    if (!pts) { dropAhead(e); return; }
+    var t = e.t, min = viewFilter.trailAhead;
+    if (!e.trail || !(min > 0)) { dropAhead(e); return; }
+    var key = [t.lat, t.lon, t.track_deg, t.gs_kt, t.on_ground ? 1 : 0, min].join('|');
     var color = trailColor(e), weight = trailWeight(e);
+    if (e.ahead && e.aheadKey === key) {
+      if (e.ahead.options.color !== color || e.ahead.options.weight !== weight) e.ahead.setStyle({ color: color, weight: weight });
+      return;
+    }
+    var pts = P.projectAhead(t, min);
+    if (!pts) { dropAhead(e); return; }
+    e.aheadKey = key;
     if (!e.ahead) {
       e.ahead = L.polyline(pts, { className: 'trail-ahead', interactive: false, color: color, weight: weight,
         opacity: AHEAD_OPACITY, dashArray: '6 6' }).addTo(map);
@@ -769,7 +777,7 @@
   }
   function dropAhead(e) {
     if (e.ahead) map.removeLayer(e.ahead);
-    e.ahead = null;
+    e.ahead = e.aheadKey = null;
   }
 
   // The trail after `pruned` points went from its front and, with
@@ -806,15 +814,19 @@
   }
 
   // The Trails group's settings live in the view (skycue.view, the filter
-  // sets, Clear); a change shows the right legend and redraws every trail.
-  var TRAIL_FIELDS = ['trailShow', 'trailColor', 'trailAhead'];
+  // sets, Clear); a change shows the right legend and redraws every trail
+  // (only the projections when Project ahead alone changed, `aheadOnly`).
   function trailOptionsChanged(a, b) {
-    return TRAIL_FIELDS.some(function (k) { return a[k] !== b[k]; });
+    return P.TRAIL_FIELDS.some(function (k) { return a[k] !== b[k]; });
   }
-  function applyTrailOptions() {
+  function applyTrailOptions(aheadOnly) {
     $('trail-signal-legend').hidden = viewFilter.trailColor !== 'signal';
     $('trail-alt-legend').hidden = viewFilter.trailColor !== 'altitude';
-    if (map) tracks.forEach(drawTrail);
+    if (!map) return;
+    tracks.forEach(function (e) {
+      if (!aheadOnly) drawTrail(e);
+      updateAhead(e);
+    });
   }
 
   // A legend: the scale's swatches (each titled with its bounds), the two
@@ -834,17 +846,24 @@
     legend.appendChild(bar);
     legend.appendChild(ends);
     if (extra) legend.appendChild(el('div', 'sig-steps', extra));
-    legend.appendChild(el('div', 'sig-none', none));
+    var row = el('div', 'sig-none');
+    var sw = el('i', 'sig-none-sw');
+    sw.style.background = P.TRAIL_NONE_COLOR;
+    row.appendChild(sw);
+    row.appendChild(document.createTextNode(none));
+    legend.appendChild(row);
   }
 
-  // The legends under Colour by, and the old "Colour trail by signal"
-  // checkbox's setting (localStorage skycue.trailSignal) taken over once.
+  // The legends under Colour by; the old "Colour trail by signal"
+  // checkbox's setting (localStorage skycue.trailSignal) taken over once;
+  // then filter sets saved before the Trails group get the current Trails
+  // settings once (P.viewSetsFillTrails), so applying one keeps them.
   var TRAIL_SIGNAL_KEY = 'skycue.trailSignal';
   function initTrails() {
     var db = function (v) { return v < 0 ? '−' + -v : String(v); };   // a minus sign, as the docs write it
     fillScaleLegend($('trail-signal-legend'), P.signalLegend(),
       function (s) { return db(s.from) + ' to ' + db(s.to) + ' dBFS'; },
-      '≤ ' + db(P.SIGNAL_MIN_DB) + ' dBFS', '≥ ' + db(P.SIGNAL_MAX_DB) + ' dBFS', null, 'dim: no signal');
+      '≤ ' + db(P.SIGNAL_MIN_DB) + ' dBFS', '≥ ' + db(P.SIGNAL_MAX_DB) + ' dBFS', null, 'faint grey: no signal');
     var ft = function (v) { return P.thousands(v); };
     var b = P.ALT_BOUNDS_FT;
     fillScaleLegend($('trail-alt-legend'), P.altitudeLegend(),
@@ -853,13 +872,21 @@
           ft(s.from) + ' to ' + ft(s.to) + ' ft';
       },
       'ground–' + ft(b[0]) + ' ft', '> ' + ft(b[b.length - 1]) + ' ft',
-      b.map(function (v) { return v / 1000 + 'k'; }).join(' · ') + ' ft', 'dim: no altitude');
+      b.map(function (v) { return v / 1000 + 'k'; }).join(' · ') + ' ft', 'faint grey: no altitude');
     var old = storeGet(TRAIL_SIGNAL_KEY);
     if (old !== null) {
       try { window.localStorage.removeItem(TRAIL_SIGNAL_KEY); } catch (err) { /* private window */ }
-      var stored = storeGet(VIEW_FILTER_KEY);
-      var had = stored && /"trailColor"/.test(stored);
-      if (old === '1' && !had) { setViewFilters({ trailColor: 'signal' }); return; }
+      var had = false;
+      try {
+        var stored = JSON.parse(storeGet(VIEW_FILTER_KEY));
+        had = !!stored && typeof stored === 'object' && 'trailColor' in stored;
+      } catch (err) { /* nothing stored, or garbage */ }
+      if (old === '1' && !had) setViewFilters({ trailColor: 'signal' });
+    }
+    var fill = P.viewSetsFillTrails(storeGet(VIEW_SETS_KEY), viewFilter);
+    if (fill.filled) {
+      viewSets = fill.store;
+      saveViewSets();
     }
     applyTrailOptions();
   }
@@ -989,7 +1016,9 @@
   function setViewFilters(partial, fromControls) {
     var before = viewFilter;
     viewFilter = P.normalizeView(Object.assign({}, viewFilter, partial));
-    if (trailOptionsChanged(before, viewFilter)) applyTrailOptions();
+    if (trailOptionsChanged(before, viewFilter)) {
+      applyTrailOptions(before.trailShow === viewFilter.trailShow && before.trailColor === viewFilter.trailColor);
+    }
     if (!fromControls) applyViewToControls();
     saveView();
     tableDirty = true;

@@ -208,8 +208,11 @@ trail point keeps its `rssi` (`P.signalLevel`) and its altitude
 `P.signalColor`, `SIGNAL_COLORS` from `SIGNAL_MIN_DB` to `SIGNAL_MAX_DB`, or
 of `P.altitudeColor`, `ALT_COLORS` split at `ALT_BOUNDS_FT`) as
 `path.trail-run` polylines over the decision-coloured `path.trail`, which is
-then transparent. A run without a value is solid in the decision colour at
-a lower opacity; no trail polyline is dashed. `#trail-signal-legend` is
+then transparent. A run without a value is solid in `P.TRAIL_NONE_COLOR`
+(neutral grey) at a lower opacity; no trail polyline is dashed.
+`P.viewSetsFillTrails` (in `initTrails`, after the `skycue.trailSignal`
+take-over) gives stored sets without the Trails fields the current ones,
+once, and saves the store. `#trail-signal-legend` is
 `P.signalLegend`, `#trail-alt-legend` `P.altitudeLegend`. The runs are kept
 up to date in place (`updateTrail`: `P.trailRunsAppend` on a new position,
 `P.trailRunsTrim` on a prune), and rebuilt only on a Trails change, a new

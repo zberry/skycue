@@ -45,6 +45,20 @@ set(SKYCUE_LEAFLET_DIR "" CACHE PATH
   "Leaflet's extracted dist/ directory (leaflet.js, leaflet.css, images/); staged and installed under www/vendor/leaflet")
 set(SKYCUE_ECHARTS_DIR "" CACHE PATH
   "ECharts' extracted npm package root (dist/echarts.min.js, LICENSE, NOTICE, licenses/LICENSE-d3); staged and installed under www/vendor/echarts")
+set(SKYCUE_SOURCE_CACHE "${PROJECT_SOURCE_DIR}/../sources" CACHE PATH
+  "Directory holding the pinned leaflet and echarts npm tarballs, used when SKYCUE_LEAFLET_DIR or SKYCUE_ECHARTS_DIR is empty")
+# Either directory left empty: the pinned tarball from SKYCUE_SOURCE_CACHE,
+# hash-checked and extracted in the build tree (cmake/VendoredWeb.cmake). A
+# directory that is given (the superbuild passes both) is used as it is.
+if(NOT SKYCUE_LEAFLET_DIR OR NOT SKYCUE_ECHARTS_DIR)
+  include(cmake/VendoredWeb.cmake)
+  if(NOT SKYCUE_LEAFLET_DIR)
+    skycue_vendored_web_dir(leaflet SKYCUE_LEAFLET_DIR)
+  endif()
+  if(NOT SKYCUE_ECHARTS_DIR)
+    skycue_vendored_web_dir(echarts SKYCUE_ECHARTS_DIR)
+  endif()
+endif()
 option(SKYCUE_UI_TESTS "Register the headless-browser test ui_playwright (skips itself without node/Playwright)" ON)
 
 # The web UI: www/ plus Leaflet and ECharts, assembled in ${PROJECT_BINARY_DIR}/www-stage
@@ -65,10 +79,17 @@ if(SKYCUE_LEAFLET_DIR)
       message(FATAL_ERROR "skycue: SKYCUE_LEAFLET_DIR=${SKYCUE_LEAFLET_DIR} has no ${_f}")
     endif()
   endforeach()
+  # Leaflet's BSD-2-Clause LICENSE sits beside dist/ in its package and
+  # travels with the copied files.
+  set(_skycue_leaflet_files ${SKYCUE_LEAFLET_DIR}/leaflet.js ${SKYCUE_LEAFLET_DIR}/leaflet.css)
+  get_filename_component(_skycue_leaflet_license "${SKYCUE_LEAFLET_DIR}/../LICENSE" ABSOLUTE)
+  if(EXISTS "${_skycue_leaflet_license}")
+    list(APPEND _skycue_leaflet_files ${_skycue_leaflet_license})
+  endif()
   list(APPEND _skycue_www_cmds
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SKYCUE_WWW_STAGE}/vendor/leaflet
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SKYCUE_LEAFLET_DIR}/leaflet.js
-      ${SKYCUE_LEAFLET_DIR}/leaflet.css ${SKYCUE_WWW_STAGE}/vendor/leaflet/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_skycue_leaflet_files}
+      ${SKYCUE_WWW_STAGE}/vendor/leaflet/
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${SKYCUE_LEAFLET_DIR}/images
       ${SKYCUE_WWW_STAGE}/vendor/leaflet/images)
 endif()
@@ -91,7 +112,7 @@ add_custom_target(www_stage ALL ${_skycue_www_cmds}
   COMMENT "Staging the web UI in ${SKYCUE_WWW_STAGE}" VERBATIM)
 install(FILES ${_skycue_www_files} DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www)
 if(SKYCUE_LEAFLET_DIR)
-  install(FILES ${SKYCUE_LEAFLET_DIR}/leaflet.js ${SKYCUE_LEAFLET_DIR}/leaflet.css
+  install(FILES ${_skycue_leaflet_files}
     DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/leaflet)
   install(DIRECTORY ${SKYCUE_LEAFLET_DIR}/images/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/leaflet/images)

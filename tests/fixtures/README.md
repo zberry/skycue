@@ -20,6 +20,24 @@
   the daemon's copy (`skycued/src/icao_class.cpp`). Hand-written; the JS is the
   source of truth.
 
+## Fetching the third-party captures
+
+`scripts/fetch-test-captures.sh [--cache DIR] [--fixtures DIR] [--offline]`
+downloads the four captures below from their upstream repositories at the
+pinned commits, checks their SHA-256 values and installs `raw/modes-120s.csv.gz`,
+`raw/uat-sample.txt.gz`, `raw/stratux-uat-2015.log.gz` and `fisb/tg30.978`, then
+regenerates `fisb/received-with-uplinks.jsonl` and `fisb/received-tg30.jsonl`
+with the generators in `fisb/`. These paths are git-ignored. The pins are in
+one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
+2026-11-05; each file's SHA-256 at that commit equals the copy recorded below):
+
+| Capture | Repository | Commit |
+| --- | --- | --- |
+| modes | junzis/pyModeS | `487cfd6139ecea10a833afea2e58f631dc875702` |
+| uat sample | flightaware/dump978 | `f40aa9a0d2d0a0067c0c628b44ba316f7049b8ce` |
+| stratux log | cyoung/stratux | `1a0d1ca9e94d1c98ae1f4305e073fdd6b5a810be` |
+| tg30 | rand-projects/fisb-decode | `c3d3b0473429336b1a98672b2e8b276c24d49765` |
+
 ## raw/modes-120s.csv.gz
 
 - Origin: https://github.com/junzis/pyModeS, file

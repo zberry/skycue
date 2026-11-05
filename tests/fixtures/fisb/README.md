@@ -3,8 +3,11 @@
 ## tg30.978
 
 - **Origin:** fisb-decode, https://github.com/rand-projects/fisb-decode,
-  file `tg/tg-source/generated/tg30.978`. Taken from a snapshot of the default
-  branch cloned on 2026-11-01; the upstream commit was not recorded. MD5
+  file `tg/tg-source/generated/tg30.978`. Fetched by
+  `scripts/fetch-test-captures.sh` at commit
+  `c3d3b0473429336b1a98672b2e8b276c24d49765` (the file's content equals the
+  2026-11-01 snapshot first used). SHA-256
+  `6df9e5671b501e4317bc7f7b661e3931bf461d47f3666e853457e7f6abd45583`, MD5
   `13828213408db1a6884887e14caebdcb`, 866470 bytes, 1048 lines.
 - **Licence:** BSD-2-Clause Plus Patent, Copyright (C) 2020-2021 Michael Barnes.
   The full text is in `LICENSE.fisb-decode` next to this file. The fixture is
@@ -38,7 +41,8 @@ from one ground station) is `../raw/uat-sample.txt.gz`. See
 
 ## received-with-uplinks.jsonl
 
-- **What it is:** a received-stream recording with FIS-B, for replay tests
+- **What it is:** a received-stream recording with FIS-B (SHA-256
+  `2ee0a8e9805bf6f0afa14121d9807f8f5ed8f69a312253c9d05e22a36a4ca346`), for replay tests
   (`test_fisb_decoder/replay_decodes_uplinks_on_recording_clock`,
   `recording_fisb_stream_written`) and the later UI tests. 1065 lines,
   about 820 kB: the 704 uplinks of `../raw/uat-sample.txt.gz` as
@@ -48,8 +52,7 @@ from one ground station) is `../raw/uat-sample.txt.gz`. See
   first 30 s of `../readsb-sample.jsonl` (361 readsb JSON-port lines,
   unchanged except their `"now"`, moved onto the same 2015 clock), in time
   order.
-- **How it is made:** `python3 gen_received_with_uplinks.py` (deterministic,
-  no arguments; rerun it after changing either input). Derived from the
+- **How it is made:** `python3 gen_received_with_uplinks.py [--fixtures DIR]` (deterministic; rerun it after changing either input). Derived from the
   BSD-2-Clause dump978 sample and the repository's own synthetic readsb data.
 
 ## received-tg30.jsonl
@@ -62,8 +65,7 @@ from one ground station) is `../raw/uat-sample.txt.gz`. See
   level 0), its NEXRAD regional mosaic (861 blocks, 36.7-43.3 N,
   90.4-81.6 W) and CONUS mosaic (1413 blocks, 20-53 N, 132-60 W) carry
   echoes, and it has the raster layers and AIRMETs.
-- **How it is made:** `python3 gen_received_tg30.py` (deterministic, no
-  arguments). Derived from `tg30.978` (BSD-2-Clause Plus Patent,
+- **How it is made:** `python3 gen_received_tg30.py [--fixtures DIR]` (deterministic). Derived from `tg30.978` (BSD-2-Clause Plus Patent,
   `LICENSE.fisb-decode`).
 
 ## tg30.golden.jsonl

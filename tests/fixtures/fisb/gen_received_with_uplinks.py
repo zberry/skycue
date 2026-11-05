@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Generate received-with-uplinks.jsonl: a received-stream recording with FIS-B.
 
-Deterministic; no arguments; run from anywhere:
+Deterministic; run from anywhere:
 
-    python3 tests/fixtures/fisb/gen_received_with_uplinks.py
+    python3 tests/fixtures/fisb/gen_received_with_uplinks.py [--fixtures DIR]
+
+--fixtures DIR reads the inputs under DIR (raw/, readsb-sample.jsonl) and writes
+the output to DIR/fisb; the default is the fixtures directory this script is in.
 
 Inputs (both committed):
-  ../raw/uat-sample.txt.gz   the 2015 dump978 sample; its 704 uplink ('+') lines
-  ../readsb-sample.jsonl     synthetic readsb JSON-port lines
+  raw/uat-sample.txt.gz      the 2015 dump978 sample; its 704 uplink ('+') lines
+  readsb-sample.jsonl        synthetic readsb JSON-port lines
 
-Output (next to this script): received-with-uplinks.jsonl, one record per line,
+Output (in fisb/ beside them): received-with-uplinks.jsonl, one record per line,
 in time order:
   - every uplink of the sample as a received-stream "uat_uplink" record, exactly
     as skycued's Recorder writes it ({"time","type","uplink_hex"}), at
@@ -23,15 +26,13 @@ in time order:
     JSON-port lines alongside received-stream records.
 """
 
+import argparse
 import gzip
 import os
 import re
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SAMPLE = os.path.join(HERE, "..", "raw", "uat-sample.txt.gz")
-READSB = os.path.join(HERE, "..", "readsb-sample.jsonl")
-OUT = os.path.join(HERE, "received-with-uplinks.jsonl")
 
 T0 = datetime(2015, 1, 24, 4, 12, 0, tzinfo=timezone.utc)
 OBS_SECONDS = 30.0
@@ -43,6 +44,13 @@ def iso_ms(t):
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--fixtures", default=os.path.join(HERE, ".."),
+                    help="fixtures directory (default: the one containing this script)")
+    fixtures = os.path.abspath(ap.parse_args().fixtures)
+    SAMPLE = os.path.join(fixtures, "raw", "uat-sample.txt.gz")
+    READSB = os.path.join(fixtures, "readsb-sample.jsonl")
+    OUT = os.path.join(fixtures, "fisb", "received-with-uplinks.jsonl")
     records = []  # (epoch_ms, seq, line)
     t0_ms = int(T0.timestamp() * 1000)
 

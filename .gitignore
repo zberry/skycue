@@ -23,3 +23,9 @@ skycue.runtime.json.rejected
 /fuzz/findings/*
 !/fuzz/findings/.gitkeep
 !/fuzz/findings/README.md
+# Third-party test captures: fetched by scripts/fetch-test-captures.sh (pinned
+# upstream commits and SHA-256 values), never committed once removed.
+/tests/fixtures/raw/
+/tests/fixtures/fisb/tg30.978
+/tests/fixtures/fisb/received-with-uplinks.jsonl
+/tests/fixtures/fisb/received-tg30.jsonl

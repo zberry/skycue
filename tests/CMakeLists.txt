@@ -163,6 +163,25 @@ set_tests_properties(parent_project PROPERTIES
   SKIP_RETURN_CODE 77
   ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
 
+# install_layout: `cmake --install` of this build tree into a DESTDIR, checked
+# against what this tree's configuration should produce (default source
+# install, package build with SKYCUE_PACKAGE_CONFIG and absolute
+# SKYCUE_SYSTEMD_UNITDIR, or SKYCUE_INSTALL_SYSTEM_FILES=OFF as the superbuild).
+add_test(NAME install_layout
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_install_layout.sh ${CMAKE_COMMAND}
+    ${PROJECT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/install-layout-work
+    ${CMAKE_INSTALL_PREFIX} ${CMAKE_INSTALL_FULL_BINDIR} ${CMAKE_INSTALL_FULL_SYSCONFDIR}
+    ${SKYCUE_INSTALL_SYSTEM_FILES} ${SKYCUE_PACKAGE_CONFIG} ${SKYCUE_SYSTEMD_UNITDIR})
+set_tests_properties(install_layout PROPERTIES TIMEOUT 120)
+
+# package_conf: cmake/PackageConfig.cmake on the example, and skycued on what
+# it writes.
+add_test(NAME package_conf
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_package_conf.sh ${CMAKE_COMMAND}
+    ${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake ${_skycue_example_conf}
+    $<TARGET_FILE:skycued> ${CMAKE_CURRENT_BINARY_DIR}/package-conf-work)
+set_tests_properties(package_conf PROPERTIES TIMEOUT 60)
+
 # SKYCUE_TEST_SLOW_FACTOR outside sanitizer and fuzz builds: two configures
 # of skycue/ (no build), their registered timeouts and environments compared.
 if(NOT SKYCUE_PYTHON3)

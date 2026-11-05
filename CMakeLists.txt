@@ -126,6 +126,56 @@ if(SKYCUE_ECHARTS_DIR)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/www/vendor/echarts/licenses)
 endif()
 
+# System files: the config, the skycued systemd unit and the map helpers.
+# They belong to the package shape and to a plain source install; the
+# superbuild turns them off, so the offline bundle's prefix is unchanged (it
+# keeps the config in its own etc/ and the helpers in scripts/). Their sources
+# live outside skycue/ (etc/, packaging/, scripts/), so each rule is skipped
+# when its file is not there (skycue/ copied on its own).
+option(SKYCUE_INSTALL_SYSTEM_FILES
+  "Install the config, the skycued systemd unit and the map helper scripts (the superbuild turns this off)" ON)
+option(SKYCUE_PACKAGE_CONFIG
+  "Install the packaged skycue.conf (STATE_DIR=/var/lib/skycue …) instead of skycue.conf.example" OFF)
+set(SKYCUE_SYSTEMD_UNITDIR "lib/systemd/system" CACHE PATH
+  "Where skycued.service is installed: relative to CMAKE_INSTALL_PREFIX, or absolute (packages: /usr/lib/systemd/system)")
+get_filename_component(_skycue_repo_dir "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+set(_skycue_conf_example "${_skycue_repo_dir}/etc/skycue.conf.example")
+set(_skycue_unit_template "${_skycue_repo_dir}/packaging/systemd/skycued.service.in")
+set(_skycue_map_scripts "${_skycue_repo_dir}/scripts/make-tiles.sh" "${_skycue_repo_dir}/scripts/make-overlays.sh")
+set(_skycue_map_merger "${_skycue_repo_dir}/scripts/tiles-merge.py")
+# The full sysconfdir, so that /usr gives /etc (GNUInstallDirs) and the
+# config lands where the unit's ExecStart looks for it.
+cmake_path(SET _skycue_sysconfdir NORMALIZE "${CMAKE_INSTALL_FULL_SYSCONFDIR}")
+cmake_path(SET _skycue_bindir NORMALIZE "${CMAKE_INSTALL_FULL_BINDIR}")
+if(SKYCUE_INSTALL_SYSTEM_FILES)
+  if(SKYCUE_PACKAGE_CONFIG AND EXISTS "${_skycue_conf_example}")
+    set(_skycue_package_conf "${PROJECT_BINARY_DIR}/package/skycue.conf")
+    add_custom_command(OUTPUT "${_skycue_package_conf}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/package"
+      COMMAND ${CMAKE_COMMAND} -DIN=${_skycue_conf_example} -DOUT=${_skycue_package_conf}
+        -P ${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake
+      DEPENDS "${_skycue_conf_example}" "${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake"
+      COMMENT "Writing the packaged skycue.conf" VERBATIM)
+    add_custom_target(skycue_package_conf ALL DEPENDS "${_skycue_package_conf}")
+    install(FILES "${_skycue_package_conf}" DESTINATION "${_skycue_sysconfdir}/skycue")
+  elseif(EXISTS "${_skycue_conf_example}")
+    install(FILES "${_skycue_conf_example}" DESTINATION "${_skycue_sysconfdir}/skycue")
+  endif()
+  if(EXISTS "${_skycue_unit_template}")
+    set(SKYCUE_UNIT_EXEC "${_skycue_bindir}/skycued --config ${_skycue_sysconfdir}/skycue/skycue.conf")
+    configure_file("${_skycue_unit_template}" "${PROJECT_BINARY_DIR}/skycued.service" @ONLY)
+    install(FILES "${PROJECT_BINARY_DIR}/skycued.service" DESTINATION "${SKYCUE_SYSTEMD_UNITDIR}")
+  endif()
+  foreach(_f IN LISTS _skycue_map_scripts)
+    if(EXISTS "${_f}")
+      install(PROGRAMS "${_f}" DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/scripts)
+    endif()
+  endforeach()
+  if(EXISTS "${_skycue_map_merger}")
+    install(FILES "${_skycue_map_merger}" DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue/scripts)
+  endif()
+endif()
+
 add_subdirectory(skycued)
 add_subdirectory(skycue-dump)
 add_subdirectory(skycue-rawrec)

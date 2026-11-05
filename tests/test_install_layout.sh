@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# What `cmake --install` puts where, for the configuration of this build tree:
+# binaries, the web UI with its vendored libraries and their licences, the
+# headers and the CMake package config always; with SKYCUE_INSTALL_SYSTEM_FILES
+# also the map scripts, the config (the example, or with SKYCUE_PACKAGE_CONFIG
+# the packaged skycue.conf) and the skycued unit, whose ExecStart names this
+# build's own bindir and sysconfdir; without it none of those (the offline
+# bundle's layout). Nothing is installed outside the prefix except the config
+# and the unit, and no map tiles or overlays are installed at all.
+# The install goes to a DESTDIR, since the config and the unit may have
+# absolute destinations (/etc, /usr/lib/systemd/system).
+# usage: test_install_layout.sh CMAKE BUILD_DIR WORK_DIR PREFIX BINDIR SYSCONFDIR
+#          SYSTEM_FILES(ON|OFF) PACKAGE_CONFIG(ON|OFF) UNITDIR
+#   BINDIR, SYSCONFDIR: the full (absolute) directories; UNITDIR as cached,
+#   relative to PREFIX or absolute.
+set -u
+cmake=$1 build=$2 work=$3 prefix=$4 bindir=$5 sysconfdir=$6 system_files=$7 package_config=$8 unitdir=$9
+fail() { echo "FAIL: $*"; exit 1; }
+is_on() { case "${1^^}" in ON|YES|TRUE|Y|1) return 0 ;; *) return 1 ;; esac; }
+
+root=$work/root
+rm -rf "$work"
+mkdir -p "$work" || fail "cannot create $work"
+DESTDIR=$root "$cmake" --install "$build" >"$work/install.log" 2>&1 \
+  || { tail -n 20 "$work/install.log"; fail "cmake --install failed"; }
+p=$root$prefix
+[ -d "$p" ] || fail "nothing installed under $prefix"
+
+need() { for f in "$@"; do [ -f "$p/$f" ] || fail "not installed: $prefix/$f"; done; }
+need bin/skycued bin/skycue-dump \
+  share/skycue/www/index.html \
+  share/skycue/www/vendor/leaflet/leaflet.js share/skycue/www/vendor/leaflet/LICENSE \
+  share/skycue/www/vendor/echarts/echarts.min.js share/skycue/www/vendor/echarts/LICENSE \
+  share/skycue/www/vendor/echarts/NOTICE share/skycue/www/vendor/echarts/licenses/LICENSE-d3 \
+  include/skycue/client.hpp include/skycue/version.hpp
+for f in bin/skycued bin/skycue-dump; do [ -x "$p/$f" ] || fail "$prefix/$f is not executable"; done
+configs=$(cd "$p" && find lib* -path '*/cmake/skycue/skycueConfig.cmake' 2>/dev/null)
+[ "$(printf '%s\n' "$configs" | grep -c .)" = 1 ] \
+  || fail "want one lib*/.../cmake/skycue/skycueConfig.cmake, got: ${configs:-none}"
+for d in tiles overlays; do
+  [ -e "$p/share/skycue/www/$d" ] && fail "$prefix/share/skycue/www/$d was installed"
+done
+
+case $unitdir in /*) unit=$unitdir/skycued.service ;; *) unit=$prefix/$unitdir/skycued.service ;; esac
+if is_on "$package_config"; then
+  conf=$sysconfdir/skycue/skycue.conf other=$sysconfdir/skycue/skycue.conf.example
+else
+  conf=$sysconfdir/skycue/skycue.conf.example other=$sysconfdir/skycue/skycue.conf
+fi
+scripts=share/skycue/scripts
+
+if is_on "$system_files"; then
+  need $scripts/make-tiles.sh $scripts/make-overlays.sh $scripts/tiles-merge.py
+  for f in make-tiles.sh make-overlays.sh; do
+    [ -x "$p/$scripts/$f" ] || fail "$prefix/$scripts/$f is not executable"
+  done
+  [ -f "$root$conf" ] || fail "not installed: $conf"
+  [ -e "$root$other" ] && fail "installed $other as well as $conf"
+  grep -q '^RECEIVER_LAT=$' "$root$conf" || fail "$conf has no empty RECEIVER_LAT="
+  if is_on "$package_config"; then
+    grep -qx 'STATE_DIR=/var/lib/skycue' "$root$conf" || fail "$conf is not the packaged config"
+  else
+    cmp -s "$root$conf" "$(dirname "$0")/../../etc/skycue.conf.example" \
+      || fail "$conf is not the example as it is in etc/"
+  fi
+  [ -f "$root$unit" ] || fail "not installed: $unit"
+  u=$root$unit
+  grep -q '@' "$u" && fail "$unit has an unexpanded @VAR@: $(grep '@' "$u")"
+  exec_want="ExecStart=$bindir/skycued --config $sysconfdir/skycue/skycue.conf"
+  [ "$(grep '^ExecStart=' "$u")" = "$exec_want" ] \
+    || fail "$unit: $(grep '^ExecStart=' "$u"), want $exec_want"
+  case $bindir$sysconfdir in *//*|*/./*|*/../*) fail "unnormalised path in $exec_want" ;; esac
+  for line in '[Unit]' '[Service]' '[Install]' Type=simple User=skycue Group=skycue \
+              After=network-online.target Wants=network-online.target Restart=on-failure \
+              RestartPreventExitStatus=2 ProtectSystem=strict ReadWritePaths=/var/lib/skycue \
+              ProtectHome=yes PrivateTmp=yes NoNewPrivileges=yes WantedBy=multi-user.target; do
+    [ "$(grep -cxF -- "$line" "$u")" = 1 ] || fail "$unit: want exactly one line $line"
+  done
+  grep -q '^Requires=' "$u" && fail "$unit requires another unit"
+  allowed_outside=("$conf" "$unit")
+else
+  for f in $scripts bin/skycue-make-maps; do
+    [ -e "$p/$f" ] && fail "SKYCUE_INSTALL_SYSTEM_FILES=OFF installed $prefix/$f"
+  done
+  for f in "$conf" "$other" "$unit"; do
+    [ -e "$root$f" ] && fail "SKYCUE_INSTALL_SYSTEM_FILES=OFF installed $f"
+  done
+  [ -n "$(cd "$root" && find . -name 'skycued.service' -o -name 'skycue.conf*')" ] \
+    && fail "SKYCUE_INSTALL_SYSTEM_FILES=OFF installed a unit or config"
+  allowed_outside=()
+fi
+
+# Every installed file is under the prefix, or is the config or the unit.
+while IFS= read -r f; do
+  f=${f#.}
+  case $f in "$prefix"/*) continue ;; esac
+  ok=0
+  for a in "${allowed_outside[@]}"; do [ "$f" = "$a" ] && ok=1; done
+  [ "$ok" = 1 ] || fail "installed outside $prefix: $f"
+done < <(cd "$root" && find . \( -type f -o -type l \) -print)
+
+rm -rf "$work"
+echo "PASS"

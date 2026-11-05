@@ -1275,6 +1275,28 @@ test('ruler_measures_without_touching_selection', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBeNull();
 });
 
+// The ruler button keeps focus after a click; Leaflet's own a:focus rule
+// once turned it near-white when the pointer left. Idle, focused and
+// disarmed it looks like the zoom buttons; armed it does not.
+test('ruler_toggle_matches_zoom_buttons_after_disarm', async ({ page }) => {
+  await openPage(page);
+  const bg = (sel) => page.locator(sel).evaluate((el) => getComputedStyle(el).backgroundColor);
+  const zoom = await bg('a.leaflet-control-zoom-in');
+  const box = await page.locator('#map').boundingBox();
+  const away = () => page.mouse.move(box.x + box.width / 2, box.y + box.height - 40);
+  expect(await bg('#ruler-toggle')).toBe(zoom);
+  await page.locator('#ruler-toggle').click();
+  await away();
+  await expect(page.locator('#ruler-toggle')).toHaveAttribute('aria-pressed', 'true');
+  expect(await bg('#ruler-toggle')).not.toBe(zoom);
+  await page.locator('#ruler-toggle').click();
+  await away();
+  await expect(page.locator('#ruler-toggle')).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => document.activeElement && document.activeElement.id)).toBe('ruler-toggle');
+  expect(await bg('#ruler-toggle')).toBe(zoom);
+  expect(await bg('a.leaflet-control-zoom-in')).toBe(zoom);
+});
+
 // The main daemon has no radar or raster: the opacity slider has nothing to
 // act on, so it is disabled and its row dimmed.
 test('radar_opacity_disabled_without_products', async ({ page }) => {

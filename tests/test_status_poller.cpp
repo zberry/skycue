@@ -1,7 +1,6 @@
 #define BOOST_TEST_MODULE skycued_status_poller
 #include <boost/test/unit_test.hpp>
 
-#include "restricted_fixtures.hpp"
 
 #include "engine_test_support.hpp"
 #include "inputs/input_def.hpp"

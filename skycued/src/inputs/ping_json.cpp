@@ -59,7 +59,7 @@ std::optional<std::string> trimmed(std::optional<std::string> s)
     return s->substr(first, last - first + 1);
 }
 
-// The ICD prints the squawk's octal display form as a decimal number (1305).
+// The receiver's interface document prints the squawk's octal display form as a decimal number (1305).
 // nullopt when it is not 0..7777 with every digit 0..7.
 std::optional<std::string> squawkText(int64_t v)
 {
@@ -184,7 +184,7 @@ bool mapAircraft(const JsonObject& a, const std::string& text, const PingContext
         obs.position_time = clock.used;
     }
 
-    // baroaltDiffMM is not used: the ICD does not give its sign (spec §9).
+    // baroaltDiffMM is not used: the receiver's interface document does not give its sign (spec §9).
     const int64_t primary_type = a.getInt("altitudeType").value_or(0);
     putAltitude(obs, primary_type, a.getDouble("altitudeMM"));
     if (detail) {

@@ -626,7 +626,7 @@ test('inputsSummary counts', () => {
     live({ connected: true, receiving: false })]), { connected: 2, enabled: 3 });
 });
 
-test('gpsStatusText and receiverStatusText: the ICD codes, else the number', () => {
+test('gpsStatusText and receiverStatusText: the documented codes, else the number', () => {
   assert.deepStrictEqual([0, 1, 2, 3, 4].map(P.gpsStatusText), ['no GPS', 'no lock', '2D fix', '3D fix', 'DGPS']);
   assert.strictEqual(P.gpsStatusText(7), '7');
   assert.deepStrictEqual([0, 1, 2].map(P.receiverStatusText), ['normal', 'comm errors', 'not transmitting']);

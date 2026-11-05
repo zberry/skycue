@@ -1,7 +1,6 @@
 #define BOOST_TEST_MODULE skycued_inputs
 #include <boost/test/unit_test.hpp>
 
-#include "restricted_fixtures.hpp"
 
 #include "asterix/cat021.hpp"
 #include "asterix/cat021_encode.hpp"

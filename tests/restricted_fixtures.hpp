@@ -1,9 +1,8 @@
 #pragma once
-// Fixtures that are not in every source tree: the third-party captures
+// Fixtures that are not in the repository: the third-party captures
 // (fixtures/raw/*, fisb/tg30.978 and the fisb/received-*.jsonl derived from
-// them), which scripts/fetch-test-captures.sh installs, and the vendor ICD
-// examples fixtures/pingstation/icd-*.json that the release source tarball leaves
-// out (fixtures/README.md says why). A test case that reads one declares it:
+// them), which scripts/fetch-test-captures.sh installs (fixtures/README.md
+// says why they are not committed). A test case that reads one declares it:
 //
 //   BOOST_AUTO_TEST_CASE(name, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 //
@@ -32,10 +31,7 @@ inline bool fixture_present(const std::string& rel)  // rel: relative to SKYCUE_
 
 inline std::string fixture_absent_message(const std::string& rel)
 {
-    // The captures can be fetched; the ICD examples are only in a git checkout.
-    if (rel.compare(0, 4, "raw/") == 0 || rel.compare(0, 5, "fisb/") == 0)
-        return "fixture " + rel + " not fetched: run scripts/fetch-test-captures.sh";
-    return "fixture " + rel + " is not in this source tree (the release tarball leaves it out)";
+    return "fixture " + rel + " not fetched: run scripts/fetch-test-captures.sh";
 }
 
 #if BOOST_VERSION >= 107400

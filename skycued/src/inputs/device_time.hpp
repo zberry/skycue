@@ -19,7 +19,7 @@ constexpr std::chrono::seconds kMaxDeviceSkew{10};
 constexpr std::chrono::seconds kGpsUtcOffset{18};
 
 // "YYYY-MM-DDTHH:MM:SS", then optionally `.` or `:` and 1 to 9 fraction
-// digits, then "Z" (the ICD writes both "…:32.3725496Z" and
+// digits, then "Z" (the receiver's interface document writes both "…:32.3725496Z" and
 // "…:ss:ffffffffZ"). The date and time fields are range-checked (no leap
 // second); the year is 1678 to 2261, inside system_clock's nanosecond range.
 // Anything else -> nullopt. UTC; locale- and time-zone-independent.
@@ -50,7 +50,7 @@ std::optional<std::chrono::system_clock::time_point> timeOfDay(double tod_s,
 
 // The pingStation's timeOfReceptionS/NS: seconds since the GPS epoch
 // (1980-01-06, Unix 315964800) plus nanoseconds. No leap-second correction: in
-// the ICD example the counter equals the UTC timeStamp. nullopt when
+// the receiver's interface document example the counter equals the UTC timeStamp. nullopt when
 // s >= kMaxGpsCounterS or ns >= 1e9 (garbage, and the nanosecond arithmetic
 // must not overflow).
 constexpr uint64_t kMaxGpsCounterS = uint64_t{1} << 32;  // about 136 years

@@ -29,22 +29,23 @@ Natural Earth (https://www.naturalearthdata.com) map data is in the public
 domain. skycue does not ship it: scripts that build the offline map tiles
 (skycue-make-maps) download it on demand.
 
-skycue source and test data
----------------------------
+skycue source and fetched test data
+-----------------------------------
 
-tests/fixtures/fisb/tg30.978 is a FIS-B test uplink file from
-fisb-decode (https://github.com/rand-projects/fisb-decode,
+Third-party test captures are fetched on demand by
+scripts/fetch-test-captures.sh and are not distributed with skycue or in its
+repository; tests/fixtures/README.md gives each one's origin, licence and
+licence text:
+
+tests/fixtures/fisb/tg30.978 is a FIS-B test uplink file from fisb-decode
+(https://github.com/rand-projects/fisb-decode,
 tg/tg-source/generated/tg30.978), Copyright (C) 2020-2021 Michael Barnes,
-redistributed under the BSD-2-Clause Plus Patent License; the full licence
-text is in tests/fixtures/fisb/LICENSE.fisb-decode.
+under the BSD-2-Clause Plus Patent License.
 
 tests/fixtures/raw/stratux-uat-2015.log.gz is a UAT receiver log from
 stratux (https://github.com/cyoung/stratux,
 test-data/cyoung-09062015-noproblem-stratux-uat.log, gzip-compressed),
-Copyright (c) 2015 Christopher Young, redistributed under the BSD-3-Clause
-License; the full licence text is in tests/fixtures/README.md. The
-files under tests/fixtures/raw/ are in the git repository only; the
-release source tarball leaves them out.
+Copyright (c) 2015 Christopher Young, under the BSD-3-Clause License.
 
 The FIS-B decoder in skycued/src/fisb/ follows the field layouts and
 product handling of fisb-decode (same copyright and licence as above). It is

@@ -2,7 +2,7 @@
 
 // TrackObservation -> what a pingStation 3 sends: the inverses of
 // parsePingDatagram (ping_json.hpp) and mapCat021Record (cat021_map.hpp),
-// for skycue-pingsim and the tests. Our own encoders, from the ICD and the
+// for skycue-pingsim and the tests. Our own encoders, from the receiver's interface document and the
 // CAT021 reference. Pure.
 
 #include "asterix/cat021.hpp"

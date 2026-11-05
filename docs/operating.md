@@ -1069,7 +1069,7 @@ poll failed 3 times in a row, grey when it is disabled. A UDP input is
 "connected" as soon as its socket is bound, so amber is the sign that a
 device has gone quiet. A pingStation card adds the device line: the GPS
 status (`no GPS`, `no lock`, `2D fix`, `3D fix`, `DGPS`), the receiver status
-(`normal`, `comm errors`, `not transmitting`; a code the ICD does not list is
+(`normal`, `comm errors`, `not transmitting`; a code the receiver's interface document does not list is
 shown as its number), the firmware, and the age of its last status, marked
 *stale* once that is older than 3 status intervals. The device's reported
 position is a diamond on the map (the receiver is the ring); **Show** pans

@@ -218,12 +218,19 @@ else
 fi
 
 # Seeds cut from the fetched captures (scripts/gen-capture-seeds.py); exit 3
-# means some capture is missing and that target gets none.
+# means some capture is missing and that target gets none; any other exit
+# status is a generator failure.
 capture_targets=" raw_formats fisb_decoder iqgen_coding recording "
 gen_dir="$work/capture-seeds"
 rm -rf "$gen_dir"
+gen_failed=0
 if [ -d "$fixtures" ]; then
-  python3 -I "$repo/scripts/gen-capture-seeds.py" "$fixtures" "$gen_dir" || true
+  python3 -I "$repo/scripts/gen-capture-seeds.py" "$fixtures" "$gen_dir"
+  gen_rc=$?
+  case "$gen_rc" in
+    0 | 3) ;;
+    *) echo "run-fuzz: gen-capture-seeds.py failed with exit $gen_rc" >&2; gen_failed=1 ;;
+  esac
 else
   echo "run-fuzz: no fixtures dir $fixtures" >&2
 fi
@@ -231,7 +238,7 @@ fi
 summary="$work/summary.tsv"
 [ -f "$summary" ] || printf 'target\tseconds\texecs\tcorpus\tfindings\n' > "$summary"
 
-status=0
+status=$gen_failed
 for t in "${targets[@]}"; do
   bin="$bin_dir/fuzz_$t"
   if [ ! -x "$bin" ]; then

@@ -48,7 +48,7 @@ std::optional<uint16_t> squawkCode(const std::optional<std::string>& s)
     return v;
 }
 
-// "A0".."C7" -> 0..23 (the ICD's emitterType); nullopt otherwise.
+// "A0".."C7" -> 0..23 (the receiver's interface document's emitterType); nullopt otherwise.
 std::optional<int> emitterType(const std::optional<std::string>& c)
 {
     if (!c || c->size() != 2 || (*c)[0] < 'A' || (*c)[0] > 'C' || (*c)[1] < '0' || (*c)[1] > '7')
@@ -103,9 +103,9 @@ std::string pingJsonFromObservation(const TrackObservation& o, system_clock::tim
     else if (o.id.type == AddressType::tisb_trackfile)
         qualifier = 3;
     else
-        qualifier = 6;  // no ICD meaning: the parser reads it as "other"
+        qualifier = 6;  // no meaning in the receiver's interface document: the parser reads it as "other"
     detail.add("addressQualifier", qualifier);
-    // 0 1090, 1 UAT; 2 has no ICD meaning and reads back as "other" (adsr, mlat).
+    // 0 1090, 1 UAT; 2 has no meaning in the receiver's interface document and reads back as "other" (adsr, mlat).
     const bool on_1090 = o.source == Source::adsb_1090 || o.source == Source::tisb;
     w.add("trafficSource", int64_t{o.source == Source::uat_978 ? 1 : on_1090 ? 0 : 2});
     w.add("utcSync", int64_t{1});

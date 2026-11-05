@@ -74,7 +74,7 @@ for p in /var/lib/skycue/maps /var/lib/skycue/recordings allow.list block.list; 
   grep -qF "$p" "$here/debian/skycue.postinst" || fail "postinst does not create $p"
 done
 grep -qx 'etc/skycue/skycue.conf' "$here/debian/skycue.install" || fail "skycue.install: conf"
-for l in Apache-2.0 BSD-2-Clause BSD-3-Clause BSD-2-Clause-Patent; do grep -qx "License: $l" "$here/debian/copyright" || fail "copyright lacks $l"; done
+for l in Apache-2.0 BSD-2-Clause BSD-3-Clause; do grep -qx "License: $l" "$here/debian/copyright" || fail "copyright lacks $l"; done
 # Nothing private: the only e-mail address in the packaging is the project's.
 others=$(grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' "$here/debian" "$here/packaging" 2>/dev/null | sort -u | grep -vx 'skycue@users.noreply.github.com')
 [ -z "$others" ] || fail "other addresses: $others"

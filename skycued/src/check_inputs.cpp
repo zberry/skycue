@@ -88,8 +88,12 @@ std::vector<InputCheckResult> checkInputs(const std::vector<InputCheck>& inputs,
     bool lookup_pending = false;
     for (auto& p : probes)
         lookup_pending = lookup_pending || p->resolving;
-    if (!lookup_pending)
+    if (!lookup_pending) {
+        // The probes' sockets and timers first: they must not outlive the
+        // io_context they were made on.
+        probes.clear();
         delete io_ptr;
+    }
     return results;
 }
 

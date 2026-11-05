@@ -3,9 +3,10 @@
 # skycue/ with add_subdirectory) against a copy of skycue/ taken out of the
 # repository, as a parent tree that vendors it would, then runs
 # `client_demo --help`. The copy proves the library reaches for nothing
-# outside skycue/. Then installs libskycue from the copy with libdir lib64
-# and builds the example again with CLIENT_DEMO_FIND_PACKAGE=ON against that
-# install. Exits 77 (ctest: skipped) when no cmake is found.
+# outside skycue/. Then installs libskycue from the copy with an explicit
+# libdir (lib64; on Debian lib/<multiarch>, since Debian's CMake does not
+# search lib64 in find_package) and builds the example again with
+# CLIENT_DEMO_FIND_PACKAGE=ON against that install. Exits 77 (ctest: skipped) when no cmake is found.
 #
 # usage: test_parent_project.sh <skycue dir> <work dir>
 # Environment: CMAKE (default: cmake on PATH; ctest passes CMAKE_COMMAND),
@@ -66,22 +67,31 @@ echo "$out"
 [[ $out == usage:* ]] || { echo "client_demo --help printed no usage" >&2; exit 1; }
 echo "parent project: client_demo built against a copy of skycue/ and ran"
 
-# Package mode: libskycue installed from the copy (libdir lib64, proving
-# GNUInstallDirs is honoured), then the parent project through
+# Package mode: libskycue installed from the copy (an explicit libdir that is
+# not GNUInstallDirs' default for this prefix, proving it is honoured), then the parent project through
 # find_package(skycue). The install comes first in CMAKE_PREFIX_PATH, ahead
 # of the enclosing build's, so no other skycue install can be picked up.
+# Debian's CMake searches lib/<multiarch> but not lib64 (it is not a Debian
+# library directory), so there the libdir is lib/<multiarch>.
+libdir=lib64
+if [[ -e /etc/debian_version ]]; then
+    multiarch=$("${CXX:-c++}" -print-multiarch 2>/dev/null || true)
+    [[ -n $multiarch ]] || { echo "no multiarch triplet from ${CXX:-c++} -print-multiarch" >&2; exit 1; }
+    libdir=lib/$multiarch
+fi
 "$cmake_bin" -S "$vendored" -B "$work/lib" -DSKYCUE_BUILD_DAEMON=OFF -DSKYCUE_BUILD_TESTS=OFF \
-    -DSKYCUE_BUILD_EXAMPLES=OFF -DCMAKE_INSTALL_LIBDIR=lib64 "${tool_args[@]}" "${prefix_args[@]}"
+    -DSKYCUE_BUILD_EXAMPLES=OFF -DCMAKE_INSTALL_LIBDIR=$libdir "${tool_args[@]}" "${prefix_args[@]}"
 "$cmake_bin" --build "$work/lib" -j "$jobs"
 "$cmake_bin" --install "$work/lib" --prefix "$work/prefix"
-test -f "$work/prefix/lib64/cmake/skycue/skycueConfig.cmake" || { echo "libskycue config not under lib64" >&2; exit 1; }
-test -f "$work/prefix/lib64/libskycue.a" || { echo "libskycue.a not under lib64" >&2; exit 1; }
+test -f "$work/prefix/$libdir/cmake/skycue/skycueConfig.cmake" || { echo "libskycue config not under $libdir" >&2; exit 1; }
+test -f "$work/prefix/$libdir/libskycue.a" || { echo "libskycue.a not under $libdir" >&2; exit 1; }
 test -f "$work/prefix/include/skycue/version.hpp" || { echo "version.hpp not installed" >&2; exit 1; }
 test -f "$work/prefix/include/skycue/client.hpp" || { echo "client.hpp not installed" >&2; exit 1; }
-if [[ -e $work/prefix/lib ]]; then echo "libskycue installed something under lib/ with libdir lib64" >&2; exit 1; fi
+stray=$(find "$work/prefix" -path "$work/prefix/include" -prune -o -path "$work/prefix/$libdir" -prune -o -type f -print)
+if [[ -n $stray ]]; then echo "libskycue installed files outside include/ and $libdir/: $stray" >&2; exit 1; fi
 "$cmake_bin" -S "$vendored/examples/parent-project" -B "$work/pkg" -DCLIENT_DEMO_FIND_PACKAGE=ON \
     "-DCMAKE_PREFIX_PATH=$work/prefix${SKYCUE_SMOKE_PREFIX_PATH:+;$SKYCUE_SMOKE_PREFIX_PATH}" "${tool_args[@]}"
-grep -qx "skycue_DIR:PATH=$work/prefix/lib64/cmake/skycue" "$work/pkg/CMakeCache.txt" \
+grep -qx "skycue_DIR:PATH=$work/prefix/$libdir/cmake/skycue" "$work/pkg/CMakeCache.txt" \
     || { echo "find_package did not use the install" >&2; exit 1; }
 "$cmake_bin" --build "$work/pkg" -j "$jobs"
 # find_package mode compiles no skycue sources: the archive comes from the install.

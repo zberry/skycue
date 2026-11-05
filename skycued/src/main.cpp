@@ -291,6 +291,7 @@ int run(int argc, char** argv)
     daemon.started = started;
     daemon.config_path = config_path;
     daemon.www_dir = www_dir;
+    daemon.map_dir = config.map_dir.empty() ? www_dir : config.map_dir;
     daemon.log_level = log_level;
     daemon.inputs_path = inputs_path;
     if (vm.count("cue-tcp-port"))
@@ -324,6 +325,7 @@ int run(int argc, char** argv)
         wc.bind = config.web_bind;
         wc.port = config.web_port;
         wc.www_dir = www_dir;
+        wc.map_dir = config.map_dir;
         wc.daemon = &daemon;
         web = std::make_unique<WebServer>(io, *engine, *runtime, wc);
         try {

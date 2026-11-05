@@ -249,7 +249,8 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
                 fields.emplace_back(toString(field.name_string()), toString(field.value()));
             const webapi::ApiRequest api = webapi::makeApiRequest(method, target, fields, std::move(req.body()),
                                                                   peer);
-            webapi::ApiContext ctx{srv->engine, srv->runtime, srv->cfg.www_dir, srv->cfg.daemon, &srv->stats_api};
+            webapi::ApiContext ctx{srv->engine,     srv->runtime,    srv->cfg.www_dir,
+                                   srv->cfg.daemon, &srv->stats_api, srv->cfg.map_dir};
             const auto r = webapi::handleApi(api, ctx);
             if (r.status >= 500)
                 LOG_ERROR("web: " << method << " " << path << ": " << r.body);
@@ -269,8 +270,12 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
             respond(version, keep, 400, "bad path\n", "text/plain; charset=utf-8", "no-store");
             return;
         }
+        // staticPath has already refused any "." or ".." segment, so the
+        // file stays under whichever directory it is read from.
+        const bool map_file = !srv->cfg.map_dir.empty() && (rel->compare(0, 7, "/tiles/") == 0 ||
+                                                            rel->compare(0, 10, "/overlays/") == 0);
         std::string file;
-        switch (readRegularFile(srv->cfg.www_dir + *rel, file)) {
+        switch (readRegularFile((map_file ? srv->cfg.map_dir : srv->cfg.www_dir) + *rel, file)) {
         case FileRead::ok: break;
         case FileRead::missing:
             respond(version, keep, 404, "not found\n", "text/plain; charset=utf-8", "no-cache");
@@ -575,9 +580,13 @@ void WebServer::Impl::start()
     }
     port = acceptor.local_endpoint(ec).port();
     LOG_INFO("web: listening on http://" << (addr.is_v6() ? "[" + cfg.bind + "]" : cfg.bind) << ":" << port
-                                         << "/ (www " << cfg.www_dir << ")");
+                                         << "/ (www " << cfg.www_dir
+                                         << (cfg.map_dir.empty() ? std::string() : ", maps " + cfg.map_dir) << ")");
     if (!isDirectory(cfg.www_dir))
         LOG_WARN("web: www directory " << cfg.www_dir << " does not exist; the UI pages will be 404 (the API works)");
+    if (!cfg.map_dir.empty() && !isDirectory(cfg.map_dir))
+        LOG_WARN("web: map directory " << cfg.map_dir
+                                       << " (MAP_DIR) does not exist; the map has no tiles or overlays (the API works)");
     Impl* self = this;  // stop() clears the sink before this goes away
     engine.onEvent([self](const EngineEvent& ev) { self->onEvent(ev); });
     runtime.onChange([self] { self->onRuntimeChange(); });

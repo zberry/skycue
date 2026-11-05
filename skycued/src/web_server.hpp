@@ -8,7 +8,8 @@
 // else 413 and the connection is closed), answers it and keeps the
 // connection open when the request asks for that; a connection idle for
 // idle_timeout is closed. Static files come from www_dir only (see
-// webapi::staticPath); when www_dir does not exist every static path is 404
+// webapi::staticPath), those under /tiles/ and /overlays/ from map_dir
+// instead when it is set; when www_dir does not exist every static path is 404
 // but the API still works.
 //
 // WebSocket (GET /ws): on upgrade the client gets {"type":"snapshot", ...}
@@ -48,6 +49,9 @@ struct WebConfig {
     std::string bind = "127.0.0.1";  // numeric address to listen on
     uint16_t port = 8080;            // 0: a port the OS picks (see localPort)
     std::string www_dir;             // static files
+    // /tiles/*, /overlays/* and /api/tiles-available (MAP_DIR); "": www_dir.
+    // When set, those paths are read from here only, never from www_dir.
+    std::string map_dir;
     const DaemonInfo* daemon = nullptr;  // for GET /api/config; must outlive the server
     size_t max_ws_queue_bytes = 2u << 20;
     std::chrono::milliseconds ping_interval{15000};
@@ -64,7 +68,8 @@ public:
     // Listens and becomes the Engine's event sink and the RuntimeConfig's
     // change callback. Throws std::runtime_error
     // ("web: cannot listen on <bind>:<port>: <reason>") when it cannot bind.
-    // Logs a WARN when www_dir does not exist. Once.
+    // Logs a WARN when www_dir does not exist, and one when map_dir is set
+    // and does not exist. Once.
     void start();
     // Closes the listener and every HTTP and WebSocket connection, clears the
     // Engine's event sink and the RuntimeConfig's change callback, and sets

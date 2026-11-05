@@ -21,6 +21,7 @@ struct DaemonInfo {
     std::string version;                            // kVersion
     std::chrono::system_clock::time_point started;  // wall clock at main() start
     std::string config_path, www_dir, log_level;
+    std::string map_dir;  // where tiles and overlays are read: MAP_DIR, else www_dir
     std::string inputs_path;                        // the resolved inputs file, always set by main
     std::map<std::string, std::string> cli_overrides;  // conf key -> value text ("WEB_PORT" -> "8081")
     std::vector<std::pair<std::string, const Recorder*>> recorders;  // ("received", r) ...; nullptr entries skipped
@@ -42,7 +43,7 @@ struct LocationFacts {
 
 // {"daemon":{version, started, uptime_s, config_path, inputs_path,
 // overlay_path, overlay_active, overrides_path ("" when STATE_DIR is
-// unset), www_dir, record_dir, recording_files,
+// unset), www_dir, map_dir, record_dir, recording_files,
 // log_level, mode ("live" or "replay"), replay ({file, speed, loop}; replay
 // only), readsb, dump978, locations ({learned_path, learned, operator_path,
 // operator, operator_rejected, operator_overflow})}, "keys":[{key, value, source, restart}, ...]}, the keys in

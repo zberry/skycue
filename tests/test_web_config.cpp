@@ -119,6 +119,7 @@ struct ConfigFx {
         info.started = std::chrono::system_clock::now();
         info.config_path = conf;
         info.www_dir = tmp.path + "/www";
+        info.map_dir = tmp.path + "/maps";
         info.log_level = "info";
         info.inputs_path = inputs_file;
         info.cli_overrides = {{"WEB_PORT", "0"}};
@@ -173,6 +174,7 @@ BOOST_AUTO_TEST_CASE(config_json_sources_and_values)
     BOOST_TEST(daemon->getString("config_path").value_or("") == f.conf);
     BOOST_TEST(daemon->getString("overlay_path").value_or("") == f.tmp.path + "/skycue.runtime.json");
     BOOST_TEST(daemon->getString("www_dir").value_or("") == f.tmp.path + "/www");
+    BOOST_TEST(daemon->getString("map_dir").value_or("") == f.tmp.path + "/maps");
     BOOST_TEST(daemon->getString("log_level").value_or("") == "info");
     BOOST_TEST(daemon->getString("record_dir").has_value());
     const auto files = daemon->getStringArray("recording_files");

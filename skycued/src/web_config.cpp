@@ -60,6 +60,7 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
                                    .add("overlay_active", !overlay.empty())
                                    .add("overrides_path", runtime.overridesPath())
                                    .add("www_dir", info.www_dir)
+                                   .add("map_dir", info.map_dir)
                                    .add("record_dir", effective.record_dir)
                                    .addRaw("recording_files", stringArray(files))
                                    .add("log_level", info.log_level)

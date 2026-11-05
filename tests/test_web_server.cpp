@@ -265,11 +265,13 @@ struct WebOptions {
     size_t max_ws_queue_bytes = 2u << 20;
     std::string extra_conf;
     std::chrono::milliseconds ping_interval{15000};
+    bool map_dir = false;  // set wc.map_dir to maps/ (created unless map_dir_missing)
+    bool map_dir_missing = false;
 };
 
 struct WebFx {
     TempDir tmp;
-    std::string conf, rec, www;
+    std::string conf, rec, www, maps;
     FakeSource* src = nullptr;
     std::unique_ptr<EngineFx> fx;
     std::unique_ptr<RuntimeConfig> rc;
@@ -281,7 +283,10 @@ struct WebFx {
         conf = tmp.path + "/skycue.conf";
         rec = tmp.path + "/rec";
         www = tmp.path + "/www";
+        maps = tmp.path + "/maps";
         ::mkdir(rec.c_str(), 0755);
+        if (o.map_dir && !o.map_dir_missing)
+            ::mkdir(maps.c_str(), 0755);
         if (o.www) {
             ::mkdir(www.c_str(), 0755);
             writeFile(www + "/index.html", kIndex);
@@ -296,6 +301,8 @@ struct WebFx {
             wc.bind = "127.0.0.1";
             wc.port = 0;
             wc.www_dir = www;
+            if (o.map_dir)
+                wc.map_dir = maps;
             wc.max_ws_queue_bytes = o.max_ws_queue_bytes;
             wc.ping_interval = o.ping_interval;
             web = std::make_unique<WebServer>(fx->t.io, *fx->engine, *rc, wc);
@@ -595,6 +602,66 @@ BOOST_AUTO_TEST_CASE(missing_www_dir_api_still_works)
     BOOST_TEST(get(f.port, "/").status == 404u);
     BOOST_TEST(get(f.port, "/api/state").status == 200u);
     BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
+}
+
+BOOST_AUTO_TEST_CASE(map_dir_serves_tiles_and_overlays)
+{
+    WebOptions o;
+    o.map_dir = true;
+    WebFx f(o);
+    for (const char* d : {"/tiles", "/tiles/7", "/tiles/7/37", "/overlays"})
+        ::mkdir((f.maps + d).c_str(), 0755);
+    writeFile(f.maps + "/tiles/7/37/49.png", "PNG");
+    writeFile(f.maps + "/tiles/meta.json", "{\"minZoom\":7,\"maxZoom\":7}");
+    writeFile(f.maps + "/overlays/meta.json", "{}");
+    Reply r = get(f.port, "/tiles/7/37/49.png");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "PNG");
+    BOOST_TEST(r.content_type == "image/png");
+    BOOST_TEST(r.cache_control == "max-age=86400");
+    r = get(f.port, "/overlays/meta.json");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "{}");
+    BOOST_TEST(r.cache_control == "no-cache");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body ==
+               "{\"tiles\":true,\"minZoom\":7,\"maxZoom\":7,\"overlays\":true}");
+    // Confined to the map directory as the rest is to www: no way out.
+    writeFile(f.tmp.path + "/secret.txt", "secret");
+    for (const char* t : {"/tiles/../../secret.txt", "/tiles/%2e%2e/%2e%2e/secret.txt", "/overlays/..%2f..%2fsecret.txt",
+                          "/tiles/7/..\\..\\secret.txt"}) {
+        r = get(f.port, t);
+        BOOST_TEST(r.status == 400u, t);
+        BOOST_TEST(r.body != "secret", t);
+    }
+    BOOST_TEST(get(f.port, "/").status == 200u);  // the rest still comes from www
+}
+
+BOOST_AUTO_TEST_CASE(map_dir_ignores_www_tiles)
+{
+    WebOptions o;
+    o.map_dir = true;
+    WebFx f(o);
+    for (const char* d : {"/tiles", "/tiles/7", "/tiles/7/37", "/overlays"})
+        ::mkdir((f.www + d).c_str(), 0755);
+    writeFile(f.www + "/tiles/7/37/49.png", "PNG");
+    writeFile(f.www + "/tiles/meta.json", "{\"minZoom\":7,\"maxZoom\":7}");
+    writeFile(f.www + "/overlays/meta.json", "{}");
+    BOOST_TEST(get(f.port, "/tiles/7/37/49.png").status == 404u);
+    BOOST_TEST(get(f.port, "/overlays/meta.json").status == 404u);
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
+    BOOST_TEST(get(f.port, "/").status == 200u);
+}
+
+BOOST_AUTO_TEST_CASE(map_dir_missing_api_still_works)
+{
+    WebOptions o;
+    o.map_dir = true;
+    o.map_dir_missing = true;
+    WebFx f(o);
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
+    BOOST_TEST(get(f.port, "/api/state").status == 200u);
+    BOOST_TEST(get(f.port, "/tiles/7/37/49.png").status == 404u);
+    BOOST_TEST(get(f.port, "/").status == 200u);
 }
 
 BOOST_AUTO_TEST_CASE(path_traversal_rejected)

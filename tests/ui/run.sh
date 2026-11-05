@@ -43,13 +43,6 @@ if [ ! -e "$www/vendor/echarts/echarts.min.js" ]; then
   echo "SKIP: ECharts not staged in $www (configure with -DSKYCUE_ECHARTS_DIR)"
   exit 77
 fi
-# The FIS-B cases replay the recordings scripts/fetch-test-captures.sh derives
-# from the third-party captures (the 2015 sample and tg30).
-if [ ! -e "$fixtures/fisb/received-tg30.jsonl" ] || [ ! -e "$fixtures/fisb/received-with-uplinks.jsonl" ]; then
-  echo "SKIP: FIS-B captures not fetched (run scripts/fetch-test-captures.sh)"
-  exit 77
-fi
-
 tmp=$(mktemp -d)
 pidfile="$tmp/skycued.pid"
 cleanup() {
@@ -166,10 +159,23 @@ EOP
 # 90.4-81.6 W; CONUS 20-53 N, 132-60 W).
 fisb_rec="$fixtures/fisb/received-with-uplinks.jsonl"
 radar_rec="$fixtures/fisb/received-tg30.jsonl"
-fisb_base=$(start_fisb fisb-2015 "$fisb_rec" 37.32 -121.75) || fail "FIS-B skycued (2015) did not come up"
-radar_base=$(start_fisb fisb-tg30 "$radar_rec" 40.04 -86.26) || fail "FIS-B skycued (tg30) did not come up"
-wait_fisb "$fisb_base" "$(grep -c '"uat_uplink"' "$fisb_rec")" || fail "2015 uplinks not decoded"
-wait_fisb "$radar_base" "$(grep -c '"uat_uplink"' "$radar_rec")" || fail "tg30 uplinks not decoded"
+# The recordings are derived from third-party captures by
+# scripts/fetch-test-captures.sh. Without one, its daemon is not started, its
+# URL is not exported and ui.spec.js skips the describes that need it; the
+# rest of the suite runs.
+fisb_base="" radar_base=""
+if [ -e "$fisb_rec" ]; then
+  fisb_base=$(start_fisb fisb-2015 "$fisb_rec" 37.32 -121.75) || fail "FIS-B skycued (2015) did not come up"
+  wait_fisb "$fisb_base" "$(grep -c '"uat_uplink"' "$fisb_rec")" || fail "2015 uplinks not decoded"
+else
+  echo "SKIP: FIS-B captures not fetched ($fisb_rec; run scripts/fetch-test-captures.sh): the 2015-sample FIS-B tests are skipped"
+fi
+if [ -e "$radar_rec" ]; then
+  radar_base=$(start_fisb fisb-tg30 "$radar_rec" 40.04 -86.26) || fail "FIS-B skycued (tg30) did not come up"
+  wait_fisb "$radar_base" "$(grep -c '"uat_uplink"' "$radar_rec")" || fail "tg30 uplinks not decoded"
+else
+  echo "SKIP: FIS-B captures not fetched ($radar_rec; run scripts/fetch-test-captures.sh): the tg30 radar tests are skipped"
+fi
 
 # Map tiles: one more skycued (the readsb fixture) serving a copy of the www
 # directory (without its own tiles/) with generated tiles while meta.json
@@ -291,8 +297,8 @@ export SKYCUE_BASE_URL="$base"
 export SKYCUE_CONF_PATH="$tmp/skycue.conf"
 export SKYCUE_START_CMD="$start_cmd"
 export SKYCUE_PID_FILE="$pidfile"
-export SKYCUE_FISB_URL="$fisb_base"
-export SKYCUE_RADAR_URL="$radar_base"
+[ -n "$fisb_base" ] && export SKYCUE_FISB_URL="$fisb_base"
+[ -n "$radar_base" ] && export SKYCUE_RADAR_URL="$radar_base"
 export SKYCUE_TILES_URL="$tiles_base"
 export SKYCUE_OVERLAYS_URL="$ov_base"
 export SKYCUE_RECEIVERS_URL="$rx_base"

@@ -26,7 +26,8 @@
 # ephemeral; every wait is a bounded poll; everything started is stopped by
 # its recorded pid on every exit path.
 #
-# Exit 0 PASS, 1 FAIL, 77 SKIP (no node, a node without WebSocket, or no
+# Exit 0 PASS, 1 FAIL, 77 SKIP (no node, a node without WebSocket, no
+# fetched FIS-B capture recording, or no
 # curl), 2 usage.
 
 set -u
@@ -78,7 +79,7 @@ fixtures=$(cd "$fixtures" 2>/dev/null && pwd) || { echo "soak.sh: fixtures dir n
 fisb_rec="$fixtures/fisb/received-tg30.jsonl"
 readsb_rec="$fixtures/readsb-sample.jsonl"
 [ -r "$fisb_rec" ] || {
-  echo "soak.sh: fixture $fisb_rec not fetched: run scripts/fetch-test-captures.sh" >&2; exit 2; }
+  echo "SKIP: fixture $fisb_rec not fetched: run scripts/fetch-test-captures.sh"; exit 77; }
 [ -r "$readsb_rec" ] || { echo "soak.sh: fixture $readsb_rec not found" >&2; exit 2; }
 python3 -I -c 'import sys; float(sys.argv[1]); int(sys.argv[2])' "$growth" "$fd_tolerance" 2>/dev/null || {
   echo "soak.sh: --growth must be a number and --fd-tolerance a whole number" >&2; exit 2; }

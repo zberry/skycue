@@ -201,17 +201,22 @@ as on a selection with "selected"), while `e.pts` keeps filling and
 ageing out. `P.viewTrailsDefault` is what Clear's enabled state needs
 besides the badge count; a change to a Trails field redraws every trail
 (`applyTrailOptions`).
-"Colour trail by signal" (`#trail-signal`, localStorage
-`skycue.trailSignal`, not part of `skycue.view` or the filter sets) keeps
-each trail point's `rssi`; `drawTrail` in `app.js` lays `P.signalRuns` (runs
-of one `P.signalColor` step, `SIGNAL_COLORS` from `SIGNAL_MIN_DB` to
-`SIGNAL_MAX_DB`) as `path.trail-sig` polylines over the decision-coloured
-`path.trail`, which is then transparent (a run without a signal is dashed in
-the decision colour; a trail with no signal at all has no runs);
-`#trail-signal-legend` is `P.signalLegend`. The runs are kept up to date in
-place (`updateTrail`: `P.signalRunsAppend` on a new position,
-`P.signalRunsTrim` on a prune), and rebuilt only on a toggle, a new marker
-or an un-dimming.
+Colour by (`#view-trail-color`, `trailColor`, `P.TRAIL_COLOR_BY`): each
+trail point keeps its `rssi` (`P.signalLevel`) and its altitude
+(`P.trackAlt`); with "signal" or "altitude" `drawTrail` lays
+`P.trailRuns(points, P.trailRunColor(mode))` (runs of one step of
+`P.signalColor`, `SIGNAL_COLORS` from `SIGNAL_MIN_DB` to `SIGNAL_MAX_DB`, or
+of `P.altitudeColor`, `ALT_COLORS` split at `ALT_BOUNDS_FT`) as
+`path.trail-run` polylines over the decision-coloured `path.trail`, which is
+then transparent. A run without a value is solid in the decision colour at
+a lower opacity; no trail polyline is dashed. `#trail-signal-legend` is
+`P.signalLegend`, `#trail-alt-legend` `P.altitudeLegend`. The runs are kept
+up to date in place (`updateTrail`: `P.trailRunsAppend` on a new position,
+`P.trailRunsTrim` on a prune), and rebuilt only on a Trails change, a new
+marker, an un-dimming or a trail of two points or fewer. The old
+checkbox's localStorage `skycue.trailSignal` is read once (`initTrails`:
+"1" becomes "signal" unless the stored view already has a `trailColor`)
+and removed.
 
 ## Ruler
 

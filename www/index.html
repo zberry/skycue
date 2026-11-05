@@ -111,9 +111,16 @@
           <label class="check" title="A trail only for the selected aircraft"><input type="radio" name="view-trail-show" value="selected"> selected</label>
           <label class="check" title="No trails (the positions are still kept)"><input type="radio" name="view-trail-show" value="off"> off</label>
         </div>
-        <label class="check" for="trail-signal" title="Colour each aircraft's trail by the signal strength (RSSI) of its positions">
-          <input id="trail-signal" type="checkbox"> Colour trail by signal</label>
+        <div class="row trail-row">
+          <label class="trail-key" for="view-trail-color">Colour by</label>
+          <select id="view-trail-color" title="What colours each aircraft's trail">
+            <option value="decision">decision</option>
+            <option value="signal">signal (RSSI)</option>
+            <option value="altitude">altitude</option>
+          </select>
+        </div>
         <div id="trail-signal-legend" class="sig-legend" aria-label="Trail signal scale" hidden></div>
+        <div id="trail-alt-legend" class="sig-legend" aria-label="Trail altitude scale" hidden></div>
       </div>
       <label for="view-search">Search</label>
       <input id="view-search" type="text" placeholder="hex, callsign or reg" autocomplete="off" spellcheck="false" title="Press / to search">

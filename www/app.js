@@ -668,56 +668,59 @@
   }
 
   // ---- trails ----------------------------------------------------------------
-  // e.trail is the polyline of e.pts in the decision colour. With the view
-  // option "Colour trail by signal" (localStorage skycue.trailSignal) a
-  // group of runs, e.sigTrail, is drawn over it instead (the polyline is
-  // then transparent but kept): each run coloured by the RSSI its points
-  // were received at (P.signalRuns), a run without one in the decision
-  // colour, dashed, at the trail's usual opacity; a trail with no signal
-  // at all has no group. e.sigRuns holds the runs, e.sigLayers their
-  // polylines in the same order: a new position extends the last run or
-  // adds one, a prune trims the first ones (P.signalRunsAppend,
-  // P.signalRunsTrim, updateTrail); drawTrail rebuilds only on a toggle, a
-  // (re)creation or an un-dimming.
-  // Which entries have a trail at all is the Trails group's "Show"
-  // (viewFilter.trailShow, trailShown): an entry without one has no
-  // polyline (e.trail null, removed from the map, not hidden), but its
-  // points are kept, so a trail drawn later (selecting it, Show back to
-  // "all") has the whole history at once. A dimmed entry has none either.
-  var TRAIL_SIGNAL_KEY = 'skycue.trailSignal';
-  var trailSignal = false;
+  // The Trails group (viewFilter.trailShow, .trailColor): which entries
+  // have a trail (trailShown) and what colours it.
+  // e.trail is the polyline of e.pts in the decision colour. An entry
+  // without a trail has no polyline (e.trail null, removed from the map,
+  // not hidden), but its points are kept, so a trail drawn later
+  // (selecting it, Show back to "all") has the whole history at once. A
+  // dimmed entry has none either.
+  // With Colour by "signal" or "altitude" a group of runs, e.runGroup, is
+  // drawn over it instead (the polyline is then transparent but kept):
+  // each run in the colour of the RSSI its points were received at, or of
+  // the altitude they were at (P.trailRuns with P.trailRunColor), a run
+  // without a value solid in the decision colour, dim. Every trail is
+  // solid: dashed is only the projection ahead. e.runs holds the runs,
+  // e.runLayers their polylines in the same order: a new position extends
+  // the last run or adds one, a prune trims the first ones
+  // (P.trailRunsAppend, P.trailRunsTrim, updateTrail); drawTrail rebuilds
+  // only on a Trails change, a (re)creation, an un-dimming or a trail of
+  // two points or fewer.
+  var TRAIL_OPACITY = 0.6;          // the plain trail
+  var RUN_OPACITY = 0.9;            // a run with a colour of the scale
+  var RUN_DIM_OPACITY = 0.25;       // a run without a value (no signal, no altitude)
 
   function trailColor(e) { return P.DECISION_COLORS[P.decisionColor(e.t.decision) || 'unknown']; }
   function trailWeight(e) { return e.key === selectedKey ? 3 : 1.5; }
-  function sigPoint(p) { return { lat: p.ll[0], lon: p.ll[1], sig: p.sig }; }
+  function runPoint(p) { return { lat: p.ll[0], lon: p.ll[1], sig: p.sig, alt: p.alt }; }
 
   // Restyles the trail only when its colour, weight or mode changed (it is
   // called on every renderEntry through styleMarker).
   function styleTrail(e) {
     if (!e.trail) return;
     var color = trailColor(e), weight = trailWeight(e);
-    var key = color + '|' + weight + '|' + (e.sigTrail ? 1 : 0);
+    var key = color + '|' + weight + '|' + (e.runGroup ? 1 : 0);
     if (e.trailStyle === key) return;
     e.trailStyle = key;
-    e.trail.setStyle({ color: color, weight: weight, opacity: e.sigTrail ? 0 : 0.6 });
-    if (e.sigLayers) {
-      e.sigLayers.forEach(function (l) { l.setStyle({ color: l.sigColor || color, weight: weight }); });
+    e.trail.setStyle({ color: color, weight: weight, opacity: e.runGroup ? 0 : TRAIL_OPACITY });
+    if (e.runLayers) {
+      e.runLayers.forEach(function (l) { l.setStyle({ color: l.runColor || color, weight: weight }); });
     }
   }
 
   function runLayer(e, r) {
     var l = L.polyline(r.points, {
-      className: 'trail-sig', interactive: false, color: r.color || trailColor(e), weight: trailWeight(e),
-      opacity: r.color ? 0.9 : 0.6, dashArray: r.color ? null : '2 5'
+      className: 'trail-run', interactive: false, color: r.color || trailColor(e), weight: trailWeight(e),
+      opacity: r.color ? RUN_OPACITY : RUN_DIM_OPACITY
     });
-    l.sigColor = r.color;
-    e.sigTrail.addLayer(l);
+    l.runColor = r.color;
+    e.runGroup.addLayer(l);
     return l;
   }
 
-  function dropSigTrail(e) {
-    if (e.sigTrail) map.removeLayer(e.sigTrail);
-    e.sigTrail = e.sigRuns = e.sigLayers = null;
+  function dropRuns(e) {
+    if (e.runGroup) map.removeLayer(e.runGroup);
+    e.runGroup = e.runs = e.runLayers = null;
   }
 
   function trailShown(e) {
@@ -730,17 +733,15 @@
   // removed when it should not.
   function drawTrail(e) {
     if (!trailShown(e)) { removeTrail(e); return; }
-    if (!e.trail) e.trail = L.polyline([], { className: 'trail', weight: 1.5, opacity: 0.6, interactive: false }).addTo(map);
-    var pts = e.pts;
+    if (!e.trail) e.trail = L.polyline([], { className: 'trail', weight: 1.5, opacity: TRAIL_OPACITY, interactive: false }).addTo(map);
+    var pts = e.pts, colorOf = P.trailRunColor(viewFilter.trailColor);
     e.trail.setLatLngs(pts.map(function (p) { return p.ll; }));
-    var runs = trailSignal && pts.length > 1 ? P.signalRuns(pts.map(sigPoint)) : [];
-    var any = runs.some(function (r) { return r.color !== null; });
-    if (any) {
-      if (!e.sigTrail) e.sigTrail = L.layerGroup().addTo(map);
-      else e.sigTrail.clearLayers();
-      e.sigRuns = runs;
-      e.sigLayers = runs.map(function (r) { return runLayer(e, r); });
-    } else dropSigTrail(e);
+    if (colorOf && pts.length > 1) {
+      if (!e.runGroup) e.runGroup = L.layerGroup().addTo(map);
+      else e.runGroup.clearLayers();
+      e.runs = P.trailRuns(pts.map(runPoint), colorOf);
+      e.runLayers = e.runs.map(function (r) { return runLayer(e, r); });
+    } else dropRuns(e);
     e.trailStyle = null;
     styleTrail(e);
   }
@@ -753,72 +754,87 @@
     var n = e.pts.length, last = e.pts[n - 1];
     if (appended && !pruned) e.trail.addLatLng(last.ll);
     else e.trail.setLatLngs(e.pts.map(function (p) { return p.ll; }));
-    if (!trailSignal) return;
-    if (!e.sigTrail) {
-      // No signal on the trail so far: a group once a position brings one.
-      if (appended && n > 1 && last.sig !== null) drawTrail(e);
-      return;
-    }
-    if (n < 2) { drawTrail(e); return; }   // no segment left: drops the group
+    var colorOf = P.trailRunColor(viewFilter.trailColor);
+    if (!colorOf) return;
+    // No runs yet (one point so far), or two points or fewer left: rebuilt
+    // (the in-place steps keep runs of two points or more).
+    if (!e.runGroup || n <= 2) { drawTrail(e); return; }
     if (pruned) {
-      var cut = P.signalRunsTrim(e.sigRuns, pruned);
-      e.sigLayers.splice(0, cut.dropped).forEach(function (l) { e.sigTrail.removeLayer(l); });
-      if (cut.trimmed) e.sigLayers[0].setLatLngs(e.sigRuns[0].points);
-      // Every position with a signal aged out: back to the plain trail.
-      if (!e.sigRuns.some(function (r) { return r.color !== null; })) { drawTrail(e); return; }
+      var cut = P.trailRunsTrim(e.runs, pruned);
+      e.runLayers.splice(0, cut.dropped).forEach(function (l) { e.runGroup.removeLayer(l); });
+      if (cut.trimmed) e.runLayers[0].setLatLngs(e.runs[0].points);
     }
     if (!appended) return;
-    if (!e.sigRuns.length) { drawTrail(e); return; }
-    if (P.signalRunsAppend(e.sigRuns, sigPoint(e.pts[n - 2]), sigPoint(last))) {
-      e.sigLayers[e.sigLayers.length - 1].addLatLng(last.ll);
-    } else e.sigLayers.push(runLayer(e, e.sigRuns[e.sigRuns.length - 1]));
+    if (!e.runs.length) { drawTrail(e); return; }
+    if (P.trailRunsAppend(e.runs, runPoint(e.pts[n - 2]), runPoint(last), colorOf)) {
+      e.runLayers[e.runLayers.length - 1].addLatLng(last.ll);
+    } else e.runLayers.push(runLayer(e, e.runs[e.runs.length - 1]));
   }
 
   function removeTrail(e) {
     if (e.trail) map.removeLayer(e.trail);
-    dropSigTrail(e);
+    dropRuns(e);
     e.trail = null;
     e.trailStyle = null;
   }
 
   // The Trails group's settings live in the view (skycue.view, the filter
-  // sets, Clear); a change redraws every trail.
-  var TRAIL_FIELDS = ['trailShow'];
+  // sets, Clear); a change shows the right legend and redraws every trail.
+  var TRAIL_FIELDS = ['trailShow', 'trailColor'];
   function trailOptionsChanged(a, b) {
     return TRAIL_FIELDS.some(function (k) { return a[k] !== b[k]; });
   }
   function applyTrailOptions() {
+    $('trail-signal-legend').hidden = viewFilter.trailColor !== 'signal';
+    $('trail-alt-legend').hidden = viewFilter.trailColor !== 'altitude';
     if (map) tracks.forEach(drawTrail);
   }
 
-  function setTrailSignal(on, initial) {
-    trailSignal = !!on;
-    $('trail-signal').checked = trailSignal;
-    $('trail-signal-legend').hidden = !trailSignal;
-    if (!initial) storeSet(TRAIL_SIGNAL_KEY, trailSignal ? '1' : '0');
-    if (map) tracks.forEach(drawTrail);
-  }
-
-  function initTrailSignal() {
-    var legend = $('trail-signal-legend');
-    var scale = P.signalLegend();
-    var db = function (v) { return v < 0 ? '−' + -v : String(v); };   // a minus sign, as the docs write it
+  // A legend: the scale's swatches (each titled with its bounds), the two
+  // ends, a line of extra text and what a dim stretch means.
+  function fillScaleLegend(legend, scale, title, lo, hi, extra, none) {
     var bar = el('div', 'sig-scale');
     scale.forEach(function (s) {
       var sw = el('i', null);
       sw.style.background = s.color;
-      sw.title = db(s.from) + ' to ' + db(s.to) + ' dBFS';
+      sw.title = title(s);
       bar.appendChild(sw);
     });
     var ends = el('div', 'sig-ends');
-    ends.appendChild(el('span', null, '≤ ' + db(P.SIGNAL_MIN_DB) + ' dBFS'));
-    ends.appendChild(el('span', null, '≥ ' + db(P.SIGNAL_MAX_DB) + ' dBFS'));
+    ends.appendChild(el('span', null, lo));
+    ends.appendChild(el('span', null, hi));
     legend.textContent = '';
     legend.appendChild(bar);
     legend.appendChild(ends);
-    legend.appendChild(el('div', 'sig-none', 'dashed: no signal'));
-    $('trail-signal').addEventListener('change', function () { setTrailSignal($('trail-signal').checked); });
-    setTrailSignal(storeGet(TRAIL_SIGNAL_KEY) === '1', true);
+    if (extra) legend.appendChild(el('div', 'sig-steps', extra));
+    legend.appendChild(el('div', 'sig-none', none));
+  }
+
+  // The legends under Colour by, and the old "Colour trail by signal"
+  // checkbox's setting (localStorage skycue.trailSignal) taken over once.
+  var TRAIL_SIGNAL_KEY = 'skycue.trailSignal';
+  function initTrails() {
+    var db = function (v) { return v < 0 ? '−' + -v : String(v); };   // a minus sign, as the docs write it
+    fillScaleLegend($('trail-signal-legend'), P.signalLegend(),
+      function (s) { return db(s.from) + ' to ' + db(s.to) + ' dBFS'; },
+      '≤ ' + db(P.SIGNAL_MIN_DB) + ' dBFS', '≥ ' + db(P.SIGNAL_MAX_DB) + ' dBFS', null, 'dim: no signal');
+    var ft = function (v) { return P.thousands(v); };
+    var b = P.ALT_BOUNDS_FT;
+    fillScaleLegend($('trail-alt-legend'), P.altitudeLegend(),
+      function (s) {
+        return s.from === null ? 'ground to ' + ft(s.to) + ' ft' : s.to === null ? 'above ' + ft(s.from) + ' ft' :
+          ft(s.from) + ' to ' + ft(s.to) + ' ft';
+      },
+      'ground–' + ft(b[0]) + ' ft', '> ' + ft(b[b.length - 1]) + ' ft',
+      'steps at ' + b.map(function (v) { return v / 1000 + 'k'; }).join(' · ') + ' ft', 'dim: no altitude');
+    var old = storeGet(TRAIL_SIGNAL_KEY);
+    if (old !== null) {
+      try { window.localStorage.removeItem(TRAIL_SIGNAL_KEY); } catch (err) { /* private window */ }
+      var stored = storeGet(VIEW_FILTER_KEY);
+      var had = stored && /"trailColor"/.test(stored);
+      if (old === '1' && !had) { setViewFilters({ trailColor: 'signal' }); return; }
+    }
+    applyTrailOptions();
   }
 
   // Draws or removes one entry's marker and trail according to its drawability,
@@ -831,7 +847,7 @@
     if (!drawable || !map) return;
     if (observed) {
       var ts = Date.parse(t.position_time);
-      var pushed = { ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon], sig: P.signalLevel(t.rssi) };
+      var pushed = { ts: isNaN(ts) ? dataNow() : ts, ll: [t.lat, t.lon], sig: P.signalLevel(t.rssi), alt: P.trackAlt(t) };
       // P.trailStep: an impossible jump (a looped replay restarting, a bad
       // position, a reused hex) restarts the trail here instead of joining
       // it; a small step back in time is left out.
@@ -911,6 +927,7 @@
     $('view-country').value = v.country;
     eachEl('input[name="view-map-mode"]', function (r) { r.checked = r.value === v.mapMode; });
     eachEl('input[name="view-trail-show"]', function (r) { r.checked = r.value === v.trailShow; });
+    $('view-trail-color').value = v.trailColor;
   }
   function readViewFromControls() {
     var o = {
@@ -918,7 +935,8 @@
       decisions: pillValues('view-decisions', 'data-decision'), classes: pillValues('view-classes', 'data-class'),
       category: $('view-category').value, country: $('view-country').value,
       mapMode: (document.querySelector('input[name="view-map-mode"]:checked') || {}).value,
-      trailShow: (document.querySelector('input[name="view-trail-show"]:checked') || {}).value
+      trailShow: (document.querySelector('input[name="view-trail-show"]:checked') || {}).value,
+      trailColor: $('view-trail-color').value
     };
     Object.keys(VIEW_NUMBERS).forEach(function (k) { o[k] = $(VIEW_NUMBERS[k]).value; });
     return P.normalizeView(o);
@@ -988,7 +1006,7 @@
     ['view-search'].concat(Object.keys(VIEW_NUMBERS).map(function (k) { return VIEW_NUMBERS[k]; })).forEach(function (id) {
       $(id).addEventListener('input', fromControls);
     });
-    ['view-ground', 'view-emergency', 'view-category', 'view-country'].forEach(function (id) {
+    ['view-ground', 'view-emergency', 'view-category', 'view-country', 'view-trail-color'].forEach(function (id) {
       $(id).addEventListener('change', fromControls);
     });
     eachEl('input[name="view-map-mode"], input[name="view-trail-show"]', function (r) { r.addEventListener('change', fromControls); });
@@ -3535,7 +3553,7 @@
     });
     $('cues-drops-only').addEventListener('change', function () { setCuesDropsOnly($('cues-drops-only').checked); });
     setCuesDropsOnly(storeGet(CUES_DROPS_ONLY_KEY) === '1');
-    initTrailSignal();
+    initTrails();
     $('cues-recent').tBodies[0].addEventListener('click', function (ev) {
       var tr = ev.target.closest('tr[data-key]');
       if (tr) select(tr.getAttribute('data-key'));
@@ -3589,18 +3607,17 @@
       return { armed: ruler.armed, start: ll(ruler.start), end: ll(ruler.end), fixed: ruler.fixed,
         label: lab ? lab.textContent : '' };
     },
-    // "Colour trail by signal": the option, and one aircraft's trail as drawn
-    // (its points, and each signal run's layer id, points, stroke colour and
-    // dashing; [] when off or when no position has a signal).
-    setTrailSignal: function (on) { setTrailSignal(on); },
-    getTrailSignal: function () { return trailSignal; },
+    // One aircraft's trail as drawn (null without one): its points, the
+    // plain polyline's style, and each run's layer id, points, stroke
+    // colour, opacity and dashing ([] with Colour by "decision").
     trail: function (hex) {
       var out = null;
       tracks.forEach(function (e) {
         if (e.t.hex !== hex || !e.trail) return;
         var runs = [];
-        (e.sigLayers || []).forEach(function (l) {
-          runs.push({ id: L.stamp(l), n: l.getLatLngs().length, color: l.options.color, dashed: !!l.options.dashArray });
+        (e.runLayers || []).forEach(function (l) {
+          runs.push({ id: L.stamp(l), n: l.getLatLngs().length, color: l.options.color, opacity: l.options.opacity,
+            dashed: !!l.options.dashArray });
         });
         out = { points: e.trail.getLatLngs().length, color: e.trail.options.color, opacity: e.trail.options.opacity,
           weight: e.trail.options.weight, runs: runs };

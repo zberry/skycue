@@ -1134,7 +1134,7 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   expect(lastOf(t)).toMatchObject({ n: 2, color: colors[0], dashed: false });
   await step(-77.18, undefined, 6000);
   t = await trail();
-  expect(lastOf(t)).toMatchObject({ n: 2, color: off.color, dashed: false, opacity: 0.25 });
+  expect(lastOf(t)).toMatchObject({ n: 2, color: off.color, dashed: false, opacity: 0.35 });
   expect(t.runs.reduce((n, r) => n + r.n - 1, 0)).toBe(14);
   expect(t.points).toBe(15);
   expect(await page.locator('path.trail-run[stroke-dasharray]').count()).toBe(0);   // trails are never dashed
@@ -1189,7 +1189,7 @@ test('trail_signal_dims_when_signal_ages_out', async ({ page }) => {
   }, SIG_HEX);
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX);
   let t = await trail();
-  expect(t.runs.map((r) => r.opacity)).toEqual([0.9, 0.25]);
+  expect(t.runs.map((r) => r.opacity)).toEqual([0.9, 0.35]);
   expect(t.runs.every((r) => !r.dashed)).toBe(true);
   const dimId = t.runs[1].id;
   expect(t.opacity).toBe(0);
@@ -1199,7 +1199,7 @@ test('trail_signal_dims_when_signal_ages_out', async ({ page }) => {
     return (await trail()).points;
   }, { timeout: 10000 }).toBe(5);
   t = await trail();
-  expect(t.runs).toEqual([{ id: dimId, n: 5, color: t.color, opacity: 0.25, dashed: false }]);
+  expect(t.runs).toEqual([{ id: dimId, n: 5, color: t.color, opacity: 0.35, dashed: false }]);
   expect(t.opacity).toBe(0);
   await page.evaluate(() => window.skycueApp.setViewFilters({ trailColor: 'decision' }));
 });
@@ -1220,13 +1220,13 @@ test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
   let t = await trail();
   expect(t.points).toBe(6);
-  expect(t.runs).toEqual([{ id: t.runs[0].id, n: 6, color: t.color, opacity: 0.25, dashed: false }]);
+  expect(t.runs).toEqual([{ id: t.runs[0].id, n: 6, color: t.color, opacity: 0.35, dashed: false }]);
   expect(t.opacity).toBe(0);
   const dimId = t.runs[0].id;
   await at(6, -20);
   t = await trail();
   expect(t.runs.length).toBe(2);
-  expect(t.runs[0]).toMatchObject({ id: dimId, n: 6, color: t.color, opacity: 0.25, dashed: false });
+  expect(t.runs[0]).toMatchObject({ id: dimId, n: 6, color: t.color, opacity: 0.35, dashed: false });
   expect(t.runs[1]).toMatchObject({ n: 2, opacity: 0.9, dashed: false });
   expect(t.runs[1].color).not.toBe(t.color);
   await at(7, -49.5);
@@ -1306,7 +1306,7 @@ test('trail_altitude_colours_climb', async ({ page }) => {
   await expect(legend.locator('.sig-scale i')).toHaveCount(7);
   await expect(legend).toContainText('ground–1,000 ft');
   await expect(legend).toContainText('> 40,000 ft');
-  await expect(legend).toContainText('steps at 1k · 5k · 10k · 20k · 30k · 40k ft');
+  await expect(legend).toContainText('1k · 5k · 10k · 20k · 30k · 40k ft');
   await expect(legend).toContainText('dim: no altitude');
   expect(await legend.locator('.sig-scale i').nth(3).getAttribute('title')).toBe('10,000 to 20,000 ft');
   const trail = () => page.evaluate((h) => window.skycueApp.trail(h), hex);
@@ -1326,7 +1326,7 @@ test('trail_altitude_colours_climb', async ({ page }) => {
   t = await trail();
   expect(t.runs.length).toBe(8);
   expect(t.runs[6].id).toBe(lastId);
-  expect(t.runs[7]).toMatchObject({ n: 2, color: t.color, opacity: 0.25, dashed: false });
+  expect(t.runs[7]).toMatchObject({ n: 2, color: t.color, opacity: 0.35, dashed: false });
   await page.locator('#view-trail-color').selectOption('decision');
   await expect(legend).toBeHidden();
   expect((await trail()).runs).toEqual([]);

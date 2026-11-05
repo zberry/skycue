@@ -693,7 +693,7 @@
   // render.
   var TRAIL_OPACITY = 0.6;          // the plain trail
   var RUN_OPACITY = 0.9;            // a run with a colour of the scale
-  var RUN_DIM_OPACITY = 0.25;       // a run without a value (no signal, no altitude)
+  var RUN_DIM_OPACITY = 0.35;       // a run without a value (no signal, no altitude)
 
   function trailColor(e) { return P.DECISION_COLORS[P.decisionColor(e.t.decision) || 'unknown']; }
   function trailWeight(e) { return e.key === selectedKey ? 3 : 1.5; }
@@ -853,7 +853,7 @@
           ft(s.from) + ' to ' + ft(s.to) + ' ft';
       },
       'ground–' + ft(b[0]) + ' ft', '> ' + ft(b[b.length - 1]) + ' ft',
-      'steps at ' + b.map(function (v) { return v / 1000 + 'k'; }).join(' · ') + ' ft', 'dim: no altitude');
+      b.map(function (v) { return v / 1000 + 'k'; }).join(' · ') + ' ft', 'dim: no altitude');
     var old = storeGet(TRAIL_SIGNAL_KEY);
     if (old !== null) {
       try { window.localStorage.removeItem(TRAIL_SIGNAL_KEY); } catch (err) { /* private window */ }

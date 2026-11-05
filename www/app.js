@@ -751,6 +751,8 @@
       var cut = P.signalRunsTrim(e.sigRuns, pruned);
       e.sigLayers.splice(0, cut.dropped).forEach(function (l) { e.sigTrail.removeLayer(l); });
       if (cut.trimmed) e.sigLayers[0].setLatLngs(e.sigRuns[0].points);
+      // Every position with a signal aged out: back to the plain trail.
+      if (!e.sigRuns.some(function (r) { return r.color !== null; })) { drawTrail(e); return; }
     }
     if (!appended) return;
     if (!e.sigRuns.length) { drawTrail(e); return; }
@@ -2817,7 +2819,8 @@
           icon: L.divIcon({ className: 'device-marker', html: DEVICE_SVG, iconSize: [16, 16], iconAnchor: [8, 8] }),
           title: title, keyboard: false, zIndexOffset: -500
         }).addTo(map);
-        m.on('click', function (ev) { rulerTakes(ev, m.getLatLng()); });
+        // A marker with a click listener keeps the click from the map: deselect here.
+        m.on('click', function (ev) { if (!rulerTakes(ev, m.getLatLng())) deselect(); });
         rx.devices.set(inp.id, m);
       } else {
         m.setLatLng(ll);
@@ -2843,7 +2846,8 @@
           icon: L.divIcon({ className: 'station-marker', html: STATION_SVG, iconSize: [16, 16], iconAnchor: [8, 8] }),
           title: 'FIS-B ground station ' + s.site_id, keyboard: false, zIndexOffset: -600
         }).addTo(map);
-        m.on('click', function (ev) { rulerTakes(ev, m.getLatLng()); });
+        // A marker with a click listener keeps the click from the map: deselect here.
+        m.on('click', function (ev) { if (!rulerTakes(ev, m.getLatLng())) deselect(); });
         rx.stations.set(s.site_id, m);
       } else {
         m.setLatLng([s.lat, s.lon]);

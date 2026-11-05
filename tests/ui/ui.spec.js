@@ -1153,6 +1153,35 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe('0');
 });
 
+// Once every position with a signal has aged out of the trail, it is the
+// plain solid trail again, not dashed no-signal runs.
+test('trail_signal_falls_back_when_signal_ages_out', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await page.evaluate(() => window.skycueApp.setTrailSignal(true));
+  await page.evaluate((hex) => {
+    const now = window.skycueApp.dataNow();
+    const at = (i, ms, rssi) => window.skycueApp.injectTestMarker({ hex, addr_type: 'icao', lat: 39.3, lon: -77.6 + i * 0.05,
+      decision: 'send', track_deg: 90, rssi, position_time: new Date(now - ms).toISOString() });
+    for (let i = 0; i < 3; i++) at(i, 118000 - i, -20);   // just inside the 120 s trail
+    for (let i = 3; i < 8; i++) at(i, 1000, undefined);
+  }, SIG_HEX);
+  const trail = () => page.evaluate((h) => window.skycueApp.trail(h), SIG_HEX);
+  let t = await trail();
+  expect(t.runs.some((r) => !r.dashed)).toBe(true);
+  expect(t.runs.some((r) => r.dashed)).toBe(true);
+  expect(t.opacity).toBe(0);
+  // The signal positions leave the 120 s window; the prune trims them.
+  await expect.poll(async () => {
+    await page.evaluate(() => window.skycueApp.prune());
+    return (await trail()).points;
+  }, { timeout: 10000 }).toBe(5);
+  t = await trail();
+  expect(t.runs).toEqual([]);
+  expect(t.opacity).toBe(0.6);
+  await page.evaluate(() => window.skycueApp.setTrailSignal(false));
+});
+
 // The ruler: away from the fixture's aircraft (around 38.9 N 77 W), two
 // clicks 300 px apart on one row at zoom 8 near 30 N are 84..88 nm
 // (611.5 m/px at the equator x cos(lat)), heading east.
@@ -2419,6 +2448,33 @@ test.describe('receiver tab (pingsim)', () => {
 
 test.describe('receiver tab (FIS-B, 2015 sample)', () => {
   test.use({ baseURL: FISB_BASE });
+
+  // Clicking the station marker deselects, like a map click; while the
+  // ruler is armed it is a ruler point at the station instead.
+  test('station_marker_click_deselects_unless_ruler_armed', async ({ page }) => {
+    await openFisbPage(page);
+    const st = (await apiAt(FISB_BASE, '/api/fisb/status')).body.stations[0];
+    const station = page.locator('.station-marker');
+    await expect(station).toHaveCount(1);
+    await page.evaluate((p) => window.skycueApp.injectTestMarker({ hex: 'fff0b1', addr_type: 'icao', lat: p.lat + 0.3,
+      lon: p.lon + 0.3, decision: 'send', track_deg: 0 }), st);
+    const glyph = page.locator('.ac-marker[data-hex="fff0b1"] .ac-glyph');
+    const selected = () => page.evaluate(() => window.skycueApp.selected());
+    await glyph.click();
+    await expect.poll(selected).toBe('fff0b1');
+    await station.click();
+    await expect.poll(selected).toBeNull();
+    await glyph.click();
+    await expect.poll(selected).toBe('fff0b1');
+    await page.locator('#ruler-toggle').click();
+    await station.click();
+    const r = await page.evaluate(() => window.skycueApp.ruler());
+    expect(Math.abs(r.start.lat - st.lat)).toBeLessThan(1e-6);
+    expect(Math.abs(r.start.lon - st.lon)).toBeLessThan(1e-6);
+    expect(await selected()).toBe('fff0b1');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.skycueApp.removeTestMarker('fff0b1|icao'));
+  });
 
   test('ground_stations_listed', async ({ page }) => {
     await openFisbPage(page);

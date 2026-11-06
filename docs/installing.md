@@ -435,7 +435,15 @@ ctest --test-dir build
 
 `curl` is for one of the tests. The headless-browser test skips itself
 without node and Playwright, and the tests that need the third-party
-captures the source tarball leaves out skip themselves too. The programs
+captures the source tarball leaves out skip themselves too. Run
+`scripts/fixtures/fetch-test-captures.sh` from the source directory to
+download the four pinned upstream capture files (about 10 MB) into
+`tests/fixtures`, so those tests run; see
+[tests/fixtures/README.md](../tests/fixtures/README.md) for details. For the
+headless-browser test, follow the one-time Playwright setup in
+[tests/ui/README.md](../tests/ui/README.md) (`npm install` in `tests/ui`, then
+`npx playwright install chromium`), and configure with
+`-DSKYCUE_UI_TESTS=ON`, which is the default. The programs
 are now in `build/`: the daemon is `build/skycued/skycued`.
 
 ### Building from a git clone

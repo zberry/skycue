@@ -3,35 +3,118 @@
 Source and releases: <https://github.com/zberry/skycue>
 
 skycue is an operator console and forwarding bridge for ADS-B and UAT
-receivers. It runs beside the receiver stack you already have (readsb, and
-optionally dump978-fa), reads what those decoders already decode, shows it
-on a live map in the browser, and forwards selected aircraft as cues to
-your own programs and devices. It does not feed any network, replace your decoders or
-change their configuration: your feeder keeps running exactly as it was.
+receivers. It is for people who already run readsb (and, in the USA,
+dump978-fa) and want a live operator view of what their receiver sees, plus
+a way to hand selected aircraft to their own programs and devices, without touching their
+feeder. It reads what those decoders already decode, shows it on a live map
+in the browser, and forwards chosen aircraft as cues to your own programs and devices. It
+does not feed any network, replace your decoders or change their
+configuration: your feeder keeps running exactly as it was.
 
 <!-- screenshot: docs/screenshot.png (the map with traffic, the side panel open) -->
 
-What it does:
+## Installing and building
 
-- Reads readsb's JSON position output, dump978-fa's UAT uplinks and pingStation 3 receivers into one track table.
-- Decides per aircraft what to forward, by range, elevation angle and allow and block lists you can change live.
-- Sends cues to cue clients over TCP or UDP in a small documented wire protocol ([docs/protocol.md](docs/protocol.md)).
-- Serves an offline web map: decision colours, trails, a track table, alerts and the health of every input.
-- Decodes FIS-B weather from the 978 MHz uplinks: NEXRAD, METAR, TAF, PIREP, winds aloft and NOTAMs.
-- Keeps statistics across restarts and records what it received and sent, for replay and offline analysis.
+All install and build instructions are in [docs/installing.md](docs/installing.md).
+The routes, in short:
 
-## Install
+- **Debian and Raspberry Pi OS** (12 and 13; amd64, arm64): install the `.deb`, see [Debian and Raspberry Pi](docs/installing.md#debian-and-raspberry-pi).
+- **RHEL 8 and 9** and their rebuilds (x86_64): install the `.rpm`, see [RHEL](docs/installing.md#rhel).
+- **From source** with plain CMake: see [From source](docs/installing.md#from-source). Once it is built you can [run it straight from the build tree](docs/installing.md#run-it-from-the-build-tree) without installing anything.
+- Whichever route you take, [turn on the one decoder output skycue reads](docs/installing.md#3-turn-on-the-decoder-output-skycue-reads) for readsb, ultrafeeder or PiAware.
 
-Debian and Raspberry Pi OS packages (arm64, amd64), RHEL 8 and 9 packages
-(x86_64), a plain CMake build from source, and how to turn on the decoder
-output skycue reads for readsb, ultrafeeder and PiAware:
-[docs/installing.md](docs/installing.md). A full-stack offline bundle that
-also builds the SDR decoders lives in a separate repository.
+## What it does
 
-Running it, the configuration keys and the web page are described in
-[docs/operating.md](docs/operating.md); the HTTP API in
-[docs/web-api.md](docs/web-api.md); the library for building your own
-cue client in [docs/libskycue.md](docs/libskycue.md).
+**Inputs.** skycued reads readsb's JSON position output, dump978-fa's raw
+UAT port and pingStation 3 receivers (JSON or ASTERIX CAT021), and merges
+them into one track table. Further inputs are added in the web page or in an
+inputs file, and the page shows the health of every one. Details:
+[docs/operating.md](docs/operating.md#the-inputs-file).
+
+**Decisions and cues.** For each aircraft skycued decides whether to
+forward it, by range, elevation angle and allow and block lists that you can
+change live, and how often to send updates. Forwarded aircraft go to your
+own programs and devices as cues over TCP or UDP in a small, documented wire protocol
+([docs/protocol.md](docs/protocol.md)). To receive them in your own program,
+use the C++ client library ([docs/libskycue.md](docs/libskycue.md)).
+
+**The web map.** skycued serves a map page that loads nothing from the
+internet. It shows:
+
+- aircraft coloured by the forwarding decision, with trails you can colour by decision, signal strength or altitude;
+- a ruler for distances, and range and elevation rings around the receiver;
+- a track table, and a side panel for the selected aircraft;
+- alerts, a statistics view, and a Receiver tab with the health of every input;
+- offline map tiles and overlays that you bake once.
+
+There is no login, so open the page only to a network you trust. The page is
+described in [docs/operating.md](docs/operating.md#the-web-ui); the HTTP and
+WebSocket API behind it in [docs/web-api.md](docs/web-api.md).
+
+**FIS-B weather.** From the 978 MHz uplinks skycued decodes NEXRAD radar,
+METAR, TAF, PIREP, winds aloft and NOTAMs, keeps the current picture with its
+expiry rules, and draws it on the map. It is for situational awareness only
+and is not flight-critical ([docs/fisb.md](docs/fisb.md)).
+
+**Recordings and statistics.** skycued can record what it received and what
+it sent (JSONL and CSV), and keeps statistics across restarts, such as
+coverage, range, signal and rates over time
+([docs/recording-format.md](docs/recording-format.md)).
+
+**Tools.** Installed beside the daemon:
+
+- `skycue-dump` prints a cue stream one line per frame.
+- `skycue-rawrec` and `skycue-rawplay` record and replay the decoders' raw output.
+- `skycue-pingsim` plays a pingStation 3 towards a skycued input, without hardware.
+- `skycue-stats` summarises recordings: coverage and the filter chain.
+- `skycue-fisb` runs the FIS-B decoder offline on a capture or recording.
+- `skycue-iqgen` makes IQ sample files so the whole chain can be tried without a dongle ([docs/iq-replay.md](docs/iq-replay.md)).
+
+## How it fits beside your receiver
+
+```
+RTL-SDR 978 MHz -> dump978-fa --raw--> readsb <- RTL-SDR 1090 MHz
+                       |                 |
+                       | raw UAT         | JSON
+                       v                 v
+                       +---------> skycued ---> cue clients (TCP / UDP)
+                                         \---> recordings
+```
+
+skycue is a client of readsb (also inside ultrafeeder, or behind PiAware's
+dump1090-fa through a second, network-only readsb) and of dump978-fa. It
+connects to the JSON port and the raw UAT port they can serve, and never
+feeds a network, restarts or reconfigures them. The one option you turn on
+per setup is in [docs/installing.md](docs/installing.md#3-turn-on-the-decoder-output-skycue-reads),
+and `skycued --check-inputs` tells you whether skycue can reach the decoders.
+A pingStation 3 is another input, added in the web page or the inputs file.
+
+## Requirements
+
+- Linux: Debian 12 or 13 or Raspberry Pi OS (amd64, arm64), RHEL 8 or 9 and rebuilds (x86_64).
+- To build: CMake 3.25 or newer, a C++17 compiler, Boost and zlib. The release tarball carries the web libraries, so nothing is downloaded.
+- A web browser. No internet access is needed at runtime.
+- readsb (and dump978-fa for UAT), or a pingStation 3, as the source of aircraft.
+
+## Documentation
+
+| file | read it when |
+|---|---|
+| [installing.md](docs/installing.md) | you install or build skycue and connect it to your decoders |
+| [operating.md](docs/operating.md) | you run it: config keys, the web page, recordings, replay, the tools |
+| [web-api.md](docs/web-api.md) | you script against the HTTP and WebSocket API |
+| [protocol.md](docs/protocol.md) | you write a client for the cue wire protocol |
+| [libskycue.md](docs/libskycue.md) | you use the C++ client library |
+| [fisb.md](docs/fisb.md) | you want to know which FIS-B products are decoded, skipped and shown |
+| [fisb-reference.md](docs/fisb-reference.md) | you need the UAT uplink bit layouts and their sources |
+| [fisb-golden.md](docs/fisb-golden.md) | you change the FIS-B decoder and check its golden output |
+| [asterix-cat021-reference.md](docs/asterix-cat021-reference.md) | you work on the pingStation ASTERIX CAT021 decoding |
+| [recording-format.md](docs/recording-format.md) | you read or write skycued's recordings |
+| [iq-replay.md](docs/iq-replay.md) | you make IQ files to try the chain without a dongle |
+| [make-tiles.md](docs/make-tiles.md) | you bake map tiles by hand or re-cut a region |
+| [make-locations.md](docs/make-locations.md) | you add report locations (airports) for weather on the map |
+| [hardening.md](docs/hardening.md) | you run the sanitizer, fuzz, static-analysis and soak checks |
+| [releasing.md](docs/releasing.md) | you cut a release and build the packages |
 
 ## Repository layout
 
@@ -54,6 +137,14 @@ cue client in [docs/libskycue.md](docs/libskycue.md).
 Version 0.1.0, the first public release. The configuration file and the
 cue protocol may still change between minor versions; each release says
 what changed.
+
+## Contributing
+
+Issues and pull requests are welcome on GitHub. Build as described in
+[docs/installing.md](docs/installing.md#build) and run `ctest --test-dir build`
+before sending a change; some tests skip themselves when an optional tool or
+capture is missing. The sanitizer, fuzzing and static-analysis runs are in
+[docs/hardening.md](docs/hardening.md).
 
 ## Licence
 

@@ -1,13 +1,14 @@
 # Installing skycue
 
-Updated 2026-11-04, for skycue 0.1.0.
+Updated 2026-11-05, for skycue 0.1.0.
 
 skycue runs beside the decoders you already have: it reads readsb's JSON
 position output (and, in the USA, dump978-fa's UAT stream) and never feeds,
 replaces, restarts or configures them. This page takes you from nothing to
 the map in the browser:
 
-1. install skycue (a package, or a build from source),
+1. install skycue (a package, or a build from source that you can run
+   straight from the build tree or install like a package),
 2. tell it where your receiver is,
 3. turn on the one decoder output it reads, and check that skycue can
    reach it,
@@ -214,17 +215,6 @@ Check:
 skycued --config /etc/skycue/skycue.conf --check-inputs
 ```
 
-#### skycue's own decoder stack (the stack repository)
-
-The stack repository ([below](#the-offline-bundle)) builds readsb
-and dump978-fa itself and `skycue-start.sh` starts them with the options
-skycue needs; nothing to change. While it runs, from the install prefix:
-
-```sh
-cd /opt/skycue
-bin/skycued --config etc/skycue/skycue.conf --check-inputs
-```
-
 #### What the check prints
 
 One line per input. The exit status is 1 when any input it tried did not
@@ -303,7 +293,7 @@ grid).
 ### 6. Open the page
 
 On the receiver itself: <http://127.0.0.1:8080/>. To open it from another
-machine, see [Opening the page to the LAN](#opening-the-page-to-the-lan)
+machine, see [Changing the page's address and port](#changing-the-pages-address-and-port)
 (or forward the port over ssh, `ssh -L 8080:127.0.0.1:8080` to the
 receiver, and open the same address). What the page shows is in
 [operating.md](operating.md#the-web-ui).
@@ -391,6 +381,15 @@ Then open the page as in [6. Open the page](#6-open-the-page).
 The same platforms, built with plain CMake from the release's source
 tarball `skycue-<version>.tar.gz`, which carries the two web libraries the
 page needs (Leaflet and ECharts) so nothing is downloaded at build time.
+There are three parts, each building on the one before:
+
+1. [Build](#build) it and run the tests.
+2. [Run it straight from the build tree](#run-it-from-the-build-tree): once
+   it is built you can just run it, with nothing installed.
+3. [Make it look like an installed package](#make-it-look-like-an-installed-package),
+   if you want the same layout, user, unit and paths as a package.
+
+### Build
 
 The build packages, on Debian and Raspberry Pi OS:
 
@@ -409,22 +408,88 @@ current minor release (a RHEL 8 compatible build got 3.26.5);
 older RHEL 8 minor releases shipped a cmake that is too old, so update
 the system first (`sudo dnf update`) if `cmake --version` says less.
 
-Build, test and install (to `/usr/local`):
+Unpack, configure, build and test:
 
 ```sh
 v=0.1.0
 tar -xzf skycue-${v}.tar.gz
 cd skycue-${v}
-cmake -S skycue -B build
+cmake -S . -B build
 cmake --build build -j"$(nproc)"
 ctest --test-dir build
-sudo cmake --install build
 ```
 
 `curl` is for one of the tests. The headless-browser test skips itself
 without node and Playwright, and the tests that need the third-party
-captures the source tarball leaves out skip themselves too. This
-installs the programs in `/usr/local/bin`, the page in
+captures the source tarball leaves out skip themselves too. The programs
+are now in `build/`: the daemon is `build/skycued/skycued`.
+
+### Run it from the build tree
+
+Nothing has to be installed to run skycue. Stay in the unpacked source
+directory. skycued needs two things beyond the binary: a config that says
+where your receiver is, and the web page's directory, which it would
+otherwise look for in `<bin>/../share/skycue/www` (that is where an
+install puts it), so name the source tree's `www` with `--www-dir`.
+
+Copy the example config and set the receiver position (the values here are
+examples; the keys are the ones described in
+[2. Edit the config](#2-edit-the-config)):
+
+```sh
+cp packaging/skycue.conf.example skycue.conf
+sed -i -e 's|^RECEIVER_LAT=$|RECEIVER_LAT=51.4700|' -e 's|^RECEIVER_LON=$|RECEIVER_LON=-0.4543|' skycue.conf
+sed -i -e "s|^MAP_DIR=\$|MAP_DIR=$PWD/maps|" skycue.conf
+```
+
+Also set `READSB_HOST` if readsb runs on another machine, and
+`DUMP978_ENABLE=no` if you have no 978 MHz (UAT) receiver, which is
+everyone outside the USA. `MAP_DIR` must be an absolute directory: the
+third command points it at `maps` here, which the map step below fills.
+Check that skycued can reach the decoders, then run it:
+
+```sh
+build/skycued/skycued --config ./skycue.conf --check-inputs
+build/skycued/skycued --config ./skycue.conf --www-dir www
+```
+
+Open <http://127.0.0.1:8080/>. Stop it with Ctrl-C. To see the page
+before any decoder is set up, replay the sample capture the tests use by
+adding `--replay tests/fixtures/readsb-sample.jsonl --replay-loop` to the
+second command. If port 8080 or the cue port (30500) is taken, add
+`--web-port 8081` or `--cue-tcp-port 0` (or set `WEB_PORT` / `CUE_TCP_PORT`
+in the config).
+
+The map script runs from the source tree too, against the same config. It
+needs GDAL, or `--container` and podman (see [5. Bake the map](#5-bake-the-map)
+and [RHEL](#rhel)); `--dry-run` shows what it would do without either:
+
+```sh
+scripts/maps/skycue-make-maps --config ./skycue.conf --around 250
+```
+
+The page picks the maps up on its next load, without a restart.
+
+What this leaves out: no system user, no systemd unit, nothing in
+`/usr/local` or `/etc`. The state skycued keeps (its inputs file,
+statistics, learned report locations) goes next to `skycue.conf`, and the
+allow and block list files, if you use them, are taken from the current
+directory, so start it from the same place each time. It stops
+when you close the terminal. And skycue only reads what the decoders
+publish: turn on readsb's JSON output as in
+[3. Turn on the decoder output](#3-turn-on-the-decoder-output-skycue-reads)
+before the `--check-inputs` line can say `connected`.
+
+### Make it look like an installed package
+
+Optional: do this when you want skycue to start at boot and keep its files
+where a package would. Install (to `/usr/local`):
+
+```sh
+sudo cmake --install build
+```
+
+This installs the programs in `/usr/local/bin`, the page in
 `/usr/local/share/skycue/www`, the example config
 `/usr/local/etc/skycue/skycue.conf.example`, and the unit in
 `/usr/local/lib/systemd/system` (which systemd also searches), running
@@ -465,15 +530,7 @@ sudo /usr/local/bin/skycue-make-maps --config /usr/local/etc/skycue/skycue.conf 
 
 Then open <http://127.0.0.1:8080/>.
 
-## The offline bundle
-
-A full-stack offline bundle that also builds the SDR decoders lives in a separate repository (the stack repository). For a machine
-without network access it carries every source tarball, builds the SDR
-libraries, readsb, dump978-fa and skycue into one relocatable prefix, and
-starts them together with `skycue-start.sh`. This repository builds and
-installs skycue alone, as described above.
-
-## Opening the page to the LAN
+## Changing the page's address and port
 
 skycued serves the page on `127.0.0.1:8080` only, so by default only the
 receiver itself can open it. To open it from other machines, listen on
@@ -484,16 +541,26 @@ sudo sed -i 's/^WEB_BIND=.*/WEB_BIND=0.0.0.0/' /etc/skycue/skycue.conf
 sudo systemctl restart skycued
 ```
 
-(from source: `/usr/local/etc/skycue/skycue.conf`). Then open
-`http://<receiver address>:8080/`. With firewalld (the RHEL default), also
-open the port:
+To serve it on another port, for example because 8080 is taken, set
+`WEB_PORT` the same way (the two can be changed together):
 
 ```sh
-sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo sed -i 's/^WEB_PORT=.*/WEB_PORT=8081/' /etc/skycue/skycue.conf
+sudo systemctl restart skycued
+```
+
+(from source: `/usr/local/etc/skycue/skycue.conf`; run from the build tree,
+`skycue.conf` in the directory you started it from, then stop and start it
+again). Then open `http://<receiver address>:<port>/`, `:8080` unless you
+changed it. With firewalld (the RHEL default), also open the port, the
+one in `WEB_PORT` (8081 here):
+
+```sh
+sudo firewall-cmd --permanent --add-port=8081/tcp
 sudo firewall-cmd --reload
 ```
 
 There is no login: anyone who can reach the port can see the traffic and
 change the filters and the allow and block lists, which change what is
-forwarded to your cue clients. Open it only to a network you trust. `WEB_PORT`
-moves the page to another port, and `WEB_PORT=0` turns it off.
+forwarded to your cue clients. Open it only to a network you trust.
+`WEB_PORT=0` turns the page off.

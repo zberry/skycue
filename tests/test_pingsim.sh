@@ -14,6 +14,7 @@
 #      nothing to play exits 1.
 # usage: test_pingsim.sh SKYCUED SKYCUE_PINGSIM SKYCUE_DUMP FIXTURE_DIR
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 pingsim=$2 dump=$3 fixtures=$4
 sample="$fixtures/readsb-sample.jsonl"
 tmp=$(mktemp -d)
@@ -22,7 +23,7 @@ cleanup() {
   local p i
   for p in "${bg_pids[@]}"; do kill "$p" 2>/dev/null; done
   for p in "${bg_pids[@]}"; do # SIGTERM first; SIGKILL whatever is left after 3 s
-    for (( i=0; i<30; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
+    for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
     kill -9 "$p" 2>/dev/null
   done
   wait 2>/dev/null
@@ -66,7 +67,7 @@ EOF
   >"$tmp/skycued.log" 2>&1 &
 bg_pids+=($!)
 base="http://127.0.0.1:$web_port"
-for (( i=0; i<100; i++ )); do curl -fs -o /dev/null "$base/api/stats" && break; sleep 0.1; done
+for (( i=0; i<100*slowf; i++ )); do curl -fs -o /dev/null "$base/api/stats" && break; sleep 0.1; done
 curl -fs -o /dev/null "$base/api/stats" || fail "web server did not come up"
 
 # counts ID -> "TRACKS MESSAGES REJECTED" (messages and rejected 0 for an input not listed yet)
@@ -86,7 +87,7 @@ sent() {
 # 3 s, or after 20 s in all (both scaled by SKYCUE_TEST_SLOW), so an emulated or
 # loaded machine that is still working through the datagrams is waited for.
 wait_messages() {
-  local i stall=0 last=-1 slowf=${SKYCUE_TEST_SLOW:-1}
+  local i stall=0 last=-1
   for (( i=0; i<200*slowf; i++ )); do
     read -r tracks messages rejected <<<"$(counts "$1")"
     [ "$messages" -ge "$2" ] && return
@@ -100,13 +101,13 @@ at_least_95() { [ $(( $1 * 100 )) -ge $(( $2 * 95 )) ]; }
 
 # ---- (a) CAT021 over UDP, capture on -------------------------------------------
 # The fixture (about 122 s) at 20x.
-timeout 60 "$pingsim" --udp "127.0.0.1:$cat_port" --as cat021 --speed 20 "$sample" >"$tmp/a.log" 2>&1
+timeout $((60*slowf)) "$pingsim" --udp "127.0.0.1:$cat_port" --as cat021 --speed 20 "$sample" >"$tmp/a.log" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/a.log"; fail "(a) pingsim exit $rc"; }
 a_sent=$(sent "$tmp/a.log")
 [ "${a_sent:-0}" -eq 1394 ] || { cat "$tmp/a.log"; fail "(a) pingsim reports '$a_sent' sent, want 1394"; }
 wait_messages sim "$a_sent"
-for (( i=0; i<50; i++ )); do
+for (( i=0; i<50*slowf; i++ )); do
   [ "$tracks" = 12 ] && break
   sleep 0.1
   read -r tracks messages rejected <<<"$(counts sim)"
@@ -118,7 +119,7 @@ a_messages=$messages
 
 # The capture file (flushed about once a second) holds every datagram counted.
 capture= lines=0
-for (( i=0; i<50; i++ )); do
+for (( i=0; i<50*slowf; i++ )); do
   capture=$(ls "$tmp"/rec/capture-sim-*.jsonl 2>/dev/null | head -n 1)
   [ -n "$capture" ] && lines=$(wc -l <"$capture") && [ "$lines" -eq "$a_messages" ] && break
   sleep 0.1
@@ -135,7 +136,7 @@ n=$(grep -cE '^  CAT021 .*addr=[0-9A-F]{6}' "$tmp/dump.out")
 ! grep -q '^  BAD' "$tmp/dump.out" || { grep '^  BAD' "$tmp/dump.out" | head; fail "(a) BAD block in the capture"; }
 
 # ---- (b) JSON with status messages ------------------------------------------------
-timeout 60 "$pingsim" --udp "127.0.0.1:$json_port" --as json --speed 20 \
+timeout $((60*slowf)) "$pingsim" --udp "127.0.0.1:$json_port" --as json --speed 20 \
   --status-interval 2 --status-lat 38.85 --status-lon -77.05 "$sample" >"$tmp/b.log" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/b.log"; fail "(b) pingsim exit $rc"; }
@@ -157,7 +158,7 @@ assert abs(d["lat"] - 38.85) < 1e-9 and abs(d["lon"] + 77.05) < 1e-9, d' "$tmp/s
 # The capture's timestamps were recorded at 20x in (a), so they already carry
 # the compressed timing; --speed 20 again would fire every datagram at once and
 # overrun the socket buffer of a slow (emulated) consumer. Replay at 1x.
-timeout 60 "$pingsim" --udp "127.0.0.1:$replay_port" --capture "$capture" --speed 1 >"$tmp/c.log" 2>&1
+timeout $((60*slowf)) "$pingsim" --udp "127.0.0.1:$replay_port" --capture "$capture" --speed 1 >"$tmp/c.log" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/c.log"; fail "(c) pingsim exit $rc"; }
 [ "$(sent "$tmp/c.log")" = "$lines" ] || { cat "$tmp/c.log"; fail "(c) pingsim did not send $lines records"; }
@@ -169,11 +170,11 @@ at_least_95 "$messages" "$lines" || fail "(c) replayed counted $messages, the ca
 [ "$rejected" -eq 0 ] || fail "(c) replayed rejected $rejected"
 
 # ---- (d) --tcp-listen, loopback by default, to a tcp_connect input ---------------
-timeout 60 "$pingsim" --tcp-listen "$listen_port" --as cat021 --speed 0 "$sample" >"$tmp/d.log" 2>&1 &
+timeout $((60*slowf)) "$pingsim" --tcp-listen "$listen_port" --as cat021 --speed 0 "$sample" >"$tmp/d.log" 2>&1 &
 d_pid=$!
 bg_pids+=($d_pid)
 listening=
-for (( i=0; i<50; i++ )); do # the local address of the LISTEN socket, from /proc/net/tcp{,6}
+for (( i=0; i<50*slowf; i++ )); do # the local address of the LISTEN socket, from /proc/net/tcp{,6}
   listening=$(python3 -I -c 'import sys
 port = "%04X" % int(sys.argv[1])
 for f in ("/proc/net/tcp", "/proc/net/tcp6"):
@@ -209,7 +210,7 @@ rc=$?
 [ "$rc" -eq 2 ] || { cat "$tmp/xml.out"; fail "(e) pingsim --as xml exit $rc, want 2"; }
 grep -q '^skycue-pingsim: ' "$tmp/xml.out" || { cat "$tmp/xml.out"; fail "(e) --as xml message"; }
 echo '{"not":"a recording"}' >"$tmp/nothing.jsonl"
-timeout 10 "$pingsim" --udp "127.0.0.1:$cat_port" --as cat021 --speed 0 --loop "$tmp/nothing.jsonl" \
+timeout $((10*slowf)) "$pingsim" --udp "127.0.0.1:$cat_port" --as cat021 --speed 0 --loop "$tmp/nothing.jsonl" \
   >"$tmp/loop.out" 2>&1
 rc=$?
 [ "$rc" -eq 1 ] || { cat "$tmp/loop.out"; fail "(e) pingsim --loop over nothing exit $rc, want 1"; }

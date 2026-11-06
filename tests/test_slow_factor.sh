@@ -21,6 +21,31 @@ mkdir -p "$work_base"
 work=$(mktemp -d "$work_base/slow-factor.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
+# The shell tests' wait helpers (tests/lib/test_common.sh) multiply their
+# bounds by SKYCUE_TEST_SLOW: wait_file on a file that never appears gives up
+# after 0.2 s at factor 1 and after 0.6 s at factor 3; a file that appears
+# ends the wait early either way.
+lib_dir=$(dirname "${BASH_SOURCE[0]}")/lib
+now() { date +%s.%N; }
+timed_wait() { # timed_wait FACTOR: seconds a 0.2 s wait_file on a missing file takes
+  local t0 t1
+  t0=$(now)
+  SKYCUE_TEST_SLOW=$1 bash -c '. "$1"; wait_file "$2" 0.2' _ "$lib_dir/test_common.sh" "$work/never" && return 1
+  t1=$(now)
+  awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.3f", b - a }'
+}
+t1=$(timed_wait 1) || { echo "wait_file succeeded on a file that never appears" >&2; exit 1; }
+t3=$(timed_wait 3) || { echo "wait_file succeeded on a file that never appears" >&2; exit 1; }
+awk -v t1="$t1" -v t3="$t3" 'BEGIN { exit !(t3 >= 0.5 && t1 < 0.5) }' || {
+  echo "wait_file 0.2 s took ${t1}s at factor 1 (want < 0.5) and ${t3}s at factor 3 (want >= 0.5)" >&2
+  exit 1
+}
+( sleep 0.3; echo up >"$work/soon" ) &
+SKYCUE_TEST_SLOW=3 bash -c '. "$1"; wait_for 5 test -s "$2"' _ "$lib_dir/test_common.sh" "$work/soon" ||
+  { echo "wait_for did not see a file that appears" >&2; exit 1; }
+wait
+echo "wait helpers: 0.2 s took ${t1}s at factor 1, ${t3}s at factor 3"
+
 args=(-DSKYCUE_UI_TESTS=OFF)
 if [[ -n ${CXX:-} ]]; then args+=("-DCMAKE_CXX_COMPILER=$CXX"); fi
 if [[ -n ${SKYCUE_SMOKE_BOOST_DIR:-} ]]; then args+=("-DBoost_DIR=$SKYCUE_SMOKE_BOOST_DIR"); fi

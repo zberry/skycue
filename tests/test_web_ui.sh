@@ -13,6 +13,7 @@
 # SKIP for the parts it cannot run.
 # usage: test_web_ui.sh SKYCUED FIXTURE_DIR WWW_STAGE JS_TEST_DIR
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 fixtures=$2 www=$3 jsdir=$4
 replay="$fixtures/readsb-sample.jsonl"
 tmp=$(mktemp -d)
@@ -21,7 +22,7 @@ cleanup() {
   local i
   if [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null
-    for (( i=0; i<30; i++ )); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    for (( i=0; i<30*slowf; i++ )); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
     kill -9 "$pid" 2>/dev/null
     wait 2>/dev/null
   fi
@@ -52,7 +53,7 @@ EOF
   --www-dir "$www" >"$tmp/skycued.log" 2>&1 &
 pid=$!
 base="http://127.0.0.1:$web_port"
-for (( i=0; i<100; i++ )); do curl -fs -o /dev/null "$base/api/stats" && break; sleep 0.1; done
+for (( i=0; i<100*slowf; i++ )); do curl -fs -o /dev/null "$base/api/stats" && break; sleep 0.1; done
 curl -fs -o /dev/null "$base/api/stats" || fail "web server did not come up"
 
 # get PATH WANT_STATUS WANT_TYPE_PREFIX
@@ -94,7 +95,7 @@ done
 
 # All 12 fixture aircraft are in the table within a few seconds.
 n=0
-for (( i=0; i<100; i++ )); do
+for (( i=0; i<100*slowf; i++ )); do
   n=$(curl -fs "$base/api/state" | python3 -I -c 'import json,sys; print(len(json.load(sys.stdin)["tracks"]))')
   [ "$n" = 12 ] && break
   sleep 0.1

@@ -4,6 +4,7 @@
 # real readsb and read its JSON position output.
 # usage: test_rawtools.sh RAWREC RAWPLAY FIXTURE_DIR [READSB]
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 rawrec=$1 rawplay=$2 fixtures=$3 readsb=${4:-}
 csv="$fixtures/raw/modes-120s.csv.gz"
 uat="$fixtures/raw/uat-sample.txt.gz"
@@ -27,11 +28,6 @@ done
 for f in "$rawrec" "$rawplay"; do [ -e "$f" ] || fail "$f missing"; done
 
 now() { date +%s.%N; }
-wait_file() { # wait_file FILE TENTHS: until FILE is non-empty
-  local i
-  for (( i=0; i<$2; i++ )); do [ -s "$1" ] && return 0; sleep 0.1; done
-  return 1
-}
 
 # sink.py PORTFILE OUT: accept one TCP connection on an ephemeral port and
 # store everything received until EOF.
@@ -49,8 +45,9 @@ with open(sys.argv[2], "wb") as out:
 EOF
 # fetch.py PORT OUT: connect (retrying for 10 s) and store everything until EOF.
 cat > "$tmp/fetch.py" <<'EOF'
-import socket, sys, time
-deadline = time.time() + 10
+import os, socket, sys, time
+slowf = float(os.environ.get("SKYCUE_TEST_SLOW", "1"))
+deadline = time.time() + 10 * slowf
 while True:
     try:
         c = socket.create_connection(("127.0.0.1", int(sys.argv[1]))); break
@@ -71,10 +68,10 @@ play_to_sink() {
   local out=$1 opt=$2; shift 2
   rm -f "$tmp/port" "$out"
   python3 "$tmp/sink.py" "$tmp/port" "$out" & local sink=$!
-  wait_file "$tmp/port" 50 || fail "sink did not start"
+  wait_file "$tmp/port" 5 || fail "sink did not start"
   local t0 t1
   t0=$(now)
-  timeout 60 "$rawplay" "$opt" "127.0.0.1:$(cat "$tmp/port")" "$@" 2>"$tmp/play.err" || { cat "$tmp/play.err"; fail "rawplay $* exit $?"; }
+  timeout $((60*slowf)) "$rawplay" "$opt" "127.0.0.1:$(cat "$tmp/port")" "$@" 2>"$tmp/play.err" || { cat "$tmp/play.err"; fail "rawplay $* exit $?"; }
   t1=$(now)
   wait "$sink"
   awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.3f\n", b - a }'
@@ -121,7 +118,7 @@ play_uat() { # play_uat OUT ARGS...: prints wall time
   local t0 t1
   python3 "$tmp/fetch.py" "$port" "$out" & local fetch=$!
   t0=$(now)
-  timeout 60 "$rawplay" --uat-listen "$port" "$@" 2>"$tmp/play.err" || { cat "$tmp/play.err"; fail "rawplay --uat-listen $* exit $?"; }
+  timeout $((60*slowf)) "$rawplay" --uat-listen "$port" "$@" 2>"$tmp/play.err" || { cat "$tmp/play.err"; fail "rawplay --uat-listen $* exit $?"; }
   t1=$(now)
   wait "$fetch" || fail "(c) fetch failed"
   awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.3f\n", b - a }'
@@ -217,14 +214,14 @@ rawrec_run() { # rawrec_run DIR FRAMES CONNS [ARGS...]: capture, then SIGTERM; c
   rm -f "$tmp/bport" "$tmp/uport"
   python3 "$tmp/beast_server.py" "$tmp/bport" "$tmp/sent.bin" "$nframes" "$conns" & local bs=$!
   python3 "$tmp/uat_server.py" "$tmp/uport" & local us=$!
-  wait_file "$tmp/bport" 50 && wait_file "$tmp/uport" 50 || fail "(d) servers did not start"
+  wait_file "$tmp/bport" 5 && wait_file "$tmp/uport" 5 || fail "(d) servers did not start"
   "$rawrec" --beast "127.0.0.1:$(cat "$tmp/bport")" --uat "127.0.0.1:$(cat "$tmp/uport")" --dir "$dir" "$@" \
     2>"$tmp/rec.err" & local rec=$!
   bg_pids+=("$rec")
   wait "$bs" || fail "(d) beast server failed"
   wait "$us"
   local i
-  for (( i=0; i<50; i++ )); do
+  for (( i=0; i<50*slowf; i++ )); do
     [ "$(cat "$dir"/beast-*.bin 2>/dev/null | wc -c)" = "$(wc -c < "$tmp/sent.bin")" ] && break
     sleep 0.1
   done
@@ -275,14 +272,14 @@ echo "ok (e) $n rotated files"
 rm -f "$tmp/bport" "$tmp/uport"
 python3 "$tmp/beast_server.py" "$tmp/bport" "$tmp/sent.bin" 40000 1 & bs=$!
 python3 "$tmp/uat_server.py" "$tmp/uport" & us=$!
-wait_file "$tmp/bport" 50 && wait_file "$tmp/uport" 50 || fail "(f) servers did not start"
+wait_file "$tmp/bport" 5 && wait_file "$tmp/uport" 5 || fail "(f) servers did not start"
 "$rawrec" --beast "127.0.0.1:$(cat "$tmp/bport")" --uat "127.0.0.1:$(cat "$tmp/uport")" --dir "$tmp/fail" \
   --fail-writes-for-test --reopen-ms-for-test 20 2>"$tmp/fail.err" & rec=$!
 bg_pids+=("$rec")
 t0=$(now)
 wait "$bs" || fail "(f) beast server failed"
 wait "$us"
-sleep 0.3
+slow_sleep 0.3
 kill -TERM "$rec"
 wait "$rec"; rc=$?
 [ $rc -eq 0 ] || { cat "$tmp/fail.err"; fail "(f) rawrec exit $rc after SIGTERM"; }
@@ -354,8 +351,9 @@ LD_LIBRARY_PATH="$(dirname "$(dirname "$readsb")")/lib${LD_LIBRARY_PATH:+:$LD_LI
   >"$tmp/readsb.log" 2>&1 & rs=$!
 bg_pids+=("$rs")
 python3 - "$jp" "$tmp/json.out" > "$tmp/json.count" <<'EOF' & reader=$!
-import socket, sys, time
-deadline = time.time() + 10
+import os, socket, sys, time
+slowf = float(os.environ.get("SKYCUE_TEST_SLOW", "1"))
+deadline = time.time() + 10 * slowf
 while True:
     try:
         c = socket.create_connection(("127.0.0.1", int(sys.argv[1]))); break
@@ -363,7 +361,7 @@ while True:
         if time.time() > deadline: sys.exit("json: cannot connect")
         time.sleep(0.1)
 c.settimeout(1)
-buf = b""; n = 0; end = time.time() + 60
+buf = b""; n = 0; end = time.time() + 60 * slowf
 with open(sys.argv[2], "wb") as out:
     while time.time() < end and n < 200:
         try:
@@ -376,8 +374,8 @@ with open(sys.argv[2], "wb") as out:
         n += sum(1 for l in lines if b'"lat"' in l)
 print(n)
 EOF
-sleep 0.5
-timeout 60 "$rawplay" --raw-in "127.0.0.1:$ri" --speed 0 "$csv" 2>"$tmp/play.err" || { cat "$tmp/play.err"; fail "full stack: rawplay exit $?"; }
+slow_sleep 0.5
+timeout $((60*slowf)) "$rawplay" --raw-in "127.0.0.1:$ri" --speed 0 "$csv" 2>"$tmp/play.err" || { cat "$tmp/play.err"; fail "full stack: rawplay exit $?"; }
 wait "$reader" || { cat "$tmp/readsb.log"; fail "full stack: JSON reader failed"; }
 n=$(cat "$tmp/json.count")
 hexes=$(grep -o '"hex":"[^"]*"' "$tmp/json.out" | sort -u | wc -l)

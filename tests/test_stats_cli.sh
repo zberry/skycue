@@ -4,6 +4,7 @@
 # real skycued writes while replaying that fixture.
 # usage: test_stats_cli.sh SKYCUED SKYCUE_STATS FIXTURE_DIR
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 stats=$2 fixtures=$3
 sample="$fixtures/readsb-sample.jsonl"
 tmp=$(mktemp -d)
@@ -12,7 +13,7 @@ cleanup() {
   local p i
   for p in "${bg_pids[@]}"; do kill "$p" 2>/dev/null; done
   for p in "${bg_pids[@]}"; do # SIGTERM first; SIGKILL whatever is left after 3 s
-    for (( i=0; i<30; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
+    for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
     kill -9 "$p" 2>/dev/null
   done
   wait 2>/dev/null
@@ -120,9 +121,9 @@ EOF
 "$skycued" --replay "$sample" --replay-speed 50 --config "$tmp/skycue.conf" >"$tmp/skycued.log" 2>&1 &
 pid=$!
 bg_pids+=($pid)
-sleep 5
+slow_sleep 5
 kill "$pid" 2>/dev/null
-for (( i=0; i<50; i++ )); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+for (( i=0; i<50*slowf; i++ )); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
 ! kill -0 "$pid" 2>/dev/null || fail "(g) skycued did not stop"
 received=$(ls "$tmp"/rec/received-*.jsonl 2>/dev/null | head -n 1)
 sentf=$(ls "$tmp"/rec/sent-*.jsonl 2>/dev/null | head -n 1)

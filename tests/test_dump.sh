@@ -8,6 +8,7 @@
 # and connects out to the dump (CUE_TCP_CONNECT).
 # usage: test_dump.sh SKYCUED SKYCUE_DUMP FIXTURE_DIR
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 dump=$2 fixtures=$3
 replay="$fixtures/readsb-sample.jsonl"
 tmp=$(mktemp -d)
@@ -16,7 +17,7 @@ cleanup() {
   local p i
   for p in "${bg_pids[@]}"; do kill "$p" 2>/dev/null; done
   for p in "${bg_pids[@]}"; do # SIGTERM first; SIGKILL whatever is left after 3 s
-    for (( i=0; i<30; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
+    for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
     kill -9 "$p" 2>/dev/null
   done
   wait 2>/dev/null
@@ -62,7 +63,7 @@ check_lines() { # check_lines FILE LABEL: every line is a frame or an event line
 }
 
 # ---- (a) text over TCP: --count frame lines, HELLO first, some UPDATEs --------
-timeout 30 "$dump" --tcp "127.0.0.1:$tcp_port" --count 20 --timeout 15 >"$tmp/a.out" 2>"$tmp/a.err"
+timeout $((30*slowf)) "$dump" --tcp "127.0.0.1:$tcp_port" --count 20 --timeout $((15*slowf)) >"$tmp/a.out" 2>"$tmp/a.err"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/a.err"; fail "(a) exit $rc"; }
 check_lines "$tmp/a.out" "(a)"
@@ -75,7 +76,7 @@ grep -qE "$update_re" "$tmp/a.out" || { cat "$tmp/a.out"; fail "(a) no UPDATE li
 ! grep -q ' LOCAL-DROP ' "$tmp/a.out" || { cat "$tmp/a.out"; fail "(a) LOCAL-DROP on a live connection"; }
 
 # ---- (b) --json over TCP: one JSON object per line ---------------------------
-timeout 30 "$dump" --tcp "127.0.0.1:$tcp_port" --json --count 10 --timeout 15 >"$tmp/b.out" 2>"$tmp/b.err"
+timeout $((30*slowf)) "$dump" --tcp "127.0.0.1:$tcp_port" --json --count 10 --timeout $((15*slowf)) >"$tmp/b.out" 2>"$tmp/b.err"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/b.err"; fail "(b) exit $rc"; }
 python3 -I -c 'import json,sys
@@ -90,13 +91,13 @@ assert counted[0]["frame"] == "hello", counted[0]
 assert any(o["frame"] == "update" for o in counted)' < "$tmp/b.out" || { cat "$tmp/b.out"; fail "(b) JSON check"; }
 
 # ---- (c) text over UDP: --count, then a HELLO and UPDATEs within 5 s -----------
-timeout 30 "$dump" --udp "127.0.0.1:$udp_port" --count 5 --timeout 15 >"$tmp/c.out" 2>"$tmp/c.err"
+timeout $((30*slowf)) "$dump" --udp "127.0.0.1:$udp_port" --count 5 --timeout $((15*slowf)) >"$tmp/c.out" 2>"$tmp/c.err"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/c.err"; fail "(c) exit $rc"; }
 check_lines "$tmp/c.out" "(c)"
 n=$(frames "$tmp/c.out" | wc -l)
 [ "$n" -eq 5 ] || { cat "$tmp/c.out"; fail "(c) $n frame lines, want 5"; }
-timeout 30 "$dump" --udp "127.0.0.1:$udp_port" --timeout 5 >"$tmp/c2.out" 2>"$tmp/c2.err"
+timeout $((30*slowf)) "$dump" --udp "127.0.0.1:$udp_port" --timeout $((5*slowf)) >"$tmp/c2.out" 2>"$tmp/c2.err"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/c2.err"; fail "(c2) exit $rc"; }
 check_lines "$tmp/c2.out" "(c2)"
@@ -105,7 +106,7 @@ grep -qE "$update_re" "$tmp/c2.out" || { cat "$tmp/c2.out"; fail "(c2) no UPDATE
 
 # ---- (d) nothing to receive: exit 3 after --timeout, no output ----------------
 dead_port=$(free_port tcp)
-timeout 30 "$dump" --tcp "127.0.0.1:$dead_port" --timeout 1 >"$tmp/d.out" 2>"$tmp/d.err"
+timeout $((30*slowf)) "$dump" --tcp "127.0.0.1:$dead_port" --timeout 1 >"$tmp/d.out" 2>"$tmp/d.err"
 rc=$?
 [ "$rc" -eq 3 ] || { cat "$tmp/d.err"; fail "(d) exit $rc, want 3"; }
 [ ! -s "$tmp/d.out" ] || fail "(d) unexpected output"
@@ -131,7 +132,7 @@ frames = [
     frame(4, struct.pack("<Q", 2)),
 ]
 s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(("127.0.0.1", 0)); s.listen(1); s.settimeout(20)
+s.bind(("127.0.0.1", 0)); s.listen(1); s.settimeout(20 * float(os.environ.get("SKYCUE_TEST_SLOW", "1")))
 open(sys.argv[1] + ".tmp", "w").write(str(s.getsockname()[1])); os.rename(sys.argv[1] + ".tmp", sys.argv[1])
 c, _ = s.accept()
 s.close()
@@ -147,7 +148,7 @@ start_peer() { # sets $peer to HOST:PORT of a fresh peer
   python3 -I "$tmp/peer.py" "$tmp/peerport" &
   bg_pids+=($!)
   local i
-  for (( i=0; i<50; i++ )); do [ -s "$tmp/peerport" ] && break; sleep 0.1; done
+  for (( i=0; i<50*slowf; i++ )); do [ -s "$tmp/peerport" ] && break; sleep 0.1; done
   [ -s "$tmp/peerport" ] || fail "(e) python peer did not start"
   peer="127.0.0.1:$(cat "$tmp/peerport")"
 }
@@ -155,7 +156,7 @@ strip() { sed -E 's/^[^ ]+ //' "$1" | tr '\n' '|'; }
 
 # (e1) the whole session: frames, then CONN down and the client's own drop.
 start_peer
-timeout 30 "$dump" --tcp "$peer" --timeout 2 >"$tmp/e1.out" 2>"$tmp/e1.err"
+timeout $((30*slowf)) "$dump" --tcp "$peer" --timeout 2 >"$tmp/e1.out" 2>"$tmp/e1.err"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/e1.err"; fail "(e1) exit $rc"; }
 want="CONN up|HELLO test kf=10000ms hb=1000ms|HB|BAD update 3|DROP 00ABCD timeout|"
@@ -167,7 +168,7 @@ want '$want'"
 
 # (e2) --count 4 counts HB and BAD but not CONN.
 start_peer
-timeout 30 "$dump" --tcp "$peer" --count 4 --timeout 10 >"$tmp/e2.out" 2>"$tmp/e2.err"
+timeout $((30*slowf)) "$dump" --tcp "$peer" --count 4 --timeout $((10*slowf)) >"$tmp/e2.out" 2>"$tmp/e2.err"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/e2.err"; fail "(e2) exit $rc"; }
 got=$(strip "$tmp/e2.out")
@@ -176,7 +177,7 @@ got=$(strip "$tmp/e2.out")
 
 # (e3) the same session as JSON.
 start_peer
-timeout 30 "$dump" --tcp "$peer" --json --timeout 2 >"$tmp/e3.out" 2>"$tmp/e3.err"
+timeout $((30*slowf)) "$dump" --tcp "$peer" --json --timeout 2 >"$tmp/e3.out" 2>"$tmp/e3.err"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/e3.err"; fail "(e3) exit $rc"; }
 python3 -I -c 'import json,sys
@@ -201,7 +202,7 @@ WEB_PORT=0
 CUE_TCP_CONNECT=127.0.0.1:$listen_port
 KEYFRAME_INTERVAL_S=2
 EOF
-timeout 30 "$dump" --tcp-listen "127.0.0.1:$listen_port" --count 10 --timeout 15 >"$tmp/f.out" 2>"$tmp/f.err" &
+timeout $((30*slowf)) "$dump" --tcp-listen "127.0.0.1:$listen_port" --count 10 --timeout $((15*slowf)) >"$tmp/f.out" 2>"$tmp/f.err" &
 dump_pid=$!
 "$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue-out.conf" \
   >"$tmp/skycued-out.log" 2>&1 &

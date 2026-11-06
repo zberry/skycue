@@ -19,7 +19,7 @@ add_test(NAME client COMMAND test_client)
 set_tests_properties(client PROPERTIES TIMEOUT 60)
 
 get_filename_component(_skycue_example_conf
-  "${CMAKE_CURRENT_SOURCE_DIR}/../etc/skycue.conf.example" ABSOLUTE)
+  "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/skycue.conf.example" ABSOLUTE)
 add_executable(test_config test_config.cpp)
 target_link_libraries(test_config PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_config PRIVATE BOOST_TEST_DYN_LINK
@@ -57,18 +57,18 @@ skycue_set_warnings(test_icao_class)
 add_test(NAME icao_class COMMAND test_icao_class)
 
 # icao_tables_current: skycued/src/icao_tables.inc is what
-# scripts/gen-icao-tables.py writes from www/app_pure.js. Skipped when the
+# scripts/fixtures/gen-icao-tables.py writes from www/app_pure.js. Skipped when the
 # generator or the page is not there (skycue built inside a parent project)
 # or python3 is not installed. icao_tables_generator (test_icao_generator.sh):
 # the generator's exit status on broken copies of the page; skipped likewise.
 get_filename_component(_skycue_gen_icao
-  "${PROJECT_SOURCE_DIR}/scripts/gen-icao-tables.py" ABSOLUTE)
+  "${PROJECT_SOURCE_DIR}/scripts/fixtures/gen-icao-tables.py" ABSOLUTE)
 set(_skycue_app_pure "${PROJECT_SOURCE_DIR}/www/app_pure.js")
 set(_skycue_icao_inc "${PROJECT_SOURCE_DIR}/skycued/src/icao_tables.inc")
 find_program(SKYCUE_PYTHON3 python3)
 set(_skycue_icao_skip "")
 if(NOT EXISTS "${_skycue_gen_icao}")
-  set(_skycue_icao_skip "scripts/gen-icao-tables.py not found")
+  set(_skycue_icao_skip "scripts/fixtures/gen-icao-tables.py not found")
 elseif(NOT EXISTS "${_skycue_app_pure}")
   set(_skycue_icao_skip "www/app_pure.js not found")
 elseif(NOT SKYCUE_PYTHON3)
@@ -435,20 +435,20 @@ skycue_set_warnings(test_capture)
 add_test(NAME capture COMMAND test_capture)
 set_tests_properties(capture PROPERTIES TIMEOUT 60)
 
-# The sanitizer canary (scripts/run-sanitizers.sh --canary); never built by
+# The sanitizer canary (scripts/dev/run-sanitizers.sh --canary); never built by
 # default.
 add_executable(sanitizer_canary EXCLUDE_FROM_ALL sanitizer/canary.cpp)
 target_link_libraries(sanitizer_canary PRIVATE Threads::Threads)
 
 # fuzz_smoke: every libFuzzer harness for 5 s on its seeds, through
-# scripts/run-fuzz.sh. fuzz_build (fixture setup) builds the harnesses first,
+# scripts/dev/run-fuzz.sh. fuzz_build (fixture setup) builds the harnesses first,
 # since ctest has no target dependencies.
 get_filename_component(_skycue_run_fuzz
-  "${PROJECT_SOURCE_DIR}/scripts/run-fuzz.sh" ABSOLUTE)
+  "${PROJECT_SOURCE_DIR}/scripts/dev/run-fuzz.sh" ABSOLUTE)
 if(NOT SKYCUE_FUZZ)
   skycue_skip_test(fuzz_smoke "SKYCUE_FUZZ is OFF (fuzz harnesses build with clang only)")
 elseif(NOT EXISTS "${_skycue_run_fuzz}")
-  skycue_skip_test(fuzz_smoke "scripts/run-fuzz.sh not found")
+  skycue_skip_test(fuzz_smoke "scripts/dev/run-fuzz.sh not found")
 else()
   get_property(_skycue_fuzz_names GLOBAL PROPERTY SKYCUE_FUZZ_TARGETS)
   set(_skycue_fuzz_bins "")
@@ -468,17 +468,17 @@ else()
 endif()
 
 # static_analysis: clang-tidy over skycue's own sources, through
-# scripts/run-static.sh --tidy-only (it configures its own tree under this
+# scripts/dev/run-static.sh --tidy-only (it configures its own tree under this
 # build directory); fails on any unsuppressed warning.
 get_filename_component(_skycue_run_static
-  "${PROJECT_SOURCE_DIR}/scripts/run-static.sh" ABSOLUTE)
+  "${PROJECT_SOURCE_DIR}/scripts/dev/run-static.sh" ABSOLUTE)
 find_program(SKYCUE_CLANG_TIDY clang-tidy)
 if(NOT SKYCUE_STATIC_TESTS)
   skycue_skip_test(static_analysis "SKYCUE_STATIC_TESTS is OFF")
 elseif(NOT SKYCUE_CLANG_TIDY)
   skycue_skip_test(static_analysis "clang-tidy not found")
 elseif(NOT EXISTS "${_skycue_run_static}")
-  skycue_skip_test(static_analysis "scripts/run-static.sh not found")
+  skycue_skip_test(static_analysis "scripts/dev/run-static.sh not found")
 else()
   add_test(NAME static_analysis
     COMMAND bash ${_skycue_run_static} --tidy-only

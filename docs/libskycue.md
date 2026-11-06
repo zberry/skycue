@@ -392,7 +392,7 @@ A Hello's keyframe interval (also clamped to at least 10 ms) replaces
   `LOCAL-DROP` for a drop the client made itself). Run it with the same
   transport and address as your program to see what you should be getting;
   `--timeout S` exits 3 if nothing arrives. Its source,
-  `skycue-dump/main.cpp`, shows poll mode and `onFrame` in use.
+  `tools/skycue-dump.cpp`, shows poll mode and `onFrame` in use.
 
 ## Compatibility promises
 

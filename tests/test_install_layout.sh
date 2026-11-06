@@ -72,7 +72,7 @@ if is_on "$system_files"; then
   if is_on "$package_config"; then
     grep -qx 'STATE_DIR=/var/lib/skycue' "$root$conf" || fail "$conf is not the packaged config"
   else
-    cmp -s "$root$conf" "$(dirname "$0")/../etc/skycue.conf.example" \
+    cmp -s "$root$conf" "$(dirname "$0")/../packaging/skycue.conf.example" \
       || fail "$conf is not the example as it is in etc/"
   fi
   [ -f "$root$unit" ] || fail "not installed: $unit"

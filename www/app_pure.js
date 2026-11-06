@@ -100,7 +100,7 @@
   function mapStyle(stored) { return stored === 'dark' ? 'dark' : 'light'; }
   function tileFilter(style) { return mapStyle(style) === 'dark' ? DARK_TILE_FILTER : ''; }
 
-  // Overlays (scripts/make-overlays.sh). Borders: admin0 (countries) at
+  // Overlays (scripts/maps/make-overlays.sh). Borders: admin0 (countries) at
   // every zoom, admin1 (states, provinces) from zoom 5. Style per map style:
   // dark lines on the light tiles, light ones on the dark.
   var ADMIN1_MIN_ZOOM = 5;

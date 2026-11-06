@@ -13,12 +13,12 @@ stratux="$fixtures/raw/stratux-uat-2015.log.gz"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-# fixtures/raw/ is fetched by scripts/fetch-test-captures.sh (fixtures/README.md):
+# fixtures/raw/ is fetched by scripts/fixtures/fetch-test-captures.sh (fixtures/README.md):
 # without it the sections that read those captures are skipped and the
 # checks on generated inputs still run.
 have_raw=1
 for f in "$modes" "$uat" "$stratux"; do
-  [ -e "$f" ] || { have_raw=0; echo "SKIP the fixture sections: $f not fetched: run scripts/fetch-test-captures.sh"; break; }
+  [ -e "$f" ] || { have_raw=0; echo "SKIP the fixture sections: $f not fetched: run scripts/fixtures/fetch-test-captures.sh"; break; }
 done
 [ -e "$iqgen" ] || fail "$iqgen missing"
 # A Mode S input for the usage and option errors, which do not need the capture.

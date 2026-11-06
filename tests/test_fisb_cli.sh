@@ -13,9 +13,9 @@ received="$fixtures/fisb/received-with-uplinks.jsonl"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-# The captures are fetched by scripts/fetch-test-captures.sh (fixtures/README.md).
+# The captures are fetched by scripts/fixtures/fetch-test-captures.sh (fixtures/README.md).
 for f in "$sample" "$tg30" "$received"; do
-  [ -e "$f" ] || { echo "SKIP: $f not fetched: run scripts/fetch-test-captures.sh"; exit 77; }
+  [ -e "$f" ] || { echo "SKIP: $f not fetched: run scripts/fixtures/fetch-test-captures.sh"; exit 77; }
 done
 for f in "$fisb" "$golden_sha"; do [ -e "$f" ] || fail "$f missing"; done
 
@@ -57,7 +57,7 @@ cmp -s "$tmp/a.out" "$tmp/b.out" || { diff "$tmp/a.out" "$tmp/b.out"; fail "(b) 
 cmp -s "$tmp/c1.jsonl" "$tmp/c2.jsonl" || fail "(c) output differs between runs (or --ref-date changed t= lines)"
 [ -s "$tmp/c2.err" ] && { cat "$tmp/c2.err"; fail "(c) warned with every line timed"; }
 # Every time in the output (received included) derives from the t= stamps: exact comparison,
-# by hash (scripts/fisb-golden.md says how to refresh it).
+# by hash (docs/fisb-golden.md says how to refresh it).
 want=$(tr -d ' \n' <"$golden_sha")
 got=$(sha256sum "$tmp/c1.jsonl" | cut -d' ' -f1)
 if [ "$got" != "$want" ]; then

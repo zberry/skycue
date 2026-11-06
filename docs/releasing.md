@@ -22,7 +22,7 @@ version throughout.
    `skycue maintainers <skycue@users.noreply.github.com>`) and one at the top
    of `%changelog` in `packaging/rpm/skycue.spec`
    (`* <date> skycue maintainers <skycue@users.noreply.github.com> - 0.2.0-1`),
-   saying the same thing. Run `scripts/fetch-test-captures.sh` first so the
+   saying the same thing. Run `scripts/fixtures/fetch-test-captures.sh` first so the
    suite runs the capture tests, then the full suite. The metadata test checks that both agree with the
    `project()` version:
 
@@ -44,7 +44,7 @@ version throughout.
    the stack repository pins.
 
    ```sh
-   scripts/make-source-tarball.sh          # -o DIR for another directory than dist/
+   packaging/make-source-tarball.sh          # -o DIR for another directory than dist/
    ```
 
 5. **Build and verify the six packages.** Each target builds in its own
@@ -62,13 +62,13 @@ version throughout.
    ```sh
    for t in debian12-amd64 debian12-arm64 debian13-amd64 debian13-arm64; do
      a=${t#*-}
-     scripts/build-package.sh "$t" --source dist/skycue-0.2.0.tar.gz &&
+     packaging/build-package.sh "$t" --source dist/skycue-0.2.0.tar.gz &&
      d=${t%-*}; d=${d#debian}
-     scripts/verify-package.sh "$t" "dist/$t/skycue_0.2.0-1~deb${d}u1_${a}.deb" "dist/$t/libskycue-dev_0.2.0-1~deb${d}u1_${a}.deb" || break
+     packaging/verify-package.sh "$t" "dist/$t/skycue_0.2.0-1~deb${d}u1_${a}.deb" "dist/$t/libskycue-dev_0.2.0-1~deb${d}u1_${a}.deb" || break
    done
    for t in el8 el9; do
-     scripts/build-package.sh "$t" --source dist/skycue-0.2.0.tar.gz &&
-     scripts/verify-package.sh "$t" "dist/$t/skycue-0.2.0-1.$t.x86_64.rpm" "dist/$t/skycue-devel-0.2.0-1.$t.x86_64.rpm" || break
+     packaging/build-package.sh "$t" --source dist/skycue-0.2.0.tar.gz &&
+     packaging/verify-package.sh "$t" "dist/$t/skycue-0.2.0-1.$t.x86_64.rpm" "dist/$t/skycue-devel-0.2.0-1.$t.x86_64.rpm" || break
    done
    ```
 

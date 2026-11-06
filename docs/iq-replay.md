@@ -13,7 +13,7 @@ There are two sources of IQ files:
 - **`skycue-iqgen`** synthesises CU8 files from the recordings already in
   `tests/fixtures/raw/`. You get exact ground truth and any length you
   want.
-- **`scripts/fetch-iq-samples.sh`** fetches one public off-air 1090 MHz
+- **`scripts/fixtures/fetch-iq-samples.sh`** fetches one public off-air 1090 MHz
   capture (Porto, Zenodo 23342598, CC BY 4.0) and resamples it for readsb.
   It gives an independent check on real signals.
 
@@ -254,8 +254,8 @@ According to its own readme:
 On a machine with network access:
 
 ```sh
-scripts/fetch-iq-samples.sh                 # cache: build/iq-samples
-scripts/fetch-iq-samples.sh --cache DIR
+scripts/fixtures/fetch-iq-samples.sh                 # cache: build/iq-samples
+scripts/fixtures/fetch-iq-samples.sh --cache DIR
 ```
 
 The script works in this order:

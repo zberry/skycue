@@ -222,7 +222,7 @@ none), `operator` the ids read from it, `operator_rejected` its lines that
 did not parse and `operator_overflow` the ids past the 250,000 cap.
 
 `keys` has every `skycue.conf` key, in the order of
-`etc/skycue.conf.example`. `value` is the value running, spelled as
+`packaging/skycue.conf.example`. `value` is the value running, spelled as
 `skycue.conf` would (`yes`/`no`, `host:port host:port`, `""` for an unset
 string). `source` is where it came from, the first that applies:
 `overlay` (`MAX_RANGE_NM` or `MIN_ELEVATION_DEG` set by the runtime
@@ -242,7 +242,7 @@ set, else the www directory; `www/` below): when `www/tiles/meta.json` exists (w
 the tile preparation script) its `minZoom`/`maxZoom` are passed through;
 otherwise the zoom directories `www/tiles/<z>/` that exist give the range;
 `{"tiles":false,...}` when there are none. `overlays` (always the last key)
-is true when `www/overlays/meta.json` (written by `scripts/make-overlays.sh`)
+is true when `www/overlays/meta.json` (written by `scripts/maps/make-overlays.sh`)
 is readable and a JSON object; the page fetches that file only then.
 
 ### Map tiles
@@ -250,7 +250,7 @@ is readable and a JSON object; the page fetches that file only then.
 Tiles are optional static files under `www/tiles/` (or `MAP_DIR/tiles/`
 when `MAP_DIR` is set; `/overlays/` likewise), laid out
 `tiles/{z}/{x}/{y}.png` (XYZ scheme, Web Mercator, 256 px), served like any
-other file (with `Cache-Control: max-age=86400`). `scripts/make-tiles.sh`
+other file (with `Cache-Control: max-age=86400`). `scripts/maps/make-tiles.sh`
 makes them from Natural Earth and writes `tiles/meta.json`:
 
 ```json
@@ -273,7 +273,7 @@ also reads `tiles/meta.json` itself for `regions`: a tile that exists but
 is not wholly inside the bbox of a region with its zoom is on a region's
 edge, and its nearest ancestor is drawn underneath it so that its
 transparent part is not blank. URLs that 404 are remembered for 60 s. See
-`scripts/make-tiles.md`.
+`docs/make-tiles.md`.
 
 ### The state object
 

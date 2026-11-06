@@ -34,7 +34,7 @@ License: Apache-2.0
 Comment: skycue's own generator scripts and notes for the FIS-B fixtures.
  The third-party test captures (stratux, dump978, fisb-decode, pyModeS) and
  the files derived from them are not part of the source or of any binary
- package: scripts/fetch-test-captures.sh downloads them on demand for tests
+ package: scripts/fixtures/fetch-test-captures.sh downloads them on demand for tests
  and tests/fixtures/README.md gives each one's origin and licence text.
 
 License: Apache-2.0

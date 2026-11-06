@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests scripts/gen-capture-seeds.py and its use by scripts/run-fuzz.sh.
+# Tests scripts/fixtures/gen-capture-seeds.py and its use by scripts/dev/run-fuzz.sh.
 #
 # The generator needs the fetched captures (tests/fixtures/raw/*.gz,
 # fisb/tg30.978, fisb/received-with-uplinks.jsonl; override the directory with
@@ -7,7 +7,7 @@
 #   - an empty fixtures dir: exit 3, nothing written;
 #   - with the captures: two runs are byte-identical, and each target gets
 #     exactly the seeds docs/hardening.md lists;
-#   - while fuzz/seeds still holds the committed copies: every generated file
+#   - while tests/fuzz/seeds still holds the committed copies: every generated file
 #     is byte-identical to the committed seed of the same name;
 #   - run-fuzz.sh (with stub harnesses, no clang) puts committed and generated
 #     seeds into each corpus, prints a SKIP line for a missing generated set
@@ -17,7 +17,7 @@ set -u
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-gen="$repo/scripts/gen-capture-seeds.py"
+gen="$repo/scripts/fixtures/gen-capture-seeds.py"
 fx=${SKYCUE_FIXTURES:-$repo/tests/fixtures}
 
 tmp=$(mktemp -d)
@@ -33,7 +33,7 @@ check() { # description, command...
 }
 count() { find "$1" -type f 2> /dev/null | wc -l; }
 
-[ -f "$gen" ] || { bad "scripts/gen-capture-seeds.py missing"; exit 1; }
+[ -f "$gen" ] || { bad "scripts/fixtures/gen-capture-seeds.py missing"; exit 1; }
 
 # ---- empty fixtures dir: exit 3, nothing written ----
 mkdir -p "$tmp/empty"
@@ -70,7 +70,7 @@ done
 
 # A seeds tree as it is after the capture-derived seeds are removed.
 stripped="$tmp/seeds"
-cp -r "$repo/fuzz/seeds" "$stripped"
+cp -r "$repo/tests/fuzz/seeds" "$stripped"
 rm -f "$stripped"/raw_formats/seed-{1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18}.txt
 rm -f "$stripped"/fisb_decoder/seed-{1,2,3,4,5,6}.bin "$stripped"/fisb_decoder/seed-{7,8,9,10,11,12}.txt
 rm -f "$stripped"/iqgen_coding/seed-{1,2}.bin
@@ -79,7 +79,7 @@ rm -f "$stripped"/recording/seed-{1,2,3,4,5,6}.jsonl
 runfuzz() { # work-name, fixtures dir, extra args...
   local w=$1 f=$2
   shift 2
-  STUB_LIST="$tmp/$w.list" bash "$repo/scripts/run-fuzz.sh" all --seconds 1 \
+  STUB_LIST="$tmp/$w.list" bash "$repo/scripts/dev/run-fuzz.sh" all --seconds 1 \
     --bin-dir "$stubs" --work "$tmp/$w" --findings "$tmp/$w-findings" \
     --seeds "$stripped" --fixtures "$f" "$@" > "$tmp/$w.out" 2>&1
 }
@@ -103,7 +103,7 @@ done
 mkdir -p "$tmp/seeds-none"
 cp -r "$stripped"/. "$tmp/seeds-none/"
 rm -f "$tmp/seeds-none"/fisb_decoder/*
-STUB_LIST="$tmp/none.list" bash "$repo/scripts/run-fuzz.sh" fisb_decoder --seconds 1 --bin-dir "$stubs" \
+STUB_LIST="$tmp/none.list" bash "$repo/scripts/dev/run-fuzz.sh" fisb_decoder --seconds 1 --bin-dir "$stubs" \
   --work "$tmp/none" --findings "$tmp/none-findings" --seeds "$tmp/seeds-none" --fixtures "$tmp/empty" \
   > "$tmp/none.out" 2>&1
 rc=$?
@@ -117,7 +117,7 @@ fi
 if [ ! -f "$fx/raw/uat-sample.txt.gz" ] || [ ! -f "$fx/raw/stratux-uat-2015.log.gz" ] \
   || [ ! -f "$fx/raw/modes-120s.csv.gz" ] || [ ! -f "$fx/fisb/tg30.978" ] \
   || [ ! -f "$fx/fisb/received-with-uplinks.jsonl" ]; then
-  echo "SKIP: the captures are not fetched (run scripts/fetch-test-captures.sh); nothing to generate from" >&2
+  echo "SKIP: the captures are not fetched (run scripts/fixtures/fetch-test-captures.sh); nothing to generate from" >&2
   [ "$fails" = 0 ] || exit 1
   exit 77
 fi
@@ -135,9 +135,9 @@ done
 compared=0
 for f in "$tmp"/a/*/*; do
   rel=${f#"$tmp/a/"}
-  [ -f "$repo/fuzz/seeds/$rel" ] || continue
+  [ -f "$repo/tests/fuzz/seeds/$rel" ] || continue
   compared=$((compared + 1))
-  cmp -s "$f" "$repo/fuzz/seeds/$rel" || bad "differs from the committed seed: $rel"
+  cmp -s "$f" "$repo/tests/fuzz/seeds/$rel" || bad "differs from the committed seed: $rel"
 done
 if [ "$compared" -gt 0 ]; then
   ok "$compared generated seeds byte-identical to the committed ones"

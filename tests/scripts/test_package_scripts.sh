@@ -2,7 +2,7 @@
 # build-package.sh / verify-package.sh argument handling and the binfmt check, without podman.
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
-b=$here/scripts/build-package.sh
+b=$here/packaging/build-package.sh
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: test_package_scripts: $*"; exit 1; }
 # The build container exports its own factor; the checks below set it themselves.
@@ -19,7 +19,7 @@ grep -q 'would run:' <<<"$out" && fail "missing binfmt: printed a dry-run line b
 native=debian12-amd64; [ "$arch" = aarch64 ] && native=debian12-arm64
 narch=amd64; [ "$arch" = aarch64 ] && narch=arm64
 out=$(bash "$b" "$native" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1) || fail "native dry-run failed: $out"
-grep -q 'would run: podman build .*containers/Containerfile.debian12' <<<"$out" || fail "no image build line"
+grep -q 'would run: podman build .*packaging/containers/Containerfile.debian12' <<<"$out" || fail "no image build line"
 grep -q "would run: podman run .*skycue-$pv.tar.gz" <<<"$out" || fail "no build run line"
 # The run: network allowed, the tarball read-only, the artefacts in dist/<target>/, slow factor 1 on the native arch.
 run=$(grep 'would run: podman run ' <<<"$out")
@@ -69,8 +69,8 @@ fi
 # in this checkout's dist/): a failing podman or inner script is exit 1 whatever its status;
 # a build that leaves the packages prints their dist/ paths, the deb revision -1~debNNu1.
 fr=$tmp/repo
-mkdir -p "$fr/scripts" "$fr/containers" "$tmp/pbin"
-cp "$b" "$fr/scripts/" && cp "$here/CMakeLists.txt" "$fr/" || fail "cannot copy the repo layout"
+mkdir -p "$fr/packaging/containers" "$tmp/pbin"
+cp "$b" "$fr/packaging/" && cp "$here/CMakeLists.txt" "$fr/" || fail "cannot copy the repo layout"
 cat > "$tmp/pbin/podman" <<'EOS'
 #!/bin/bash
 # STUB_RUN_RC: the exit status of "podman run"; with 0 the packages named in STUB_PKGS appear in /out.
@@ -83,25 +83,25 @@ exit 0
 EOS
 chmod +x "$tmp/pbin/podman"
 for st in 2 3 125; do
-  out=$(PATH=$tmp/pbin:$PATH STUB_RUN_RC=$st bash "$fr/scripts/build-package.sh" "$native" --source "$tmp/skycue-$pv.tar.gz" 2>&1); rc=$?
+  out=$(PATH=$tmp/pbin:$PATH STUB_RUN_RC=$st bash "$fr/packaging/build-package.sh" "$native" --source "$tmp/skycue-$pv.tar.gz" 2>&1); rc=$?
   [ $rc -eq 1 ] || fail "podman run exit $st: build-package exit $rc, want 1"
 done
 na=${native#*-}
 for d in 12 13; do
   out=$(PATH=$tmp/pbin:$PATH STUB_PKGS="skycue_${pv}-1~deb${d}u1_${na}.deb libskycue-dev_${pv}-1~deb${d}u1_${na}.deb" \
-        bash "$fr/scripts/build-package.sh" "debian$d-$na" --source "$tmp/skycue-$pv.tar.gz" 2>&1) ||
+        bash "$fr/packaging/build-package.sh" "debian$d-$na" --source "$tmp/skycue-$pv.tar.gz" 2>&1) ||
     fail "stub build debian$d-$na failed: $out"
   [ "$(tail -n 2 <<<"$out")" = "dist/debian$d-$na/skycue_${pv}-1~deb${d}u1_${na}.deb
 dist/debian$d-$na/libskycue-dev_${pv}-1~deb${d}u1_${na}.deb" ] || fail "debian$d-$na artefact names: $out"
 done
 rm -rf "$fr/dist"
 out=$(PATH=$tmp/pbin:$PATH STUB_PKGS="skycue_${pv}-1_${na}.deb libskycue-dev_${pv}-1_${na}.deb" \
-      bash "$fr/scripts/build-package.sh" "debian12-$na" --source "$tmp/skycue-$pv.tar.gz" 2>&1)
+      bash "$fr/packaging/build-package.sh" "debian12-$na" --source "$tmp/skycue-$pv.tar.gz" 2>&1)
 [ $? -eq 1 ] || fail "debs without the ~deb12u1 revision accepted"
 
 # build-package-inner.sh's deb_changelog prepends the release entry to a copy of the changelog:
 # <v>-1~deb12u1 for bookworm, <v>-1~deb13u1 for trixie, same identity and date as the entry below.
-inner_b=$here/containers/build-package-inner.sh
+inner_b=$here/packaging/containers/build-package-inner.sh
 fns=$(sed -n '/^deb_changelog() {/,/^}/p' "$inner_b")
 grep -q '^deb_changelog() {' <<<"$fns" || fail "build-package-inner.sh has no deb_changelog()"
 for d in "12 bookworm" "13 trixie"; do
@@ -137,7 +137,7 @@ cp "$here/debian/changelog" "$tmp/changelog"
 bash -c "set -euo pipefail; $fns"'
 deb_changelog "$1" "$2" debian11' _ "$tmp/changelog" "$pv" >/dev/null 2>&1 && fail "deb_changelog accepted debian11"
 
-v=$here/scripts/verify-package.sh
+v=$here/packaging/verify-package.sh
 bash "$v" nonsense "$tmp/x.deb" >/dev/null 2>&1; [ $? -eq 2 ] || fail "verify: bad target is not exit 2"
 bash "$v" $native "$tmp/missing.deb" >/dev/null 2>&1; [ $? -eq 2 ] || fail "verify: missing package is not exit 2"
 touch "$tmp/skycue_${pv}-1~deb12u1_${farch}.deb" "$tmp/skycue_${pv}-1~deb12u1_${narch}.deb" "$tmp/libskycue-dev_${pv}-1~deb12u1_${narch}.deb" "$tmp/skycue-${pv}-1.el9.x86_64.rpm"
@@ -152,7 +152,7 @@ grep -q qemu-user-static <<<"$out" || fail "verify: missing binfmt: no qemu-user
 # Dry run: phase 1 on the Containerfile's base image (not the build image), phase 2 offline.
 out=$(bash "$v" $native "$tmp/skycue_${pv}-1~deb12u1_${narch}.deb" "$tmp/libskycue-dev_${pv}-1~deb12u1_${narch}.deb" \
         --source "$tmp/skycue-$pv.tar.gz" --systemd --dry-run 2>&1) || fail "verify: dry-run failed: $out"
-base=$(sed -n 's/^FROM[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' "$here/containers/Containerfile.debian12" | head -n 1)
+base=$(sed -n 's/^FROM[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' "$here/packaging/containers/Containerfile.debian12" | head -n 1)
 [ -n "$base" ] || fail "verify: no FROM in Containerfile.debian12"
 p1=$(grep 'would run: podman run ' <<<"$out" | head -n 1)
 grep -qF " $base " <<<"$p1" || fail "verify: phase 1 does not start from $base: $p1"
@@ -181,7 +181,7 @@ if [ "$arch" = x86_64 ]; then
 fi
 # verify-package-inner.sh's unit_fail tells a namespace failure (226/NAMESPACE,
 # a rootless podman limit) from a unit fault, with stand-in systemctl/journalctl.
-inner=$here/containers/verify-package-inner.sh
+inner=$here/packaging/containers/verify-package-inner.sh
 mkdir -p "$tmp/sd"
 cat > "$tmp/sd/systemctl" <<'EOS'
 #!/bin/sh

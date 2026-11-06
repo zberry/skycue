@@ -12,7 +12,7 @@
 namespace skycued {
 
 // Settings from skycue.conf. The grammar is the one documented in
-// etc/skycue.conf.example and implemented by load_config in skycue-start.sh.
+// packaging/skycue.conf.example and implemented by load_config in skycue-start.sh.
 struct Config {
     double receiver_lat = NAN, receiver_lon = NAN, receiver_alt_m = 0, antenna_height_m = 0;
     uint16_t dump978_raw_port = 30978, dump978_json_port = 30979, readsb_json_port = 30047,
@@ -75,7 +75,7 @@ Config parseConfigFile(const std::string& path);
 // one in the running STATE_DIR.
 Config parseConfigFile(const std::string& path, const std::string& overrides_path);
 Config parseConfigText(const std::string& text, const std::string& name_for_errors);
-const std::vector<std::string>& knownConfigKeys();  // exactly the keys of etc/skycue.conf.example
+const std::vector<std::string>& knownConfigKeys();  // exactly the keys of packaging/skycue.conf.example
 
 // The overrides file: skycued's own writes ("save as baseline") of the live
 // filter keys when STATE_DIR is set, so skycue.conf (which may belong to

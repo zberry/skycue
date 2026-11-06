@@ -533,7 +533,7 @@ std::string eventJson(const EngineEvent& event)
 
 std::string tilesAvailableJson(const std::string& dir)
 {
-    // "overlays": whether overlays/meta.json (scripts/make-overlays.sh) is a usable JSON object.
+    // "overlays": whether overlays/meta.json (scripts/maps/make-overlays.sh) is a usable JSON object.
     bool overlays = false;
     if (const auto text = readSmallFile(dir + "/overlays/meta.json", 64 * 1024))
         overlays = JsonObject::parse(*text).has_value();

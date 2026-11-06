@@ -4,7 +4,7 @@
   `gen_readsb_jsonl.py` (see its docstring).
 - `raw/`: real receiver captures, used by `test_rawtools.sh` and handy for
   `skycue-start.sh replay-raw`. They are third-party data under their own
-  licences: fetched by `scripts/fetch-test-captures.sh`, not in the repository
+  licences: fetched by `scripts/fixtures/fetch-test-captures.sh`, not in the repository
   and not distributed in releases. The directory is git-ignored.
 - `fisb/`: FIS-B uplink test data (fisb-decode's `tg30.978`, fetched, and
   `received-with-uplinks.jsonl` and `received-tg30.jsonl`, regenerated from the
@@ -32,7 +32,7 @@
 These files are not in the repository. Without them the test cases that read
 them are skipped (the skip message names the file).
 
-`scripts/fetch-test-captures.sh [--cache DIR] [--fixtures DIR] [--offline]`
+`scripts/fixtures/fetch-test-captures.sh [--cache DIR] [--fixtures DIR] [--offline]`
 downloads the four captures below from their upstream repositories at the
 pinned commits, checks their SHA-256 values and installs `raw/modes-120s.csv.gz`,
 `raw/uat-sample.txt.gz`, `raw/stratux-uat-2015.log.gz` and `fisb/tg30.978`, then

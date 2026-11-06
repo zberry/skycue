@@ -150,7 +150,7 @@ grep -q '^== FIS-B' "$tmp/a.out" && fail "(i) FIS-B section on a recording witho
 "$stats" --json "$sample" | python3 -I -c 'import json,sys; assert json.load(sys.stdin)["fisb"] is None' ||
   fail "(i) --json fisb not null without uplinks"
 uplinks="$fixtures/fisb/received-with-uplinks.jsonl"
-# The capture-derived recording is fetched by scripts/fetch-test-captures.sh.
+# The capture-derived recording is fetched by scripts/fixtures/fetch-test-captures.sh.
 if [ -e "$uplinks" ]; then
 "$stats" "$uplinks" >"$tmp/i.out" 2>"$tmp/i.err" || { cat "$tmp/i.err"; fail "(i) exit"; }
 fs=$(section "$tmp/i.out" "FIS-B products by ID")
@@ -176,7 +176,7 @@ m = f["mosaics"][0]
 assert (m["key"], m["blocks"], m["published"]) == ("63", 671, 1), m
 assert f["counters"]["store.applied"] == 561, f["counters"]' || fail "(i) --json fisb section"
 else
-  echo "SKIP (i): $uplinks not fetched: run scripts/fetch-test-captures.sh"
+  echo "SKIP (i): $uplinks not fetched: run scripts/fixtures/fetch-test-captures.sh"
 fi
 
 echo "PASS"

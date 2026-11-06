@@ -1,5 +1,5 @@
 #!/bin/bash
-# scripts/gen-icao-tables.py --check on broken copies of www/app_pure.js: a
+# scripts/fixtures/gen-icao-tables.py --check on broken copies of www/app_pure.js: a
 # renamed country is stale (1); an overlap, a missing table and a bad row are
 # errors (2); strings and comments after the tables are not read (0).
 # usage: test_icao_generator.sh PYTHON3 GEN_ICAO_TABLES_PY APP_PURE_JS ICAO_TABLES_INC WORK_DIR

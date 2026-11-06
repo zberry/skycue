@@ -1,4 +1,4 @@
-# The packaged skycue.conf, written from etc/skycue.conf.example.
+# The packaged skycue.conf, written from packaging/skycue.conf.example.
 # Script mode: cmake -DIN=<skycue.conf.example> -DOUT=<skycue.conf> -P PackageConfig.cmake
 #
 # The package-shape values (STATE_DIR, MAP_DIR, the list files under

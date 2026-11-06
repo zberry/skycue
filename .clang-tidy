@@ -1,4 +1,4 @@
-# clang-tidy for skycue (scripts/run-static.sh; docs/hardening.md "Static
+# clang-tidy for skycue (scripts/dev/run-static.sh; docs/hardening.md "Static
 # analysis"). A conservative set: bugprone-*, cert-*, performance-* and a few
 # readability checks that cannot change behaviour. modernize-* and the rest
 # of readability-* stay off. Each check turned off below has its reason on
@@ -31,6 +31,6 @@ CheckOptions:
   bugprone-implicit-widening-of-multiplication-result.IgnoreConstantIntExpr: true
 WarningsAsErrors: ''
 # skycue's own sources only: not system headers, not the third-party
-# headers, not tests/ or fuzz/.
-HeaderFilterRegex: '.*/(skycued|libskycue|skycue-[a-z]+)/.*'
+# headers, not tests/.
+HeaderFilterRegex: '.*/(skycued|libskycue|tools)/.*'
 FormatStyle: none

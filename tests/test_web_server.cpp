@@ -514,7 +514,7 @@ BOOST_AUTO_TEST_CASE(static_index_served)
     BOOST_TEST(r.status == 200u);
     BOOST_TEST(r.body == "{\"tiles\":false,\"overlays\":false}");
     ::mkdir((f.www + "/tiles").c_str(), 0755);
-    // As scripts/make-tiles.sh writes it: the bbox array and strings are ignored.
+    // As scripts/maps/make-tiles.sh writes it: the bbox array and strings are ignored.
     writeFile(f.www + "/tiles/meta.json", "{\"minZoom\":5,\"maxZoom\":9,\"bbox\":[-10.5,35,30,60],"
                                           "\"source\":\"Natural Earth 1:10m\",\"generated\":\"2026-11-01T00:00:00Z\"}");
     BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":true,\"minZoom\":5,\"maxZoom\":9,\"overlays\":false}");

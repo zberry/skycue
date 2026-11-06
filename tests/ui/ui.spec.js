@@ -1691,7 +1691,7 @@ test('radar_opacity_disabled_without_products', async ({ page }) => {
 });
 
 test.describe('fisb radar (tg30)', () => {
-  test.skip(!RADAR_BASE, 'FIS-B captures not fetched: run scripts/fetch-test-captures.sh');
+  test.skip(!RADAR_BASE, 'FIS-B captures not fetched: run scripts/fixtures/fetch-test-captures.sh');
   test.use({ baseURL: RADAR_BASE });
 
   test('radar_canvas_drawn_when_radar_present', async ({ page }) => {
@@ -2090,7 +2090,7 @@ test.describe('fisb radar (tg30)', () => {
 });
 
 test.describe('fisb text and airspace (2015 sample)', () => {
-  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fetch-test-captures.sh');
+  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fixtures/fetch-test-captures.sh');
   test.use({ baseURL: FISB_BASE });
 
   test('header_fits_one_row_at_1280_with_fisb_stats', async ({ page }) => {
@@ -2855,7 +2855,7 @@ test.describe('receiver tab (pingsim)', () => {
 });
 
 test.describe('receiver tab (FIS-B, 2015 sample)', () => {
-  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fetch-test-captures.sh');
+  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fixtures/fetch-test-captures.sh');
   test.use({ baseURL: FISB_BASE });
 
   // Clicking the station marker deselects, like a map click; while the
@@ -3784,7 +3784,7 @@ test('stats_weather_follows_uat_seen', async ({ page }) => {
 });
 
 test.describe('stats weather (FIS-B daemon)', () => {
-  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fetch-test-captures.sh');
+  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fixtures/fetch-test-captures.sh');
   test.use({ baseURL: FISB_BASE });
   test('stats_weather_uat_lines_shown_then_hidden', async ({ page }) => {
     expect((await apiAt(FISB_BASE, '/api/stats/summary')).body.uat_seen).toBe(true);

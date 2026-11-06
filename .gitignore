@@ -18,12 +18,12 @@ fisb-locations.json.unreadable-*
 skycue.runtime.json
 skycue.runtime.json.rejected
 *.unreadable-*
-# Fuzz findings are copied here by scripts/run-fuzz.sh; only the placeholder
+# Fuzz findings are copied here by scripts/dev/run-fuzz.sh; only the placeholder
 # and the README are tracked.
-/fuzz/findings/*
-!/fuzz/findings/.gitkeep
-!/fuzz/findings/README.md
-# Third-party test captures: fetched by scripts/fetch-test-captures.sh (pinned
+/tests/fuzz/findings/*
+!/tests/fuzz/findings/.gitkeep
+!/tests/fuzz/findings/README.md
+# Third-party test captures: fetched by scripts/fixtures/fetch-test-captures.sh (pinned
 # upstream commits and SHA-256 values), never committed once removed.
 /tests/fixtures/raw/
 /tests/fixtures/fisb/tg30.978

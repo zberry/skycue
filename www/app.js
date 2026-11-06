@@ -232,7 +232,7 @@
         // enlarges the region tiles below it.
         maxNativeZoom: typeof tiles.maxZoom === 'number' ? tiles.maxZoom : 10,
         maxZoom: 14,
-        attribution: 'Made with Natural Earth' // scripts/make-tiles.sh
+        attribution: 'Made with Natural Earth' // scripts/maps/make-tiles.sh
       }).addTo(map);
     } else {
       graticule = L.layerGroup().addTo(map);
@@ -255,7 +255,7 @@
   // ---- map style and overlays ------------------------------------------------
   // View options kept in localStorage (never sent to skycued): the map style
   // (Light: the tiles as baked; Dark: P.tileFilter on the tile pane only)
-  // and two overlays from scripts/make-overlays.sh, Borders and Cities,
+  // and two overlays from scripts/maps/make-overlays.sh, Borders and Cities,
   // offered only when overlays/meta.json lists their files. Without tiles
   // the background is dark, so the overlays use the dark style.
   var VIEW_KEYS = { style: 'skycue.mapStyle', borders: 'skycue.overlay.borders', cities: 'skycue.overlay.cities' };
@@ -3825,13 +3825,13 @@
   wire();
   var tilesReady = request('GET', 'api/tiles-available').catch(function () { return { tiles: false }; }).then(function (tiles) {
     if (!tiles.tiles) return tiles;
-    // The regions (scripts/make-tiles.sh), for the tiles on their edges.
+    // The regions (scripts/maps/make-tiles.sh), for the tiles on their edges.
     return request('GET', 'tiles/meta.json').then(function (m) {
       tiles.regions = m && Array.isArray(m.regions) ? m.regions : null;
       return tiles;
     }, function () { return tiles; });
   });
-  // The overlays (scripts/make-overlays.sh) are optional like the tiles:
+  // The overlays (scripts/maps/make-overlays.sh) are optional like the tiles:
   // api/tiles-available says whether overlays/meta.json exists, so it is
   // fetched only then (no request, no 404, without overlays).
   var overlaysReady = tilesReady.then(function (tiles) {

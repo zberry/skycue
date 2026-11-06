@@ -9,7 +9,7 @@
 SKYCUE_GDAL_IMAGE=ghcr.io/osgeo/gdal:ubuntu-small-3.9.3
 
 # load_config FILE [KEY...]: read FILE in the config grammar (see
-# etc/skycue.conf.example): KEY=value, KEY="value" or KEY='value' lines,
+# packaging/skycue.conf.example): KEY=value, KEY="value" or KEY='value' lines,
 # blank lines and # comments. Nothing in the file is expanded or executed;
 # a later assignment of a key wins. Without KEYs, every key is assigned to
 # the shell variable of its name and must be one of $KNOWN_KEYS (the

@@ -285,7 +285,7 @@ the receiver position in the config must match the capture, or readsb
 cannot decode positions and the range filter drops everything: for files
 made from the bundled Mode S capture use `RECEIVER_LAT=52.0` /
 `RECEIVER_LON=4.5`; for the Porto capture fetched by
-`scripts/fetch-iq-samples.sh` use `RECEIVER_LAT=41.15` /
+`scripts/fixtures/fetch-iq-samples.sh` use `RECEIVER_LAT=41.15` /
 `RECEIVER_LON=-8.61`. Making IQ files (`skycue-iqgen`), the real capture and
 what the decoders recovered from both are described in
 [iq-replay.md](iq-replay.md).
@@ -1190,14 +1190,14 @@ shows the text selected in a box to copy by hand.
 Without tiles the map is a dark background with a 1°/5° latitude/longitude
 grid and a scale bar, which is all the page needs. For coastlines and
 terrain underneath, make tiles on a connected machine with
-`scripts/make-tiles.sh` and put them in `tiles/` under the map directory:
+`scripts/maps/make-tiles.sh` and put them in `tiles/` under the map directory:
 `MAP_DIR` when it is set in `skycue.conf` (`/var/lib/skycue/maps` in the
 packages), else `<prefix>/share/skycue/www/`. The overlays
 (`overlays/`, below) go in the same directory. With `MAP_DIR` set,
 `/tiles/`, `/overlays/` and `/api/tiles-available` are read from it only,
 never from the www directory, and a `MAP_DIR` that does not exist is
 logged as a WARN at start and the map has no tiles or overlays. See
-[scripts/make-tiles.md](../scripts/make-tiles.md) for the sizes and how
+[docs/make-tiles.md](../docs/make-tiles.md) for the sizes and how
 a full-stack bundle can carry them. The page picks them up on its next load.
 
 With the packages, or a source install of `skycue/`, `skycue-make-maps`
@@ -1220,8 +1220,8 @@ each first bakes the whole world at zoom 0–5 (region `global`) unless
 `tiles/meta.json` already has it, then the region asked for (`--around`:
 zoom 6–9, at most 500 nm, the box clamped at the antimeridian and at ±85°
 rather than wrapped, see make-tiles.md; `conus` and `europe`: zoom 6–8;
-`world`: the base alone), then the overlays, with `scripts/make-tiles.sh` and
-`scripts/make-overlays.sh` from `<prefix>/share/skycue/scripts/`. It needs a
+`world`: the base alone), then the overlays, with `scripts/maps/make-tiles.sh` and
+`scripts/maps/make-overlays.sh` from `<prefix>/share/skycue/scripts/`. It needs a
 network connection for the downloads (about 310 MB, kept in the cache:
 `/var/cache/skycue` as root, else `~/.cache/skycue`). Without GDAL on PATH it
 stops with exit status 3 and names both ways to get it: the distribution's
@@ -1233,8 +1233,8 @@ is `/` or that already holds other files but neither `tiles/` nor
 downloading anything (exit 1 otherwise), and as root hands the result to
 the `skycue` user (`--owner` for another). Exit status:
 0 done, 1 failure, 2 usage or config error, 3 a missing tool. With a
-source tree, run `scripts/make-tiles.sh` and `scripts/make-overlays.sh`
-from it as above (`scripts/skycue-make-maps --map-dir DIR` works
+source tree, run `scripts/maps/make-tiles.sh` and `scripts/maps/make-overlays.sh`
+from it as above (`scripts/maps/skycue-make-maps --map-dir DIR` works
 there too, with the scripts beside it).
 
 ### Map style and overlays
@@ -1265,9 +1265,9 @@ Make the overlays on a connected machine, or on any machine whose cache
 already holds the three Natural Earth downloads:
 
 ```sh
-scripts/make-overlays.sh                                   # needs ogr2ogr (GDAL) on PATH
-scripts/make-overlays.sh --container ghcr.io/osgeo/gdal:ubuntu-small-3.9.3   # ogr2ogr in podman/docker
-scripts/make-overlays.sh --dry-run                         # print the commands only
+scripts/maps/make-overlays.sh                                   # needs ogr2ogr (GDAL) on PATH
+scripts/maps/make-overlays.sh --container ghcr.io/osgeo/gdal:ubuntu-small-3.9.3   # ogr2ogr in podman/docker
+scripts/maps/make-overlays.sh --dry-run                         # print the commands only
 cp -r www/overlays build/stage/share/skycue/www/    # or <prefix>/share/skycue/www/, or MAP_DIR
 ```
 
@@ -1540,8 +1540,8 @@ a file that cannot be read stops skycued with exit status 2. At most
 250,000 ids are read from it; the rest are ignored with one WARN giving
 the count (a world-wide `make-locations.py` file is well under that, and
 the script warns when its output is not).
-`scripts/make-locations.py` builds one from OurAirports' public-domain
-data ([scripts/make-locations.md](../scripts/make-locations.md)); the
+`scripts/maps/make-locations.py` builds one from OurAirports' public-domain
+data ([docs/make-locations.md](../docs/make-locations.md)); the
 result is a local file, never committed. Both are served as
 `GET /api/fisb/locations` ([web-api.md](web-api.md#get-apifisblocations)).
 
@@ -1556,8 +1556,8 @@ integration, the API, threading, drops and liveness: [libskycue.md](libskycue.md
 None of this is needed to run skycue, and none of it is in the default build
 or any release. Before changing a parser, the daemon's threading or
 anything that runs for days, run the checks in
-[hardening.md](hardening.md): `scripts/run-sanitizers.sh asan|tsan`,
-`scripts/run-fuzz.sh`, `scripts/run-static.sh` and
+[hardening.md](hardening.md): `scripts/dev/run-sanitizers.sh asan|tsan`,
+`scripts/dev/run-fuzz.sh`, `scripts/dev/run-static.sh` and
 `tests/soak/soak.sh`, with their options, skip rules and how to add a
-fuzz harness for a new parser. What the first sweep found and fixed is in
-[hardening-report-2026-11-03.md](hardening-report-2026-11-03.md).
+fuzz harness for a new parser; the hardening notes also list what each part
+found and fixed.

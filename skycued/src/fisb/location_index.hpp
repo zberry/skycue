@@ -24,7 +24,7 @@ constexpr uint32_t kMaxSamples = 1000;        // the running mean stops weightin
 // Memory bounds: new ids past these are counted and ignored (a WARN once per index).
 constexpr std::size_t kMaxLearnedIds = 20000;
 // Room for a world-wide make-locations.py file (about 100k ids from full
-// OurAirports data); scripts/make-locations.py warns past it and
+// OurAirports data); scripts/maps/make-locations.py warns past it and
 // tests/scripts/test_make_locations.sh pins the two together.
 constexpr std::size_t kMaxOperatorRows = 250000;
 

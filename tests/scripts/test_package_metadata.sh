@@ -17,7 +17,7 @@ v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/CMakeLists.txt"
 id='skycue maintainers <skycue@users.noreply.github.com>'
 [ -f "$here/debian/control" ] || fail "debian/control missing"
 # The committed changelog's top entry is <v>-1. A package build prepends a <v>-1~debNNuM
-# entry in its own copy of the tree (scripts/build-package.sh), so that copy passes too.
+# entry in its own copy of the tree (packaging/build-package.sh), so that copy passes too.
 revs=$(sed -n 's/^skycue (\([^)]*\)).*/\1/p' "$here/debian/changelog" | head -n 2 | tr '\n' ' ')
 case $revs in
   "$v-1 "*) ;;

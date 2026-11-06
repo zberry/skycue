@@ -17,12 +17,12 @@ cleanup() {
 }
 trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-# fixtures/raw/ is fetched by scripts/fetch-test-captures.sh (fixtures/README.md):
+# fixtures/raw/ is fetched by scripts/fixtures/fetch-test-captures.sh (fixtures/README.md):
 # without it the sections that replay those captures, (a)-(c2) and the full
 # stack, are skipped and the rest still runs.
 have_raw=1
 for f in "$csv" "$uat" "$stratux"; do
-  [ -e "$f" ] || { have_raw=0; echo "SKIP (a)-(c2) and full stack: $f not fetched: run scripts/fetch-test-captures.sh"; break; }
+  [ -e "$f" ] || { have_raw=0; echo "SKIP (a)-(c2) and full stack: $f not fetched: run scripts/fixtures/fetch-test-captures.sh"; break; }
 done
 for f in "$rawrec" "$rawplay"; do [ -e "$f" ] || fail "$f missing"; done
 

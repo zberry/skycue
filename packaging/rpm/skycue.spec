@@ -1,8 +1,8 @@
 # skycue for EL8 and EL9. Built from the release source tarball by
-# scripts/build-package.sh, which passes the version (read from
+# packaging/build-package.sh, which passes the version (read from
 # CMakeLists.txt) and, for slow builds, the test timeout factor:
 #   rpmbuild -bb --define "skycue_version <v>" [--define "skycue_slow_factor N"]
-%{!?skycue_version:%{error:define skycue_version (scripts/build-package.sh does)}}
+%{!?skycue_version:%{error:define skycue_version (packaging/build-package.sh does)}}
 
 Name:           skycue
 Version:        %{skycue_version}

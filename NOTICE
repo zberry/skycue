@@ -33,7 +33,7 @@ skycue source and fetched test data
 -----------------------------------
 
 Third-party test captures are fetched on demand by
-scripts/fetch-test-captures.sh and are not distributed with skycue or in its
+scripts/fixtures/fetch-test-captures.sh and are not distributed with skycue or in its
 repository; tests/fixtures/README.md gives each one's origin, licence and
 licence text:
 
@@ -52,7 +52,7 @@ product handling of fisb-decode (same copyright and licence as above). It is
 an independent C++ implementation written from docs/fisb-reference.md; no
 fisb-decode source code is copied into it.
 
-The Mode S CRC and the UAT Reed-Solomon encoder in skycue-iqgen/ are
+The Mode S CRC and the UAT Reed-Solomon encoder in tools/iqgen/ are
 written from the published definitions, with the Reed-Solomon parameters
 taken from dump978's uat_protocol.h and fec.cc (BSD-2-Clause); no readsb or
 libfec code is copied.
@@ -69,6 +69,6 @@ Commons Attribution 4.0 International licence (CC BY 4.0,
 https://creativecommons.org/licenses/by/4.0/legalcode) by Conrado Guimarães
 da Costa, Faculdade de Engenharia da Universidade do Porto. Its recording
 raw_data/recording.bin (1090 MHz, 2.0 MS/s, unsigned 8-bit I/Q) is
-downloaded on demand by scripts/fetch-iq-samples.sh and resampled from 2.0
+downloaded on demand by scripts/fixtures/fetch-iq-samples.sh and resampled from 2.0
 to 2.4 MS/s locally; that resampling is the only change made to it. It is
 not part of this repository or its releases.

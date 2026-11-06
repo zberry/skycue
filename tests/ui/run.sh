@@ -160,7 +160,7 @@ EOP
 fisb_rec="$fixtures/fisb/received-with-uplinks.jsonl"
 radar_rec="$fixtures/fisb/received-tg30.jsonl"
 # The recordings are derived from third-party captures by
-# scripts/fetch-test-captures.sh. Without one, its daemon is not started, its
+# scripts/fixtures/fetch-test-captures.sh. Without one, its daemon is not started, its
 # URL is not exported and ui.spec.js skips the describes that need it; the
 # rest of the suite runs.
 fisb_base="" radar_base=""
@@ -168,13 +168,13 @@ if [ -e "$fisb_rec" ]; then
   fisb_base=$(start_fisb fisb-2015 "$fisb_rec" 37.32 -121.75) || fail "FIS-B skycued (2015) did not come up"
   wait_fisb "$fisb_base" "$(grep -c '"uat_uplink"' "$fisb_rec")" || fail "2015 uplinks not decoded"
 else
-  echo "SKIP: FIS-B captures not fetched ($fisb_rec; run scripts/fetch-test-captures.sh): the 2015-sample FIS-B tests are skipped"
+  echo "SKIP: FIS-B captures not fetched ($fisb_rec; run scripts/fixtures/fetch-test-captures.sh): the 2015-sample FIS-B tests are skipped"
 fi
 if [ -e "$radar_rec" ]; then
   radar_base=$(start_fisb fisb-tg30 "$radar_rec" 40.04 -86.26) || fail "FIS-B skycued (tg30) did not come up"
   wait_fisb "$radar_base" "$(grep -c '"uat_uplink"' "$radar_rec")" || fail "tg30 uplinks not decoded"
 else
-  echo "SKIP: FIS-B captures not fetched ($radar_rec; run scripts/fetch-test-captures.sh): the tg30 radar tests are skipped"
+  echo "SKIP: FIS-B captures not fetched ($radar_rec; run scripts/fixtures/fetch-test-captures.sh): the tg30 radar tests are skipped"
 fi
 
 # Map tiles: one more skycued (the readsb fixture) serving a copy of the www
@@ -193,7 +193,7 @@ for f in "$www"/* "$www"/.[!.]*; do
   case $(basename "$f") in tiles|overlays) continue ;; esac
   cp -r "$f" "$tiles_www/" || fail "tiles www copy"
 done
-# Overlays (scripts/make-overlays.sh) for the map-style cases: one border
+# Overlays (scripts/maps/make-overlays.sh) for the map-style cases: one border
 # line and three cities around the receiver (38.9 N, 77.0 W) of ranks 1, 4
 # and 7, shown from zoom 0, 5 and 7.
 mkdir -p "$tiles_www/overlays" || fail "overlays www dir"

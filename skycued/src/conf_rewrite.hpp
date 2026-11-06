@@ -1,6 +1,6 @@
 #pragma once
 
-// Rewrites values in skycue.conf text (the grammar of etc/skycue.conf.example)
+// Rewrites values in skycue.conf text (the grammar of packaging/skycue.conf.example)
 // while keeping every other byte: comments, blank lines, the order of the
 // keys, other keys' quoting, and the line endings.
 

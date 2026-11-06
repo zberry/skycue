@@ -1,7 +1,7 @@
 #pragma once
 // Fixtures that are not in the repository: the third-party captures
 // (fixtures/raw/*, fisb/tg30.978 and the fisb/received-*.jsonl derived from
-// them), which scripts/fetch-test-captures.sh installs (fixtures/README.md
+// them), which scripts/fixtures/fetch-test-captures.sh installs (fixtures/README.md
 // says why they are not committed). A test case that reads one declares it:
 //
 //   BOOST_AUTO_TEST_CASE(name, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
@@ -31,7 +31,7 @@ inline bool fixture_present(const std::string& rel)  // rel: relative to SKYCUE_
 
 inline std::string fixture_absent_message(const std::string& rel)
 {
-    return "fixture " + rel + " not fetched: run scripts/fetch-test-captures.sh";
+    return "fixture " + rel + " not fetched: run scripts/fixtures/fetch-test-captures.sh";
 }
 
 #if BOOST_VERSION >= 107400

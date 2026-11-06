@@ -14,13 +14,13 @@ tmp=$(mktemp -d)
 made=()
 cleanup() { rm -rf "$tmp"; for f in "${made[@]}"; do rm -f "$f"; done; }
 trap cleanup EXIT
-bash "$here/scripts/make-source-tarball.sh" -o "$tmp/a" >/dev/null 2>&1 || { echo "FAIL: first run"; exit 1; }
-bash "$here/scripts/make-source-tarball.sh" -o "$tmp/b" >/dev/null 2>&1 || { echo "FAIL: second run"; exit 1; }
+bash "$here/packaging/make-source-tarball.sh" -o "$tmp/a" >/dev/null 2>&1 || { echo "FAIL: first run"; exit 1; }
+bash "$here/packaging/make-source-tarball.sh" -o "$tmp/b" >/dev/null 2>&1 || { echo "FAIL: second run"; exit 1; }
 t=$tmp/a/skycue-$v.tar.gz
 [ -f "$t" ] || { echo "FAIL: no $t"; exit 1; }
 cmp -s "$t" "$tmp/b/skycue-$v.tar.gz" || { echo "FAIL: not reproducible"; exit 1; }
 list=$(tar -tzf "$t")
-for want in "skycue-$v/CMakeLists.txt" "skycue-$v/cmake/web-sources.cmake" "skycue-$v/etc/skycue.conf.example" \
+for want in "skycue-$v/CMakeLists.txt" "skycue-$v/cmake/web-sources.cmake" "skycue-$v/packaging/skycue.conf.example" \
             "skycue-$v/sources/leaflet-1.9.4.tgz" "skycue-$v/sources/echarts-5.6.0.tgz"; do
   grep -qx "$want" <<<"$list" || { echo "FAIL: $want missing"; exit 1; }
 done
@@ -40,7 +40,7 @@ for f in tests/fixtures/raw/x tests/fixtures/fisb/tg30.978; do
     mkdir -p "$(dirname "$here/$f")"; : >"$here/$f"; made+=("$here/$f")
   fi
 done
-bash "$here/scripts/make-source-tarball.sh" -o "$tmp/d" >/dev/null 2>&1 || { echo "FAIL: run with untracked files"; exit 1; }
+bash "$here/packaging/make-source-tarball.sh" -o "$tmp/d" >/dev/null 2>&1 || { echo "FAIL: run with untracked files"; exit 1; }
 cmp -s "$t" "$tmp/d/skycue-$v.tar.gz" || { echo "FAIL: untracked files changed the tarball"; exit 1; }
 
 tar -xzf "$t" -C "$tmp"

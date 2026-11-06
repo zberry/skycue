@@ -4,7 +4,7 @@
 // icaoCountry, icaoMilitary, callsignKind, trackClass, trackCountry), in C++
 // so the daemon can count them over the stats ledger. Same rules and tables:
 // the tables are icao_tables.inc, generated from app_pure.js by
-// scripts/gen-icao-tables.py (ctest icao_tables_current), and
+// scripts/fixtures/gen-icao-tables.py (ctest icao_tables_current), and
 // tests/test_icao_class.cpp runs the cases app_pure.test.js runs
 // (tests/fixtures/icao_class_cases.json).
 //

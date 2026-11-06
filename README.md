@@ -33,6 +33,22 @@ Running it, the configuration keys and the web page are described in
 [docs/web-api.md](docs/web-api.md); the library for building your own
 cue client in [docs/libskycue.md](docs/libskycue.md).
 
+## Repository layout
+
+| path | holds |
+|---|---|
+| `libskycue/` | the cue-client library (`skycue::skycue`) |
+| `skycued/` | the daemon: decoders, track table, web server |
+| `tools/` | the command-line tools (`skycue-dump`, `-rawrec`, `-rawplay`, `-pingsim`, `-stats`, `-fisb`; `iqgen/` for `skycue-iqgen`) |
+| `www/` | the web page |
+| `cmake/` | CMake modules |
+| `examples/` | a client demo and a parent-project example |
+| `docs/` | the documentation |
+| `packaging/` | the config example, systemd unit, RPM spec, container build and verify scripts, source tarball script |
+| `debian/` | Debian packaging |
+| `scripts/` | `maps/` (map tiles and overlays), `dev/` (sanitizers, fuzzing, static analysis), `fixtures/` (test captures and generated tables), `lib/` |
+| `tests/` | unit and script tests; `tests/fuzz/` holds the libFuzzer harnesses, seeds and findings |
+
 ## Status
 
 Version 0.1.0, the first public release. The configuration file and the

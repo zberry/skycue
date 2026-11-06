@@ -7,7 +7,7 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 SKYCUE_TEST_SLOW_FACTOR ?= 1
 # Where the unit goes. Debian 13's debhelper finds it in /usr/lib/systemd/system;
 # Debian 12's (13.11.4) looks only in /lib/systemd/system, so
-# containers/build-package-inner.sh sets that for Debian 12 and rewrites the unit
+# packaging/containers/build-package-inner.sh sets that for Debian 12 and rewrites the unit
 # line of debian/skycue.install in its copy of the tree.
 SKYCUE_DEB_UNITDIR ?= /usr/lib/systemd/system
 

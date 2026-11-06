@@ -79,7 +79,7 @@ fixtures=$(cd "$fixtures" 2>/dev/null && pwd) || { echo "soak.sh: fixtures dir n
 fisb_rec="$fixtures/fisb/received-tg30.jsonl"
 readsb_rec="$fixtures/readsb-sample.jsonl"
 [ -r "$fisb_rec" ] || {
-  echo "SKIP: fixture $fisb_rec not fetched: run scripts/fetch-test-captures.sh"; exit 77; }
+  echo "SKIP: fixture $fisb_rec not fetched: run scripts/fixtures/fetch-test-captures.sh"; exit 77; }
 [ -r "$readsb_rec" ] || { echo "soak.sh: fixture $readsb_rec not found" >&2; exit 2; }
 python3 -I -c 'import sys; float(sys.argv[1]); int(sys.argv[2])' "$growth" "$fd_tolerance" 2>/dev/null || {
   echo "soak.sh: --growth must be a number and --fd-tolerance a whole number" >&2; exit 2; }

@@ -131,7 +131,7 @@ endif()
 # They belong to the package shape and to a plain source install. A parent
 # build that wants a smaller prefix turns them off (a bundle can keep
 # the config in its own etc/ and the helpers in scripts/). Their sources
-# (etc/, packaging/, scripts/) are optional: each rule is skipped when its
+# (packaging/, scripts/) are optional: each rule is skipped when its
 # file is not there.
 option(SKYCUE_INSTALL_SYSTEM_FILES
   "Install the config, the skycued systemd unit and the map helper scripts (a parent build may turn this off)" ON)
@@ -140,12 +140,12 @@ option(SKYCUE_PACKAGE_CONFIG
 set(SKYCUE_SYSTEMD_UNITDIR "lib/systemd/system" CACHE PATH
   "Where skycued.service is installed: relative to CMAKE_INSTALL_PREFIX, or absolute (packages: /usr/lib/systemd/system)")
 set(_skycue_repo_dir "${PROJECT_SOURCE_DIR}")
-set(_skycue_conf_example "${_skycue_repo_dir}/etc/skycue.conf.example")
+set(_skycue_conf_example "${_skycue_repo_dir}/packaging/skycue.conf.example")
 set(_skycue_unit_template "${_skycue_repo_dir}/packaging/systemd/skycued.service.in")
-set(_skycue_map_scripts "${_skycue_repo_dir}/scripts/make-tiles.sh" "${_skycue_repo_dir}/scripts/make-overlays.sh")
-set(_skycue_map_merger "${_skycue_repo_dir}/scripts/tiles-merge.py")
+set(_skycue_map_scripts "${_skycue_repo_dir}/scripts/maps/make-tiles.sh" "${_skycue_repo_dir}/scripts/maps/make-overlays.sh")
+set(_skycue_map_merger "${_skycue_repo_dir}/scripts/maps/tiles-merge.py")
 set(_skycue_map_common "${_skycue_repo_dir}/scripts/lib/skycue-common.sh")
-set(_skycue_make_maps "${_skycue_repo_dir}/scripts/skycue-make-maps")
+set(_skycue_make_maps "${_skycue_repo_dir}/scripts/maps/skycue-make-maps")
 # The full sysconfdir, so that /usr gives /etc (GNUInstallDirs) and the
 # config lands where the unit's ExecStart looks for it.
 cmake_path(SET _skycue_sysconfdir NORMALIZE "${CMAKE_INSTALL_FULL_SYSCONFDIR}")
@@ -187,16 +187,10 @@ if(SKYCUE_INSTALL_SYSTEM_FILES)
 endif()
 
 add_subdirectory(skycued)
-add_subdirectory(skycue-dump)
-add_subdirectory(skycue-rawrec)
-add_subdirectory(skycue-rawplay)
-add_subdirectory(skycue-pingsim)
-add_subdirectory(skycue-stats)
-add_subdirectory(skycue-fisb)
-add_subdirectory(skycue-iqgen)
+add_subdirectory(tools)
 # Before tests/: fuzz_smoke there reads SKYCUE_FUZZ_TARGETS.
 if(SKYCUE_FUZZ)
-  add_subdirectory(fuzz)
+  add_subdirectory(tests/fuzz)
 endif()
 if(SKYCUE_BUILD_TESTS)
   add_subdirectory(tests)

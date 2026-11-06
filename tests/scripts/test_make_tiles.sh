@@ -4,11 +4,11 @@
 # tools on PATH. Runs nothing that needs the network.
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
-script="$here/scripts/make-tiles.sh"
+script="$here/scripts/maps/make-tiles.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: test_make_tiles: $*"; [ -f "$tmp/out" ] && cat "$tmp/out" "$tmp/err"; exit 1; }
-[ -f "$script" ] || fail "scripts/make-tiles.sh missing"
+[ -f "$script" ] || fail "scripts/maps/make-tiles.sh missing"
 bash -n "$script" || fail "bash -n"
 bash_bin=$(command -v bash)
 
@@ -56,7 +56,7 @@ expect=(
   "would run: unzip -o -j $tmp/cache/$ne.zip $ne.tif -d $tmp/cache"
   "would run: gdal_translate -q -projwin -10.5 60.25 30 35 $tmp/cache/$ne.tif $tmp/cache/crop--10.5_35_30_60.25.tif"
   "would run: gdal2tiles.py --xyz -z 0-6 -w none $tmp/cache/crop--10.5_35_30_60.25.tif $tmp/cache/stage-default"
-  "would run: python3 -I $here/scripts/tiles-merge.py merge $tmp/cache/stage-default $tmp/tiles"
+  "would run: python3 -I $here/scripts/maps/tiles-merge.py merge $tmp/cache/stage-default $tmp/tiles"
 )
 i=0
 while IFS= read -r line; do
@@ -97,7 +97,7 @@ grep -qxF "$crun gdal_translate -q -projwin -10 60 30 35 $ne.tif crop--10_35_30_
   fail "--container dry-run: no '$crun gdal_translate ...' line"
 grep -qxF "$crun gdal2tiles.py --xyz -z 0-6 -w none crop--10_35_30_60.tif stage-default" "$tmp/out" ||
   fail "--container dry-run: no '$crun gdal2tiles.py ...' line"
-grep -qxF "would run: python3 -I $here/scripts/tiles-merge.py merge $tmp/cache/stage-default $tmp/tiles" "$tmp/out" ||
+grep -qxF "would run: python3 -I $here/scripts/maps/tiles-merge.py merge $tmp/cache/stage-default $tmp/tiles" "$tmp/out" ||
   fail "--container dry-run: the merge is not on the host"
 [ "$(grep -c '^would run: podman run --rm --network=none ' "$tmp/out")" = 2 ] ||
   fail "--container dry-run: want exactly two container steps"
@@ -147,7 +147,7 @@ EOP
   # merge: a tile the output lacks is moved in, the ones it has stay.
   mkdir -p "$tmp/stage/3/1" "$tmp/stage/4/2"
   echo new > "$tmp/stage/4/2/5.png"
-  python3 -I "$here/scripts/tiles-merge.py" merge "$tmp/stage" "$tmp/meta" >/dev/null || fail "merge: exit $?"
+  python3 -I "$here/scripts/maps/tiles-merge.py" merge "$tmp/stage" "$tmp/meta" >/dev/null || fail "merge: exit $?"
   [ "$(cat "$tmp/meta/4/2/5.png")" = new ] && [ -e "$tmp/meta/3/1/2.png" ] || fail "merge: tiles not merged"
 
   # Malformed meta.json: a region entry without fields is dropped with a
@@ -178,7 +178,7 @@ EOP
     pil_flags=()
   fi
   if python3 ${pil_flags[@]+"${pil_flags[@]}"} -c 'import PIL' 2>/dev/null; then
-    python3 ${pil_flags[@]+"${pil_flags[@]}"} - "$tmp/pil" "$here/scripts/tiles-merge.py" \
+    python3 ${pil_flags[@]+"${pil_flags[@]}"} - "$tmp/pil" "$here/scripts/maps/tiles-merge.py" \
       ${pil_flags[@]+"${pil_flags[@]}"} <<'EOP' || fail "Pillow merge"
 import os, subprocess, sys
 from PIL import Image

@@ -6,7 +6,7 @@
 # map-dir check and the usage errors. Bakes nothing and needs no network.
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
-src="$here/scripts/skycue-make-maps"
+src="$here/scripts/maps/skycue-make-maps"
 tmp=$(readlink -f "$(mktemp -d)")
 trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 fail() {
@@ -14,7 +14,7 @@ fail() {
   for f in out err calls; do [ -s "$tmp/$f" ] && { echo "--- $f"; cat "$tmp/$f"; }; done
   exit 1
 }
-[ -f "$src" ] || fail "scripts/skycue-make-maps missing"
+[ -f "$src" ] || fail "scripts/maps/skycue-make-maps missing"
 bash -n "$src" || fail "bash -n"
 bash_bin=$(command -v bash)
 image=ghcr.io/osgeo/gdal:ubuntu-small-3.9.3

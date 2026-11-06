@@ -1,0 +1,327 @@
+#!/usr/bin/env bash
+# skycue-make-maps [--config FILE] [--map-dir DIR] [--cache DIR] [--container [IMAGE]] [--owner USER] [--dry-run]
+#                  (--preset conus|europe|world | --around RADIUS_NM | --around LAT LON RADIUS_NM
+#                   | --bbox W,S,E,N --zoom MINZ-MAXZ)
+# skycue-make-maps [--config FILE] [--map-dir DIR] --list
+# Bakes the web map's tiles and overlays into the MAP_DIR skycued serves
+# them from (<MAP_DIR>/tiles, <MAP_DIR>/overlays), with make-tiles.sh and
+# make-overlays.sh. Run it on a machine with network access: it downloads
+# the Natural Earth data (about 310 MB) once into the cache.
+# Runs add up, as docs/make-tiles.md describes: each run first makes sure
+# the coarse whole-world base region (global, zoom 0-5) is there, baking it
+# only when <MAP_DIR>/tiles/meta.json has no region named global, then bakes
+# the region asked for at finer zooms, merged into the same directory:
+#   --preset conus     the contiguous US, zoom 6-8
+#   --preset europe    Europe, zoom 6-8
+#   --preset world     the base region alone
+#   --around RADIUS_NM            the receiver (RECEIVER_LAT, RECEIVER_LON in
+#                                 the config) out to RADIUS_NM, zoom 6-9
+#   --around LAT LON RADIUS_NM    the same around another point
+#   --bbox W,S,E,N --zoom MINZ-MAXZ  any box and zoom range (region "bbox")
+# then the overlays (borders, cities; about 1 MB). Each region keeps its name
+# in meta.json; running the same one again replaces only its entry there
+# (see docs/make-tiles.md for re-cutting).
+#   --config FILE       the skycue config (default /etc/skycue/skycue.conf),
+#                       for MAP_DIR and the receiver position
+#   --map-dir DIR       the map directory instead of the config's MAP_DIR
+#   --cache DIR         where the downloads are kept (default /var/cache/skycue
+#                       as root, else ${XDG_CACHE_HOME:-~/.cache}/skycue)
+#   --container [IMAGE] run GDAL from a container image with podman or docker
+#                       (default ghcr.io/osgeo/gdal:ubuntu-small-3.9.3)
+#                       instead of the GDAL on PATH
+#   --owner USER        chown -R the map dir to USER afterwards (default
+#                       skycue, when run as root and that user exists)
+#   --dry-run           print what would run, change nothing; without GDAL
+#                       it plans the container route
+#   --list              print the regions in meta.json and exit
+# The map dir must not be / nor a non-empty directory with neither tiles/
+# nor overlays/ in it (exit 2, before anything is written or chowned).
+# --around clamps its box to -180..180 and -85..85; it does not wrap across
+# the antimeridian.
+# Exit status: 0 done, 1 failure, 2 usage or config error, 3 a required tool
+# is missing.
+set -euo pipefail
+
+prog=skycue-make-maps
+die() { echo "$prog: $*" >&2; exit 2; }  # usage and config errors (load_config calls it)
+fail() { echo "$prog: $*" >&2; exit 1; }
+usage() {
+  cat >&2 <<EOF
+usage: $prog [--config FILE] [--map-dir DIR] [--cache DIR] [--container [IMAGE]] [--owner USER] [--dry-run]
+         (--preset conus|europe|world | --around RADIUS_NM | --around LAT LON RADIUS_NM
+          | --bbox W,S,E,N --zoom MINZ-MAXZ)
+       $prog [--config FILE] [--map-dir DIR] --list
+EOF
+  exit 2
+}
+bad() { echo "$prog: $*" >&2; usage; }
+
+# The helpers: beside this script in the source tree, else in the installed
+# share/skycue/scripts.
+self=$(readlink -f "$0")
+here=$(dirname "$self")
+if [ -f "$here/make-tiles.sh" ]; then helpers=$here
+else helpers=$(dirname "$here")/share/skycue/scripts; fi
+# lib/ is beside the helpers once installed, one level up in the source tree.
+if [ -f "$helpers/lib/skycue-common.sh" ]; then common=$helpers/lib/skycue-common.sh
+else common=$(dirname "$helpers")/lib/skycue-common.sh; fi
+for f in make-tiles.sh make-overlays.sh; do
+  [ -f "$helpers/$f" ] || fail "$helpers/$f not found"
+done
+[ -f "$common" ] || fail "$common not found"
+# shellcheck source=../lib/skycue-common.sh
+. "$common" # load_config, SKYCUE_GDAL_IMAGE
+
+config=/etc/skycue/skycue.conf
+map= cache= image= owner= mode= preset= bbox= zoom=
+container=0 dry=0 list=0
+around=()
+num='^-?([0-9]+(\.[0-9]*)?|\.[0-9]+)$'
+region_mode() { [ -z "$mode" ] || bad "give one of --preset, --around or --bbox"; mode=$1; }
+while [ $# -gt 0 ]; do
+  case $1 in
+    --config|--map-dir|--cache|--owner|--preset|--bbox|--zoom)
+      [ $# -ge 2 ] && [ -n "$2" ] || bad "$1 needs a value"
+      case $1 in
+        --config) config=$2 ;;
+        --map-dir) map=$2 ;;
+        --cache) cache=$2 ;;
+        --owner) owner=$2 ;;
+        --preset) region_mode preset; preset=$2 ;;
+        --bbox) region_mode bbox; bbox=$2 ;;
+        --zoom) zoom=$2 ;;
+      esac
+      shift ;;
+    --container)
+      container=1
+      if [ $# -ge 2 ] && [ -n "$2" ] && [[ $2 != -* ]]; then image=$2; shift; fi ;;
+    --around)
+      region_mode around
+      while [ $# -ge 2 ] && [ ${#around[@]} -lt 3 ] && [[ $2 =~ $num ]]; do around+=("$2"); shift; done
+      [ ${#around[@]} = 1 ] || [ ${#around[@]} = 3 ] || bad "--around takes RADIUS_NM or LAT LON RADIUS_NM" ;;
+    --dry-run) dry=1 ;;
+    --list) list=1 ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) bad "unknown argument $1" ;;
+  esac
+  shift
+done
+
+# ---- the region ------------------------------------------------------------
+
+in_range() { awk -v v="$1" -v lo="$2" -v hi="$3" 'BEGIN { exit !(v >= lo && v <= hi) }'; }
+if [ $list = 1 ]; then
+  [ -z "$mode" ] || bad "--list takes no region"
+else
+  [ -n "$mode" ] || usage
+fi
+[ -z "$zoom" ] || [ "$mode" = bbox ] || bad "--zoom goes with --bbox"
+case $mode in
+  preset)
+    case $preset in
+      conus) region=(-125,24,-66,50 6 8 conus) ;;
+      europe) region=(-11,35,31,61 6 8 europe) ;;
+      world) region=() ;;
+      *) bad "unknown preset '$preset' (conus, europe or world)" ;;
+    esac ;;
+  bbox)
+    [ -n "$zoom" ] || bad "--bbox needs --zoom MINZ-MAXZ"
+    c='-?([0-9]+(\.[0-9]*)?|\.[0-9]+)'
+    [[ $bbox =~ ^($c),($c),($c),($c)$ ]] || bad "--bbox must be west,south,east,north in degrees, got '$bbox'"
+    IFS=, read -r w s e n <<<"$bbox"
+    awk -v w="$w" -v s="$s" -v e="$e" -v n="$n" \
+      'BEGIN { exit !(w >= -180 && e <= 180 && w < e && s >= -90 && n <= 90 && s < n) }' ||
+      bad "--bbox needs -180 <= west < east <= 180 and -90 <= south < north <= 90"
+    [[ $zoom =~ ^([0-9]+)-([0-9]+)$ ]] || bad "--zoom must be MINZ-MAXZ, got '$zoom'"
+    zmin=${BASH_REMATCH[1]} zmax=${BASH_REMATCH[2]}
+    [ "$zmax" -le 18 ] && [ "$zmin" -le "$zmax" ] || bad "--zoom needs 0 <= MINZ <= MAXZ <= 18, got '$zoom'"
+    region=("$bbox" "$zmin" "$zmax" bbox) ;;
+  around)
+    radius=${around[${#around[@]}-1]}
+    in_range "$radius" 0.01 500 || bad "RADIUS_NM must be above 0 and at most 500, got '$radius'" ;;
+esac
+if [ -n "$owner" ]; then id -u "$owner" >/dev/null 2>&1 || bad "no user '$owner' (--owner)"; fi
+
+# ---- the config ------------------------------------------------------------
+
+if [ -z "$map" ] || [ ${#around[@]} = 1 ]; then
+  [ -f "$config" ] && [ -r "$config" ] || die "cannot read $config (pass --config FILE, or --map-dir DIR)"
+  MAP_DIR= RECEIVER_LAT= RECEIVER_LON=
+  load_config "$config" MAP_DIR RECEIVER_LAT RECEIVER_LON
+  [ -n "$map" ] || map=$MAP_DIR
+  [ -n "$map" ] || die "MAP_DIR is not set in $config; pass --map-dir"
+  if [ ${#around[@]} = 1 ]; then
+    [ -n "$RECEIVER_LAT" ] && [ -n "$RECEIVER_LON" ] ||
+      die "RECEIVER_LAT and RECEIVER_LON are not set in $config; set them, or pass --around LAT LON RADIUS_NM"
+    around=("$RECEIVER_LAT" "$RECEIVER_LON" "${around[0]}")
+  fi
+fi
+case $map in /*) ;; *) map=$PWD/$map ;; esac
+[ "$map" = / ] || map=${map%/}
+
+if [ "$mode" = around ]; then
+  lat=${around[0]} lon=${around[1]}
+  [[ $lat =~ $num ]] && in_range "$lat" -85 85 || bad "the latitude must be -85..85, got '$lat'"
+  [[ $lon =~ $num ]] && in_range "$lon" -180 180 || bad "the longitude must be -180..180, got '$lon'"
+  # RADIUS_NM in each direction (1 nm = 1 minute of latitude), clamped to
+  # the map's extent and rounded outward to 0.01 degree.
+  box=$(awk -v la="$lat" -v lo="$lon" -v r="$radius" '
+    function down(x) { x = x * 100; return (x == int(x) || x > 0 ? int(x) : int(x) - 1) / 100 }
+    function up(x) { return -down(-x) }
+    BEGIN {
+      c = cos(la * atan2(0, -1) / 180); if (c < 0.05) c = 0.05
+      s = la - r / 60; n = la + r / 60; w = lo - r / (60 * c); e = lo + r / (60 * c)
+      if (s < -85) s = -85; if (n > 85) n = 85; if (w < -180) w = -180; if (e > 180) e = 180
+      print down(w) "," down(s) "," up(e) "," up(n)
+    }')
+  region=("$box" 6 9 around)
+fi
+
+# ---- the map directory -----------------------------------------------------
+
+meta=$map/tiles/meta.json
+# regions FILE: one line per region of a meta.json, "name bbox zoom MIN-MAX";
+# the old single-region form is one region named default (as tiles-merge.py
+# reads it).
+regions() {
+  command -v python3 >/dev/null 2>&1 || { echo "$prog: python3 not found on PATH (needed to read $1)" >&2; exit 3; }
+  python3 -I - "$1" <<'EOP'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as f:
+        m = json.load(f)
+except (OSError, ValueError) as e:
+    sys.exit("skycue-make-maps: cannot read %s: %s" % (path, e))
+if not isinstance(m, dict):
+    sys.exit("skycue-make-maps: %s is not a JSON object" % path)
+regs = m.get("regions")
+if not isinstance(regs, list):
+    regs = [{"name": "default", "bbox": m.get("bbox"), "minZoom": m.get("minZoom"), "maxZoom": m.get("maxZoom")}]
+def num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+for r in regs:
+    if not isinstance(r, dict) or not isinstance(r.get("name"), str):
+        continue
+    b = r.get("bbox")
+    bb = ",".join("%g" % v for v in b) if isinstance(b, list) and len(b) == 4 and all(num(v) for v in b) else "?"
+    z = [r.get(k) for k in ("minZoom", "maxZoom")]
+    print("%s %s zoom %s-%s" % (r["name"], bb, *("%d" % v if num(v) else "?" for v in z)))
+EOP
+}
+
+if [ $list = 1 ]; then
+  if [ ! -f "$meta" ]; then echo "$prog: no tiles in $map/tiles yet"; exit 0; fi
+  regions "$meta" || exit 1
+  exit 0
+fi
+
+# Not a map directory: the root, or a directory that already holds other
+# things and has neither tiles/ nor overlays/. The bake writes into it and
+# --owner (the default as root) chowns it recursively, so stop here.
+has_entries() { # has_entries DIR: DIR holds anything, dot files included
+  local e
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do { [ -e "$e" ] || [ -L "$e" ]; } && return 0; done
+  return 1
+}
+real=$map
+if [ -d "$map" ]; then
+  real=$(cd "$map" 2>/dev/null && pwd -P) || die "cannot enter the map dir $map (no search permission)"
+fi
+[ "$real" != / ] || die "refusing --map-dir / (MAP_DIR must be a directory of its own, such as /var/lib/skycue/maps)"
+# No symlink where the bake writes: run as root, it would write (and chown)
+# wherever the link points, and the map dir may belong to the daemon's user.
+# Leading directories (such as a linked /var/lib) are not checked.
+nolink=$map
+while [ "$nolink" != / ] && [ "${nolink%/}" != "$nolink" ]; do nolink=${nolink%/}; done
+for d in "$nolink" "$nolink/tiles" "$nolink/overlays" "$nolink/tiles/meta.json"; do
+  [ ! -L "$d" ] || die "refusing $d: it is a symlink, which a bake run as root would write through (replace it with a real directory or file, or pass the real map dir as --map-dir)"
+done
+if [ -d "$map" ] && [ ! -d "$map/tiles" ] && [ ! -d "$map/overlays" ] && has_entries "$map"; then
+  die "refusing $map: it is not empty and has no tiles/ or overlays/, so it is not a map directory (pass an empty or new --map-dir)"
+fi
+
+# Writable before anything is downloaded: the map dir and its tiles/ and
+# overlays/ where they exist, else the nearest directory above it.
+check=()
+if [ -e "$map" ]; then
+  check=("$map")
+  for d in "$map/tiles" "$map/overlays"; do [ ! -e "$d" ] || check+=("$d"); done
+else
+  d=$map
+  while [ ! -e "$d" ]; do d=$(dirname "$d"); done
+  check=("$d")
+fi
+for d in "${check[@]}"; do
+  [ -d "$d" ] && [ -w "$d" ] && [ -x "$d" ] || fail "cannot write $d (run it with sudo, or pass --map-dir)"
+done
+
+# ---- GDAL: on PATH, or from a container image --------------------------------
+
+if [ $container = 0 ]; then
+  missing=
+  for t in gdal2tiles.py gdal_translate ogr2ogr; do command -v $t >/dev/null 2>&1 || missing="$missing $t"; done
+  if [ -n "$missing" ] && [ $dry = 1 ]; then
+    echo "$prog: no local GDAL (${missing# }); this is the plan for --container $SKYCUE_GDAL_IMAGE" >&2
+    container=1
+  elif [ -n "$missing" ]; then
+    cat >&2 <<EOF
+$prog: GDAL is not on PATH (missing:$missing). Either install it:
+  apt (Debian, Ubuntu):  apt install gdal-bin python3-gdal
+  dnf (EPEL on RHEL-family systems):  dnf install gdal python3-gdal
+or run GDAL from a container image with podman or docker:
+  $prog --container [IMAGE] ...   (default IMAGE $SKYCUE_GDAL_IMAGE)
+EOF
+    exit 3
+  fi
+fi
+cargs=()
+if [ $container = 1 ]; then
+  image=${image:-$SKYCUE_GDAL_IMAGE}
+  cargs=(--container "$image")
+  if [ $dry = 0 ] && ! command -v podman >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+    echo "$prog: --container needs podman or docker on PATH" >&2
+    exit 3
+  fi
+fi
+
+if [ -z "$cache" ]; then
+  if [ "$(id -u)" = 0 ]; then cache=/var/cache/skycue
+  else cache=${XDG_CACHE_HOME:-$HOME/.cache}/skycue; fi
+fi
+case $cache in /*) ;; *) cache=$PWD/$cache ;; esac
+if [ -z "$owner" ] && [ "$(id -u)" = 0 ] && id -u skycue >/dev/null 2>&1; then owner=skycue; fi
+
+# ---- the runs ----------------------------------------------------------------
+
+have_global=0
+if [ -f "$meta" ]; then
+  names=$(regions "$meta") || exit $?
+  awk '$1 == "global" { f = 1 } END { exit !f }' <<<"$names" && have_global=1
+fi
+dargs=()
+[ $dry = 0 ] || dargs=(--dry-run)
+helper() { # helper NAME ARGS...: run it with the container and dry-run options; stop on failure
+  local h=$1 rc=0
+  shift
+  "$helpers/$h" "$@" ${cargs[@]+"${cargs[@]}"} ${dargs[@]+"${dargs[@]}"} || rc=$?
+  [ $rc = 0 ] || { echo "$prog: $h failed (exit $rc)" >&2; exit $rc; }
+}
+tiles() { # tiles BBOX MINZ MAXZ NAME
+  echo "$prog: region $4: $1, zoom $2-$3"
+  helper make-tiles.sh "$1" "$2" "$3" --name "$4" --out "$map/tiles" --cache "$cache"
+}
+
+[ $dry = 1 ] || mkdir -p "$map" || fail "cannot create $map"
+if [ $have_global = 1 ]; then
+  echo "$prog: region global is already in $meta; not baking it again"
+else
+  tiles -180,-85,180,85 0 5 global
+fi
+[ ${#region[@]} = 0 ] || tiles "${region[@]}"
+helper make-overlays.sh --out "$map/overlays" --cache "$cache"
+if [ -n "$owner" ]; then
+  if [ $dry = 1 ]; then echo "would run: chown -R $owner: $map"
+  else chown -R "$owner:" "$map" || fail "cannot chown $map to $owner"; fi
+fi
+[ $dry = 1 ] || echo "$prog: done; reload the web page to see the maps in $map"

@@ -5,7 +5,7 @@
 # network nor the real captures. (The real pins are checked by a real run.)
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
-script="$here/scripts/fetch-test-captures.sh"
+script="$here/scripts/fixtures/fetch-test-captures.sh"
 gens="$here/tests/fixtures/fisb"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -13,7 +13,7 @@ out="$tmp/out"
 fail() { echo "FAIL: test_fetch_test_captures: $*"; [ -f "$out" ] && cat "$out"; exit 1; }
 command -v python3 >/dev/null || { echo "SKIP test_fetch_test_captures: no python3"; exit 77; }
 command -v curl >/dev/null || { echo "SKIP test_fetch_test_captures: no curl"; exit 77; }
-[ -f "$script" ] || fail "scripts/fetch-test-captures.sh missing"
+[ -f "$script" ] || fail "scripts/fixtures/fetch-test-captures.sh missing"
 
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 
@@ -118,7 +118,7 @@ done <<<"$builtin"
 # (a3) -h prints the whole header comment: its first line and its last.
 run -h
 [ "$rc" -eq 0 ] || fail "(a3) -h exited $rc, want 0"
-grep -q '^Usage: scripts/fetch-test-captures.sh' "$out" || fail "(a3) -h lacks the usage line"
+grep -q '^Usage: scripts/fixtures/fetch-test-captures.sh' "$out" || fail "(a3) -h lacks the usage line"
 grep -q '^Exit status: 0 done, 1 failure' "$out" || fail "(a3) -h lacks the exit status line (the header is cut)"
 ! grep -q 'set -euo pipefail' "$out" || fail "(a3) -h prints code"
 

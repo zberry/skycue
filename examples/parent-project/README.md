@@ -7,7 +7,7 @@ installed libskycue through `find_package(skycue)` (see "Using an installed
 libskycue" below). It is **not** part of the skycue build: skycue's own
 `examples/CMakeLists.txt` does not add it. It is built by the `parent_project`
 test (against a copy of `skycue/` in a temporary directory) and by the
-clean-room container check (`containers/verify.sh`), which also runs it
+clean-room container check (`packaging/verify-package.sh`), which also runs it
 against a replaying skycued.
 
 ## What the parent sets

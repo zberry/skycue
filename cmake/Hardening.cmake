@@ -4,7 +4,7 @@ include_guard(GLOBAL)
 # this is on by default: the default configure builds exactly what it built before.
 
 set(SKYCUE_SANITIZE "OFF" CACHE STRING
-  "Build skycue instrumented: address,undefined, thread or OFF (run with scripts/run-sanitizers.sh)")
+  "Build skycue instrumented: address,undefined, thread or OFF (run with scripts/dev/run-sanitizers.sh)")
 set_property(CACHE SKYCUE_SANITIZE PROPERTY STRINGS "OFF" "address,undefined" "thread")
 if(SKYCUE_SANITIZE STREQUAL "OFF" OR SKYCUE_SANITIZE STREQUAL "")
   set(_skycue_sanitize "")
@@ -15,7 +15,7 @@ else()
 endif()
 
 option(SKYCUE_FUZZ
-  "Build the libFuzzer harnesses in fuzz (clang only; run with scripts/run-fuzz.sh)" OFF)
+  "Build the libFuzzer harnesses in tests/fuzz (clang only; run with scripts/dev/run-fuzz.sh)" OFF)
 if(SKYCUE_FUZZ)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "SKYCUE_FUZZ=ON needs clang (CMAKE_CXX_COMPILER_ID is ${CMAKE_CXX_COMPILER_ID})")
@@ -26,7 +26,7 @@ if(SKYCUE_FUZZ)
 endif()
 
 option(SKYCUE_STATIC_TESTS
-  "Register the ctest static_analysis (scripts/run-static.sh --tidy-only; needs clang-tidy)" OFF)
+  "Register the ctest static_analysis (scripts/dev/run-static.sh --tidy-only; needs clang-tidy)" OFF)
 
 option(SKYCUE_SOAK_TESTS
   "Register the ctest soak_short (tests/soak/soak.sh for 2 minutes; needs node and curl)" OFF)
@@ -44,10 +44,10 @@ else()
   set(_skycue_slow_factor 1)
 endif()
 
-# Where scripts/run-sanitizers.sh points the sanitizers' log_path; cached so
+# Where scripts/dev/run-sanitizers.sh points the sanitizers' log_path; cached so
 # the script reads it from CMakeCache.txt.
 set(SKYCUE_SANITIZER_LOG_DIR "${PROJECT_BINARY_DIR}/sanitizer-logs"
-  CACHE INTERNAL "sanitizer log_path directory (scripts/run-sanitizers.sh)")
+  CACHE INTERNAL "sanitizer log_path directory (scripts/dev/run-sanitizers.sh)")
 
 if(_skycue_sanitize)
   # Line tables only: enough for symbolized stacks, a fraction of the disk
@@ -84,7 +84,7 @@ function(skycue_add_fuzzer name)
     message(FATAL_ERROR "skycue_add_fuzzer(${name}): SOURCES is required")
   endif()
   add_executable(fuzz_${name} ${_fz_SOURCES})
-  target_include_directories(fuzz_${name} PRIVATE ${PROJECT_SOURCE_DIR}/fuzz)
+  target_include_directories(fuzz_${name} PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
   target_link_libraries(fuzz_${name} PRIVATE skycued_core ${_fz_LIBS})
   target_link_options(fuzz_${name} PRIVATE -fsanitize=fuzzer)
   set_target_properties(fuzz_${name} PROPERTIES
@@ -99,7 +99,7 @@ endfunction()
 # machine), every test of the calling directory gets its timeout (1500 s when
 # it sets none) and its waits (SKYCUE_TEST_SLOW, tests/test_slow.hpp) scaled
 # by the slow factor. Otherwise tests keep their own timeouts. The sanitizer
-# options and suppression files are not set here: scripts/run-sanitizers.sh
+# options and suppression files are not set here: scripts/dev/run-sanitizers.sh
 # exports them at test time and ctest passes them on.
 function(skycue_scale_test_timeouts)
   if(NOT (_skycue_sanitize OR SKYCUE_FUZZ OR NOT SKYCUE_TEST_SLOW_FACTOR STREQUAL ""))

@@ -31,7 +31,7 @@ through npm). It is not committed: the page loads it from
   `SKYCUE_LEAFLET_DIR` the page has no map library and the tests that need
   it say SKIP.
 
-`vendor/`, `tiles/` and `overlays/` (scripts/make-overlays.sh) in this directory are git-ignored, for local use
+`vendor/`, `tiles/` and `overlays/` (scripts/maps/make-overlays.sh) in this directory are git-ignored, for local use
 only; the build never copies them.
 
 ## ECharts
@@ -107,7 +107,7 @@ the strip does, for operators, is in `docs/operating.md` (Alerts).
 When `www/tiles/<z>/<x>/<y>.png` exist (see `/api/tiles-available`) the page
 shows them; otherwise it draws a plain background with a 1°/5° graticule
 and a scale bar. The tiles may come from several regions with different
-zoom ranges (`scripts/make-tiles.md`); where the zoom shown has no tile, the
+zoom ranges (`docs/make-tiles.md`); where the zoom shown has no tile, the
 page's tile layer (`FallbackTileLayer` in `app.js`) shows the nearest
 lower-zoom ancestor that exists (at most 4 levels down), enlarged
 (`parentTile` in `app_pure.js`), and draws that ancestor underneath a tile

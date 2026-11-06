@@ -3,11 +3,11 @@
 # OurAirports-style excerpts written here (no real data is committed).
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
-script="$here/scripts/make-locations.py"
+script="$here/scripts/maps/make-locations.py"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: test_make_locations: $*"; [ -f "$tmp/out" ] && cat "$tmp/out"; [ -f "$tmp/err" ] && cat "$tmp/err"; exit 1; }
-[ -f "$script" ] || fail "scripts/make-locations.py missing"
+[ -f "$script" ] || fail "scripts/maps/make-locations.py missing"
 command -v python3 >/dev/null || { echo "SKIP test_make_locations: no python3"; exit 77; }
 
 cat > "$tmp/airports.csv" <<'EOF'

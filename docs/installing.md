@@ -285,7 +285,7 @@ runs add up: bake a wider area or a second region later without losing the
 first. `--around` does not wrap across the antimeridian or past ±85°
 latitude: the box is cut at 180° and at the poles (near 180° longitude, bake
 the other side as a second `--bbox` region; see
-[make-tiles.md](../scripts/make-tiles.md)). The other ways to name a region:
+[make-tiles.md](../docs/make-tiles.md)). The other ways to name a region:
 
 ```sh
 sudo skycue-make-maps --preset conus     # also: europe, world
@@ -365,7 +365,7 @@ system.)
 they are GDAL 3.1 or newer (`gdalinfo --version`); EPEL is not required.
 
 No container either? Bake on another machine (any Linux with GDAL or
-podman, using the source tarball's `scripts/skycue-make-maps`, no install
+podman, using the source tarball's `scripts/maps/skycue-make-maps`, no install
 needed) and copy the result into `/var/lib/skycue/maps`. On the other
 machine, with this machine's `skycue.conf` copied next to the unpacked
 source tarball:
@@ -373,7 +373,7 @@ source tarball:
 ```sh
 v=0.1.0
 tar -xzf skycue-${v}.tar.gz
-skycue-${v}/scripts/skycue-make-maps --config skycue.conf --map-dir maps --owner "$(id -un)" --around 250
+skycue-${v}/scripts/maps/skycue-make-maps --config skycue.conf --map-dir maps --owner "$(id -un)" --around 250
 tar -C maps -czf skycue-maps.tar.gz .
 ```
 

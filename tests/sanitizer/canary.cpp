@@ -1,4 +1,4 @@
-// The sanitizer canary (scripts/run-sanitizers.sh --canary): proves that a
+// The sanitizer canary (scripts/dev/run-sanitizers.sh --canary): proves that a
 // report from a child process lands in the sanitizer log directory, the way
 // a skycued spawned by a shell test or test_web_server would. Built only on
 // request (EXCLUDE_FROM_ALL) in an instrumented tree.

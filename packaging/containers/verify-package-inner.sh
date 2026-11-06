@@ -240,6 +240,22 @@ systemd_checks() {
   case $s in running|degraded) ;; *) fail "systemd: not up after 60 s ($s)" ;; esac
   [ ! -e "$stats" ] || fail "systemd: $stats exists before the unit ran"
 
+  # Debian 13's systemd 257 gives journald ImportCredential=journal.*. In a
+  # rootless container under qemu-user (the arm64 targets) no unit can set up
+  # a credentials directory (exit 243/CREDENTIALS), so journald is dead and
+  # journalctl reports "No journal files were found". Start journald without
+  # that directive, in this test container only; the check on the journal
+  # below stays as strict as before.
+  if systemctl is-failed --quiet systemd-journald.service; then
+    mkdir -p /etc/systemd/system/systemd-journald.service.d
+    printf '[Service]\nImportCredential=\n' > /etc/systemd/system/systemd-journald.service.d/verify-nocred.conf
+    systemctl daemon-reload
+    systemctl reset-failed systemd-journald.service systemd-journald.socket systemd-journald-dev-log.socket || true
+    systemctl start systemd-journald.socket systemd-journald-dev-log.socket systemd-journald.service ||
+      fail "systemd: journald does not start (even without ImportCredential)"
+    say "systemd: journald had failed (credentials unavailable in this container); restarted without ImportCredential"
+  fi
+
   set_key "$conf" RECEIVER_LAT 38.9
   set_key "$conf" RECEIVER_LON -77.0
   exec=$(sed -n 's/^ExecStart=//p' "$unit")

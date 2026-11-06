@@ -1,7 +1,5 @@
 # skycue
 
-Source and releases: <https://github.com/zberry/skycue>
-
 skycue is an operator console and forwarding bridge for ADS-B and UAT
 receivers. It is for people who already run readsb (and, in the USA,
 dump978-fa) and want a live operator view of what their receiver sees, plus
@@ -11,12 +9,16 @@ in the browser, and forwards chosen aircraft as cues to your own programs and de
 does not feed any network, replace your decoders or change their
 configuration: your feeder keeps running exactly as it was.
 
-<!-- screenshot: docs/screenshot.png (the map with traffic, the side panel open) -->
+Source: <https://github.com/zberry/skycue>. Packages and the source tarball:
+[Releases](https://github.com/zberry/skycue/releases).
+
+<!-- screenshot of the map with traffic: coming -->
 
 ## Installing and building
 
 All install and build instructions are in [docs/installing.md](docs/installing.md).
-The routes, in short:
+Download the `.deb`, the `.rpm` or the source tarball from the
+[Releases page](https://github.com/zberry/skycue/releases). The routes, in short:
 
 - **Debian and Raspberry Pi OS** (12 and 13; amd64, arm64): install the `.deb`, see [Debian and Raspberry Pi](docs/installing.md#debian-and-raspberry-pi).
 - **RHEL 8 and 9** and their rebuilds (x86_64): install the `.rpm`, see [RHEL](docs/installing.md#rhel).
@@ -26,7 +28,8 @@ The routes, in short:
 ## What it does
 
 **Inputs.** skycued reads readsb's JSON position output, dump978-fa's raw
-UAT port and pingStation 3 receivers (JSON or ASTERIX CAT021), and merges
+UAT port and pingStation 3 receivers (uAvionix's small networked
+ADS-B/UAT receiver; JSON or ASTERIX CAT021), and merges
 them into one track table. Further inputs are added in the web page or in an
 inputs file, and the page shows the health of every one. Details:
 [docs/operating.md](docs/operating.md#the-inputs-file).
@@ -92,7 +95,8 @@ A pingStation 3 is another input, added in the web page or the inputs file.
 ## Requirements
 
 - Linux: Debian 12 or 13 or Raspberry Pi OS (amd64, arm64), RHEL 8 or 9 and rebuilds (x86_64).
-- To build: CMake 3.25 or newer, a C++17 compiler, Boost and zlib. The release tarball carries the web libraries, so nothing is downloaded.
+- To build: CMake 3.25 or newer, a C++17 compiler, Boost and zlib. The release tarball carries the web libraries, so nothing is downloaded; a git clone fetches them once with `scripts/dev/fetch-web-libs.sh`.
+- To bake the offline map: network access once (about 310 MB of Natural Earth data) and GDAL, or podman or docker (see [docs/installing.md](docs/installing.md#5-bake-the-map)).
 - A web browser. No internet access is needed at runtime.
 - readsb (and dump978-fa for UAT), or a pingStation 3, as the source of aircraft.
 
@@ -106,13 +110,18 @@ A pingStation 3 is another input, added in the web page or the inputs file.
 | [protocol.md](docs/protocol.md) | you write a client for the cue wire protocol |
 | [libskycue.md](docs/libskycue.md) | you use the C++ client library |
 | [fisb.md](docs/fisb.md) | you want to know which FIS-B products are decoded, skipped and shown |
-| [fisb-reference.md](docs/fisb-reference.md) | you need the UAT uplink bit layouts and their sources |
-| [fisb-golden.md](docs/fisb-golden.md) | you change the FIS-B decoder and check its golden output |
-| [asterix-cat021-reference.md](docs/asterix-cat021-reference.md) | you work on the pingStation ASTERIX CAT021 decoding |
 | [recording-format.md](docs/recording-format.md) | you read or write skycued's recordings |
 | [iq-replay.md](docs/iq-replay.md) | you make IQ files to try the chain without a dongle |
 | [make-tiles.md](docs/make-tiles.md) | you bake map tiles by hand or re-cut a region |
 | [make-locations.md](docs/make-locations.md) | you add report locations (airports) for weather on the map |
+
+For contributors:
+
+| file | read it when |
+|---|---|
+| [fisb-reference.md](docs/fisb-reference.md) | you need the UAT uplink bit layouts and their sources |
+| [fisb-golden.md](docs/fisb-golden.md) | you change the FIS-B decoder and check its golden output |
+| [asterix-cat021-reference.md](docs/asterix-cat021-reference.md) | you work on the pingStation ASTERIX CAT021 decoding |
 | [hardening.md](docs/hardening.md) | you run the sanitizer, fuzz, static-analysis and soak checks |
 | [releasing.md](docs/releasing.md) | you cut a release and build the packages |
 
@@ -123,7 +132,7 @@ A pingStation 3 is another input, added in the web page or the inputs file.
 | `libskycue/` | the cue-client library (`skycue::skycue`) |
 | `skycued/` | the daemon: decoders, track table, web server |
 | `tools/` | the command-line tools (`skycue-dump`, `-rawrec`, `-rawplay`, `-pingsim`, `-stats`, `-fisb`; `iqgen/` for `skycue-iqgen`) |
-| `www/` | the web page |
+| `www/` | the web page (Leaflet and ECharts are added from `sources/` at build time) |
 | `cmake/` | CMake modules |
 | `examples/` | a client demo and a parent-project example |
 | `docs/` | the documentation |
@@ -140,9 +149,12 @@ what changed.
 
 ## Contributing
 
-Issues and pull requests are welcome on GitHub. Build as described in
-[docs/installing.md](docs/installing.md#build) and run `ctest --test-dir build`
-before sending a change; some tests skip themselves when an optional tool or
+Issues and pull requests are welcome on GitHub. A git clone has no `sources/`:
+run [`scripts/dev/fetch-web-libs.sh`](scripts/dev/fetch-web-libs.sh) once (it
+fetches the two web libraries, see
+[Building from a git clone](docs/installing.md#building-from-a-git-clone)),
+then build as described in [docs/installing.md](docs/installing.md#build) with
+`cmake -S . -B build`, and run `ctest --test-dir build` before sending a change; some tests skip themselves when an optional tool or
 capture is missing. The sanitizer, fuzzing and static-analysis runs are in
 [docs/hardening.md](docs/hardening.md).
 

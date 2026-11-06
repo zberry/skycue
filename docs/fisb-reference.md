@@ -5,13 +5,13 @@ weather, NOTAM/TFR text and shapes, SUA, and other products. Target: C++17 + Boo
 
 RTCA DO-282B (UAT MOPS) and DO-358B (FIS-B MOPS) are paywalled and were **not read**. Every
 layout here comes from reading open implementations, then checking it against real frames
-(the sample file and fisb-decode's `tg30.978`). Each claim gives its source. **[V]** means I
-checked it by decoding data in this session. **[U]** means I could not verify it, or the
-sources disagree.
+(the sample file and fisb-decode's `tg30.978`). Each claim gives its source. **[V]** means the
+claim was verified by decoding data. **[U]** means it could not be verified, or the sources
+disagree.
 
-Sources were downloaded to `fisb-src/` in the scratchpad (4.1 MB after pruning):
+Sources:
 
-| Tag | Repo (cloned 2026-11-01, `--depth 1`) | Language | Licence (read from LICENSE) |
+| Tag | Repo | Language | Licence (read from LICENSE) |
 |---|---|---|---|
 | MUT | https://github.com/mutability/dump978 (`uat_decode.c/.h`, `extract_nexrad.c`, `uat2text.c`) | C | **GPL-2.0-or-later**, not BSD-2 (file headers say "GNU General Public License ... version 2 ... or any later") |
 | FA  | https://github.com/flightaware/dump978 | C++ (Boost) | BSD-2-Clause (© Oliver Jowett 2015, FlightAware 2019) |
@@ -32,7 +32,7 @@ bytes. Deinterleaving is `blockdata[i] = raw[i*6 + block]` (FA `fec.cc:112-115`,
 `uat_protocol.h:30-39`: `UPLINK_BLOCK_DATA_BITS=576`, `UPLINK_BLOCKS_PER_FRAME=6`). The hex
 that dump978 prints is the deinterleaved 432-byte payload. The line format is
 `+<864 hex>;rs=N;rssi=X;t=<unix>.<ms>;` (FA `uat_message.cc:30-61`). Older dump978 builds and
-our sample print only `+<hex>;`, with **no `t=`** **[V]**.
+the sample print only `+<hex>;`, with **no `t=`** **[V]**.
 
 ### 1.1 UAT-specific header (bytes 0-7). Bits are MSB-first; "b5.0" = byte 5, bit 0 (LSB).
 
@@ -314,7 +314,7 @@ What value an empty block gets:
 - MUT empirically uses 0 for regional and **1** for CONUS ("valid data, but no precipitation",
   :255-259).
 - FD fills 0 for both (`msgBlock.py:210`), but its own table says CONUS 0 = "no data".
-- **[U]** I recommend regional = 0 and CONUS = 1, so an empty CONUS block is not drawn as missing.
+- **[U]** Recommended: regional = 0 and CONUS = 1, so an empty CONUS block is not drawn as missing.
 
 ### 5.5 Other global-block run-length encodings (FD only; unverified against a spec)
 - **Lightning 103** (`lightningRL` :261-400): byte `NNNN P SSS`.
@@ -395,7 +395,7 @@ flags: element_flag(1) qualifier_flag(1) param_flag(1) object_element(5)
         element: 0 TFR,1 TURB,2 LLWS,3 SFC,4 ICING,5 FRZLVL,6 IFR,7 MTN
 type/status: object_type(4) object_status(4)   type 0 airport, 14 airspace; status 13 cancelled, 15 in effect
 [object qualifier, 3 bytes]   FD: only if qualifier_flag && product==14 (bitmap, DO-358B Table A-54);
-                              STX: whenever qualifier_flag.  [U] qualifier_flag never set elsewhere in our data
+                              STX: whenever qualifier_flag.  [U] qualifier_flag never set elsewhere in the data
 [param type(5)+value(11), 2 bytes]  if param_flag; FD: "the entire record should be ignored"
 applicability: options(2) date_time_format(2) geometry(4)
         options: 0 none (UFN), 1 start only, 2 end only, 3 both
@@ -420,7 +420,7 @@ Convert with `deg = raw*360/2^19` (if `>180`, `-360`; for lat, if `>90`, `-180`)
 - STX multiplies z_bot by **5** (`uatparse.go:457`). This is a probable STX bug; use 500.
 - FD only accepts a simple circle: bot==top, r_major==r_minor, alpha==0 (`level2/utilities.py:1094-1098`).
 
-Examples decoded this session **[V]**:
+Examples decoded from the captures **[V]**:
 - Sample NOTAM-D KSCK (product 8, report 12045; the sample carries several KSCK graphics, and
   these values are that report's): label "KSCK", type 0/status 15, options 3, fmt 1,
   geometry 9 (point AGL). Start 1/23 16:18, stop 1/24 23:59. Point (37.894, -121.238), 0 ft.
@@ -485,7 +485,7 @@ Examples decoded this session **[V]**:
   - Each entry is 3 bytes: `year_or_month(7) = e0&0x7f` (month for TRA/TMOA), `text_flag = e1.7`,
     `graphic_flag = e1.6`, `report_number(14) = (e1&0x3f)<<8|e2` (FD `crl_frame.py:41-106`).
 
-### 6.6 Text formats seen (decoded this session) [V]
+### 6.6 Text formats seen (decoded from the captures) [V]
 - NOTAM-D (product 8): `NOTAM-D KLHM.01/124 230125Z !RIU 01/124 LHM RWY 15 PAPI OUT OF SERVICE 1501230125-1501300122`.
   The validity is `YYMMDDhhmm-YYMMDDhhmm|PERM`, optionally suffixed `EST`. FD regexes are at
   `msg8_16_17.py:18-35`. FD's PERM placeholder is 2038-01-01.
@@ -511,7 +511,7 @@ Examples decoded this session **[V]**:
   - Year digits: one digit is resolved as 5 years back / 4 forward (`singleDigitYear` :396-448);
     two digits as 50 years back / 49 forward (`doubleDigitYear` :450-497).
 - **Receive time.** dump978-fa's `t=` field gives the receive time; tg30 has it on 963/963
-  lines **[V]**. **Our sample has no `t=`, so there is no receive date at all.** The decoder
+  lines **[V]**. **The sample has no `t=`, so there is no receive date at all.** The decoder
   needs an externally supplied reference time (CLI option or file metadata). In the sample it
   can be inferred from the T-opt 2 month/day (all January) and from NOTAM `YYMMDD` dates
   (2015-01).
@@ -538,8 +538,8 @@ Examples decoded this session **[V]**:
   | Level-3 dedup hash | 45 min |
 
 - Transmission and update intervals (e.g. regional NEXRAD every 2.5 min, CONUS every 15 min)
-  are in the FAA AIM §7-1 FIS-B table and SRT-047. I could not fetch them (faa.gov returned
-  HTTP 403), so they are **[U]**.
+  are in the FAA AIM §7-1 FIS-B table and SRT-047. Those documents were not available when this was written
+  (faa.gov refused automated download), so the intervals are **[U]**.
 
 ---
 
@@ -554,11 +554,11 @@ Examples decoded this session **[V]**:
 
 - FD architecture to copy: level0 (bits → dict), level1 (unsegment, TWGO match), level2
   (semantic messages, expiry), level3 (dedup, SHA-224 of message JSON, `Deduplicator.py:41-64`).
-- I did not survey Rust or other C decoders (no time budget).
+- Rust and other C decoders are not covered.
 ---
 
 ## 9. Validation data
-- **Our fixture `tests/fixtures/raw/uat-sample.txt.gz` is byte-identical to dump978's
+- **The fixture `tests/fixtures/raw/uat-sample.txt.gz` is byte-identical to dump978's
   `sample-data.txt.gz`**, in both MUT and FA: same gzip MD5 `28d6b169…`, and 1143 lines
   (704 `+` uplinks, 439 `-` downlinks) **[V]**.
   - Content: one ground station; dates in January 2015, i.e. pre-DO-358B, yet the TWGO
@@ -566,7 +566,7 @@ Examples decoded this session **[V]**:
   - Product counts: 8 = 64, 11 = 2, 12 = 2, 13 = 71, 63 = 200, 413 = 224.
   - **All 200 NEXRAD blocks are empty-block messages.** There are no radar returns, no CONUS
     radar, and nothing from products 14-17, 64, 70+ or 103. One segmented NOTAM (3 segments).
-  - Neither repo documents the product mix; these counts are from my survey script.
+  - Neither repo documents the product mix; these counts come from a survey of the file.
 - **FD `tg/tg-source/generated/tg28.978`, `tg29.978`, `tg30.978` (866 KB)** were generated by
   FD's author and carry FD's BSD-2+Patent licence. Format: `+hex;rs=;t=;` with Oct 2020
   timestamps.
@@ -580,7 +580,7 @@ Examples decoded this session **[V]**:
   `tg30.978` with `bin/decode` (level 0-3 JSON). FD needs Python and, for harvest/RSR,
   MongoDB; level0-2 do not. Commit the JSON as golden output and attribute it per BSD-2+Patent.
   MUT `uat2text` gives a second, independent golden for headers, 413 text and hex.
-- Other documents (not downloaded): SRT-047 "SBS Description Document" (FAA TSO-C157/C195 attachments, links in `document.rst:2183-2268`); MITRE "Aerodrome and Airspace FIS-B Product Definitions" Rev 4, STX's TWGO source: https://github.com/cyoung/stratux/blob/master/notes/Aero_FISB_ProdDef_Rev4.pdf.
+- Other documents (not consulted): SRT-047 "SBS Description Document" (FAA TSO-C157/C195 attachments, links in `document.rst:2183-2268`); MITRE "Aerodrome and Airspace FIS-B Product Definitions" Rev 4, STX's TWGO source: https://github.com/cyoung/stratux/blob/master/notes/Aero_FISB_ProdDef_Rev4.pdf.
 
 ---
 

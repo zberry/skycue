@@ -6,7 +6,7 @@ Comment: The map data that skycue-make-maps downloads on the reader's machine
  It is not part of the source or of any binary package.
 
 Files: *
-Copyright: 2026 skycue maintainers
+Copyright: 2026 the skycue authors
 License: Apache-2.0
 
 Files: sources/leaflet-*.tgz
@@ -29,7 +29,7 @@ Comment: Apache ECharts 5.6.0 is Apache-2.0. The parts it embeds from d3.js
 
 Files: tests/fixtures/fisb/gen_*.py
        tests/fixtures/fisb/README.md
-Copyright: 2026 skycue maintainers
+Copyright: 2026 the skycue authors
 License: Apache-2.0
 Comment: skycue's own generator scripts and notes for the FIS-B fixtures.
  The third-party test captures (stratux, dump978, fisb-decode, pyModeS) and

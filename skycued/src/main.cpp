@@ -176,7 +176,7 @@ int run(int argc, char** argv)
         "web-port", po::value(&web_port), "override WEB_PORT (0: no web UI)")(
         "check-inputs",
         "connect once to each configured TCP input (readsb, dump978, tcp_connect inputs of the inputs file), "
-        "print one line per input, exit 0 when all connected, 1 otherwise; starts nothing else. Each check "
+        "print one line per input, exit 0 when all connected, 1 when one is not, 2 on a usage or configuration error; starts nothing else. Each check "
         "gives up after 3 s; a name lookup cannot be cancelled, so one that is still running then is "
         "abandoned and ends on the system resolver's own timeout")(
         "log-level", po::value(&log_level)->default_value("info"), "debug, info, warn or error");

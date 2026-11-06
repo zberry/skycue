@@ -32,11 +32,10 @@ sense.
 
 ## Running fisb-decode without MongoDB
 
-fisb-decode (https://github.com/rand-projects/fisb-decode, BSD-2-Clause Plus
-Patent) was taken from the same snapshot as `tg30.978` (cloned 2026-11-01;
-the cross-check below was last re-run on 2026-11-02 from a fresh clone at
-commit `c3d3b047` of 2022-09-05, the repository's latest commit on both
-dates). Levels 0-2 are pure Python 3.
+fisb-decode ("FD" below; https://github.com/rand-projects/fisb-decode,
+BSD-2-Clause Plus Patent) supplied `tg30.978`; the cross-check below uses
+commit `c3d3b047` of 2022-09-05 (the repository's latest commit when it was
+last run). Levels 0-2 are pure Python 3.
 Python 3.9 was used, with no third-party modules. Only level 0 imports
 `pymongo`, and only when `CALCULATE_RSR` is on (the reception-success-rate
 statistics). Level 3 and the harvester need MongoDB, but the check below does
@@ -118,14 +117,14 @@ script. Each is counted separately.
 4. **PIREP station, 1.** For `PIREP KMEM 300840Z MEM UA ...` our station is
    `KMEM`, the first token after the type. FD's is `MEM`, from the report's
    own location field. The time and text are identical.
-5. **FD's `BAD_MESSAGES`, 0 records (as of 2026-11-02).** `msg11_12_15.py`
+5. **FD's `BAD_MESSAGES`, 0 records.** `msg11_12_15.py`
    in FD has a hard-coded list of "stuck" SIGMETs that it ignores on
    purpose. The script still allows a golden record whose text is on that
    list, but none is left: SIGMETs 12-20-7489 and 12-20-7676 (the July 2020
    text `WST KMKC 062057 CONVECTIVE SIGMET 99C`, still re-broadcast in this
    October capture, start 2020-07-06) were 4 records here until the store
    began rejecting AIRMET/SIGMET/CWA reports whose start is more than 12 h
-   old (`store.stale_start`, design §10.2 amended 2026-11-02). The 2019
+   old (`store.stale_start`). The 2019
    report 19-7540 that this entry covered before that is rejected by the
    year check (`wrong_year`).
 6. **TFR keep-alives 0-230, 0-852, 0-7764, 3.** FD prints a `renew-only`
@@ -137,8 +136,7 @@ script. Each is counted separately.
 fisb-decode expires a NOTAM-D at its text's end of validity and a NOTAM-TFR
 70 min after its last reception (a keep-alive renews it). The store ends
 every NOTAM, AIRMET, SIGMET, G-AIRMET and CWA at the earlier of its latest
-end time and 70 min after its last reception (design §10.3, amended at the
-final review), so for TFRs it now agrees with fisb-decode. An earlier version
+end time and 70 min after its last reception, so for TFRs it now agrees with fisb-decode. An earlier version
 of this file listed TFRs 0-5116 and 0-229 as "expiry differs from
 fisb-decode" because the store kept their text's end (2021-09-01 and
 2021-10-29): that was a bug in the store, not a representational difference.
@@ -184,7 +182,7 @@ These records were checked by hand against fisb-decode's output and source:
    -132, bin 5′ × 7.5′ (FD alternate block 60057). 381 of the blocks are
    empty-list blocks at level 1 (adjudication 1).
 33. Lightning (103) at 08:55Z: 861 blocks, all empty (tg30 has no lightning
-   RLE blocks, Task 3). Each matches an FD LIGHTNING IMAGE with zero bins.
+   RLE blocks). Each matches an FD LIGHTNING IMAGE with zero bins.
 34. Cloud tops (84) at 09:00Z: block 247842 RLE `[[3,3],[4,29],[3,3],[4,29],...]`
    expands to FD's bins exactly.
 35. Expired SIGMET 20-9878 at 08:55:00Z: its end `0855Z` (FD
@@ -226,7 +224,7 @@ not by 19-7540.
 ## Stuck-SIGMET regeneration (2026-11-02)
 
 The golden was regenerated after the store began rejecting stale-on-arrival
-AIRMET, SIGMET and CWA reports (design §10.2, amended 2026-11-02). Against
+AIRMET, SIGMET and CWA reports. Against
 the previous golden (1776 lines) exactly 4 lines are removed and none added
 or changed: the text and the text-plus-graphics records of SIGMETs
 12-20-7489 and 12-20-7676 (`CONVECTIVE SIGMET 99C`, start 2020-07-06T20:55Z,

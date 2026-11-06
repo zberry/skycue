@@ -1,6 +1,6 @@
 # Installing skycue
 
-Updated 2026-11-05, for skycue 0.1.0.
+For skycue 0.1.0.
 
 skycue runs beside the decoders you already have: it reads readsb's JSON
 position output (and, in the USA, dump978-fa's UAT stream) and never feeds,
@@ -16,8 +16,10 @@ the map in the browser:
 5. bake the offline map,
 6. open the page.
 
-The commands below set `v` to the release you install; change that line
-when you install a later one. Every other line can be pasted as it is.
+The commands below set `v` to the release you install. Replace `v` (when
+you install a later release) and your own position and addresses; the rest
+can be pasted as it is. The packages and the source tarball are on the
+[Releases page](https://github.com/zberry/skycue/releases).
 
 ## Debian and Raspberry Pi
 
@@ -26,8 +28,9 @@ release has a build per Debian release, told apart by the end of the
 version: pick `skycue_<version>-1~deb12u1_<arch>.deb` on Debian 12 and on
 Raspberry Pi OS (based on Debian 12, bookworm), and
 `skycue_<version>-1~deb13u1_<arch>.deb` on Debian 13. The two are not
-interchangeable (each needs its own release's Boost libraries). Put the
-one you need in the current directory.
+interchangeable (each needs its own release's Boost libraries). Download the
+one you need from the [Releases page](https://github.com/zberry/skycue/releases)
+into the current directory.
 
 ### 1. Install the package
 
@@ -87,6 +90,11 @@ sudo sed -i 's/^NET_OPTIONS="\(.*\)"$/NET_OPTIONS="\1 --net-json-port 30047 --ne
 grep '^NET_OPTIONS=' /etc/default/readsb
 sudo systemctl restart readsb
 ```
+
+The `grep` must print a line ending in
+`--net-json-port-include-noposition"`. If it prints nothing, `NET_OPTIONS`
+is missing or spans several lines and the `sed` changed nothing: add the
+options to `/etc/default/readsb` by hand, then restart readsb.
 
 With a 978 MHz receiver and dump978-fa installed as a service: dump978-fa's
 `/etc/default/dump978-fa` already serves the raw port in its default
@@ -275,7 +283,7 @@ runs add up: bake a wider area or a second region later without losing the
 first. `--around` does not wrap across the antimeridian or past ±85°
 latitude: the box is cut at 180° and at the poles (near 180° longitude, bake
 the other side as a second `--bbox` region; see
-[make-tiles.md](../docs/make-tiles.md)). The other ways to name a region:
+[make-tiles.md](make-tiles.md)). The other ways to name a region:
 
 ```sh
 sudo skycue-make-maps --preset conus     # also: europe, world
@@ -301,8 +309,9 @@ receiver, and open the same address). What the page shows is in
 ## RHEL
 
 RHEL 8 and 9 and their rebuilds (Rocky Linux, AlmaLinux), on x86_64. The
-package is `skycue-<version>-1.el8.x86_64.rpm` or `.el9.`; put it in the
-current directory.
+package is `skycue-<version>-1.el8.x86_64.rpm` or `.el9.`; download it from the
+[Releases page](https://github.com/zberry/skycue/releases) into the current
+directory.
 
 ```sh
 v=0.1.0
@@ -379,7 +388,8 @@ Then open the page as in [6. Open the page](#6-open-the-page).
 ## From source
 
 The same platforms, built with plain CMake from the release's source
-tarball `skycue-<version>.tar.gz`, which carries the two web libraries the
+tarball `skycue-<version>.tar.gz` from the
+[Releases page](https://github.com/zberry/skycue/releases), which carries the two web libraries the
 page needs (Leaflet and ECharts) so nothing is downloaded at build time.
 There are three parts, each building on the one before:
 
@@ -388,6 +398,10 @@ There are three parts, each building on the one before:
    it is built you can just run it, with nothing installed.
 3. [Make it look like an installed package](#make-it-look-like-an-installed-package),
    if you want the same layout, user, unit and paths as a package.
+
+If you have a git clone instead of the tarball, read
+[Building from a git clone](#building-from-a-git-clone) after the package
+list in Build.
 
 ### Build
 
@@ -404,9 +418,9 @@ sudo dnf install gcc-c++ make cmake boost-devel zlib-devel python3 diffutils fin
 ```
 
 skycue needs CMake 3.25 or newer. On RHEL 8 that is the cmake from a
-current minor release (a RHEL 8 compatible build got 3.26.5);
-older RHEL 8 minor releases shipped a cmake that is too old, so update
-the system first (`sudo dnf update`) if `cmake --version` says less.
+current minor release: older RHEL 8 minor releases ship a cmake that is
+too old, so update the system first (`sudo dnf update`) if
+`cmake --version` says less than 3.25.
 
 Unpack, configure, build and test:
 
@@ -423,6 +437,36 @@ ctest --test-dir build
 without node and Playwright, and the tests that need the third-party
 captures the source tarball leaves out skip themselves too. The programs
 are now in `build/`: the daemon is `build/skycued/skycued`.
+
+### Building from a git clone
+
+A `git clone` has no `sources/` directory, and the web page needs two
+libraries that the release tarball carries: Leaflet and ECharts, as the npm
+tarballs `leaflet-1.9.4.tgz` and `echarts-5.6.0.tgz` (names, URLs and
+SHA-256 values are in `cmake/web-sources.cmake`). Without them `cmake`
+stops at configure and says so. Put the two files in `sources/`, with the
+script that reads them from that file and checks their hashes:
+
+```sh
+git clone https://github.com/zberry/skycue.git
+cd skycue
+scripts/dev/fetch-web-libs.sh      # downloads into sources/ (git-ignored)
+cmake -S . -B build
+cmake --build build -j"$(nproc)"
+ctest --test-dir build
+```
+
+On a machine without network access, run `scripts/dev/fetch-web-libs.sh
+--offline` to see which files `sources/` still needs, and copy them there
+from another machine. Or point the build at copies you already have
+unpacked: Leaflet's `package/dist` directory and ECharts' `package`
+directory from the two tarballs:
+
+```sh
+cmake -S . -B build -DSKYCUE_LEAFLET_DIR=/path/to/leaflet -DSKYCUE_ECHARTS_DIR=/path/to/echarts
+```
+
+The rest, from the run steps on, is the same as for the tarball.
 
 ### Run it from the build tree
 

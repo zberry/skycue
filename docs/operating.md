@@ -2,7 +2,7 @@
 
 How to run skycued beside the decoders you already have, replay recordings,
 and watch the cue stream. The Debian and RHEL packages and the plain CMake
-install run it as the systemd unit `skycued`, with `/skycue.conf`
+install run it as the systemd unit `skycued`, with `/etc/skycue/skycue.conf`
 and its files under `/var/lib/skycue` ([installing.md](installing.md)); from a
 source tree it runs straight from the build tree with
 `skycued --config ./skycue.conf --www-dir www` ([Run it from the build
@@ -37,7 +37,7 @@ and reconnects when they restart.
 Installed from a package (see [installing.md](installing.md)):
 
 ```sh
-sudoedit /skycue.conf    # at least RECEIVER_LAT, RECEIVER_LON
+sudoedit /etc/skycue/skycue.conf    # at least RECEIVER_LAT, RECEIVER_LON
 sudo systemctl enable --now skycued
 systemctl status skycued            # running or not, pid, last log lines
 journalctl -u skycued -f            # the log
@@ -103,7 +103,7 @@ the one you do not have:
 With only a 978 MHz receiver skycued counts and decodes the uplinks but shows
 no UAT aircraft: those reach it through readsb, which merges dump978-fa's
 frames and needs a 1090 MHz receiver. A site whose only receiver is a
-pingStation 3 runs skycued with neither decoder and defines the pingStation
+pingStation 3 (uAvionix's small networked ADS-B/UAT receiver) runs skycued with neither decoder and defines the pingStation
 in [the inputs file](#the-inputs-file); the web UI or the API add and change
 inputs while it runs. A built-in input that is left out is absent from the
 inputs list.
@@ -115,7 +115,7 @@ inputs to `RECORD_DIR`; raw capture of a decoder's own output is
 ## Config keys that matter
 
 The full list, with comments and the file grammar, is
-`packaging/skycue.conf.example` (installed as `/skycue.conf` by the packages). An unknown key or a malformed line stops
+`packaging/skycue.conf.example` (installed as `/etc/skycue/skycue.conf` by the packages). An unknown key or a malformed line stops
 skycued with exit status 2. An unexpected error
 that escapes `skycued`, `skycue-rawrec` or `skycue-pingsim` ends it with
 exit status 1 and one line, `fatal: <what>` at ERROR in skycued's log or
@@ -132,7 +132,7 @@ shared with other tooling.
 | `READSB_HOST` | skycued | host of the readsb JSON port (default `127.0.0.1`, not empty) (`--readsb-host` overrides it) |
 | `DUMP978_HOST` | skycued | host of the dump978-fa raw port (default `127.0.0.1`, not empty) (`--dump978-host` overrides it) |
 | `DUMP978_ENABLE` | skycued | `no`: there is no 978 MHz decoder, skycued neither connects to one nor expects UAT input (as `--no-uat`, which overrides it); default `yes` |
-| `STATE_DIR` | skycued | absolute directory for skycued's files; a relative `INPUTS_FILE`, `LOCATIONS_FILE`, `STATS_FILE`, `ALLOW_LIST_FILE` or `BLOCK_LIST_FILE` is taken from it, and it holds the runtime overlay `skycue.runtime.json` and the `skycue.overrides.conf` that save as baseline writes instead of rewriting `skycue.conf` (see [web-api.md](web-api.md#save-as-baseline)); empty (default): today's places (next to `skycue.conf`; the list files from the working directory) |
+| `STATE_DIR` | skycued | absolute directory for skycued's files; a relative `INPUTS_FILE`, `LOCATIONS_FILE`, `STATS_FILE`, `ALLOW_LIST_FILE` or `BLOCK_LIST_FILE` is taken from it, and it holds the runtime overlay `skycue.runtime.json` and the `skycue.overrides.conf` that save as baseline writes instead of rewriting `skycue.conf` (see [web-api.md](web-api.md#save-as-baseline)); empty (default): the places next to the config (next to `skycue.conf`; the list files from the working directory) |
 | `MAP_DIR` | skycued | absolute directory the web map's `tiles/` and `overlays/` are served from, and nowhere else; empty (default): the web directory's |
 | `CUE_TCP_PORT` | skycued | cue clients connect here; `0`: no listener |
 | `CUE_TCP_CONNECT` | skycued | `host:port ...` of clients that listen; skycued dials them |
@@ -166,7 +166,7 @@ them by hand ([installing.md](installing.md#from-source)):
 
 | File | Build tree (`STATE_DIR`, `MAP_DIR` empty) | Package (`STATE_DIR=/var/lib/skycue`, `MAP_DIR=/var/lib/skycue/maps`) |
 |------|------|------|
-| config | wherever `--config` points | `/skycue.conf` (`/usr/local/skycue.conf` from source); skycued never writes it |
+| config | wherever `--config` points | `/etc/skycue/skycue.conf` (`/usr/local/etc/skycue/skycue.conf` from source); skycued never writes it |
 | inputs, statistics, learned locations (`skycue.inputs.json`, `skycue.stats.json`, `fisb-locations.json`) | next to `skycue.conf` | in `STATE_DIR` |
 | runtime overlay (`skycue.runtime.json`) | next to `skycue.conf` | in `STATE_DIR` |
 | what **Save as baseline** writes | `MAX_RANGE_NM`/`MIN_ELEVATION_DEG` in `skycue.conf`, and the list files | `STATE_DIR/skycue.overrides.conf`, and the list files |
@@ -1167,7 +1167,7 @@ logged as a WARN at start and the map has no tiles or overlays. See
 
 With the packages, or a source install of `skycue/`, `skycue-make-maps`
 makes both the tiles and the overlays straight into `MAP_DIR` (read from
-`/skycue.conf`, or `--config FILE`, or given as `--map-dir DIR`):
+`/etc/skycue/skycue.conf`, or `--config FILE`, or given as `--map-dir DIR`):
 
 ```sh
 sudo skycue-make-maps --around 150                   # the world coarse, 150 nm around the receiver fine
@@ -1240,7 +1240,7 @@ cp -r www/overlays <prefix>/share/skycue/www/    # or MAP_DIR, or ./www/ for a b
 downloads `ne_50m_admin_0_boundary_lines_land`,
 `ne_50m_admin_1_states_provinces_lines` and `ne_10m_populated_places_simple`
 (about 1.2 MB of zip files, public domain, each pinned by SHA-256) into the
-cache (default `build/naturalearth/`) once, and writes `admin0.json`,
+cache (default `build/naturalearth/` when run by hand) once, and writes `admin0.json`,
 `admin1.json` and `cities.json` (compact GeoJSON, lines simplified to about
 1 km; about 1 MB in all) and `meta.json` (each file's source, version,
 SHA-256, feature count and size, and when it was made) to the output
@@ -1506,8 +1506,8 @@ a file that cannot be read stops skycued with exit status 2. At most
 the count (a world-wide `make-locations.py` file is well under that, and
 the script warns when its output is not).
 `scripts/maps/make-locations.py` builds one from OurAirports' public-domain
-data ([docs/make-locations.md](../docs/make-locations.md)); the
-result is a local file, never committed. Both are served as
+data ([docs/make-locations.md](make-locations.md)); the
+result is a local file, never committed. The merged table (learned and CSV) is served as
 `GET /api/fisb/locations` ([web-api.md](web-api.md#get-apifisblocations)).
 
 ## The consumer library

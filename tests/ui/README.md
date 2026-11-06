@@ -25,14 +25,14 @@ install` downloads nothing else. `node_modules/` is git-ignored.
 
 ## Running
 
-Through ctest, from a standalone skycue build configured with Leaflet and
+Through ctest, from the skycue source directory, with a build configured with Leaflet and
 ECharts (`run.sh` says SKIP without either; see `www/README.md`):
 
 ```sh
-cmake -S skycue -B build-skycue -DSKYCUE_LEAFLET_DIR=/path/to/leaflet/package/dist \
+cmake -S . -B build -DSKYCUE_LEAFLET_DIR=/path/to/leaflet/package/dist \
   -DSKYCUE_ECHARTS_DIR=/path/to/echarts/package
-cmake --build build-skycue
-ctest --test-dir build-skycue -R ui_playwright --output-on-failure
+cmake --build build
+ctest --test-dir build -R ui_playwright --output-on-failure
 ```
 
 or directly: `bash run.sh <skycued> <fixtures dir> <build>/www-stage <skycue-pingsim> [playwright args]`

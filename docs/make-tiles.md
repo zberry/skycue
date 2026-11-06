@@ -20,7 +20,7 @@ scripts/maps/make-tiles.sh -10,35,30,60 0 8 --container ghcr.io/osgeo/gdal:ubunt
 1. Downloads the Natural Earth 1:10m "Cross Blended Hypsometric Tints with
    Shaded Relief, Water and Drainages" raster (`NE1_HR_LC_SR_W_DR.zip`,
    about 310 MB, public domain, from the Natural Earth S3 bucket) into the
-   cache (default `build/naturalearth/`, git-ignored), once; set
+   cache (default `build/naturalearth/` when you run the script by hand, git-ignored; `/var/cache/skycue` for the installed `skycue-make-maps`), once; set
    `SKYCUE_NE_URL` to use a mirror.
 2. Crops it to BBOX with `gdal_translate -projwin`.
 3. Cuts XYZ tiles with `gdal2tiles.py --xyz -z MINZ-MAXZ` into a staging
@@ -162,7 +162,7 @@ for `--around RADIUS_NM`, the receiver position) from
 `/etc/skycue/skycue.conf` or `--config FILE`, or takes `--map-dir DIR`; uses
 the GDAL on PATH, or `--container [IMAGE]`; and as root gives the map
 directory to the `skycue` user. See "Map tiles" in
-[docs/operating.md](../docs/operating.md) for every option.
+[docs/operating.md](operating.md) for every option.
 
 `--around` makes a box RADIUS_NM out from the point in each direction and
 clamps it to the map's extent (longitude -180 to 180, latitude -85 to 85).
@@ -183,7 +183,7 @@ Country and state borders and city names are not in the tiles: they are a
 separate, optional overlay layer (about 1 MB) the page draws on top, in the
 Light and Dark map styles alike. `scripts/maps/make-overlays.sh` makes them from
 Natural Earth vectors; see "Map style and overlays" in
-[docs/operating.md](../docs/operating.md).
+[docs/operating.md](operating.md).
 
 ## Attribution
 

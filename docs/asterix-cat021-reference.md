@@ -1,12 +1,10 @@
 # ASTERIX Category 021 (ADS-B Target Reports) decoding reference
 
 Scope: decoding EUROCONTROL ASTERIX CAT021 data blocks arriving over UDP (or TCP, §6) into skycued
-`TrackObservation`s. Target: C++17 + Boost, offline. Primary edition: **2.6** (2021-12-21).
-Compiled 2026-11-02.
+`TrackObservation`s. Primary edition: **2.6** (2021-12-21).
 
-**Source situation.** Every eurocontrol.int URL (the CAT021 PDFs for ed. 2.5, 2.6, 2.7 and 1.8,
-and the Part 1 publication page) answered **HTTP 403** to automated download on 2026-11-02, so
-**no CAT021 PDF was read**. The layouts below come from **asterix-specs** (BSD-3-Clause), a
+**Sources.** The EUROCONTROL CAT021 PDFs (ed. 2.5, 2.6, 2.7 and 1.8) and the Part 1 publication
+page refuse automated download, so **no CAT021 PDF was read** (§9). The layouts below come from **asterix-specs** (BSD-3-Clause), a
 machine-readable transcription of the EUROCONTROL PDFs, one file per edition. They were
 cross-checked against the CroatiaControl `asterix` decoder XML configs (GPL), which were read but
 not copied, and against the decoded bytes of the `cat21_re.ast` sample (§7). Tags:
@@ -22,8 +20,7 @@ not copied, and against the decoded bytes of the `cat21_re.ast` sample (§7). Ta
 This reference summarises the public EUROCONTROL CAT021 standard. §8 lists what the pingStation 3
 emits, as the project's decoder and encoder model it; the device is not a source for any bit layout.
 
-Fetched files are in the session scratchpad (`asterix/specs`, `asterix/cc`, `asterix/pdf`).
-They are data only. Nothing from the GPL XML is reproduced here.
+Nothing from the GPL XML is reproduced here.
 
 Bit numbering follows ASTERIX convention: in an N-bit field, bit N is the MSB and bit 1 the LSB,
 and bytes go on the wire MSB first (big-endian). "b8" in a one-octet table means the octet's
@@ -496,11 +493,11 @@ records have no lengths. Therefore:
   016 = 4 s, amplitude −53/−83 dBm, data ages as in §3.42, RE/SGV 0 kt 137.8° and 15 kt 90°.
   Both records end exactly at LEN with the 2.x length rules. **Licence**: the file has no
   licence of its own. The repository's LICENSE is **GPL-2.0** (GitHub reports `GPL-2.0`, the
-  LICENSE text is GPL v2), **not GPL-3 as assumed in the task**. Do not commit the file into a
+  LICENSE text is GPL v2), **not GPL-3**. Do not commit the file into a
   non-GPL repo. Reproducing its 91 bytes as a test vector is a licensing judgement call.
 - No larger public CAT021 sample was found. CroatiaControl's other samples (`asterix.pcap`,
-  CAT 001/002/034/048/062/065) are other categories, also GPL. **We need our own CAT021
-  encoder for tests**: build records from a `TrackObservation`-like struct with the 2.6 rules
+  CAT 001/002/034/048/062/065) are other categories, also GPL. **Tests need their own CAT021
+  encoder**: build records from a `TrackObservation`-like struct with the 2.6 rules
   (FSPEC builder, FX chains, compound primary subfields, RE explicit length). Include
   round-trip tests, all-items records, unknown-FRN/edition-mismatch cases, multi-record blocks,
   midnight wrap, and negative lat/lon/rates.
@@ -543,20 +540,20 @@ All rows follow the ed. 2.5 UAP [T]. The highest FRN is 36, so the FSPEC is at m
 vector (RE/SGV), no true-north heading (RE/TNH), and no high-precision times. The decoder should
 still implement the full 2.2+ length rules (§1), because a firmware change could add items.
 
-## 9. Sources (all fetched or attempted 2026-11-02)
+## 9. Sources
 
-| Source | Edition | Result |
+| Source | Edition | Status |
 |---|---|---|
-| https://www.eurocontrol.int/sites/default/files/2021-12/asterix-adsbtr-cat021-part12-v2-6.pdf | CAT021 2.6 (EUROCONTROL-SPEC-0149-12) | **HTTP 403, not read** |
-| https://www.eurocontrol.int/sites/default/files/2021-02/asterix-adsbtr-cat021-part12-v2-5.pdf | 2.5 | **403, not read** |
-| https://www.eurocontrol.int/sites/default/files/2025-07/asterix-adsbtr-cat021-part12-v2-7.pdf | 2.7 | **403, not read** |
-| https://www.eurocontrol.int/sites/default/files/2019-06/asterix-cat021-asterix-ads-b-messages-part-12-v1.8-012011.pdf | 1.8 | **403, not read** |
-| https://www.eurocontrol.int/publication/eurocontrol-specification-surveillance-data-exchange-part-i | Part 1 (page lists ed. 3.1 as newest, per search snippet) | **403, not read** |
+| https://www.eurocontrol.int/sites/default/files/2021-12/asterix-adsbtr-cat021-part12-v2-6.pdf | CAT021 2.6 (EUROCONTROL-SPEC-0149-12) | **not read (automated download refused)** |
+| https://www.eurocontrol.int/sites/default/files/2021-02/asterix-adsbtr-cat021-part12-v2-5.pdf | 2.5 | **not read (automated download refused)** |
+| https://www.eurocontrol.int/sites/default/files/2025-07/asterix-adsbtr-cat021-part12-v2-7.pdf | 2.7 | **not read (automated download refused)** |
+| https://www.eurocontrol.int/sites/default/files/2019-06/asterix-cat021-asterix-ads-b-messages-part-12-v1.8-012011.pdf | 1.8 | **not read (automated download refused)** |
+| https://www.eurocontrol.int/publication/eurocontrol-specification-surveillance-data-exchange-part-i | Part 1 (page lists ed. 3.1 as newest, per search snippet) | **not read (automated download refused)** |
 | https://www.icao.int/sites/default/files/sp-files/SAM/Documents/2010/ASTERIX/01%20ASTERIX_CAT_1.pdf | EUROCONTROL CAT001 Part 2a ed. 1.1, Aug 2002 | **Read** (data block / LEN / record / UAP definitions only) [V] |
-| https://github.com/zoranbosnjak/asterix-specs `specs/cat021/cat-{0.23,0.24,0.25,0.26,2.1,2.2,2.3,2.4,2.5,2.6,2.7}.ast`, `ref-{1.4,1.5}.ast`, `remarks.md` (master, last commit 2026-10-27) | Transcriptions, BSD-3-Clause (© 2019 KZPS) | **Read in full for 2.6. Structural diffs for the rest** [T] |
+| https://github.com/zoranbosnjak/asterix-specs `specs/cat021/cat-{0.23,0.24,0.25,0.26,2.1,2.2,2.3,2.4,2.5,2.6,2.7}.ast`, `ref-{1.4,1.5}.ast`, `remarks.md` (master) | Transcriptions, BSD-3-Clause (© 2019 KZPS) | **Read in full for 2.6. Structural diffs for the rest** [T] |
 | https://github.com/CroatiaControlLtd/asterix `install/config/asterix_cat021_{0_23,0_26,1_8,2_4,2_6}.xml` | Decoder configs, GPL-2.0 | Read for cross-check only, nothing copied [U] |
 | https://github.com/CroatiaControlLtd/asterix `install/sample_data/cat21_re.ast` | 91-byte sample, GPL-2.0 repo | Decoded (§7) |
 
-Known gaps (to close when a PDF can be obtained by hand): the PIC table (090), the LW codes
+Known gaps (to close when a PDF is obtained by hand): the PIC table (090), the LW codes
 (271), the BPS offset and the remaining RE prose, the exact UDP wording in Part 1, the 1.x
 editions other than 1.8, and the 1.8 layouts (seen only in the GPL XML).

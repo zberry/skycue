@@ -26,15 +26,15 @@ is not 0.
 
 Suppressions, each with its reason beside it. Today there are the four
 cppcheck entries and 45 clang-tidy `NOLINT` comments in the source
-(`grep -rc NOLINT skycue/ | awk -F: '{s+=$2} END{print s}'`), plus the
+(`git grep -c NOLINT | awk -F: '{s+=$NF} END{print s}'`), plus the
 checks turned off in `.clang-tidy`; TSan, LSan and fuzzing need
 none:
 
-- TSan: `tests/sanitizer/tsan.supp`, LSan:
-  `tests/sanitizer/lsan.supp`, in the sanitizers' own format
-  (`race:<function or file>`, `leak:<function or library>`), one entry per
-  line with a `# <reason>` line above it. The runner passes the file at test
-  time when it exists (no reconfigure). Neither file exists.
+- TSan and LSan: there are none. A suppression file would use the
+  sanitizers' own format (`race:<function or file>`, `leak:<function or
+  library>`), one entry per line with a `# <reason>` line above it; the
+  runner passes it at test time when it exists (see Sanitizer runs
+  below), with no reconfigure.
 - clang-tidy: inline `// NOLINTNEXTLINE(<check>): <reason>`; a check turned
   off in `.clang-tidy` has its reason there.
 - cppcheck: `<id>:<file>` under a `# <reason>` line in
@@ -95,7 +95,7 @@ clang++, and `tsan` without clang++ prints
 The script configures the tree once:
 
 ```sh
-cmake -S skycue -B build-asan -DCMAKE_CXX_COMPILER=clang++ \
+cmake -S . -B build-asan -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSKYCUE_BUILD_TESTS=ON \
   -DSKYCUE_UI_TESTS=ON -DSKYCUE_SANITIZE=address,undefined
 ```
@@ -234,7 +234,7 @@ from the fetched captures at fuzz time and `scripts/dev/run-fuzz.sh` copies them
 into each corpus beside the committed seeds (a `SKIP: generated seeds` line
 when the captures are not fetched). Every harness still has at least one
 committed seed. Generated corpora, artefacts and work dirs stay in the build
-tree; findings are copied to `tests/tests/fuzz/findings/` (ignored by git except
+tree; findings are copied to `tests/fuzz/findings/` (ignored by git except
 `.gitkeep` and its `README.md`; the directory is never used as a corpus) and
 become regression tests.
 
@@ -280,7 +280,7 @@ included, and the CAT021 seeds have their edition byte after the mode byte.
 ```sh
 scripts/dev/run-fuzz.sh readsb_line                  # 600 s, tree build-fuzz/
 scripts/dev/run-fuzz.sh all --seconds 60             # every harness, 60 s each
-scripts/dev/run-fuzz.sh readsb_line --seconds 20 --canary --findings build-hdev/h3-findings
+scripts/dev/run-fuzz.sh readsb_line --seconds 20 --canary --findings build/fuzz-findings
 scripts/dev/run-fuzz.sh --clean                      # remove build-fuzz/ and its work dir
 ```
 
@@ -297,7 +297,7 @@ that links `-fsanitize=fuzzer` (a one-line probe; else
 the tree once:
 
 ```sh
-cmake -S skycue -B build-fuzz -DCMAKE_CXX_COMPILER=clang++ \
+cmake -S . -B build-fuzz -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSKYCUE_FUZZ=ON
 ```
 
@@ -535,7 +535,7 @@ its reason in `.clang-tidy`:
   function taking two parameters of one type.
 - `bugprone-narrowing-conversions`: `-Wconversion` already covers it.
 - `bugprone-unchecked-optional-access`: its dataflow cannot see the
-  invariants the parsers rely on (all 66 first-run findings were false
+  invariants the parsers rely on (all of its findings were false
   positives, see below).
 - `performance-enum-size`: a smaller underlying type changes libskycue's ABI.
 - `performance-inefficient-string-concatenation`: only error-message
@@ -557,7 +557,7 @@ edited.
 
 ### Triage
 
-How the first clang-tidy and cppcheck findings were settled:
+How the clang-tidy and cppcheck findings were settled:
 
 | check | outcome |
 |---|---|

@@ -52,8 +52,10 @@ path, `cxx_std_17`, `Boost::system` and `Threads::Threads`, so `client_demo`
 needs no other change. libskycue is found through its CMake package only; no
 pkg-config file is installed.
 
+From the skycue source directory:
+
 ```sh
-cmake -S skycue -B build-lib -DSKYCUE_BUILD_DAEMON=OFF
+cmake -S . -B build-lib -DSKYCUE_BUILD_DAEMON=OFF
 cmake --build build-lib && cmake --install build-lib --prefix /path/to/prefix
 cmake -S examples/parent-project -B build-client \
       -DCLIENT_DEMO_FIND_PACKAGE=ON -DCMAKE_PREFIX_PATH=/path/to/prefix

@@ -50,7 +50,7 @@ set(SKYCUE_SOURCE_CACHE "${_skycue_default_source_cache}" CACHE PATH
   "Directory holding the pinned leaflet and echarts npm tarballs, used when SKYCUE_LEAFLET_DIR or SKYCUE_ECHARTS_DIR is empty")
 # Either directory left empty: the pinned tarball from SKYCUE_SOURCE_CACHE,
 # hash-checked and extracted in the build tree (cmake/VendoredWeb.cmake). A
-# directory that is given (a parent build passes both) is used as it is.
+# directory that is given is used as it is.
 if(NOT SKYCUE_LEAFLET_DIR OR NOT SKYCUE_ECHARTS_DIR)
   include(cmake/VendoredWeb.cmake)
   if(NOT SKYCUE_LEAFLET_DIR)

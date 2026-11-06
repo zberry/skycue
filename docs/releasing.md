@@ -1,6 +1,6 @@
 # Releasing skycue
 
-The checklist for one release, run on a developer machine with podman (and
+The checklist for one release, run with podman (and
 `qemu-user-static` for the arm64 packages). `0.2.0` stands for the new
 version throughout.
 
@@ -102,8 +102,6 @@ version throughout.
    The Debian 12 and Debian 13 debs of one architecture are not
    interchangeable (each depends on its own release's Boost libraries); the
    `~deb12u1` / `~deb13u1` revision that `build-package.sh` gives them keeps
-   their file names apart. The committed changelogs stay at `0.2.0-1`. Debian `-dbgsym` packages that land in `dist/<target>/`
-   are not attached.
-
-This list is meant to become a GitHub Actions workflow later; the workflow
-will call the same scripts, so each step stays runnable by hand.
+   their file names apart. The committed changelogs keep the plain `-1` revision;
+   `build-package.sh` adds the `~debNNu1` suffix to the package name only.
+   Debian `-dbgsym` packages that land in `dist/<target>/` are not attached.

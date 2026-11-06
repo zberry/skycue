@@ -1,5 +1,7 @@
-# skycue configuration. The packages install it as /etc/skycue/skycue.conf; from
-# source, copy it to a skycue.conf and pass it with skycued --config. Edit it.
+# skycue configuration: the template the packages fill in and the from-source build copies.
+# The packages install a copy as /etc/skycue/skycue.conf with the state paths
+# set; from source, copy it to a skycue.conf and pass it with skycued --config.
+# Edit it.
 #
 # Grammar. This file is parsed, never sourced or executed:
 #   - Blank lines, and lines whose first non-blank character is '#', are
@@ -16,8 +18,6 @@
 # A malformed line or an unknown key stops skycued with exit status 2, naming
 # the line number or the key. skycued also stops with exit status 2, naming
 # the key, on a value outside the range given in its comment below.
-#
-# Keys marked (phase 3) are not used yet; they are here so this file keeps its shape.
 
 # Receiver latitude in decimal degrees, -90..90 (required).
 RECEIVER_LAT=
@@ -40,16 +40,16 @@ READSB_HOST=127.0.0.1
 # Host skycued reads DUMP978_RAW_PORT on (not empty; default 127.0.0.1), as
 # READSB_HOST. A --dump978-host on skycued's command line overrides it.
 DUMP978_HOST=127.0.0.1
-# yes (default, today's behaviour): skycued expects dump978-fa's UAT stream.
+# yes (default): skycued expects dump978-fa's UAT stream.
 # no: there is no 978 MHz decoder; skycued neither connects to it nor expects
 # anything on it (as skycued --no-uat, which overrides it).
 DUMP978_ENABLE=yes
-# (phase 3) HTTP port for the web map; 0 turns the web map off.
+# HTTP port for the web map; 0 turns the web map off.
 WEB_PORT=8080
-# (phase 3) Address the web map listens on: 127.0.0.1 for this machine only,
+# Address the web map listens on: 127.0.0.1 for this machine only,
 # 0.0.0.0 for every interface (not empty).
 WEB_BIND=127.0.0.1
-# (phase 3) Seconds of position history drawn behind each aircraft on the web
+# Seconds of position history drawn behind each aircraft on the web
 # map, a whole number 0..3600 (0: no trails).
 TRAIL_SECONDS=120
 # TCP port where cue clients connect to skycued; 0 for no listener (then
@@ -75,7 +75,7 @@ RECORD_FORMATS="jsonl csv"
 # with skycue-rawplay). Needs RECORD_DIR. The raw streams of readsb and
 # dump978-fa are recorded by running skycue-rawrec. no: do not.
 RECORD_RAW=no
-# (phase 3) Disk budget for the recordings under RECORD_DIR and RECORD_DIR/raw
+# Disk budget for the recordings under RECORD_DIR and RECORD_DIR/raw
 # together, in gigabytes (10^9 bytes; a number >= 0; 0 for no limit). When a
 # new file is started the oldest recordings are deleted to stay within it;
 # only files with skycue's own names are counted or deleted.
@@ -124,11 +124,11 @@ FISB_EXPERIMENTAL=no
 # STATE_DIR: an absolute directory for the files skycued keeps (the inputs,
 # statistics and learned report locations); a relative INPUTS_FILE,
 # LOCATIONS_FILE, STATS_FILE, ALLOW_LIST_FILE or BLOCK_LIST_FILE is taken from
-# it. Empty (default, today's behaviour): those files live next to this file
+# it. Empty (default): those files live next to this file
 # (the list files: skycued's working directory).
 STATE_DIR=
 # MAP_DIR: an absolute directory the web map's tiles/ and overlays/ are served
-# from, and nowhere else. Empty (default, today's behaviour): the ones in
+# from, and nowhere else. Empty (default): the ones in
 # skycued's web directory.
 MAP_DIR=
 

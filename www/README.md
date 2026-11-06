@@ -11,19 +11,22 @@ no request to any host but skycued itself.
 
 ## Leaflet
 
-The map library is Leaflet 1.9.4, pinned in `cmake/sources.cmake` as the
+The map library is Leaflet 1.9.4, pinned in `cmake/web-sources.cmake` as the
 npm registry tarball (`leaflet-1.9.4.tgz`: it ships the prebuilt `dist/`,
 which the GitHub source archive does not; it is only extracted, never run
 through npm). It is not committed: the page loads it from
 `vendor/leaflet/leaflet.js` and `vendor/leaflet/leaflet.css`.
 
-- **Parent build** (a larger project that builds skycue): a build step extracts the tarball
-  and the skycue step installs `dist/leaflet.js`, `dist/leaflet.css` and
-  `dist/images/` into `share/skycue/www/vendor/leaflet/`, next to these files.
-- **Standalone skycue build**: pass the extracted `dist/` directory,
+- **Default**: the build checks `sources/leaflet-1.9.4.tgz` against its
+  SHA-256 and extracts it in the build tree
+  (`scripts/dev/fetch-web-libs.sh` puts it there from a git clone).
+- **`SKYCUE_LEAFLET_DIR`**: if you pass it, `dist/leaflet.js`,
+  `dist/leaflet.css` and `dist/images/` are installed from that directory
+  into `share/skycue/www/vendor/leaflet/`, next to these files. To pass
+  the extracted `dist/` directory by hand, from the source directory:
   ```sh
   mkdir -p /tmp/leaflet && tar xzf sources/leaflet-1.9.4.tgz -C /tmp/leaflet package/dist
-  cmake -S skycue -B build-skycue -DSKYCUE_LEAFLET_DIR=/tmp/leaflet/package/dist
+  cmake -S . -B build -DSKYCUE_LEAFLET_DIR=/tmp/leaflet/package/dist
   ```
   The `www_stage` target (part of `all`) assembles these files plus Leaflet
   in `<build>/www-stage/`, which the web tests serve with `--www-dir`, and
@@ -37,20 +40,21 @@ only; the build never copies them.
 ## ECharts
 
 The statistics charts use Apache ECharts 5.6.0 (Apache-2.0), pinned in
-`cmake/sources.cmake` as the npm registry tarball (`echarts-5.6.0.tgz`,
+`cmake/web-sources.cmake` as the npm registry tarball (`echarts-5.6.0.tgz`,
 which ships the prebuilt `dist/echarts.min.js`; only extracted, never run
 through npm). It is not committed: the page loads it from
 `vendor/echarts/echarts.min.js`, and `LICENSE`, `NOTICE` and
 `licenses/LICENSE-d3` are installed beside it.
 
-- **Parent build** (a larger project that builds skycue): a build step extracts the tarball
-  and the skycue step installs those files into
-  `share/skycue/www/vendor/echarts/`.
-- **Standalone skycue build**: pass the extracted package root,
+- **Default**: the build checks `sources/echarts-5.6.0.tgz` against its
+  SHA-256 and extracts it in the build tree.
+- **`SKYCUE_ECHARTS_DIR`**: if you pass it, those files are installed from
+  that directory into `share/skycue/www/vendor/echarts/`. To pass the
+  extracted package root by hand, from the source directory:
   ```sh
   mkdir -p /tmp/echarts && tar xzf sources/echarts-5.6.0.tgz -C /tmp/echarts \
     package/dist/echarts.min.js package/LICENSE package/NOTICE package/licenses/LICENSE-d3
-  cmake -S skycue -B build-skycue -DSKYCUE_ECHARTS_DIR=/tmp/echarts/package
+  cmake -S . -B build -DSKYCUE_ECHARTS_DIR=/tmp/echarts/package
   ```
   (with `-DSKYCUE_LEAFLET_DIR` as above). Without `SKYCUE_ECHARTS_DIR` the
   page has no chart library and the tests that need it say SKIP.

@@ -1,7 +1,10 @@
 #include "inputs/udp_listener.hpp"
 
+#include "log.hpp"
+
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/socket_base.hpp>
 #include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
@@ -14,6 +17,8 @@ namespace skycued {
 namespace asio = boost::asio;
 using asio::ip::udp;
 using boost::system::error_code;
+
+constexpr int kReceiveBufferBytes = 4 * 1024 * 1024;
 
 struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
     Impl(asio::io_context& io_, std::string bind_, uint16_t port_, const std::string& peer_,
@@ -33,6 +38,7 @@ struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
     std::vector<uint8_t> buf;
     udp::endpoint sender;
     bool bound = false;
+    int rcvbuf = 0;  // granted receive buffer, bytes
     // When last_error last named a refused peer (at most once a second).
     std::optional<std::chrono::steady_clock::time_point> peer_noted;
 
@@ -44,8 +50,17 @@ struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
         const auto addr = asio::ip::make_address(bind, ec);
         if (!ec)
             sock.open(addr.is_v6() ? udp::v6() : udp::v4(), ec);
-        if (!ec)
+        if (!ec) {
+            // Best effort, before bind: a burst (a fast replay) must not overrun
+            // the kernel default while a slow consumer catches up.
+            error_code ignored;
+            sock.set_option(asio::socket_base::receive_buffer_size(kReceiveBufferBytes), ignored);
+            asio::socket_base::receive_buffer_size got;
+            sock.get_option(got, ignored);
+            rcvbuf = ignored ? 0 : got.value();
+            LOG_INFO("udp " << bind << ":" << port << ": receive buffer " << rcvbuf << " bytes");
             sock.bind(udp::endpoint(addr, port), ec);
+        }
         if (ec) {
             error_code ignored;
             sock.close(ignored);
@@ -154,5 +169,7 @@ void UdpListener::start()
 void UdpListener::stop() { impl_->shutdown(); }
 
 bool UdpListener::connected() const { return impl_->bound; }
+
+int UdpListener::receiveBufferBytes() const { return impl_->rcvbuf; }
 
 }  // namespace skycued

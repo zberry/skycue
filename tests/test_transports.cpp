@@ -210,6 +210,23 @@ BOOST_AUTO_TEST_CASE(udp_delivers_datagrams_and_peer)
     });
 }
 
+BOOST_AUTO_TEST_CASE(udp_receive_buffer_is_enlarged)
+{
+    // A burst of datagrams must fit the socket while a slow consumer catches
+    // up; the kernel default (~208 KB) lost some on an emulated machine. Linux
+    // grants twice the request up to net.core.rmem_max, so assert only 1 MiB.
+    IoThread t;
+    const uint16_t port = freeUdpPort();
+    std::unique_ptr<UdpListener> l;
+    t.call([&] {
+        l = std::make_unique<UdpListener>(t.io, "0.0.0.0", port, "", kRebind);
+        l->start();
+    });
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return l->connected(); }); }));
+    BOOST_CHECK_GE(t.call([&] { return l->receiveBufferBytes(); }), 1 << 20);
+    t.call([&] { l.reset(); });
+}
+
 BOOST_AUTO_TEST_CASE(udp_peer_filter)
 {
     IoThread t;

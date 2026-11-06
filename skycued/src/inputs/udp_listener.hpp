@@ -6,6 +6,7 @@
 // after `rebind_delay`. With `peer` set, datagrams from any other address are
 // counted in rejectedPeer() and dropped. The socket does not set
 // reuse_address, so a port another process holds shows as a bind failure.
+// It asks for a 4 MiB receive buffer (best effort) so a burst survives a slow consumer.
 
 #include "inputs/transport.hpp"
 
@@ -29,6 +30,8 @@ public:
     void stop() override;
     bool connected() const override;
     bool datagrams() const override { return true; }
+    // The receive buffer the socket was granted (0 until bound); io_context thread.
+    int receiveBufferBytes() const;
 
 private:
     struct Impl;

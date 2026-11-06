@@ -154,7 +154,10 @@ assert abs(d["lat"] - 38.85) < 1e-9 and abs(d["lon"] + 77.05) < 1e-9, d' "$tmp/s
   { cat "$tmp/status.json"; fail "(b) device_status"; }
 
 # ---- (c) the capture replayed into a fresh input -----------------------------------
-timeout 60 "$pingsim" --udp "127.0.0.1:$replay_port" --capture "$capture" --speed 20 >"$tmp/c.log" 2>&1
+# The capture's timestamps were recorded at 20x in (a), so they already carry
+# the compressed timing; --speed 20 again would fire every datagram at once and
+# overrun the socket buffer of a slow (emulated) consumer. Replay at 1x.
+timeout 60 "$pingsim" --udp "127.0.0.1:$replay_port" --capture "$capture" --speed 1 >"$tmp/c.log" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/c.log"; fail "(c) pingsim exit $rc"; }
 [ "$(sent "$tmp/c.log")" = "$lines" ] || { cat "$tmp/c.log"; fail "(c) pingsim did not send $lines records"; }

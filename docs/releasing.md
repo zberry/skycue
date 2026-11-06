@@ -72,9 +72,9 @@ version throughout.
    done
    ```
 
-   The arm64 builds run under emulation and compile with `parallel=4`
-   (qemu user-mode crashes the compiler at the host's full core count);
-   `SKYCUE_BUILD_JOBS=N` changes that. They take much longer; Debian 12
+   The arm64 builds run under emulation and compile with one job per core
+   of the host; `SKYCUE_BUILD_JOBS=N` lowers that if the emulator
+   crashes under load. They take much longer; Debian 12
    arm64 stands in for Raspberry Pi OS.
 
    **Do not tag the release until all six targets print `verify: OK`,

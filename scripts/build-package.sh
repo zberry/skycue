@@ -14,9 +14,8 @@
 # stops (exit 3) and says how to install it. Emulated builds take hours; there
 # is no timeout here. SKYCUE_TEST_SLOW_FACTOR (default 4 emulated, else 1)
 # scales the test timeouts of the build's ctest run. Emulated Debian builds
-# also compile with parallel=4 (qemu user-mode crashes the compiler under the
-# host's full core count); SKYCUE_BUILD_JOBS=N overrides that number. Native
-# builds keep one job per core.
+# also pass parallel=<cores of this machine> explicitly; SKYCUE_BUILD_JOBS=N
+# overrides that number (lower it if the emulator crashes under load).
 # A --source tarball named skycue-<version>.tar.gz must be the release in
 # CMakeLists.txt. The Debian revision carries the release:
 # skycue_<v>-1~deb12u1_<arch>.deb on Debian 12, ~deb13u1 on Debian 13 (the
@@ -121,7 +120,7 @@ fi
 
 jobs_opt=()
 if [ "$arch" != "$host_arch" ]; then
-  jobs_opt=(-e "DEB_BUILD_OPTIONS=parallel=${SKYCUE_BUILD_JOBS:-4}")
+  jobs_opt=(-e "DEB_BUILD_OPTIONS=parallel=${SKYCUE_BUILD_JOBS:-$(nproc)}")
 fi
 
 image=skycue-pkg:$target

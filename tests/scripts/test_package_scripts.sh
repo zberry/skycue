@@ -17,6 +17,7 @@ out=$(SKYCUE_BINFMT_DIR=$tmp/nobinfmt bash "$b" "$foreign" --source "$tmp/skycue
 grep -q qemu-user-static <<<"$out" || fail "missing binfmt: no qemu-user-static hint"
 grep -q 'would run:' <<<"$out" && fail "missing binfmt: printed a dry-run line before stopping"
 native=debian12-amd64; [ "$arch" = aarch64 ] && native=debian12-arm64
+narch=amd64; [ "$arch" = aarch64 ] && narch=arm64
 out=$(bash "$b" "$native" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1) || fail "native dry-run failed: $out"
 grep -q 'would run: podman build .*containers/Containerfile.debian12' <<<"$out" || fail "no image build line"
 grep -q "would run: podman run .*skycue-$pv.tar.gz" <<<"$out" || fail "no build run line"
@@ -24,7 +25,7 @@ grep -q "would run: podman run .*skycue-$pv.tar.gz" <<<"$out" || fail "no build 
 run=$(grep 'would run: podman run ' <<<"$out")
 grep -q -- '--network none' <<<"$run" && fail "build run is --network none (package builds may use the network)"
 grep -q "skycue-$pv.tar.gz:[^ ]*:ro" <<<"$run" || fail "tarball not mounted read-only"
-grep -q "dist/$native:/out:Z" <<<"$run" || fail "artefacts do not go to dist/$native"
+grep -q "dist/${native}:/out:Z" <<<"$run" || fail "artefacts do not go to dist/$native"
 grep -q 'SKYCUE_TEST_SLOW_FACTOR=1 ' <<<"$run" || fail "native build is not slow factor 1"
 grep -q "would run: podman rmi .*skycue-pkg:$native" <<<"$out" || fail "image not removed by default"
 # The Debian release (12 or 13) goes to the inner script, which puts it in the revision.
@@ -50,7 +51,7 @@ out=$(SKYCUE_TEST_SLOW_FACTOR=8 SKYCUE_BINFMT_DIR=$tmp/binfmt bash "$b" "$foreig
   fail "foreign dry-run with slow factor 8 failed"
 grep -q 'SKYCUE_TEST_SLOW_FACTOR=8 ' <<<"$out" || fail "SKYCUE_TEST_SLOW_FACTOR from the environment ignored"
 out=$(SKYCUE_BINFMT_DIR=$tmp/binfmt bash "$b" "$foreign" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1)
-grep -q 'DEB_BUILD_OPTIONS=parallel=4 ' <<<"$out" || fail "foreign build lacks parallel=4"
+grep -q "DEB_BUILD_OPTIONS=parallel=$(nproc) " <<<"$out" || fail "foreign build is not parallel=nproc"
 out=$(SKYCUE_BUILD_JOBS=2 SKYCUE_BINFMT_DIR=$tmp/binfmt bash "$b" "$foreign" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1)
 grep -q 'DEB_BUILD_OPTIONS=parallel=2 ' <<<"$out" || fail "SKYCUE_BUILD_JOBS ignored"
 out=$(bash "$b" "$native" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1)
@@ -138,38 +139,38 @@ deb_changelog "$1" "$2" debian11' _ "$tmp/changelog" "$pv" >/dev/null 2>&1 && fa
 
 v=$here/scripts/verify-package.sh
 bash "$v" nonsense "$tmp/x.deb" >/dev/null 2>&1; [ $? -eq 2 ] || fail "verify: bad target is not exit 2"
-bash "$v" debian12-amd64 "$tmp/missing.deb" >/dev/null 2>&1; [ $? -eq 2 ] || fail "verify: missing package is not exit 2"
-touch "$tmp/skycue_${pv}-1~deb12u1_amd64.deb" "$tmp/libskycue-dev_${pv}-1~deb12u1_amd64.deb" "$tmp/skycue-${pv}-1.el9.x86_64.rpm"
-bash "$v" debian12-amd64 >/dev/null 2>&1; [ $? -eq 2 ] || fail "verify: no package is not exit 2"
-bash "$v" debian12-amd64 "$tmp/skycue-${pv}-1.el9.x86_64.rpm" --source "$tmp/skycue-$pv.tar.gz" >/dev/null 2>&1
+bash "$v" $native "$tmp/missing.deb" >/dev/null 2>&1; [ $? -eq 2 ] || fail "verify: missing package is not exit 2"
+touch "$tmp/skycue_${pv}-1~deb12u1_${farch}.deb" "$tmp/skycue_${pv}-1~deb12u1_${narch}.deb" "$tmp/libskycue-dev_${pv}-1~deb12u1_${narch}.deb" "$tmp/skycue-${pv}-1.el9.x86_64.rpm"
+bash "$v" $native >/dev/null 2>&1; [ $? -eq 2 ] || fail "verify: no package is not exit 2"
+bash "$v" $native "$tmp/skycue-${pv}-1.el9.x86_64.rpm" --source "$tmp/skycue-$pv.tar.gz" >/dev/null 2>&1
 [ $? -eq 2 ] || fail "verify: an rpm for a deb target is not exit 2"
-bash "$v" debian12-amd64 "$tmp/skycue_${pv}-1~deb12u1_amd64.deb" --source "$tmp/missing.tar.gz" >/dev/null 2>&1
+bash "$v" $native "$tmp/skycue_${pv}-1~deb12u1_${narch}.deb" --source "$tmp/missing.tar.gz" >/dev/null 2>&1
 [ $? -eq 2 ] || fail "verify: missing --source is not exit 2"
-out=$(SKYCUE_BINFMT_DIR=$tmp/nobinfmt bash "$v" "$foreign" "$tmp/skycue_${pv}-1~deb12u1_amd64.deb" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1); rc=$?
+out=$(SKYCUE_BINFMT_DIR=$tmp/nobinfmt bash "$v" "$foreign" "$tmp/skycue_${pv}-1~deb12u1_${farch}.deb" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1); rc=$?
 [ $rc -eq 3 ] || fail "verify: missing binfmt: exit $rc, want 3"
 grep -q qemu-user-static <<<"$out" || fail "verify: missing binfmt: no qemu-user-static hint"
 # Dry run: phase 1 on the Containerfile's base image (not the build image), phase 2 offline.
-out=$(bash "$v" debian12-amd64 "$tmp/skycue_${pv}-1~deb12u1_amd64.deb" "$tmp/libskycue-dev_${pv}-1~deb12u1_amd64.deb" \
+out=$(bash "$v" $native "$tmp/skycue_${pv}-1~deb12u1_${narch}.deb" "$tmp/libskycue-dev_${pv}-1~deb12u1_${narch}.deb" \
         --source "$tmp/skycue-$pv.tar.gz" --systemd --dry-run 2>&1) || fail "verify: dry-run failed: $out"
 base=$(sed -n 's/^FROM[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' "$here/containers/Containerfile.debian12" | head -n 1)
 [ -n "$base" ] || fail "verify: no FROM in Containerfile.debian12"
 p1=$(grep 'would run: podman run ' <<<"$out" | head -n 1)
 grep -qF " $base " <<<"$p1" || fail "verify: phase 1 does not start from $base: $p1"
 grep -q 'skycue-pkg:' <<<"$out" && fail "verify: uses the build image"
-grep -qF "libskycue-dev_${pv}-1~deb12u1_amd64.deb:/pkgs/libskycue-dev_${pv}-1~deb12u1_amd64.deb:ro" <<<"$p1" || fail "verify: dev package not mounted read-only"
+grep -qF "libskycue-dev_${pv}-1~deb12u1_${narch}.deb:/pkgs/libskycue-dev_${pv}-1~deb12u1_${narch}.deb:ro" <<<"$p1" || fail "verify: dev package not mounted read-only"
 grep -q ' cmake ' <<<"$p1" || fail "verify: no cmake installed with a dev package"
 # Package paths reach the install shell as positional arguments, not inside its script.
 grep -q "bash -c '[^']*/pkgs/" <<<"$p1" && fail "verify: package paths inside the bash -c script: $p1"
 grep -qF "' _ /pkgs/" <<<"$p1" || grep -qF "' _ '/pkgs/" <<<"$p1" || fail "verify: package paths not passed as arguments: $p1"
-grep -q 'would run: podman commit .* skycue-verify:debian12-amd64$' <<<"$out" || fail "verify: phase 1 not committed"
+grep -q "would run: podman commit .* skycue-verify:${native}\$" <<<"$out" || fail "verify: phase 1 not committed"
 p2=$(grep 'would run: podman run --rm ' <<<"$out")
 grep -q -- '--network none' <<<"$p2" || fail "verify: phase 2 is not --network none"
 grep -q "skycue-$pv.tar.gz:[^ ]*:ro" <<<"$p2" || fail "verify: tarball not mounted read-only in phase 2"
 grep -q 'verify-package-inner.sh:[^ ]*:ro' <<<"$p2" || fail "verify: inner script not mounted read-only"
 grep -q 'VERIFY_DEV=1' <<<"$p2" || fail "verify: dev package not passed to the checks"
 grep -q 'would run: podman run -d .*--systemd=always.*--network none' <<<"$out" || fail "verify: no systemd container"
-grep -q "would run: podman rmi -f skycue-verify:debian12-amd64" <<<"$out" || fail "verify: image not removed"
-out=$(bash "$v" debian12-amd64 "$tmp/skycue_${pv}-1~deb12u1_amd64.deb" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1) ||
+grep -q "would run: podman rmi -f skycue-verify:$native" <<<"$out" || fail "verify: image not removed"
+out=$(bash "$v" $native "$tmp/skycue_${pv}-1~deb12u1_${narch}.deb" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1) ||
   fail "verify: dry-run without dev package failed"
 grep -q 'VERIFY_DEV=0' <<<"$out" || fail "verify: VERIFY_DEV not 0 without a dev package"
 grep -q 'systemd=always' <<<"$out" && fail "verify: systemd run without --systemd"

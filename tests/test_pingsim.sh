@@ -82,12 +82,16 @@ sent() {
     awk '{ print $1 + $2 }'
 }
 # wait_messages ID WANT: sets tracks/messages/rejected, polling until the
-# input has counted WANT messages (5 s at most)
+# input has counted WANT messages. It gives up when the count has not grown for
+# 3 s, or after 20 s in all (both scaled by SKYCUE_TEST_SLOW), so an emulated or
+# loaded machine that is still working through the datagrams is waited for.
 wait_messages() {
-  local i
-  for (( i=0; i<50; i++ )); do
+  local i stall=0 last=-1 slowf=${SKYCUE_TEST_SLOW:-1}
+  for (( i=0; i<200*slowf; i++ )); do
     read -r tracks messages rejected <<<"$(counts "$1")"
     [ "$messages" -ge "$2" ] && return
+    if [ "$messages" -gt "$last" ]; then stall=0; last=$messages; else stall=$(( stall + 1 )); fi
+    [ "$stall" -ge $(( 30 * slowf )) ] && return
     sleep 0.1
   done
 }

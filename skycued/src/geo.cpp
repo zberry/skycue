@@ -35,6 +35,11 @@ double greatCircleNm(double lat1, double lon1, double lat2, double lon2)
 
 double bearingDeg(double lat1, double lon1, double lat2, double lon2)
 {
+    // The same point has no bearing. Decided here, not left to atan2 of the
+    // residue of x: where the compiler fuses the multiply-adds (aarch64) that
+    // residue is a tiny nonzero number of either sign, and atan2 gave 180.
+    if (lat1 == lat2 && lon1 == lon2)
+        return 0.0;
     const double p1 = lat1 * kDegToRad;
     const double p2 = lat2 * kDegToRad;
     const double dl = (lon2 - lon1) * kDegToRad;

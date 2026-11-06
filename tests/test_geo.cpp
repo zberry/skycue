@@ -86,4 +86,8 @@ BOOST_AUTO_TEST_CASE(bearing_is_in_0_360)
     BOOST_TEST(b > 359.9);
     BOOST_TEST(b < 360.0);
     BOOST_TEST(geo::bearingDeg(38.9, -77.0, 38.9, -77.0) == 0.0);  // same point
+    // Same point written with either zero: no bearing, and not 180 from atan2(+-0, -0).
+    BOOST_TEST(geo::bearingDeg(0.0, 0.0, -0.0, -0.0) == 0.0);
+    BOOST_TEST(geo::bearingDeg(-0.0, -0.0, 0.0, 0.0) == 0.0);
+    BOOST_TEST(geo::bearingDeg(-0.0, 10.0, 0.0, 10.0) == 0.0);
 }

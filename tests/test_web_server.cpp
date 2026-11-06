@@ -1392,7 +1392,7 @@ BOOST_AUTO_TEST_CASE(web_port_zero_disabled)
     const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture, "--replay-loop"}, log);
     BOOST_TEST(pollUntil([&] { return has(readAll(log), "web UI disabled"); }));
     ::kill(pid, SIGTERM);
-    BOOST_TEST(waitExit(pid, 5s) == 0);
+    BOOST_TEST(waitExit(pid, slow(5s)) == 0);
     BOOST_TEST(!has(readAll(log), "web: listening"));
 }
 

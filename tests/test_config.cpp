@@ -483,8 +483,14 @@ BOOST_AUTO_TEST_CASE(known_keys_match_example)
     BOOST_TEST(known_set.size() == known.size());  // no duplicates
     for (const auto& k : in_example)
         BOOST_TEST(known_set.count(k) == 1u, "example key not known: " << k);
-    for (const auto& k : known_set)
+    // Accepted and ignored for configs shared with other tooling; not in the example.
+    const std::set<std::string> ignored{"SDR_1090_SERIAL", "SDR_978_SERIAL", "GAIN_1090", "GAIN_978",
+                                        "DUMP978_JSON_PORT"};
+    for (const auto& k : known_set) {
+        if (ignored.count(k))
+            continue;
         BOOST_TEST(in_example.count(k) == 1u, "known key not in example: " << k);
+    }
     BOOST_TEST(in_example.size() > 20u);
 }
 

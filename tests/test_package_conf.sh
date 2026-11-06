@@ -30,10 +30,6 @@ expected=(
   "#RECORD_DIR=/var/lib/skycue/recordings"
   "ALLOW_LIST_FILE=allow.list"
   "BLOCK_LIST_FILE=block.list"
-  "#SDR_1090_SERIAL="
-  "#SDR_978_SERIAL="
-  "#GAIN_1090=auto"
-  "#GAIN_978=auto"
 )
 for line in "${expected[@]}"; do
   [ "$(grep -cxF -- "$line" "$out")" = 1 ] || fail "$out: want exactly one line '$line'"

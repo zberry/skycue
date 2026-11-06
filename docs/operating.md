@@ -119,13 +119,15 @@ The full list, with comments and the file grammar, is
 skycued with exit status 2. An unexpected error
 that escapes `skycued`, `skycue-rawrec` or `skycue-pingsim` ends it with
 exit status 1 and one line, `fatal: <what>` at ERROR in skycued's log or
-`skycue-rawrec: <what>` / `skycue-pingsim: <what>` on stderr.
+`skycue-rawrec: <what>` / `skycue-pingsim: <what>` on stderr. The key names
+`SDR_1090_SERIAL`, `SDR_978_SERIAL`, `GAIN_1090`, `GAIN_978` and
+`DUMP978_JSON_PORT` are accepted and ignored for compatibility with configs
+shared with other tooling.
 
 | Key | Used by | Meaning |
 |-----|---------|---------|
 | `RECEIVER_LAT`, `RECEIVER_LON` | all | receiver position (required) |
 | `RECEIVER_ALT_M`, `ANTENNA_HEIGHT_M` | skycued | antenna altitude for elevation angles |
-| `SDR_1090_SERIAL`, `SDR_978_SERIAL`, `GAIN_1090`, `GAIN_978`, `DUMP978_JSON_PORT` | (nobody) | describe your decoders; skycued accepts and ignores them |
 | `READSB_JSON_PORT`, `DUMP978_RAW_PORT` | skycued | where skycued reads from |
 | `READSB_HOST` | skycued | host of the readsb JSON port (default `127.0.0.1`, not empty) (`--readsb-host` overrides it) |
 | `DUMP978_HOST` | skycued | host of the dump978-fa raw port (default `127.0.0.1`, not empty) (`--dump978-host` overrides it) |

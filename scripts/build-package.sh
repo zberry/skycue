@@ -13,7 +13,10 @@
 # user emulation, which needs the qemu binfmt handler; without it the script
 # stops (exit 3) and says how to install it. Emulated builds take hours; there
 # is no timeout here. SKYCUE_TEST_SLOW_FACTOR (default 4 emulated, else 1)
-# scales the test timeouts of the build's ctest run.
+# scales the test timeouts of the build's ctest run. Emulated Debian builds
+# also compile with parallel=4 (qemu user-mode crashes the compiler under the
+# host's full core count); SKYCUE_BUILD_JOBS=N overrides that number. Native
+# builds keep one job per core.
 # A --source tarball named skycue-<version>.tar.gz must be the release in
 # CMakeLists.txt. The Debian revision carries the release:
 # skycue_<v>-1~deb12u1_<arch>.deb on Debian 12, ~deb13u1 on Debian 13 (the
@@ -116,6 +119,11 @@ if [ -z "$slow" ]; then
   if [ "$arch" != "$host_arch" ]; then slow=4; else slow=1; fi
 fi
 
+jobs_opt=()
+if [ "$arch" != "$host_arch" ]; then
+  jobs_opt=(-e "DEB_BUILD_OPTIONS=parallel=${SKYCUE_BUILD_JOBS:-4}")
+fi
+
 image=skycue-pkg:$target
 out=$repo/dist/$target
 cleanup() {
@@ -137,6 +145,7 @@ inner=("$kind" "/src/skycue-$v.tar.gz" "$v")
 # :Z relabels the mounts for an SELinux-enforcing host (a no-op elsewhere).
 run podman run --rm --arch "$arch" \
   -e "SKYCUE_TEST_SLOW_FACTOR=$slow" \
+  ${jobs_opt[@]+"${jobs_opt[@]}"} \
   -v "$tarball:/src/skycue-$v.tar.gz:ro,Z" \
   -v "$out:/out:Z" \
   "$image" /build-package.sh "${inner[@]}" || {

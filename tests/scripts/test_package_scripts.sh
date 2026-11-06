@@ -49,6 +49,12 @@ grep -q 'would run: podman run .*SKYCUE_TEST_SLOW_FACTOR=4 ' <<<"$out" || fail "
 out=$(SKYCUE_TEST_SLOW_FACTOR=8 SKYCUE_BINFMT_DIR=$tmp/binfmt bash "$b" "$foreign" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1) ||
   fail "foreign dry-run with slow factor 8 failed"
 grep -q 'SKYCUE_TEST_SLOW_FACTOR=8 ' <<<"$out" || fail "SKYCUE_TEST_SLOW_FACTOR from the environment ignored"
+out=$(SKYCUE_BINFMT_DIR=$tmp/binfmt bash "$b" "$foreign" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1)
+grep -q 'DEB_BUILD_OPTIONS=parallel=4 ' <<<"$out" || fail "foreign build lacks parallel=4"
+out=$(SKYCUE_BUILD_JOBS=2 SKYCUE_BINFMT_DIR=$tmp/binfmt bash "$b" "$foreign" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1)
+grep -q 'DEB_BUILD_OPTIONS=parallel=2 ' <<<"$out" || fail "SKYCUE_BUILD_JOBS ignored"
+out=$(bash "$b" "$native" --source "$tmp/skycue-$pv.tar.gz" --dry-run 2>&1)
+grep -q 'DEB_BUILD_OPTIONS' <<<"$out" && fail "native build carries DEB_BUILD_OPTIONS"
 printf 'disabled\n' > "$tmp/binfmt/$fh"
 SKYCUE_BINFMT_DIR=$tmp/binfmt bash "$b" "$foreign" --source "$tmp/skycue-$pv.tar.gz" --dry-run >/dev/null 2>&1
 [ $? -eq 3 ] || fail "disabled binfmt handler is not exit 3"

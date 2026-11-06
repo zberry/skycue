@@ -271,6 +271,11 @@ int run(int argc, char** argv)
                               vm.count("no-readsb") == 0, readsb_host, use_dump978, dump978_host);
 
     boost::asio::io_context io;
+    // Registered before anything is logged or started: a SIGINT/SIGTERM that arrives during startup (a
+    // supervisor stopping a unit that is still coming up, a test killing on the first log line) is held
+    // by asio until async_wait below and then shuts down cleanly, instead of the default action ending
+    // the process with status 143/130.
+    boost::asio::signal_set signals(io, SIGINT, SIGTERM);
 
     ForwarderConfig fc;
     fc.tcp_port = config.cue_tcp_port;
@@ -441,7 +446,6 @@ int run(int argc, char** argv)
 
     runtime->startWatching();
 
-    boost::asio::signal_set signals(io, SIGINT, SIGTERM);
     boost::asio::steady_timer exit_timer(io);
     std::chrono::steady_clock::time_point exit_deadline{};
     // After stop(): exit once the clients have their data, after at most 3 s.

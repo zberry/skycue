@@ -1396,6 +1396,27 @@ BOOST_AUTO_TEST_CASE(web_port_zero_disabled)
     BOOST_TEST(!has(readAll(log), "web: listening"));
 }
 
+// A SIGTERM that arrives while skycued is still starting up (here: on the first log line it writes
+// after the config is read) must be held and end in a clean, prompt exit 0, not the default action
+// (status 143). Regression: the handler used to be installed only after the engine had started, so
+// under load the signal could win the race.
+BOOST_AUTO_TEST_CASE(sigterm_during_startup_exits_cleanly_and_promptly)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.conf";
+    writeFile(conf, std::string(kConfHead) + "WEB_PORT=0\nCUE_TCP_PORT=0\n");
+    for (int i = 0; i < 20; ++i) {
+        const std::string log = tmp.path + "/log" + std::to_string(i);
+        const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture, "--replay-loop"}, log);
+        BOOST_TEST(pollUntil([&] { return has(readAll(log), "web UI disabled"); }));
+        const auto t0 = steady::now();
+        ::kill(pid, SIGTERM);
+        BOOST_TEST(waitExit(pid, slow(5s)) == 0);
+        const bool prompt = steady::now() - t0 < slow(2s);
+        BOOST_TEST(prompt);
+    }
+}
+
 BOOST_AUTO_TEST_CASE(web_bind_failure_exits_1)
 {
     TempDir tmp;

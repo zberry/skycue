@@ -17,7 +17,7 @@ which the GitHub source archive does not; it is only extracted, never run
 through npm). It is not committed: the page loads it from
 `vendor/leaflet/leaflet.js` and `vendor/leaflet/leaflet.css`.
 
-- **Parent build** (the stack repository): a build step extracts the tarball
+- **Parent build** (a larger project that builds skycue): a build step extracts the tarball
   and the skycue step installs `dist/leaflet.js`, `dist/leaflet.css` and
   `dist/images/` into `share/skycue/www/vendor/leaflet/`, next to these files.
 - **Standalone skycue build**: pass the extracted `dist/` directory,
@@ -43,7 +43,7 @@ through npm). It is not committed: the page loads it from
 `vendor/echarts/echarts.min.js`, and `LICENSE`, `NOTICE` and
 `licenses/LICENSE-d3` are installed beside it.
 
-- **Parent build** (the stack repository): a build step extracts the tarball
+- **Parent build** (a larger project that builds skycue): a build step extracts the tarball
   and the skycue step installs those files into
   `share/skycue/www/vendor/echarts/`.
 - **Standalone skycue build**: pass the extracted package root,

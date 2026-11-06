@@ -204,7 +204,7 @@ skycue_set_warnings(test_raw_formats)
 add_test(NAME raw_formats COMMAND test_raw_formats)
 
 # skycue-rawrec / skycue-rawplay on the real-data fixtures; the last part
-# feeds a real readsb when SKYCUE_TEST_READSB names one (the stack's tests do).
+# feeds a real readsb when SKYCUE_TEST_READSB names one.
 set(SKYCUE_TEST_READSB "" CACHE FILEPATH
   "readsb used by the rawtools full-stack check (skipped when missing)")
 add_test(NAME rawtools

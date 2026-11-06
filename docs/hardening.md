@@ -607,7 +607,7 @@ target. Whole tree (daemon, tools, tests, examples), Release:
   a structured binding, which C++17 does not allow: named references
   instead). Then clean.
 - gcc 8.5 (RHEL 8 compatible, Boost 1.66): proved on the sweep's final head by
-  the stack's clean-room build with `SKYCUE_WERROR=ON` (0 compiler
+  a clean-room build with `SKYCUE_WERROR=ON` (0 compiler
   warnings), and gcc 11 again on RHEL 9 compatible; both plain and with
   `SKYCUE_WERROR=ON`.
 

@@ -2,9 +2,9 @@
 
 `ui.spec.js` drives the page in headless Chromium with Playwright against a
 real skycued replaying `../fixtures/readsb-sample.jsonl` in real time. It
-is a development check: node, npm and Playwright are never needed by the
-a stack build or the containers. A stack build configures
-skycue with `-DSKYCUE_UI_TESTS=OFF`, and in a standalone build the ctest
+is a development check: node, npm and Playwright are never needed by a
+package build or the containers. A build that does not want them configures
+skycue with `-DSKYCUE_UI_TESTS=OFF`, and otherwise the ctest
 `ui_playwright` prints `SKIP: playwright not installed` and is reported as
 skipped (exit 77) when `node_modules/@playwright/test` is missing.
 `SKYCUE_UI_NODE_MODULES=/path/to/node_modules` points it at another

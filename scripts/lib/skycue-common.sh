@@ -1,5 +1,5 @@
 # skycue-common.sh: shell helpers shared by the skycue scripts. Sourced, not
-# run: skycue-start.sh, make-tiles.sh, make-overlays.sh, skycue-make-maps.
+# run: make-tiles.sh, make-overlays.sh, skycue-make-maps.
 # The script that sources it defines die MESSAGE (print and exit 2), which
 # load_config calls on a malformed config.
 

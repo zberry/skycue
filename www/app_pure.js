@@ -386,7 +386,7 @@
   // The whole configuration as skycue.conf text (the Config tab's copy):
   // a `# <group>` line before each group, and before each key a comment
   // with its source and whether it needs a restart, so every line is one
-  // parseConfigText and skycue-start.sh accept. A value the grammar cannot
+  // parseConfigText and skycued accept. A value the grammar cannot
   // hold is left as a comment saying so.
   function configText(cfg) {
     var d = cfg.daemon || {}, out = '# ' + d.version + ', started ' + d.started + '\n';

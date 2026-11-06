@@ -5,8 +5,9 @@ demodulated: Beast frames, dump978 text, readsb JSON. IQ replay goes one step
 earlier. It makes raw radio samples that readsb's 2.4 MS/s Mode S demodulator
 and dump978-fa's 2.083 MS/s UAT demodulator can read. That way the whole
 chain can be exercised before a dongle is plugged in: samples, demodulator,
-decoder, skycued, cues on the wire. This page covers making the files; the
-stack repository that builds the decoders has the start script that plays them.
+decoder, skycued, cues on the wire. This page covers making the files; readsb and dump978-fa read them with
+their own file inputs (`readsb --device-type ifile --ifile FILE --iformat UC8`,
+`dump978-fa --file FILE --format CU8`).
 
 There are two sources of IQ files:
 
@@ -143,15 +144,18 @@ These are counted as `unplaced_unclean`, not failed.
 
 ## Making a file
 
+Installed, `skycue-iqgen` is on the PATH; in a build tree it is
+`build/tools/iqgen/skycue-iqgen`.
+
 ```sh
 # 1090: 5 s of the bundled Mode S capture, starting 1 s in
-bin/skycue-iqgen modes tests/fixtures/raw/modes-120s.csv.gz \
+skycue-iqgen modes tests/fixtures/raw/modes-120s.csv.gz \
   --skip-seconds 1 --duration 5 -o /data/iq/sample.1090.cu8
 
 # 978: 5 s of the bundled UAT sample, and the longer stratux log
-bin/skycue-iqgen uat tests/fixtures/raw/uat-sample.txt.gz \
+skycue-iqgen uat tests/fixtures/raw/uat-sample.txt.gz \
   --duration 5 -o /data/iq/sample.978.cu8
-bin/skycue-iqgen uat tests/fixtures/raw/stratux-uat-2015.log.gz \
+skycue-iqgen uat tests/fixtures/raw/stratux-uat-2015.log.gz \
   --duration 60 -o /data/iq/stratux.978.cu8
 ```
 
@@ -206,9 +210,9 @@ negative or over-cap `--duration`, `--skip-seconds`, `--spacing-us` or
 ### `resample` and `info`
 
 ```sh
-bin/skycue-iqgen resample IN.cu8 2000000 -o OUT.1090.cu8          # to 2 400 000 S/s
-bin/skycue-iqgen resample - 2000000 -o OUT.1090.cu8 < IN.cu8      # from stdin
-bin/skycue-iqgen info OUT.1090.cu8 [--rate 2400000]
+skycue-iqgen resample IN.cu8 2000000 -o OUT.1090.cu8          # to 2 400 000 S/s
+skycue-iqgen resample - 2000000 -o OUT.1090.cu8 < IN.cu8      # from stdin
+skycue-iqgen info OUT.1090.cu8 [--rate 2400000]
 ```
 
 **`resample`** converts CU8 between rates whose ratio reduces to factors of
@@ -273,7 +277,7 @@ The script works in this order:
    output is byte-identical only on the same libm and architecture, so a
    mismatch here prints a warning with the expected and actual hashes, keeps
    the file and still exits 0.
-6. It prints the `replay-iq` command for the stack's start script.
+6. It prints the readsb command to play the file and the receiver position to use.
 
 A second run checks the cached files and downloads nothing.
 
@@ -281,13 +285,14 @@ A second run checks the cached files and downloads nothing.
 directory by hand and run with `--offline`. The script then never
 downloads. If the zip is missing, it says so and exits 1.
 
-`skycue-iqgen` is taken from `build/stage/bin`, else from `PATH`. Exit
+`skycue-iqgen` is taken from `build/tools/iqgen`, else from `PATH`. Exit
 codes: 0 done, 1 failure, 2 usage error.
 
-To replay the capture with the stack's start script, set the receiver
-position near Porto (`RECEIVER_LAT=41.15` / `RECEIVER_LON=-8.61`) and run
-`bin/skycue-start.sh replay-iq build/iq-samples/porto-awec2026.1090.cu8 -c CONFIG`
-(stack bundle launcher; it is in the stack repository, not in this one).
+To replay the capture, set the receiver position near Porto
+(`RECEIVER_LAT=41.15` / `RECEIVER_LON=-8.61`, and readsb's `--lat` / `--lon`)
+and run readsb on `build/iq-samples/porto-awec2026.1090.cu8` as in the
+introduction, with skycued reading its JSON port as in a live run
+([operating.md](operating.md#iq-files)).
 
 ## Limits
 

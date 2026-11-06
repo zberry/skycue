@@ -12,7 +12,7 @@
 namespace skycued {
 
 // Settings from skycue.conf. The grammar is the one documented in
-// packaging/skycue.conf.example and implemented by load_config in skycue-start.sh.
+// packaging/skycue.conf.example.
 struct Config {
     double receiver_lat = NAN, receiver_lon = NAN, receiver_alt_m = 0, antenna_height_m = 0;
     uint16_t dump978_raw_port = 30978, dump978_json_port = 30979, readsb_json_port = 30047,
@@ -21,7 +21,7 @@ struct Config {
     std::vector<std::pair<std::string, uint16_t>> cue_udp_targets;  // from "host:port host:port"
     std::string record_dir;
     std::set<std::string> record_formats{"jsonl", "csv"};
-    // RECORD_RAW: skycue-start.sh runs skycue-rawrec; skycued writes the
+    // RECORD_RAW: skycued writes the
     // pingStation JSON rawData frames to RECORD_DIR/raw-<id>-*.
     bool record_raw = false;
     // READSB_HOST, DUMP978_HOST: where skycued finds the decoders' ports;
@@ -48,7 +48,7 @@ struct Config {
     std::string stats_file = "skycue.stats.json";  // STATS_FILE as written (empty: statistics not saved)
     int stats_aircraft_max = 20000;      // STATS_AIRCRAFT_MAX: aircraft ledger cap, 100-100000
     int stats_save_s = 300;              // STATS_SAVE_S: seconds between statistics saves, 10-86400
-    // Accepted (they are skycue-start.sh's), unused by skycued.
+    // Accepted (they describe the decoders), unused by skycued.
     std::string sdr_1090_serial, sdr_978_serial, gain_1090 = "auto", gain_978 = "auto";
     std::set<std::string> file_keys;  // the keys skycue.conf assigns (parseConfigLayers fills it)
     // skycue.conf's own assignments as written (the last of a repeated key),

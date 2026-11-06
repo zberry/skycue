@@ -124,7 +124,7 @@ BOOST_AUTO_TEST_CASE(shell_expansion_rejected)
 
 BOOST_AUTO_TEST_CASE(malformed_lines_rejected)
 {
-    // Same accept/reject decisions as load_config in skycue-start.sh.
+    // The grammar accepts and rejects what packaging/skycue.conf.example documents.
     for (const char* line : {" RECEIVER_ALT_M=1", "RECEIVER_ALT_M = 1", "RECEIVER_ALT_M =1",
                              "receiver_alt_m=1", "_X=1", "RECEIVER_ALT_M", "1A=2",
                              "RECEIVER_ALT_M=1 # trailing comment", "RECEIVER_ALT_M=1 ",
@@ -182,7 +182,7 @@ BOOST_AUTO_TEST_CASE(missing_required)
     BOOST_TEST(contains(e.what(), "missing required key RECEIVER_LAT"));
     e = expectError("RECEIVER_LAT=1\n");
     BOOST_TEST(contains(e.what(), "missing required key RECEIVER_LON"));
-    // An empty value counts as missing, as in skycue-start.sh.
+    // An empty value counts as missing.
     e = expectError("RECEIVER_LAT=\nRECEIVER_LON=1\n");
     BOOST_TEST(contains(e.what(), "missing required key RECEIVER_LAT"));
 }
@@ -516,7 +516,7 @@ BOOST_AUTO_TEST_CASE(crlf_line_rejected_with_line_number)
     BOOST_TEST(contains(e.what(), "malformed"));
     e = expectError("RECEIVER_LAT=1\nRECEIVER_LON=2\nRECORD_DIR=\"/x\"\r\n");
     BOOST_TEST(e.line == 3);
-    // Like skycue-start.sh ([[:space:]] includes \r), a CR-only blank line or a
+    // A CR-only blank line or a
     // comment ending in CR is still a blank/comment line.
     Config c = parseConfigText("# comment\r\n\r\nRECEIVER_LAT=1\nRECEIVER_LON=2\n", "t");
     BOOST_TEST(c.receiver_lat == 1.0);

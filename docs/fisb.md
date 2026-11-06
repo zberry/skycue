@@ -235,13 +235,13 @@ after connecting and then applies the WebSocket items.
 
 ## skycue-fisb
 
-`bin/skycue-fisb` runs the same decoder and store offline, for checking a
+`skycue-fisb` runs the same decoder and store offline, for checking a
 capture or a recording:
 
 ```sh
-bin/skycue-fisb --ref-date 2015-01-24 uat-sample.txt.gz   # summary (the default)
-bin/skycue-fisb --json received-20261101-120000.jsonl > products.jsonl
-bin/skycue-fisb --experimental capture.txt               # include the [U] layouts
+skycue-fisb --ref-date 2015-01-24 uat-sample.txt.gz   # summary (the default)
+skycue-fisb --json received-20261101-120000.jsonl > products.jsonl
+skycue-fisb --experimental capture.txt               # include the [U] layouts
 ```
 
 Input, plain or `.gz`, line by line in any mix: dump978-fa lines
@@ -261,7 +261,7 @@ status: 0, 1 an unreadable or truncated file, 2 a usage error, 3 no uplink in
 the input. On the 2015 sample (abridged):
 
 ```
-$ bin/skycue-fisb --summary --ref-date 2015-01-24 uat-sample.txt.gz
+$ skycue-fisb --summary --ref-date 2015-01-24 uat-sample.txt.gz
 == Uplinks
   uplinks            704 (0 timestamped, 704 undated)
   undated taken as   2015-01-24T04:10:00.000Z (the newest global-block product time on --ref-date 2015-01-24)

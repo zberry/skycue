@@ -126,13 +126,12 @@ go beyond 8.
 
 ## Taking them to the receiver
 
-A full-stack bundle can carry `www/tiles/` when it exists; keep it under
-about 500 MB. On the
+Keep the tiles under about 500 MB. On the
 receiver the build does not install tiles; after building, copy them next to
 the installed UI:
 
 ```sh
-cp -r www/tiles build/stage/share/skycue/www/     # or <prefix>/share/skycue/www/
+cp -r www/tiles <prefix>/share/skycue/www/     # or MAP_DIR, or ./www/ for a build-tree run
 ```
 
 skycued reads the directory on each `/api/tiles-available` request, so a

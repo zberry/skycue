@@ -290,7 +290,7 @@ int run(int argc, char** argv)
         "max-gb", po::value(&max_gb)->default_value(0),
         "keep the recordings within this many GB, deleting the oldest (0: no limit; RECORD_MAX_GB)")(
         "retention-dir", po::value(&retention_dir),
-        "the directory --max-gb covers, with its raw/ (default: --dir; skycue-start.sh passes RECORD_DIR)");
+        "the directory --max-gb covers, with its raw/ (default: --dir)");
     // Test seams, not in --help.
     po::options_description hidden;
     hidden.add_options()("fail-writes-for-test", "every write fails as on a full disk")(

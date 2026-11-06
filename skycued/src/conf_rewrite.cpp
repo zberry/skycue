@@ -10,7 +10,7 @@ namespace conf_rewrite {
 
 namespace {
 
-// The unquoted value characters of the grammar (config.cpp, skycue-start.sh).
+// The unquoted value characters of the grammar (config.cpp).
 bool isPlainChar(char c)
 {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||

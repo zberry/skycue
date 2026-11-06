@@ -2,7 +2,7 @@
 # Script mode: cmake -DIN=<skycue.conf.example> -DOUT=<skycue.conf> -P PackageConfig.cmake
 #
 # The package-shape values (STATE_DIR, MAP_DIR, the list files under
-# /var/lib/skycue) are set and the keys only skycue-start.sh uses are
+# /var/lib/skycue) are set and the decoder keys skycued does not use are
 # commented out; everything else is the example's own text. Every edit must
 # match exactly one whole line of the example, else this stops naming the
 # line and writes nothing, so the example cannot drift away from what the

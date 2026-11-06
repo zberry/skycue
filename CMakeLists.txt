@@ -129,7 +129,7 @@ endif()
 # System files: the config, the skycued systemd unit, the map helpers and
 # bin/skycue-make-maps, their front.
 # They belong to the package shape and to a plain source install. A parent
-# build that wants a smaller prefix turns them off (a bundle can keep
+# build that wants a smaller prefix turns them off (it can keep
 # the config in its own etc/ and the helpers in scripts/). Their sources
 # (packaging/, scripts/) are optional: each rule is skipped when its
 # file is not there.

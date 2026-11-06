@@ -901,7 +901,7 @@ test('conf_value_every_branch', () => {
   assert.strictEqual(P.confValue('a\nb'), null);
 });
 // Every line is a comment or KEY=value in the conf grammar (config.cpp
-// parseConfigText, skycue-start.sh load_config):
+// parseConfigText, skycued's config grammar):
 // ^[A-Z][A-Z0-9_]*=  then  ^"[^"$`\\]*"$  or  ^'[^']*'$  or  ^[A-Za-z0-9_.,:/+@%=-]*$.
 function confGrammarValue(line) {
   if (/^\s*(#|$)/.test(line)) return undefined;

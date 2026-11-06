@@ -99,7 +99,7 @@ JSON capture instead. See
 
 **Raw frames** (`RECORD_RAW=yes`, `pingstation_json` inputs): the `detail.rawData`
 frames of each datagram, written in skycue-rawrec's line formats so that
-`skycue-rawplay` (and `skycue-start.sh replay-raw` of the stack bundle launcher) replays them through readsb and
+`skycue-rawplay` replays them through readsb and
 dump978 like any raw capture:
 
 - 1090 frames (7 or 14 bytes) go to `raw-<id>-YYYYMMDD-HHMMSS[-N].csv` as

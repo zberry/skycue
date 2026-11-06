@@ -43,7 +43,7 @@ const std::vector<std::string>& knownConfigKeys()
 
 namespace {
 
-// The character classes below mirror load_config in scripts/skycue-start.sh.
+// The character classes below are the grammar documented in packaging/skycue.conf.example.
 
 // [[:space:]] in the C locale: includes \r, so a CR-only line is blank.
 bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'; }

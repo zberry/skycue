@@ -228,9 +228,7 @@ string). `source` is where it came from, the first that applies:
 `overlay` (`MAX_RANGE_NM` or `MIN_ELEVATION_DEG` set by the runtime
 overlay), `cli` (a command-line option: `--cue-tcp-port`, `--web-port`,
 `--web-bind`, `--inputs-file`, `--readsb-host`, `--dump978-host`, or
-`--no-uat` for `DUMP978_ENABLE`; `value` is the option's; under the offline
-bundle `READSB_HOST` and `DUMP978_HOST` always show `cli`, because
-`skycue-start.sh` (stack bundle launcher) passes both options), `overrides` (set
+`--no-uat` for `DUMP978_ENABLE`; `value` is the option's), `overrides` (set
 in `skycue.overrides.conf`, `STATE_DIR` only), `conf` (set in
 `skycue.conf`), `default`. `restart` is true for every key that takes
 effect only when skycued restarts: all but `MAX_RANGE_NM`,
@@ -351,7 +349,7 @@ A track object:
 ## Inputs
 
 skycued's inputs are the built-ins (`readsb` and `dump978`, the decoders
-`skycue-start.sh` (stack bundle launcher) launches; `replay` under `--replay`) and the inputs added
+skycued connects to; `replay` under `--replay`) and the inputs added
 through these routes or the inputs file (see
 [operating.md](operating.md#the-inputs-file)), such as a pingStation 3.
 Every change is written to `skycue.inputs.json` before it is applied; when

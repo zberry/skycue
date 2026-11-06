@@ -79,8 +79,7 @@ threads: Boost.ProgramOptions, Boost.Test and zlib are not looked for.
 Configuring the whole directory needs CMake 3.25 (skycue's own minimum).
 Nothing outside `skycue/` is used, so a copy of that directory alone is
 enough. The `parent_project` test builds the example against such a copy on
-every test run, and the clean-room container check also runs it against a
-replaying skycued.
+every test run.
 
 ## Choosing a transport
 

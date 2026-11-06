@@ -32,7 +32,7 @@ version throughout.
 
 3. **Commit and tag.** Commit the bump, the changelogs and the page
    updates, then tag the commit (the source tarball takes its name from the
-   version, and the stack repository pins the tarball of this tag):
+   version):
 
    ```sh
    git tag -a v0.2.0 -m "skycue 0.2.0"
@@ -40,8 +40,7 @@ version throughout.
 
 4. **Make the source tarball.** `dist/skycue-0.2.0.tar.gz`: the tagged tree
    plus the Leaflet and ECharts tarballs from `sources/`. The package builds
-   below use it, it is what a from-source reader downloads, and it is what
-   the stack repository pins.
+   below use it, it is what a from-source reader downloads.
 
    ```sh
    packaging/make-source-tarball.sh          # -o DIR for another directory than dist/
@@ -105,13 +104,6 @@ version throughout.
    `~deb12u1` / `~deb13u1` revision that `build-package.sh` gives them keeps
    their file names apart. The committed changelogs stay at `0.2.0-1`. Debian `-dbgsym` packages that land in `dist/<target>/`
    are not attached.
-
-8. **Update the stack's pin after tagging.** In the stack repository, point
-   its pin at the published tarball:
-
-   ```sh
-   scripts/pin-source.sh skycue <asset URL> skycue-0.2.0.tar.gz
-   ```
 
 This list is meant to become a GitHub Actions workflow later; the workflow
 will call the same scripts, so each step stays runnable by hand.

@@ -14,7 +14,7 @@
 # no network. --offline never downloads: place AWEC2026_ADSB_Data.zip in DIR
 # by hand (on a machine without network access) and the script checks and
 # resamples it, or says what is missing. Needs curl (only to download),
-# python3, sha256sum and skycue-iqgen (<repo>/build/stage/bin, else PATH).
+# python3, sha256sum and skycue-iqgen (<repo>/build/tools/iqgen, else PATH).
 # The zip and recording hashes are strict; a resampled file whose hash differs
 # from the pinned one (another libm or architecture) is kept with a warning.
 # Exit status: 0 done, 1 failure (download, checksum, tool), 2 usage error.
@@ -75,10 +75,11 @@ out=$cache/$out_name
 print_command() {
   cat <<EOF
 
-Replay it (real time, 18.2 s; add --loop to repeat):
-  bin/skycue-start.sh replay-iq $out -c CONFIG
-The receiver position in CONFIG must be near Porto, or readsb cannot place
-the aircraft and the range filter drops them, e.g.
+Run readsb on it in place of an SDR (real time, 18.2 s):
+  readsb --device-type ifile --ifile $out --iformat UC8 --throttle ...
+The receiver position (readsb's --lat/--lon and RECEIVER_LAT/RECEIVER_LON in
+skycue.conf) must be near Porto, or readsb cannot place the aircraft and the
+range filter drops them, e.g.
   RECEIVER_LAT=41.15
   RECEIVER_LON=-8.61
 EOF
@@ -116,9 +117,9 @@ else
   echo "sha256 ok: $zip"
 fi
 
-iqgen=$here/build/stage/bin/skycue-iqgen
+iqgen=$here/build/tools/iqgen/skycue-iqgen
 if [ ! -x "$iqgen" ]; then
-  iqgen=$(command -v skycue-iqgen) || die "skycue-iqgen not found in $here/build/stage/bin or PATH; build skycue first"
+  iqgen=$(command -v skycue-iqgen) || die "skycue-iqgen not found in $here/build/tools/iqgen or PATH; build skycue first"
 fi
 command -v python3 >/dev/null || die "python3 is needed to read the zip"
 

@@ -1,8 +1,7 @@
-# skycue configuration. Copy to <prefix>/etc/skycue/skycue.conf and edit.
+# skycue configuration. The packages install it as /etc/skycue/skycue.conf; from
+# source, copy it to a skycue.conf and pass it with skycued --config. Edit it.
 #
-# Grammar. This file is parsed, never sourced or executed. skycue-start.sh
-# and skycued both read it and implement the same grammar (in bash and C++),
-# so a file valid for one is valid for the other:
+# Grammar. This file is parsed, never sourced or executed:
 #   - Blank lines, and lines whose first non-blank character is '#', are
 #     ignored. There are no comments after a value.
 #   - Every other line is KEY=value, KEY="value" or KEY='value', starting in
@@ -14,19 +13,14 @@
 #     " $ ` and \. A 'single-quoted' value may contain anything except '.
 #     The quotes are removed; nothing is expanded or substituted.
 #   - A key given twice takes its last value.
-# A malformed line or an unknown key stops skycue-start.sh and skycued with
-# exit status 2, naming the line number or the key. skycued also stops with
-# exit status 2, naming the key, on a value outside the range given in its
-# comment below.
+# A malformed line or an unknown key stops skycued with exit status 2, naming
+# the line number or the key. skycued also stops with exit status 2, naming
+# the key, on a value outside the range given in its comment below.
 #
-# Pid and log files go to <prefix>/var/run. That is deliberately not a key in
-# this file: `skycue-start.sh stop` and `status` do not read the config, so
-# the run directory is set only through the SKYCUE_RUN_DIR environment
-# variable, the same for every subcommand.
-#
-# skycue-start.sh uses the receiver, SDR, gain and decoder port keys and
-# RECORD_RAW/RECORD_DIR, and starts skycued with this same file; skycued uses
-# the receiver position and everything from CUE_TCP_PORT down. Keys marked
+# skycued uses the receiver position and the keys from the decoder hosts and
+# ports down. The SDR, gain and DUMP978_JSON_PORT keys describe the decoders
+# (readsb, dump978-fa), which you run yourself; skycued accepts them and does
+# not use them, so one file can describe the whole receiver. Keys marked
 # (phase 3) are not used yet; they are here so this file keeps its shape.
 
 # Receiver latitude in decimal degrees, -90..90 (required).
@@ -39,27 +33,28 @@ RECEIVER_ALT_M=0
 # Antenna height in metres above the ground at the receiver.
 ANTENNA_HEIGHT_M=0
 
-# Serial number of the RTL-SDR dongle for 1090 MHz / readsb (see rtl_test). Empty: no
-# dongle, readsb is not started (see "Running without SDR dongles" in docs/operating.md).
+# Serial number of the RTL-SDR dongle for 1090 MHz / readsb (see rtl_test). For
+# your own decoder set-up; skycued does not use it. Empty: none.
 SDR_1090_SERIAL=
 # Serial number of the RTL-SDR dongle for 978 MHz / dump978-fa (must differ from
-# SDR_1090_SERIAL). Empty: no dongle, dump978-fa is not started.
+# SDR_1090_SERIAL). For your own decoder set-up; skycued does not use it.
 SDR_978_SERIAL=
 # readsb gain in dB (a decimal number), auto for automatic gain, or auto-verbose
-# (automatic gain, logging each change).
+# (automatic gain, logging each change). For your own decoder set-up; skycued
+# does not use it.
 GAIN_1090=auto
 # dump978-fa gain in dB (a decimal number), or auto for automatic gain (SDR AGC).
+# For your own decoder set-up; skycued does not use it.
 GAIN_978=auto
 
-# TCP port where dump978-fa serves raw UAT messages (readsb and skycued connect to it).
+# TCP port where dump978-fa serves raw UAT messages (skycued connects to it).
 DUMP978_RAW_PORT=30978
-# TCP port where dump978-fa serves decoded UAT JSON.
+# TCP port where dump978-fa serves decoded UAT JSON (not used by skycued).
 DUMP978_JSON_PORT=30979
 # TCP port where readsb serves JSON position output (skycued reads it).
 READSB_JSON_PORT=30047
 # Host skycued reads READSB_JSON_PORT on (not empty; default 127.0.0.1, this
-# machine). skycue-start.sh runs readsb here and always tells skycued
-# 127.0.0.1; the key is for a skycued started on its own, with readsb elsewhere.
+# machine). Set it when readsb runs on another machine.
 # A --readsb-host on skycued's command line overrides it.
 READSB_HOST=127.0.0.1
 # Host skycued reads DUMP978_RAW_PORT on (not empty; default 127.0.0.1), as
@@ -78,8 +73,7 @@ WEB_BIND=127.0.0.1
 # map, a whole number 0..3600 (0: no trails).
 TRAIL_SECONDS=120
 # TCP port where cue clients connect to skycued; 0 for no listener (then
-# skycue-start.sh neither checks nor waits for it, and skycued forwards only
-# to CUE_TCP_CONNECT and CUE_UDP_TARGETS).
+# skycued forwards only to CUE_TCP_CONNECT and CUE_UDP_TARGETS).
 CUE_TCP_PORT=30500
 # Space-separated host:port list of cue clients that listen for
 # skycued to connect to them (skycued dials each one and keeps reconnecting);
@@ -94,13 +88,12 @@ CUE_UDP_TARGETS=
 RECORD_DIR=
 # Formats skycued records in, space separated: jsonl csv (either or both;
 # at least one while RECORD_DIR is set).
-# A received-*.jsonl file replays with `skycue-start.sh replay FILE`.
+# A received-*.jsonl file replays with `skycued --replay FILE`.
 RECORD_FORMATS="jsonl csv"
-# yes: also record the raw receiver streams (readsb Beast output, dump978 raw
-# UAT lines) under RECORD_DIR/raw with skycue-rawrec, for replay with
-# `skycue-start.sh replay-raw`; skycued also writes the rawData frames of
-# pingStation JSON inputs to RECORD_DIR/raw-<input id>-* (.csv for 1090, .txt
-# for UAT, both replayable with skycue-rawplay). Needs RECORD_DIR. no: do not.
+# yes: skycued writes the rawData frames of pingStation JSON inputs to
+# RECORD_DIR/raw-<input id>-* (.csv for 1090, .txt for UAT, both replayable
+# with skycue-rawplay). Needs RECORD_DIR. The raw streams of readsb and
+# dump978-fa are recorded by running skycue-rawrec. no: do not.
 RECORD_RAW=no
 # (phase 3) Disk budget for the recordings under RECORD_DIR and RECORD_DIR/raw
 # together, in gigabytes (10^9 bytes; a number >= 0; 0 for no limit). When a

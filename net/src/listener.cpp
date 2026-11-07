@@ -129,6 +129,7 @@ void Listener::stop()
     m.sessions.clear();
     m.counters.peers = 0;
     m.up = false;
+    m.bound_port = 0;
 }
 
 void Listener::bindAndListen(bool throwOnFailure)
@@ -245,8 +246,8 @@ void Listener::adopt(const std::shared_ptr<Session>& s)
     log(LogLevel::info, "peer " + s->who.address().to_string() + ":" + std::to_string(s->who.port()) +
                             " connected as stream " + std::to_string(s->stream));
     const uint64_t gen = m.gen;
-    if (m.on_peer)
-        m.on_peer(s->stream, true, s->who);
+    if (const auto hook = m.on_peer) // a copy: the hook may replace the handler
+        hook(s->stream, true, s->who);
     if (gen != m.gen || s->closed)
         return; // the callback stopped us or closed this peer
     readLoop(gen, s);
@@ -275,8 +276,10 @@ void Listener::closeSession(const std::shared_ptr<Session>& s, const std::string
         const tcp::endpoint who = s->who;
         asio::post(m.io, [weak, epoch, stream, who] {
             auto self = weak.lock();
-            if (self && self->impl_->stop_epoch == epoch && self->impl_->on_peer)
-                self->impl_->on_peer(stream, false, who);
+            if (!self || self->impl_->stop_epoch != epoch)
+                return;
+            if (const auto hook = self->impl_->on_peer) // a copy: the hook may replace the handler
+                hook(stream, false, who);
         });
     }
 }

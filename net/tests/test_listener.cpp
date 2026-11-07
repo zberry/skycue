@@ -327,7 +327,6 @@ BOOST_AUTO_TEST_CASE(tcp_listen_send_cap_closes_slow_peer)
     BOOST_CHECK(eventually([&] { return t.call([&] { return l->peers(); }) == 1; }));
     BOOST_CHECK(eventually([&] { return rec->peerEvents() == 3; }));
     t.call([&] { l->sendAll(makeBuf(std::string_view("still"))); });
-    // The good client may also hold earlier bytes? No: only stream 1 was sent to.
     BOOST_CHECK_EQUAL(good.read(5, slow(std::chrono::seconds(2))), "still");
     t.call([&] { l->stop(); });
 }

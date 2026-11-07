@@ -38,6 +38,16 @@ BOOST_AUTO_TEST_CASE(line_framer_splits_and_strips_cr)
     BOOST_TEST(c.msgs[2] == " c");
 }
 
+BOOST_AUTO_TEST_CASE(line_framer_strips_midline_cr)
+{
+    // Unlike line_client.cpp, every CR is dropped, not only a trailing one.
+    LineFramer f;
+    Collector c;
+    feed(f, "a\rb\n\r\n", c.out());
+    BOOST_REQUIRE_EQUAL(c.msgs.size(), 1u);
+    BOOST_TEST(c.msgs[0] == "ab");
+}
+
 BOOST_AUTO_TEST_CASE(line_framer_joins_across_chunks)
 {
     LineFramer f;

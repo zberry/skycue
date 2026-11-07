@@ -259,6 +259,46 @@ BOOST_AUTO_TEST_CASE(udp_two_multicast_receivers_share_a_port)
     t.call([&] { s->stop(); r1->stop(); r2->stop(); return 0; });
 }
 
+BOOST_AUTO_TEST_CASE(udp_two_multicast_receivers_different_groups_isolated)
+{
+    IoThread t;
+    auto g1 = std::make_shared<Got>();
+    auto g2 = std::make_shared<Got>();
+    UdpReceiveOptions o1;
+    o1.group = "239.255.77.2";
+    o1.iface = "127.0.0.1";
+    UdpReceiveOptions o2 = o1;
+    o2.group = "239.255.77.3";
+    const uint16_t port = freeUdpPort();
+    auto r1 = startReceiver(t, "0.0.0.0", port, o1, g1);
+    if (noMulticast(t, r1)) {
+        BOOST_TEST_MESSAGE("SKIP: no multicast-capable loopback interface on this host");
+        t.call([&] { r1->stop(); return 0; });
+        return;
+    }
+    auto r2 = startReceiver(t, "0.0.0.0", port, o2, g2);
+    BOOST_REQUIRE(r1->bound());
+    BOOST_REQUIRE(r2->bound());
+    auto s = t.call([&] {
+        auto x = UdpSender::create(t.io);
+        UdpTarget a = target("239.255.77.2", port);
+        a.iface = "127.0.0.1";
+        UdpTarget b = target("239.255.77.3", port);
+        b.iface = "127.0.0.1";
+        x->addTarget(a);
+        x->addTarget(b);
+        return x;
+    });
+    BOOST_CHECK_EQUAL(t.call([&] { return s->start(); }), 2u);
+    t.call([&] { s->send(makeBuf("x")); return 0; });
+    BOOST_REQUIRE(eventually([&] { return g1->count() >= 1 && g2->count() >= 1; }));
+    // Each receiver is bound to its own group, so each sees exactly one datagram.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    BOOST_CHECK_EQUAL(g1->count(), 1u);
+    BOOST_CHECK_EQUAL(g2->count(), 1u);
+    t.call([&] { s->stop(); r1->stop(); r2->stop(); return 0; });
+}
+
 BOOST_AUTO_TEST_CASE(udp_unicast_and_multicast_do_not_share)
 {
     IoThread t;
@@ -346,8 +386,8 @@ BOOST_AUTO_TEST_CASE(udp_sender_sets_interface_per_target)
     };
     // After start() the second target's setting is in force.
     BOOST_CHECK_EQUAL(ifaddr(), htonl(INADDR_ANY));
-    // A send visits both targets, leaving the socket as the last one set it;
-    // sending only to the first target must not leave the other's setting.
+    // A send visits both targets; the interface is re-set for each, so the
+    // socket is left as the last target set it.
     t.call([&] { s->send(makeBuf("x")); return 0; });
     BOOST_CHECK_EQUAL(ifaddr(), htonl(INADDR_ANY));
     auto s1 = t.call([&] {

@@ -54,7 +54,9 @@ public:
     // Greeting hook: called when a TCP peer of an attached listener connects,
     // from the listener's accept handler. sendToThatPeer queues a buffer for
     // that peer only; whatever is published after the hook returns is queued
-    // behind it. The function is valid only for the duration of the call.
+    // behind it. The function holds a shared_ptr to the Listener and the
+    // stream id, so a retained copy keeps the Listener alive: do not retain it;
+    // use it only during the call.
     void onPeerUp(std::function<void(const std::function<void(Buf)>& sendToThatPeer)> h);
     // Called (asynchronously) when a TCP peer of an attached listener is gone.
     void onPeerDown(std::function<void(uint64_t stream)> h);

@@ -80,10 +80,26 @@ or `udp 239.1.1.5:4001 via 192.0.2.10 ttl 4`; IPv6 addresses are in brackets.
   alive, because pending handlers hold it.
 - `UdpSender::start()` resolves host names synchronously and may block; call
   it before serving.
+- Every component must be `stop()`ped and released before the `io_context` it
+  runs on is destroyed: sockets and timers must not outlive their service.
+- Counters are monotonic across `stop()` and `start()`; only `peers` resets.
+  `Fanout::counters()` sums `messages_out`, `bytes_out`, `dropped` and `peers`
+  only.
+- `Fanout` peer events: peers that already exist when a listener is attached
+  get no peer-up, and the peers of a detached or stopped listener get no
+  peer-down, so a host that keeps per-stream state must clear it when it
+  detaches or stops a listener.
 - `Fanout` holds destinations by `shared_ptr` and does not start or stop them.
   Register peer events through `Fanout::onPeerUp` and `onPeerDown`, not
   through `Listener::onPeer`, and detach listeners before destroying the
   `Fanout`.
+
+## Multicast on one port
+
+An IPv4 receiver binds its group address, so receivers of different groups on
+one port are isolated. An IPv6 receiver binds the wildcard: every receiver on
+that port receives the datagrams of every group joined on it. Give each IPv6
+group its own port.
 
 ## Log sink
 

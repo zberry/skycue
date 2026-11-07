@@ -18,6 +18,7 @@
 #include <locale>
 #include <map>
 #include <sstream>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -561,11 +562,11 @@ const std::map<std::string, SortValue>& sortFields()
 {
     using A = const AircraftStats&;
     auto u = [](uint64_t AircraftStats::*f) { return SortValue([f](A a) { return std::optional<double>(double(a.*f)); }); };
-    auto ranged = [](std::function<double(A)> f) {
+    auto ranged = [](const std::function<double(A)>& f) {
         return SortValue([f](A a) { return a.max_range_nm ? std::optional<double>(f(a)) : std::nullopt; });
     };
     // A non-finite value (never stored; defensive) sorts as no value.
-    auto finite = [](SortValue f) {
+    auto finite = [](const SortValue& f) {
         return SortValue([f](A a) {
             const std::optional<double> v = f(a);
             return v && std::isfinite(*v) ? v : std::nullopt;
@@ -697,7 +698,7 @@ ApiResponse aircraftEntryRoute(const std::string& hex, const std::map<std::strin
     return fail(404, "no such aircraft in the statistics: " + hex);
 }
 
-const std::string kAircraftPrefix = "/api/stats/aircraft/";
+constexpr std::string_view kAircraftPrefix = "/api/stats/aircraft/";
 
 }  // namespace
 

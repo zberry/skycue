@@ -6,7 +6,7 @@
 namespace skycue::net {
 
 Backoff::Backoff(std::chrono::milliseconds min, std::chrono::milliseconds max)
-    : min_(min), max_(std::max(min, max)), cur_(min) {}
+    : min_(std::max(min, std::chrono::milliseconds(1))), max_(std::max(min_, max)), cur_(min_) {}
 
 std::chrono::milliseconds Backoff::next()
 {

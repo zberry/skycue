@@ -263,7 +263,7 @@ BOOST_AUTO_TEST_CASE(fanout_slow_peer_dropped_others_continue)
     BOOST_REQUIRE(eventually([&] { return t.call([&] { return l->peers(); }) == 2; }));
 
     // The kernel buffers swallow a lot on loopback, so publish small buffers
-    // one at a time (the good client drains between them) until the slow
+    // one at a time until the slow
     // peer's queue passes the cap.
     const std::string chunk(1000, 'x');
     std::size_t published = 0;

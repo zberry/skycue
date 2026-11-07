@@ -46,7 +46,7 @@ struct Probe : std::enable_shared_from_this<Probe> {
                 self->finish(false, "timed out");
         });
         resolver.async_resolve(result.input.host, std::to_string(result.input.port),
-                               [self](const boost::system::error_code& ec, tcp::resolver::results_type eps) {
+                               [self](const boost::system::error_code& ec, const tcp::resolver::results_type& eps) {
                                    self->resolving = false;
                                    if (self->done)
                                        return;

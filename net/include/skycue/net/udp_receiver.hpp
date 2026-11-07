@@ -11,6 +11,10 @@
 // failure. Multicast sets it, binds the group address (IPv4) or the wildcard
 // (IPv6) on the port and joins the group on `iface` (or the default), so
 // several receivers on one host can share a group and port.
+// Limitation: an IPv4 receiver is bound to its group address, so receivers of
+// different groups on one port are isolated. An IPv6 receiver binds the
+// wildcard, so every receiver on that port sees the datagrams of every group
+// joined on it; use distinct ports for distinct IPv6 groups.
 
 #include "skycue/net/counters.hpp"
 

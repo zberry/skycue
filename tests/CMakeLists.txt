@@ -428,6 +428,13 @@ target_compile_definitions(test_decode_cpr PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_decode_cpr)
 add_test(NAME decode_cpr COMMAND test_decode_cpr)
 
+# The 1090 decoder: address confirmation, CPR pairing, observation production.
+add_executable(test_decode_modes test_decode_modes.cpp)
+target_link_libraries(test_decode_modes PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_modes PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_decode_modes)
+add_test(NAME decode_modes COMMAND test_decode_modes)
+
 # Inputs and the InputManager: pingStation inputs over real sockets, the
 # inputs file, hand edits and the lifecycle.
 add_executable(test_inputs test_inputs.cpp)

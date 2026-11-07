@@ -420,6 +420,14 @@ target_compile_definitions(test_decode_fields PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_decode_fields)
 add_test(NAME decode_fields COMMAND test_decode_fields)
 
+# CPR position math: global, surface and local decoding with NL.
+add_executable(test_decode_cpr test_decode_cpr.cpp)
+target_link_libraries(test_decode_cpr PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_cpr PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_decode_cpr)
+add_test(NAME decode_cpr COMMAND test_decode_cpr)
+
 # Inputs and the InputManager: pingStation inputs over real sockets, the
 # inputs file, hand edits and the lifecycle.
 add_executable(test_inputs test_inputs.cpp)

@@ -12,7 +12,7 @@ configuration: your feeder keeps running exactly as it was.
 Source: <https://github.com/zberry/skycue>. Packages and the source tarball:
 [Releases](https://github.com/zberry/skycue/releases).
 
-<!-- screenshot of the map with traffic: coming -->
+![The skycue map: aircraft and trails over offline tiles, the output and display filters on the left, one toolbar on the map](docs/images/map.png)
 
 ## Installing and building
 
@@ -46,6 +46,8 @@ internet. It shows:
 
 - aircraft coloured by the forwarding decision, with trails you can colour by decision, signal strength or altitude;
 - a ruler for distances, and range and elevation rings around the receiver;
+- one toolbar on the map whose buttons fold out the map style, the aircraft trails, the weather layers and the radar controls, so the map stays clear until you need them;
+- saved views that bring back a set of filters and map settings with one key;
 - a track table, and a side panel for the selected aircraft;
 - alerts, a statistics view, and a Receiver tab with the health of every input;
 - offline map tiles and overlays that you bake once.

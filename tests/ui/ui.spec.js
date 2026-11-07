@@ -840,9 +840,16 @@ test('alerts_strip_arrival_resizes_open_box', async ({ page }) => {
   await alertsOnly(page, ['emergency']);
   await openPage(page);
   await waitMarkers(page, 1);
+  await page.locator('#alerts-toggle').click();               // strip off
+  await expect(page.locator('#alerts')).toBeHidden();
+  await page.setViewportSize({ width: 1280, height: 300 });   // short: the open box is clipped by the map, not by its content
   await openBox(page, 'aircraft');
-  await inject(page);
-  await expect(page.locator('#alerts-count')).toHaveText('1');
+  const map = await page.locator('#map').boundingBox();
+  const before = await page.locator('#box-aircraft').boundingBox();
+  // With no strip the box reaches the map's bottom margin, i.e. below where the strip will start.
+  expect(before.y + before.height).toBeGreaterThan(map.y + map.height - 20);
+  await page.locator('#alerts-toggle').click();               // strip on
+  await expect(page.locator('#alerts')).toBeVisible();
   const s = await page.locator('#alerts').boundingBox();
   await expect.poll(async () => { const b = await page.locator('#box-aircraft').boundingBox(); return b.y + b.height; }).toBeLessThanOrEqual(s.y + 1);
 });

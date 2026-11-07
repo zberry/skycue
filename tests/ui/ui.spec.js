@@ -1774,6 +1774,30 @@ test('map_box_hidden_button_ignores_stored_state', async ({ page }) => {
   await expect(page.locator('#box-map')).toBeHidden();
   expect(await page.evaluate(() => window.skycueApp.mapBox())).toBe(null);
 });
+test('layers_persist_per_browser_and_badge_counts', async ({ page }) => {
+  await openPage(page);
+  await expect(page.locator('#layers-badge')).toHaveText('2');
+  await openBox(page, 'layers');
+  await layerToggle(page, 'Radar (CONUS)').uncheck();
+  await layerToggle(page, 'SUA').check();
+  await layerToggle(page, 'NOTAM / TFR').check();
+  await expect(page.locator('#layers-badge')).toHaveText('3');
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.layers')))).toEqual(
+    { regional: true, conus: false, rasters: false, tfr: true, sigmet: false, airmet: false, cwa: false, sua: true });
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  expect(await page.evaluate(() => window.skycueApp.layers())).toEqual(
+    { regional: true, conus: false, rasters: false, tfr: true, sigmet: false, airmet: false, cwa: false, sua: true });
+  await expect(layerToggle(page, 'Radar (CONUS)')).not.toBeChecked();
+  await expect(layerToggle(page, 'SUA')).toBeChecked();
+  await page.evaluate(() => window.skycueApp.setLayers({ regional: false, sua: false, tfr: false }));
+  await expect(page.locator('#layers-badge')).toBeHidden();
+  await expect(layerToggle(page, 'Radar (regional)')).not.toBeChecked();
+});
+test('weather_dot_hidden_without_fisb', async ({ page }) => {
+  await openPage(page);
+  await expect(page.locator('#weather-dot')).toBeHidden();
+});
 test('aircraft_box_controls_apply', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 10);
@@ -1941,6 +1965,19 @@ test.describe('fisb radar (tg30)', () => {
     // Back on skycued's clock: drawn as before.
     o = await at(status.now);
     expect(o.regional.faded).toBe(false);
+  });
+
+  test('weather_dot_follows_radar_age_and_layers', async ({ page }) => {
+    const status = (await apiAt(RADAR_BASE, '/api/fisb/status')).body;
+    await openFisbPage(page);
+    await expect(page.locator('#radar-age')).toContainText(/\d+ (s|min)/);
+    await expect(page.locator('#weather-dot')).toBeHidden();
+    const late = new Date(Date.parse(status.radar.regional.product_time) + 40 * 60000).toISOString();
+    const r = await page.evaluate((t) => window.skycueApp.setDataClock(t), late);
+    expect(r.regional.faded).toBe(true);
+    await expect(page.locator('#weather-dot')).toBeVisible();
+    await page.evaluate(() => window.skycueApp.setLayers({ regional: false, conus: false }));
+    await expect(page.locator('#weather-dot')).toBeHidden();
   });
 
   test('other_rasters_layer_and_legend', async ({ page }) => {

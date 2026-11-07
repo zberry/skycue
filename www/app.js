@@ -1923,7 +1923,7 @@
     map.on('moveend zoomend', function () { fisb.symDirty = true; });
     var overlays = {};
     ['conus', 'regional'].forEach(function (w) {
-      radarGroups[w] = L.layerGroup().addTo(map);    // radar: on by default
+      radarGroups[w] = L.layerGroup();    // on or off by the saved layer set (setLayers, below)
     });
     overlays[swatchName('#02fd02', radar.regional.label)] = radarGroups.regional;
     overlays[swatchName('#008e00', radar.conus.label)] = radarGroups.conus;
@@ -1957,6 +1957,50 @@
       renderRasterSelect();
       loadRaster();
     });
+    P.LAYER_IDS.forEach(function (id) { layerGroup(id).on('add remove', onLayerChange); });
+    setLayers(P.normalizeLayers(storeGet(LAYERS_KEY)));
+  }
+
+  // The layer set is kept per browser: each layer group's add and remove
+  // saves it and refreshes the Layers count and the Weather dot.
+  var LAYERS_KEY = 'skycue.layers';
+  function layerGroup(id) {
+    if (id === 'regional' || id === 'conus') return radarGroups[id];
+    return id === 'rasters' ? rasterGroup : shapeGroups[id];
+  }
+  function layersState() {
+    var out = {};
+    P.LAYER_IDS.forEach(function (id) { out[id] = map.hasLayer(layerGroup(id)); });
+    return out;
+  }
+  function setLayers(partial) {
+    var want = P.normalizeLayersPartial(partial);
+    Object.keys(want).forEach(function (id) {
+      var g = layerGroup(id);
+      if (want[id] && !map.hasLayer(g)) g.addTo(map);
+      else if (!want[id] && map.hasLayer(g)) map.removeLayer(g);
+    });
+  }
+  function saveLayers() { storeSet(LAYERS_KEY, JSON.stringify(layersState())); }
+  function updateLayersBadge() {
+    var n = P.layersOnCount(layersState());
+    $('layers-badge').textContent = String(n);
+    $('layers-badge').hidden = n === 0;
+  }
+  function updateWeatherDot() {
+    var items = ['regional', 'conus'].map(function (w) {
+      var d = radar[w].drawn;
+      return { on: map.hasLayer(radarGroups[w]), drawn: !!d,
+        faded: !!d && P.radarFaded(productAgeMs(d.head), radar[w].product) };
+    });
+    var n = fisb.status && fisb.status.stations ? fisb.status.stations.length : 0;
+    $('weather-dot').hidden = !P.weatherDot(items, !!fisb.loaded && n > 0);
+  }
+  function onLayerChange() {
+    saveLayers();
+    updateLayersBadge();
+    updateWeatherDot();
+    syncViewSetSelect();
   }
 
   // ---- mosaics ----
@@ -2675,6 +2719,7 @@
     $('radar-age').textContent = parts.length ? 'Radar ' + parts.join(', ') : 'No radar';
     setStat('stat-radar-age', isNaN(newest) ? '–' : shortAge(dataNow() - newest, dataNow()));
     applyRadarOpacity();
+    updateWeatherDot();
   }
 
   // ---- snapshot and items ----
@@ -3689,6 +3734,8 @@
   // Test hooks (tests/ui/ui.spec.js); read-only views of the page state.
   window.skycueApp = {
     mapBox: function () { return openBoxName; },
+    layers: function () { return layersState(); },
+    setLayers: function (partial) { setLayers(partial); },
     markers: function () {
       var out = [];
       tracks.forEach(function (e) {

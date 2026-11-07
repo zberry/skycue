@@ -18,6 +18,12 @@ std::optional<int32_t> altitudeAc13(uint32_t ac13);
 // AC12 is AC13 without the M bit (Q is bit 8 from the left). 0 gives nullopt.
 std::optional<int32_t> altitudeAc12(uint32_t ac12);
 
+// TC 20-22 (airborne position with GNSS height): the 12-bit field is the height
+// above the WGS-84 ellipsoid in whole metres, with no Q bit and no Gillham code
+// (ICAO Doc 9871, airborne position message with GNSS height; The 1090 MHz Riddle,
+// ADS-B position chapter). Returns feet, round(metres * 3.28084); 0 gives nullopt.
+std::optional<int32_t> altitudeGnssHeightM12(uint32_t field12);
+
 // ID13 as transmitted -> four octal digits "ABCD" (the Mode A code).
 std::optional<std::string> squawkId13(uint32_t id13);
 

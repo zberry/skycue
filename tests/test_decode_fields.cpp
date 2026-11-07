@@ -199,6 +199,20 @@ BOOST_AUTO_TEST_CASE(airborne_position_fields)
     BOOST_CHECK_EQUAL(*alt, 38000);
 }
 
+// TC 22 frame from tests/fixtures/opensky/n722bd_2026-11-01_florida/n722bd_position_data4.csv
+// (rawmsg column): the 12-bit field is 605 m of GNSS height, OpenSky reports 605.028 m = 1985 ft.
+// The barometric Q-bit rule would give 6525 ft.
+BOOST_AUTO_TEST_CASE(tc22_altitude_is_gnss_height_in_metres)
+{
+    const Frame f = frameFromHex("8fa9ab17b625d5759cdbcb2423d4");
+    BOOST_CHECK_EQUAL(typeCode(f), 22);
+    BOOST_CHECK_EQUAL(f.bits(40, 12), 605u);
+    const auto alt = altitudeGnssHeightM12(f.bits(40, 12));
+    BOOST_REQUIRE(alt.has_value());
+    BOOST_CHECK_EQUAL(*alt, 1985);
+    BOOST_CHECK(!altitudeGnssHeightM12(0).has_value());
+}
+
 BOOST_AUTO_TEST_CASE(surface_position_fields)
 {
     const Frame f = frameFromHex(kSurface);

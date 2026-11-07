@@ -1,3 +1,4 @@
+#include <cmath>
 #include "decode/altitude.hpp"
 
 // Field layouts: ICAO Annex 10 Vol IV (Mode S surveillance, AC and ID fields)
@@ -64,6 +65,13 @@ std::optional<int32_t> altitudeAc12(uint32_t ac12)
     // Re-insert a zero M bit between the 6th and 7th bit.
     const uint32_t ac13 = ((ac12 & 0xFC0u) << 1) | (ac12 & 0x3Fu);
     return altitudeAc13(ac13);
+}
+
+std::optional<int32_t> altitudeGnssHeightM12(uint32_t field12)
+{
+    if (field12 == 0 || field12 > 0xFFFu)
+        return std::nullopt;
+    return static_cast<int32_t>(std::lround(static_cast<double>(field12) * 3.28084));
 }
 
 std::optional<std::string> squawkId13(uint32_t id13)

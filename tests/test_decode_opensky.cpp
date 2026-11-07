@@ -41,6 +41,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -166,24 +167,41 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
     int files_checked = 0;
     for (const auto& dir : dirs) {
         std::vector<Row> rows;
+        int tables_read = 0;
         for (const auto& e : fs::directory_iterator(dir)) {
             const std::string n = e.path().filename().string();
             if (endsWith(n, "_position_data4.csv")) {
                 auto v = readTable(e.path(), 0);
+                if (!v.empty()) ++tables_read;
                 rows.insert(rows.end(), v.begin(), v.end());
             } else if (endsWith(n, "_velocity_data4.csv")) {
                 auto v = readTable(e.path(), 1);
+                if (!v.empty()) ++tables_read;
                 rows.insert(rows.end(), v.begin(), v.end());
             } else if (endsWith(n, "_identification_data4.csv")) {
                 auto v = readTable(e.path(), 2);
+                if (!v.empty()) ++tables_read;
                 rows.insert(rows.end(), v.begin(), v.end());
             }
         }
-        if (rows.empty()) continue;
+        if (tables_read != 3) {
+            // A file that lacks a table (or has one that does not parse) is a failure, not a skip.
+            BOOST_ERROR(dir.filename().string() << ": " << tables_read << " of 3 tables parsed");
+            continue;
+        }
         std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.t < b.t; });
         ++files_checked;
 
         ModesDecoder dec(DecoderConfig{}, "opensky");
+        // Surface CPR needs a reference position, and the decoder rejects positions far from it
+        // (300 NM), so a single per-file reference would break the airborne comparison. A second
+        // decoder, used for the surface rows only, gets as reference the latest position OpenSky
+        // decoded for the file, and is rebuilt with a new reference when that has moved more than
+        // 50 km from the one in use (an aircraft on the ground stays near the airport). A file
+        // that starts on the ground takes its first surface row as the first reference.
+        std::unique_ptr<ModesDecoder> sdec;
+        std::optional<std::pair<double, double>> sref;
+        std::vector<TrackObservation> sgot;
         std::vector<TrackObservation> got;
         dec.onObservation([&](const TrackObservation& o) { got.push_back(o); });
 
@@ -202,6 +220,26 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
                 continue;
             }
             ++frames;
+            if (r.table == 0) {
+                const auto la = num(r, "lat"), lo = num(r, "lon");
+                if (la && lo && (r.f.at("surface") != "True" || !sref)) {
+                    const double dla = (*la - (sref ? sref->first : 1e3)) * 111.0;
+                    const double dlo = (*lo - (sref ? sref->second : 1e3)) * 111.0 * std::cos(*la * M_PI / 180.0);
+                    if (!sref || std::hypot(dla, dlo) > 50.0) {
+                        sref = std::make_pair(*la, *lo);
+                        DecoderConfig cfg{};
+                        cfg.reference = skycued::decode::cpr::Position{*la, *lo};
+                        sdec = std::make_unique<ModesDecoder>(cfg, "opensky-surface");
+                        sdec->onObservation([&](const TrackObservation& o) { sgot.push_back(o); });
+                    }
+                }
+            }
+            sgot.clear();
+            if (sdec)
+                sdec->feed(bytes,
+                           ModesDecoder::Clock::time_point(std::chrono::duration_cast<ModesDecoder::Clock::duration>(
+                               std::chrono::duration<double>(r.t))),
+                           std::nullopt);
             got.clear();
             dec.feed(bytes,
                      ModesDecoder::Clock::time_point(std::chrono::duration_cast<ModesDecoder::Clock::duration>(
@@ -224,12 +262,14 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
                 const auto lat = num(r, "lat"), lon = num(r, "lon");
                 const bool surface = r.f.at("surface") == "True";
                 if (lat && lon) {
-                    const bool have = o && o->lat && o->lon;
-                    const double dev = have ? std::max(std::fabs(*o->lat - *lat), std::fabs(*o->lon - *lon)) : 0;
+                    const TrackObservation* so = sgot.empty() ? nullptr : &sgot.back();
+                    const TrackObservation* po = surface ? so : o;
+                    const bool have = po && po->lat && po->lon;
+                    const double dev = have ? std::max(std::fabs(*po->lat - *lat), std::fabs(*po->lon - *lon)) : 0;
                     (surface ? surf : pos).add(have, dev <= 1e-4, dev);
                     if (have && dev > 1e-4 && (pos.both - pos.agree) + (surf.both - surf.agree) <= 5)
-                        std::cout << "  position differs " << hexOf(*o) << " t=" << r.t << " ours " << *o->lat << ","
-                                  << *o->lon << " opensky " << *lat << "," << *lon << "\n";
+                        std::cout << "  position differs " << hexOf(*po) << " t=" << r.t << " ours " << *po->lat << ","
+                                  << *po->lon << " opensky " << *lat << "," << *lon << "\n";
                 }
                 // Altitude of the frame, where an observation came out of it.
                 if (const auto m = num(r, "alt"); m && !surface && o) {
@@ -258,6 +298,8 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
                     trk.add(have, dev <= 0.5, dev);
                 }
             }
+            // No age limit on the callsign, unlike velocity: the decoder keeps an identity for the
+            // aircraft by design, so the latest identification row stays the expected value.
             if (!ident.empty()) {
                 const bool have = o->callsign.has_value();
                 cs.add(have, have && *o->callsign == ident);
@@ -280,6 +322,9 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
         show("track", trk, "deg");
         show("callsign", cs, "");
 
+        // A few corrupt rows are tolerated; more is a broken fixture.
+        BOOST_TEST(bad <= 5, name << ": " << bad << " unparsable rows");
+
         // Where both have a value, they must agree.
         const auto check = [&](const char* what, const Tally& t) {
             if (t.both < 20) return;
@@ -299,6 +344,7 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
             BOOST_TEST(t.both >= frac * t.rows, "ours reported " << t.both << " of " << t.rows);
         };
         covers("position", pos, 0.3);  // global CPR needs a pair within 10 s; OpenSky decodes more
+        covers("position (surface)", surf, 0.9);  // with a reference, only pair-window misses remain
         covers("altitude", alt, 0.8);
         covers("ground speed", gs, 0.8);
         covers("track", trk, 0.8);

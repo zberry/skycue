@@ -37,7 +37,7 @@
 #
 # Every step whose result already verifies is skipped, so a second run prints
 # only "sha256 ok" lines and uses no network. A cache file with the wrong hash
-# is deleted and the run fails; nothing is installed unless all four verify.
+# is deleted and the run fails; nothing is installed unless every capture verifies.
 # The upstream hashes are strict; the gzip of the stratux log (made here) and
 # the derived files are strict too, except the gzip hash, which only warns
 # (another gzip build may compress differently; the content is still checked).
@@ -49,8 +49,9 @@
 # not pinned: see tests/fixtures/README.md.
 #
 # Tests may set SKYCUE_CAPTURE_URL_BASE (replaces the https://raw.githubusercontent.com,
-# https://s3.opensky-network.org or https://zenodo.org prefix of every URL) and SKYCUE_CAPTURE_PINS=FILE (pin lines in the format
-# below, instead of the block in this script).
+# https://s3.opensky-network.org or https://zenodo.org prefix of every URL) and
+# SKYCUE_CAPTURE_PINS=FILE (pin lines in the format below, instead of the block
+# in this script).
 # Exit status: 0 done, 1 failure (download, checksum, tool), 2 usage error.
 set -euo pipefail
 
@@ -75,7 +76,8 @@ derived fisb/received-tg30.jsonl 95633adbe73d449c2904d41b7b65d80e1735d3f4101b4a0
 pin pyModeS-tests-sample_data_adsb.csv 7534e8186adec1aa44589c27d6059d0cde102c12d7e77c2584041f33afb99d9f https://raw.githubusercontent.com/junzis/pyModeS/487cfd6139ecea10a833afea2e58f631dc875702/tests/data/sample_data_adsb.csv
 pin pyModeS-tests-sample_data_commb_df20.csv 4c3ac03dd47c1280a9b98fb7e951fa52afa33597421f25a8068fd23f12195a08 https://raw.githubusercontent.com/junzis/pyModeS/487cfd6139ecea10a833afea2e58f631dc875702/tests/data/sample_data_commb_df20.csv
 pin pyModeS-tests-sample_data_commb_df21.csv b119c3cd26a9c0ec16ad13ef1b8a7d85f0bf63543ac405118aeb5fd17c68e509 https://raw.githubusercontent.com/junzis/pyModeS/487cfd6139ecea10a833afea2e58f631dc875702/tests/data/sample_data_commb_df21.csv
-# dump1090 testfiles/modes1.bin: BSD-3-Clause repository (MalcolmRobb/dump1090); u8 I/Q, 2 MS/s.
+# dump1090 testfiles/modes1.bin: BSD-3-Clause repository (MalcolmRobb/dump1090), fetched at
+# test time and never redistributed; u8 I/Q, 2 MS/s.
 pin dump1090-modes1.bin 3a33e16025da8669149c780075950b4e908ca036ea21f9583c113f60d5fb3094 https://raw.githubusercontent.com/MalcolmRobb/dump1090/bff92c4ad772a0a8d433f788d39dae97e00e4dbe/testfiles/modes1.bin
 # OpenSky Network incident extracts, licence CC BY 4.0 (stated in each tarball's README;
 # cite Schaefer et al. (2014), "Bringing up OpenSky"): https://s3.opensky-network.org/data-samples

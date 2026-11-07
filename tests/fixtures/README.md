@@ -255,7 +255,8 @@ PIREP texts in two `#` header lines plus one report per line, used by
 
 - Origin: https://github.com/MalcolmRobb/dump1090, file `testfiles/modes1.bin` at commit
   `bff92c4ad772a0a8d433f788d39dae97e00e4dbe` (renamed here).
-- Licence: BSD-3-Clause (the repository's licence; no separate data licence).
+- Licence: BSD-3-Clause (the repository's licence; no separate data licence). Fetched at test
+  time, never redistributed.
 - Content: 713,736 bytes of raw 8-bit unsigned I/Q at 2 MS/s from an RTL-SDR, about
   0.18 s with a handful of Mode S frames. It is IQ, not a Beast stream: it exercises a
   demodulator, not the frame decoder. No test reads it yet.

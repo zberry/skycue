@@ -288,9 +288,11 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
             if (mv.track_deg) ks.track.set(*mv.track_deg, now_);
             setGround(ks, true);
         } else {
-            if (const auto alt = altitudeAc12(f.bits(40, 12))) {
-                if (tc <= 18) setField(ks, ks.alt_baro, *alt, now_, true);
-                else setField(ks, ks.alt_gnss, *alt, now_, true);
+            // TC 9-18: barometric AC12 (Q bit). TC 20-22: GNSS height in metres, no Q bit.
+            if (tc <= 18) {
+                if (const auto alt = altitudeAc12(f.bits(40, 12))) setField(ks, ks.alt_baro, *alt, now_, true);
+            } else if (const auto alt = altitudeGnssHeightM12(f.bits(40, 12))) {
+                setField(ks, ks.alt_gnss, *alt, now_, true);
             }
             setGround(ks, false);
         }

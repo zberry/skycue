@@ -7,8 +7,9 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 for f in leaflet-1.9.4.tgz echarts-5.6.0.tgz; do
   [ -f "$here/sources/$f" ] || { echo "SKIP test_source_tarball: sources/$f missing"; exit 77; }
 done
-git -C "$here" rev-parse --show-toplevel >/dev/null 2>&1 ||
-  { echo "SKIP test_source_tarball: not a git checkout (make-source-tarball.sh archives HEAD)"; exit 77; }
+top=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null) && top=$(cd "$top" && pwd -P) &&
+  [ "$top" = "$(cd "$here" && pwd -P)" ] ||
+  { echo "SKIP test_source_tarball: not the top of a git checkout (make-source-tarball.sh archives HEAD)"; exit 77; }
 v=$(sed -n 's/^project(skycue VERSION \([0-9.]*\).*/\1/p' "$here/CMakeLists.txt")
 tmp=$(mktemp -d)
 made=()

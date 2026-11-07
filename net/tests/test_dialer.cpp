@@ -293,3 +293,56 @@ BOOST_AUTO_TEST_CASE(dialer_send_cap_disconnects)
     BOOST_TEST(test::eventually([&] { return ups.load() == 2; }));
     t.call([&] { d->stop(); srv->stopAll(); });
 }
+
+BOOST_AUTO_TEST_CASE(dialer_loss_notification_is_posted_and_suppressed_by_stop)
+{
+    test::IoThread t;
+    auto srv = t.call([&] { return TestServer::create(t.io, 0, false); });
+    TcpOptions o;
+    o.send_cap = 1024;
+    auto d = Dialer::create(t.io, "127.0.0.1", srv->port(), o);
+    std::atomic<int> downs{0};
+    bool inside_send = false, reentered = false;
+    d->onConnection([&](bool up) {
+        if (!up) {
+            ++downs;
+            if (inside_send)
+                reentered = true;
+        }
+    });
+    t.call([&] { d->start(); });
+    BOOST_REQUIRE(test::eventually([&] { return d->connected(); }));
+    t.call([&] {
+        inside_send = true;
+        d->send(makeBuf(std::string(2048, 'a'))); // over the cap: the connection is lost
+        inside_send = false;
+        d->stop(); // before the posted notification runs
+    });
+    std::this_thread::sleep_for(milliseconds(200));
+    BOOST_TEST(downs.load() == 0);
+    BOOST_TEST(!reentered);
+    t.call([&] { srv->stopAll(); });
+}
+
+BOOST_AUTO_TEST_CASE(dialer_cap_during_write_and_stop_cycling_is_safe)
+{
+    test::IoThread t;
+    auto srv = t.call([&] { return TestServer::create(t.io, 0, false); });
+    TcpOptions o;
+    o.send_cap = 4096;
+    auto d = Dialer::create(t.io, "localhost", srv->port(), o); // may resolve to several addresses
+    for (int i = 0; i < 50; ++i) {
+        t.call([&] { d->start(); });
+        BOOST_REQUIRE(test::eventually([&] { return d->connected(); }));
+        t.call([&] {
+            d->send(makeBuf(std::string(3000, 'b')));
+            for (int k = 0; k < 3; ++k)
+                d->send(makeBuf(std::string(1500, 'c'))); // trips the cap with a write in flight
+            if (i % 2 == 0)
+                d->stop();
+        });
+        if (i % 2 != 0)
+            t.call([&] { d->stop(); });
+    }
+    t.call([&] { srv->stopAll(); });
+}

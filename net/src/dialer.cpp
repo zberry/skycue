@@ -28,7 +28,8 @@ struct Dialer::Impl {
     tcp::resolver resolver;
     RetryTimer retry;
     Backoff backoff;
-    std::unique_ptr<tcp::socket> socket;
+    std::shared_ptr<tcp::socket> socket; // handlers of composed operations hold it too, so a reset is safe
+    uint64_t stop_epoch = 0; // changes on stop(); suppresses notifications posted earlier
     std::vector<uint8_t> rbuf;
     std::function<void(const uint8_t*, std::size_t)> on_data;
     std::function<void(bool)> on_conn;
@@ -77,6 +78,7 @@ void Dialer::stop()
     auto& m = *impl_;
     m.running = false;
     ++m.gen;
+    ++m.stop_epoch;
     m.retry.cancel();
     boost::system::error_code ec;
     m.resolver.cancel();
@@ -94,10 +96,11 @@ void Dialer::connect()
     auto& im = *impl_;
     const uint64_t gen = ++im.gen;
     ++im.attempts;
-    im.socket = std::make_unique<tcp::socket>(im.io);
+    im.socket = std::make_shared<tcp::socket>(im.io);
+    auto sock = im.socket;
     auto self = shared_from_this();
     im.resolver.async_resolve(im.host, std::to_string(im.port),
-                             [self, gen](const boost::system::error_code& ec, tcp::resolver::results_type results) {
+                             [self, gen, sock](const boost::system::error_code& ec, tcp::resolver::results_type results) {
         auto& m = *self->impl_;
         if (gen != m.gen)
             return;
@@ -105,8 +108,8 @@ void Dialer::connect()
             self->lost(gen, "resolve " + m.host + ": " + ec.message());
             return;
         }
-        asio::async_connect(*m.socket, results,
-                            [self, gen](const boost::system::error_code& cec, const tcp::endpoint&) {
+        asio::async_connect(*sock, results,
+                            [self, gen, sock](const boost::system::error_code& cec, const tcp::endpoint&) {
             auto& st = *self->impl_;
             if (gen != st.gen)
                 return;
@@ -114,7 +117,7 @@ void Dialer::connect()
                 self->lost(gen, "connect " + st.host + ":" + std::to_string(st.port) + ": " + cec.message());
                 return;
             }
-            applyTcpOptions(*st.socket, st.opts);
+            applyTcpOptions(*sock, st.opts);
             st.backoff.reset();
             st.failed_before = false;
             ++st.counters.connects;
@@ -156,8 +159,16 @@ void Dialer::lost(uint64_t gen, const std::string& why)
                 self->connect();
         });
     }
-    if (was_up && m.on_conn)
-        m.on_conn(false);
+    if (was_up && m.on_conn) {
+        // Always asynchronous: the caller of send() must not be re-entered.
+        std::weak_ptr<Dialer> weak = shared_from_this();
+        const uint64_t epoch = m.stop_epoch;
+        asio::post(m.io, [weak, epoch] {
+            auto self = weak.lock();
+            if (self && self->impl_->stop_epoch == epoch && self->impl_->on_conn)
+                self->impl_->on_conn(false);
+        });
+    }
 }
 
 void Dialer::readLoop(uint64_t gen)
@@ -165,8 +176,9 @@ void Dialer::readLoop(uint64_t gen)
     auto& im = *impl_;
     im.rbuf.resize(im.opts.chunk_bytes);
     auto self = shared_from_this();
-    im.socket->async_read_some(asio::buffer(im.rbuf),
-                              [self, gen](const boost::system::error_code& ec, std::size_t n) {
+    auto sock = im.socket;
+    sock->async_read_some(asio::buffer(im.rbuf),
+                              [self, gen, sock](const boost::system::error_code& ec, std::size_t n) {
         auto& m = *self->impl_;
         if (gen != m.gen)
             return;
@@ -214,7 +226,8 @@ void Dialer::writeLoop(uint64_t gen)
     for (std::size_t i = 0; i < im.in_flight; ++i)
         bufs.emplace_back(im.queue[i]->data(), im.queue[i]->size());
     auto self = shared_from_this();
-    asio::async_write(*im.socket, bufs, [self, gen](const boost::system::error_code& ec, std::size_t n) {
+    auto sock = im.socket;
+    asio::async_write(*sock, bufs, [self, gen, sock](const boost::system::error_code& ec, std::size_t n) {
         auto& m = *self->impl_;
         if (gen != m.gen)
             return;

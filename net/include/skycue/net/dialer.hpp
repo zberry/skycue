@@ -4,7 +4,8 @@
 // reads in chunks and reconnects with doubling backoff when the peer goes
 // away. All work and all callbacks run on the io_context's thread (it must be
 // run by one thread); call every member from that thread, except connected(),
-// which may be read from any. After stop() returns no callback is invoked.
+// which may be read from any. Connection notifications are always delivered
+// asynchronously (posted), never from inside send() or stop(). After stop() returns no callback is invoked.
 
 #include "skycue/net/buffer.hpp"
 #include "skycue/net/counters.hpp"
@@ -34,8 +35,8 @@ public:
     void stop();
     bool connected() const;
     void send(Buf b); // queued; dropped and counted when not connected
-    const Counters& counters() const;
-    uint64_t attempts() const; // connection attempts started, successful or not
+    const Counters& counters() const; // read on the io thread only
+    uint64_t attempts() const;         // diagnostic: attempts started; io thread only
 
 private:
     Dialer(boost::asio::io_context& io, std::string host, uint16_t port, TcpOptions o);

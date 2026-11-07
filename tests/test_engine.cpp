@@ -1006,7 +1006,12 @@ BOOST_AUTO_TEST_CASE(engine_counts_rebroadcast_suppressed)
 {
     FakeSource* src = nullptr;
     EngineFx fx(baseConfig(), fakeSource(src));
+    int observed = 0;
     fx.t.call([&] {
+        fx.engine->onEvent([&](const skycued::EngineEvent& e) {
+            if (e.kind == skycued::EventKind::observed)
+                ++observed;
+        });
         src->connection(true);
         TrackObservation d = nearbyObservation(0x777777, 0);
         src->emit(d);
@@ -1018,4 +1023,7 @@ BOOST_AUTO_TEST_CASE(engine_counts_rebroadcast_suppressed)
         src->emit(r);
     });
     BOOST_TEST(fx.stats().rebroadcast_suppressed == 1u);
+    // The suppressed position is not a fresh one: only the direct one is observed.
+    BOOST_TEST(fx.t.call([&] { return observed; }) == 1);
+    fx.t.call([&] { fx.engine->onEvent({}); });
 }

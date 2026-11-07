@@ -273,7 +273,7 @@ void Engine::handleObservation(const TrackObservation& obs)
     TrackState& state = table_.apply(obs);
     if (table_.lastApplySuppressedPosition())
         ++rebroadcast_suppressed_;
-    process(obs, state, steady::now(), obs.lat.has_value());
+    process(obs, state, steady::now(), obs.lat.has_value() && !table_.lastApplySuppressedPosition());
 }
 
 void Engine::handleUplink(std::chrono::system_clock::time_point when, const std::string& hex)

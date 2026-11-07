@@ -5,7 +5,8 @@
 - `raw/`: real receiver captures, used by `test_rawtools.sh` and handy for
   `skycue-rawplay`. They are third-party data under their own
   licences: fetched by `scripts/fixtures/fetch-test-captures.sh`, not in the repository
-  and not distributed in releases. The directory is git-ignored.
+  and not distributed in releases. The captures are git-ignored; the one committed
+  file is the derived `modes-120s.golden.jsonl.gz` (below).
 - `fisb/`: FIS-B uplink test data (fisb-decode's `tg30.978`, fetched, and
   `received-with-uplinks.jsonl` and `received-tg30.jsonl`, regenerated from the
   fetched files by `fisb/gen_received_with_uplinks.py` and
@@ -55,7 +56,7 @@ one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
 - Licence: GPL-3.0 (the pyModeS repository's licence).
 - Content: 120 s of 1090 MHz Mode S traffic (European, 2026-07-13), 176,612
   messages (118,059 short, 14 hex digits; 58,553 long, 28 hex digits); readsb
-  decodes positions for 248 aircraft from it.
+  positions 182 aircraft from it at speed 1.
 - Line format: `epoch_seconds.fraction,HEX`, no header, gzip-compressed.
   First line: `1783963099.005369,5F406A936F50F0`.
 - Decoding positions needs a receiver location near the traffic, e.g.
@@ -63,6 +64,9 @@ one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
 - sha256: `fa433eb8dc2ec9cf6ebd40c1bf0a095ae753960d5e8c42ae6da15cc28eb3baea`
 
 ## raw/modes-120s.golden.jsonl.gz
+
+Provenance: derived facts (ICAO addresses, positions, identity fields, counts)
+computed by readsb 3.16.21 from the pyModeS-hosted capture; no capture bytes are included.
 
 What readsb 3.16.21 makes of `raw/modes-120s.csv.gz`, committed (about 13 KB; the
 capture itself is not) so `decode_golden` can compare the 1090 decoder with it. It is

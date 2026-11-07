@@ -410,6 +410,37 @@ BOOST_AUTO_TEST_CASE(obs_input_round_trips)
     BOOST_TEST(plain->input_id.empty());
 }
 
+BOOST_AUTO_TEST_CASE(rebroadcast_flag_round_trips)
+{
+    TempDir tmp;
+    auto obs = minimalObservation(sys_clock::now());
+    obs.rebroadcast = true;
+    auto plain = minimalObservation(sys_clock::now());
+    plain.id.address = 0xabc124;
+    const auto lines = readLines(recordObservations(tmp.path, {obs, plain}));
+    BOOST_REQUIRE(lines.size() == 2u);
+
+    auto j = skycued::JsonObject::parse(lines[0]);
+    BOOST_REQUIRE(j);
+    auto back = skycued::recording::observationFromRecord(*j);
+    BOOST_REQUIRE(back);
+    BOOST_TEST(back->rebroadcast);
+
+    auto k = skycued::JsonObject::parse(lines[1]);
+    BOOST_REQUIRE(k);
+    BOOST_TEST(!k->has("rebroadcast"));  // false is not written
+    auto back_plain = skycued::recording::observationFromRecord(*k);
+    BOOST_REQUIRE(back_plain);
+    BOOST_TEST(!back_plain->rebroadcast);
+
+    // A record without the key reads false.
+    auto none = skycued::JsonObject::parse(R"({"time":"2026-11-01T00:00:00.000Z","type":"obs","hex":"abc123"})");
+    BOOST_REQUIRE(none);
+    auto absent = skycued::recording::observationFromRecord(*none);
+    BOOST_REQUIRE(absent);
+    BOOST_TEST(!absent->rebroadcast);
+}
+
 BOOST_AUTO_TEST_CASE(obs_without_on_ground_omits_key)
 {
     TempDir tmp;

@@ -16,19 +16,21 @@ int hexVal(char ch) {
 }  // namespace
 
 std::optional<RawFrame> fromBeast(const beast::Frame& f, FrameSourceCounters& c) {
-    std::size_t payload = 0;
-    switch (f.type) {
-        case '2': payload = 7; break;
-        case '3':
-        case '5': payload = 14; break;
-        case '1': ++c.modeac_skipped; return std::nullopt;
-        default: ++c.other_skipped; return std::nullopt;
+    if (f.type == '1') {
+        ++c.modeac_skipped;
+        return std::nullopt;
     }
+    if (f.type != '2' && f.type != '3' && f.type != '5') {
+        ++c.other_skipped;
+        return std::nullopt;
+    }
+    const std::size_t body_len = beast::bodyLength(f.type);  // 6 timestamp + 1 signal + payload
+    const std::size_t payload = body_len - 7;
     if (f.timestamp == kMlatMarker) {
         ++c.mlat_skipped;
         return std::nullopt;
     }
-    if (f.body.size() != 7 + payload) {
+    if (f.body.size() != body_len) {
         ++c.other_skipped;
         return std::nullopt;
     }

@@ -2,7 +2,7 @@
 // into frames: each frame is a length byte (odd: 14 bytes, even: 7 bytes)
 // followed by that many bytes (the rest of the input if short); every frame
 // is fed with a rising arrival time. The decoder must not throw and every
-// frame must be counted. Seeds: none yet (docs/hardening.md "Fuzzing").
+// frame must be counted. Seeds: seeds/decode_1090/.
 
 #include "decode/modes_decoder.hpp"
 #include "fuzz_util.hpp"

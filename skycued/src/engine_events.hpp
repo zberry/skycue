@@ -24,9 +24,9 @@ struct EngineStats {
              uat_downlink = 0, uat_uplink = 0;
     bool readsb_connected = false, dump978_connected = false;
     uint64_t tcp_clients = 0, udp_targets = 0;  // Forwarder destinations now
-    // sent_drops by reason (the shutdown drops are counted in sent_drops only).
     // Rebroadcast (TIS-B, ADS-R) positions ignored for a fresh direct one.
     uint64_t rebroadcast_suppressed = 0;
+    // sent_drops by reason (the shutdown drops are counted in sent_drops only).
     uint64_t drops_timeout = 0, drops_filtered = 0, drops_source_lost = 0;
     // drops_filtered by the filter decision that dropped the track (they sum to it).
     uint64_t drops_blocked = 0, drops_out_of_range = 0, drops_below_elevation = 0, drops_no_position = 0;

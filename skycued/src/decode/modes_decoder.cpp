@@ -24,7 +24,7 @@ constexpr seconds kAirbornePair{10};    // our choice: airborne even/odd pair wi
 constexpr seconds kSurfacePair{30};     // our choice: surface pair window
 constexpr seconds kSurfacePairSlow{60}; // our choice: surface pair window when the last gs <= 25 kt
 constexpr float kSlowGsKt = 25.0f;
-constexpr seconds kLocalLastPos{60};    // design 5.5 step 2: last position usable for a local decode (readsb's value)
+constexpr seconds kLocalLastPos{60};    // design 5.5 step 2: last position usable for a local decode; our choice, set by black-box comparison with the readsb golden (tests/test_decode_golden.cpp)
 constexpr seconds kSurfaceRefAge{300};  // design 5.5 step 1: last position usable as surface reference
 constexpr double kLocalRefNm = 180.0;   // our choice: reference-based local decode range (airborne)
 constexpr double kRangeNm = 300.0;      // our choice: reasonableness range from the reference/first position
@@ -67,7 +67,7 @@ void setField(KeyState& ks, Timed<T>& f, const T& v, TimePoint now, bool track) 
 }  // namespace
 
 ModesDecoder::ModesDecoder(DecoderConfig cfg, std::string input_id)
-    : cfg_(std::move(cfg)), input_id_(std::move(input_id)) {}
+    : cfg_(cfg), input_id_(std::move(input_id)) {}
 
 void ModesDecoder::onObservation(std::function<void(const TrackObservation&)> h) { handler_ = std::move(h); }
 const DecodeCounters& ModesDecoder::counters() const { return counters_; }
@@ -282,8 +282,8 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
         if (surface) {
             const SurfaceMovement mv = decodeSurfaceMovement(f);
             if (mv.gs_kt) {
-                ks.gs.set(*mv.gs_kt, now_);
-                ks.last_gs_kt = *mv.gs_kt;
+                ks.gs.set(mv.gs_kt.value_or(0.0f), now_);
+                ks.last_gs_kt = mv.gs_kt.value_or(0.0f);
             }
             if (mv.track_deg) ks.track.set(*mv.track_deg, now_);
             setGround(ks, true);
@@ -303,8 +303,8 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
     } else if (tc == 19) {
         if (const auto v = decodeVelocity(f)) {
             if (v->gs_kt) {
-                ks.gs.set(*v->gs_kt, now_);
-                ks.last_gs_kt = *v->gs_kt;
+                ks.gs.set(v->gs_kt.value_or(0.0f), now_);
+                ks.last_gs_kt = v->gs_kt.value_or(0.0f);
             }
             if (v->track_deg) ks.track.set(*v->track_deg, now_);
             if (v->rate_fpm) {

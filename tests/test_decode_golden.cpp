@@ -6,6 +6,7 @@
 #define BOOST_TEST_MODULE decode_golden
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -22,6 +23,7 @@
 #include "decode/modes_decoder.hpp"
 #include "gz_line_reader.hpp"
 #include "json_lite.hpp"
+#include "test_slow.hpp"
 
 using skycued::JsonObject;
 using skycued::TrackObservation;
@@ -55,7 +57,8 @@ struct Tally {
 };
 std::map<std::string, Tally> g_tally;
 
-void cmpNum(const std::string& hex, const char* what, const std::optional<double>& ours, double theirs, double tol)
+void cmpNum(const std::string& hex, const char* what, const std::optional<double>& ours, double theirs, double tol,
+            bool wrap360 = false)
 {
     Tally& t = g_tally[what];
     if (!ours) {
@@ -63,8 +66,10 @@ void cmpNum(const std::string& hex, const char* what, const std::optional<double
         return;
     }
     ++t.both;
-    if (std::fabs(*ours - theirs) <= tol + 1e-6) ++t.agree;
-    else BOOST_TEST_MESSAGE(hex << " " << what << ": ours " << *ours << ", readsb " << theirs);
+    double d = std::fabs(*ours - theirs);
+    if (wrap360) d = std::min(d, 360.0 - d);  // 359.9 and 0.1 are 0.2 apart
+    if (d <= tol + 1e-6) ++t.agree;
+    else std::cout << hex << " " << what << ": ours " << *ours << ", readsb " << theirs << "\n";
 }
 
 void cmpStr(const std::string& hex, const char* what, const std::optional<std::string>& ours, const std::string& theirs)
@@ -76,7 +81,7 @@ void cmpStr(const std::string& hex, const char* what, const std::optional<std::s
     }
     ++t.both;
     if (*ours == theirs) ++t.agree;
-    else BOOST_TEST_MESSAGE(hex << " " << what << ": ours " << *ours << ", readsb " << theirs);
+    else std::cout << hex << " " << what << ": ours " << *ours << ", readsb " << theirs << "\n";
 }
 
 template <class T>
@@ -153,7 +158,7 @@ BOOST_AUTO_TEST_CASE(golden_matches_readsb)
             ++eligible;
             const auto it = ours.find(hex);
             if (it == ours.end() || it->second.positions.empty()) {
-                BOOST_TEST_MESSAGE("no position from us: " << hex << " (readsb " << n << ")");
+                std::cout << "no position from us: " << hex << " (readsb " << n << ")\n";
                 continue;
             }
             ++positioned;
@@ -164,22 +169,21 @@ BOOST_AUTO_TEST_CASE(golden_matches_readsb)
             for (const auto& p : ps)
                 if (near(p.lat, deg(*sec, "lat")) && near(p.lon, deg(*sec, "lon"))) found = true;
             if (found) ++second_ok;
-            else BOOST_TEST_MESSAGE("second position not found: " << hex);
+            else std::cout << "second position not found: " << hex << "\n";
             // Our observation at readsb's last position (our last one when none matches).
             const Snap* at = &ps.back();
             for (const auto& p : ps)
                 if (near(p.lat, deg(*last, "lat")) && near(p.lon, deg(*last, "lon"))) at = &p;
             if (near(ps.back().lat, deg(*last, "lat")) && near(ps.back().lon, deg(*last, "lon"))) ++last_ok;
             else
-                BOOST_TEST_MESSAGE("last position differs: " << hex << " ours " << ps.back().lat << "," << ps.back().lon
-                                                             << " readsb " << deg(*last, "lat") << ","
-                                                             << deg(*last, "lon"));
+                std::cout << "last position differs: " << hex << " ours " << ps.back().lat << "," << ps.back().lon
+                          << " readsb " << deg(*last, "lat") << "," << deg(*last, "lon") << "\n";
             const Snap& l = *at;
 
             // The rest, as carried by that observation and only where readsb had it.
             if (const auto v = last->getInt("alt_baro")) cmpNum(hex, "alt_baro", asD(l.alt), static_cast<double>(*v), 0);
             if (const auto v = last->getDouble("gs")) cmpNum(hex, "gs", asD(l.gs), *v, 1.0);
-            if (const auto v = last->getDouble("track")) cmpNum(hex, "track", asD(l.track), *v, 0.1);
+            if (const auto v = last->getDouble("track")) cmpNum(hex, "track", asD(l.track), *v, 0.1, true);
             if (const auto v = last->getInt("baro_rate")) cmpNum(hex, "baro_rate", asD(l.baro_rate), static_cast<double>(*v), 0);
             if (const auto v = last->getInt("geom_rate")) cmpNum(hex, "geom_rate", asD(l.geom_rate), static_cast<double>(*v), 0);
             if (const auto s = g->getString("flight")) cmpStr(hex, "callsign", l.callsign, *s);
@@ -206,13 +210,19 @@ BOOST_AUTO_TEST_CASE(golden_matches_readsb)
     BOOST_TEST(last_ok >= 0.98 * positioned);
     for (const char* name : {"callsign", "category", "squawk"}) {
         const Tally& t = g_tally[name];
-        BOOST_TEST_CONTEXT(name) { BOOST_TEST(t.agree == t.both); }
+        BOOST_TEST_CONTEXT(name) {
+            BOOST_TEST(t.both > 0, "no aircraft with both a value from us and from readsb: the comparison is vacuous");
+            BOOST_TEST(t.agree == t.both);
+        }
     }
     for (const char* name : {"alt_baro", "gs", "track", "baro_rate", "geom_rate", "nic", "nac_p"}) {
         const Tally& t = g_tally[name];
-        BOOST_TEST_CONTEXT(name) { BOOST_TEST(t.agree >= 0.9 * t.both); }
+        BOOST_TEST_CONTEXT(name) {
+            BOOST_TEST(t.both > 0, "no aircraft with both a value from us and from readsb: the comparison is vacuous");
+            BOOST_TEST(t.agree >= 0.9 * t.both);
+        }
     }
     BOOST_TEST(ratio >= 0.85);
     BOOST_TEST(ratio <= 1.15);
-    BOOST_TEST(wall < 10.0);
+    BOOST_TEST(wall < std::chrono::duration<double>(slow(std::chrono::seconds(10))).count());
 }

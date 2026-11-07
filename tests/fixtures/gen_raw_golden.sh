@@ -38,19 +38,42 @@ PY
     --net-json-port-include-noposition --quiet >"$work/readsb.log" 2>&1 &
 pids+=($!)
 readsb_pid=$!
-sleep 2
+# Wait (up to 10 s) for readsb to bind its JSON port.
+wait_port() {
+    python3 -I - "$1" <<'PY'
+import socket, sys, time
+port = int(sys.argv[1])
+end = time.time() + 10
+while time.time() < end:
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        sys.exit(0)
+    except OSError:
+        time.sleep(0.2)
+sys.exit(1)
+PY
+}
+wait_port "$p_json" || { echo "readsb did not bind its JSON port" >&2; cat "$work/readsb.log" >&2; exit 1; }
 kill -0 "$readsb_pid" || { cat "$work/readsb.log" >&2; exit 1; }
 
 python3 -I "$here/gen_raw_golden.py" collect "$p_json" "$work/lines.jsonl" &
 pids+=($!)
 collector_pid=$!
 sleep 1
+kill -0 "$collector_pid" || { echo "collector exited early" >&2; exit 1; }
 
+wait_port "$p_raw" || { echo "readsb did not bind its raw input port" >&2; exit 1; }
 "$rawplay" --raw-in "127.0.0.1:$p_raw" --speed 1 "$csv"
 sleep 2
+kill -0 "$collector_pid" || { echo "collector died during playback" >&2; exit 1; }
 kill "$readsb_pid"
 wait "$readsb_pid" 2>/dev/null || true
 wait "$collector_pid" 2>/dev/null || true
 pids=()
 
 python3 -I "$here/gen_raw_golden.py" reduce "$work/lines.jsonl" "$out"
+n=$(python3 -I -c 'import gzip,sys; print(sum(1 for _ in gzip.open(sys.argv[1], "rt")))' "$out")
+if [ "$n" -lt 100 ]; then
+    echo "golden has only $n addresses (expected at least 100)" >&2
+    exit 1
+fi

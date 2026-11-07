@@ -551,6 +551,11 @@ BOOST_AUTO_TEST_CASE(address_qualifiers)
         BOOST_TEST((o.id.type == c.type), "qualifier " << c.q);
         BOOST_TEST((o.source == c.source), "qualifier " << c.q);
     }
+    for (int q = 0; q <= 7; ++q) {
+        auto o = one(R"("detail":{"addressQualifier":)" + std::to_string(q) + "}");
+        BOOST_TEST(o.rebroadcast == (q == 2 || q == 3), "qualifier " << q);
+    }
+    BOOST_TEST(!one("").rebroadcast);
     auto absent = one("");
     BOOST_TEST((absent.id.type == AddressType::icao));
     BOOST_TEST((absent.source == Source::adsb_1090));

@@ -500,7 +500,7 @@ scripts/dev/run-static.sh --cppcheck-only -j 8 --build-dir /path/to/tree
 
 The script configures skycue (no build: nothing is generated) with clang++
 and `CMAKE_EXPORT_COMPILE_COMMANDS=ON`, and analyses the translation units in
-`compile_commands.json` under `skycued`, `libskycue` and
+`compile_commands.json` under `skycued`, `libskycue`, `net/src` and
 `tools/`; `tests/` (with `tests/fuzz/`) is not analysed. clang-tidy runs
 through `run-clang-tidy` with `.clang-tidy`; cppcheck runs with
 `--enable=warning,portability --std=c++17` and
@@ -623,8 +623,9 @@ tree runs them with the library compiled with the same instrumentation and
 the slow factor applied; `ctest -R '^net_'` runs just those. The line framer
 has the libFuzzer harness `net_line_framer` (`tests/fuzz/fuzz_net_line_framer.cpp`),
 run like the others with `scripts/dev/run-fuzz.sh net_line_framer`. The
-static-analysis run lists `skycued`, `libskycue` and `tools` only (see
-Static analysis), so `net/` is not analysed by it yet.
+static-analysis run (`scripts/dev/run-static.sh`) analyses `net/src` with the
+rest of the library and daemon sources; `net/tests` is not analysed, like
+`tests/`.
 
 ## Soak
 

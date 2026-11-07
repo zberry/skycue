@@ -7,7 +7,7 @@
 # The tree is configured (not built: nothing is generated) into DIR, default
 # <repo>/build-static, with clang++ and CMAKE_EXPORT_COMPILE_COMMANDS=ON; the
 # files analysed are the translation units in its compile_commands.json under
-# skycued, libskycue and tools/ (not tests/, which holds
+# skycued, libskycue, tools/ and net/src (not tests/, which holds
 # tests/fuzz/). -j defaults to the number of cores. DIR is run-static's own tree:
 # a directory other than <repo>/build-static that already holds a
 # CMakeCache.txt without the marker file .skycue-static-tree (another build,
@@ -115,7 +115,7 @@ db="$build_dir/compile_commands.json"
 mapfile -t files < <(python3 -I - "$db" "$repo" <<'EOF'
 import json, os, re, sys
 db, src = sys.argv[1], os.path.realpath(sys.argv[2])
-own = re.compile(re.escape(src) + r"/(skycued|libskycue|tools)/")
+own = re.compile(re.escape(src) + r"/(skycued|libskycue|tools|net/src)/")
 seen = set()
 for e in json.load(open(db)):
     f = os.path.realpath(os.path.join(e["directory"], e["file"]))

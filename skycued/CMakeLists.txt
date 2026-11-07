@@ -18,6 +18,8 @@ add_library(skycued_core STATIC
   src/change_detector.cpp
   src/coding/bits.cpp
   src/coding/modes_crc.cpp
+  src/decode/altitude.cpp
+  src/decode/frame.cpp
   src/check_inputs.cpp
   src/conf_rewrite.cpp
   src/config.cpp

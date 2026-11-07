@@ -413,6 +413,13 @@ target_compile_definitions(test_coding PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_coding)
 add_test(NAME coding COMMAND test_coding)
 
+# Mode S frame fields and altitude/squawk code tables.
+add_executable(test_decode_fields test_decode_fields.cpp)
+target_link_libraries(test_decode_fields PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_fields PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_decode_fields)
+add_test(NAME decode_fields COMMAND test_decode_fields)
+
 # Inputs and the InputManager: pingStation inputs over real sockets, the
 # inputs file, hand edits and the lifecycle.
 add_executable(test_inputs test_inputs.cpp)

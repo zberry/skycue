@@ -868,3 +868,163 @@ BOOST_AUTO_TEST_CASE(dialled_target_marked)
     BOOST_TEST(clients[0].endpoint == "127.0.0.1:" + std::to_string(target.localPort()));
     BOOST_REQUIRE(waitUntil([&] { return fx.tcpClients().at(0).bytes_sent > 0; }));
 }
+
+namespace {
+
+uint16_t freeTcpPort()
+{
+    asio::io_context io;
+    tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    return a.local_endpoint().port();
+}
+
+skycued::ForwarderDestination destination(const std::string& id, skycue::net::Transport transport,
+                                          const std::string& host, uint16_t port)
+{
+    skycue::net::Endpoint e;
+    e.transport = transport;
+    e.port = port;
+    if (transport == skycue::net::Transport::tcp_listen)
+        e.bind = host;
+    else
+        e.host = host;
+    return skycued::ForwarderDestination{id, e, false};
+}
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(forwarder_slow_client_dropped_and_regreeted)
+{
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    Fx fx(cfg, [] { return mkTracks(3); });
+
+    RawTcp slow(fx.port(), 4096); // never read
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+
+    size_t pushed_bytes = 0;
+    const size_t frame_size = encodeTrackUpdate(mkTrack(1, false)).size();
+    while (pushed_bytes < (64u << 20) && fx.clients() == 1) {
+        fx.t.call([&] {
+            for (uint32_t i = 0; i < 1000; ++i)
+                fx.fwd->sendUpdate(mkTrack(1 + i, false));
+        });
+        pushed_bytes += 1000 * frame_size;
+        std::this_thread::sleep_for(5ms);
+    }
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 0; }));
+
+    // The same address connecting again is greeted like any new client.
+    RawTcp again(fx.port());
+    auto first = again.next(kWait);
+    BOOST_REQUIRE(first);
+    BOOST_TEST(static_cast<int>(first->type) == static_cast<int>(FrameType::hello));
+    for (int i = 0; i < 3; ++i) {
+        auto f = again.next(kWait);
+        BOOST_REQUIRE(f);
+        Track tr;
+        BOOST_REQUIRE(decodeTrackUpdate(*f, tr));
+        BOOST_TEST(tr.keyframe);
+    }
+    BOOST_TEST(fx.clients() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(forwarder_dialled_target_late_start)
+{
+    const uint16_t port = freeTcpPort(); // nothing listens yet
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.tcp_connect_targets = {{"127.0.0.1", port}};
+    Fx fx(cfg, [] { return mkTracks(3); });
+    std::this_thread::sleep_for(1500ms); // several refused attempts, backoff growing
+    BOOST_TEST(fx.clients() == 0u);
+
+    Events ev;
+    std::vector<FrameType> types;
+    Client target(listenConfig(port));
+    ev.attach(target);
+    recordFrames(target, ev, types);
+    target.start();
+    BOOST_REQUIRE(target.localPort() == port);
+
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3; }));
+    {
+        std::lock_guard<std::mutex> lk(ev.m);
+        BOOST_REQUIRE(!types.empty());
+        BOOST_TEST(static_cast<int>(types.front()) == static_cast<int>(FrameType::hello));
+    }
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+    BOOST_TEST(fx.tcpClients().at(0).dialled);
+}
+
+BOOST_AUTO_TEST_CASE(forwarder_add_and_remove_destination_at_runtime)
+{
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.heartbeat_interval = 10s;
+    Fx fx(cfg, [] { return mkTracks(2); });
+    BOOST_TEST(fx.t.call([&] { return fx.fwd->destinations().size(); }) == 1u);
+    BOOST_TEST(fx.t.call([&] { return fx.fwd->destinations().at(0).id; }) == "cue-tcp");
+    BOOST_TEST(fx.t.call([&] { return fx.fwd->destinations().at(0).builtin; }));
+
+    // A listener added while running: a client gets Hello and the keyframe.
+    const uint16_t lport = freeTcpPort();
+    fx.t.call([&] {
+        fx.fwd->addDestination(destination("extra-listen", skycue::net::Transport::tcp_listen, "127.0.0.1", lport));
+    });
+    RawTcp raw(lport);
+    auto hello = raw.next(kWait);
+    BOOST_REQUIRE(hello);
+    BOOST_TEST(static_cast<int>(hello->type) == static_cast<int>(FrameType::hello));
+    for (int i = 0; i < 2; ++i)
+        BOOST_REQUIRE(raw.next(kWait));
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+
+    // A UDP target and a dialled target added while running.
+    RawUdp udpRaw;
+    fx.t.call([&] {
+        fx.fwd->addDestination(destination("extra-udp", skycue::net::Transport::udp, "127.0.0.1", udpRaw.port()));
+    });
+    auto uh = udpRaw.next(kWait);
+    BOOST_REQUIRE(uh);
+    Frame uf;
+    size_t used = 0;
+    BOOST_REQUIRE(decodeFrame(uh->data(), uh->size(), uf, used) == DecodeStatus::ok);
+    BOOST_TEST(static_cast<int>(uf.type) == static_cast<int>(FrameType::hello));
+    BOOST_TEST(fx.udpTargets().size() == 1u);
+
+    Events ev;
+    Client target(listenConfig());
+    ev.attach(target);
+    target.start();
+    fx.t.call([&] {
+        fx.fwd->addDestination(
+            destination("extra-dial", skycue::net::Transport::tcp_connect, "127.0.0.1", target.localPort()));
+    });
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 2; }));
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 2; }));
+    BOOST_TEST(fx.t.call([&] { return fx.fwd->destinations().size(); }) == 4u);
+    BOOST_CHECK_THROW(fx.t.call([&] {
+        fx.fwd->addDestination(destination("extra-udp", skycue::net::Transport::udp, "127.0.0.1", 9));
+    }), std::invalid_argument);
+
+    // Removal closes that destination's peer and sends no drop.
+    fx.t.call([&] { fx.fwd->removeDestination("extra-listen"); });
+    bool saw_drop = false;
+    for (;;) {
+        auto f = raw.next(kWait);
+        if (!f)
+            break; // end of stream
+        saw_drop = saw_drop || f->type == FrameType::track_drop;
+    }
+    BOOST_TEST(!saw_drop);
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+    fx.t.call([&] { fx.fwd->removeDestination("extra-udp"); });
+    BOOST_TEST(fx.udpTargets().empty());
+    fx.t.call([&] { fx.fwd->removeDestination("no-such-id"); }); // ignored
+    BOOST_TEST(fx.t.call([&] { return fx.fwd->destinations().size(); }) == 2u);
+
+    // The remaining destinations keep working.
+    fx.update(mkTrack(9, false));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3; }));
+}

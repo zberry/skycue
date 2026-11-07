@@ -167,11 +167,14 @@ it. Other methods: 405 with `Allow: GET`.
 and `dialled` for one of `CUE_TCP_CONNECT`; `endpoint` is the peer
 (`addr:port`, an IPv6 address in brackets, or the configured `host:port` when dialled);
 `connected_since` is the wall-clock time the connection was made; and
-`bytes_sent` counts the bytes actually written to it (not those still
-queued). A closed connection leaves the list. `udp` has every UDP target
+`bytes_sent` counts the bytes handed to it (those still queued for a slow
+connection are included). A closed connection leaves the list. `udp` has every UDP target
 that resolved at startup, in configuration order, with the datagrams sent
 to it without error. The counts start at 0 for each connection and when
-skycued starts. Other methods: 405 with `Allow: GET`.
+skycued starts. The fields above are the whole object: a later release adds an
+optional `output` field (the id of the cue output the entry belongs to) once
+outputs can be defined at runtime; clients should ignore fields they do not
+know. Other methods: 405 with `Allow: GET`.
 
 `GET /api/config` shows the configuration skycued runs with and facts
 about the daemon. It is read only: nothing in it can be changed here.

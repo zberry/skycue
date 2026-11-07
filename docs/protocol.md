@@ -166,6 +166,17 @@ connection's TrackDrop removes it, and when that connection closes (or falls
 silent, see [Liveness](#liveness)) its tracks are dropped as `source_lost`.
 The UDP receiver is single-source: bind one port per sending skycued.
 
+skycued sends all of this through its network library, which differs from
+earlier releases in two ways. Every TCP connection skycued serves or dials
+has keepalive (probes after 30 s idle, every 10 s, three probes) and
+`TCP_NODELAY` switched on; a receiver that vanished without closing is now
+noticed by skycued as well. UDP is best effort: a datagram the kernel cannot
+take at once is dropped and counted, not queued, and a host name that
+resolves to several addresses is sent to at one only (the first IPv4
+address). Frames, Hello timing, keyframe bursts and shutdown drops are
+unchanged. A TCP consumer that falls more than 1 MiB behind is disconnected,
+as before, and is greeted afresh (Hello, keyframe) when it reconnects.
+
 ## Liveness
 
 Heartbeats are the liveness signal in every transport. A receiver treats a

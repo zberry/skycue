@@ -1771,6 +1771,62 @@ test('map_toolbar_keyboard_space_and_enter', async ({ page }) => {
   await expect(page.locator('#box-aircraft')).toBeVisible();
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
 });
+test('map_box_scrolls_inside_when_map_is_short', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 420 });
+  await openPage(page);
+  await openBox(page, 'aircraft');
+  const dims = await page.locator('#box-aircraft').evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
+  expect(dims.sh).toBeGreaterThan(dims.ch);
+  const map = await page.locator('#map').boundingBox();
+  const box = await page.locator('#box-aircraft').boundingBox();
+  expect(box.y + box.height).toBeLessThanOrEqual(map.y + map.height);
+  if (await page.locator('#alerts').isVisible()) {
+    const strip = await page.locator('#alerts').boundingBox();
+    expect(box.y + box.height).toBeLessThanOrEqual(strip.y + 1);
+  }
+});
+test('map_box_stays_open_on_map_click_and_does_not_pass_clicks', async ({ page }) => {
+  await openPage(page);
+  await openBox(page, 'layers');
+  const panel = await selectTarget(page);
+  const map = await page.locator('#map').boundingBox();
+  const empty = async () => {
+    // Bottom right of the map, away from the toolbar box and the aircraft.
+    await page.mouse.click(map.x + map.width - 12, map.y + map.height - 80);
+  };
+  await empty();
+  await expect(panel).toBeHidden();
+  await expect(page.locator('#box-layers')).toBeVisible();
+  await selectTarget(page);
+  const box = await page.locator('#box-layers').boundingBox();
+  await page.mouse.click(box.x + 3, box.y + 3);               // padding inside the box
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('[data-field="hex"]')).toHaveText(TARGET);
+  await expect(page.locator('#box-layers')).toBeVisible();
+  const scale = () => page.locator('.leaflet-control-scale-line').first().textContent();
+  const before = await scale();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -600);
+  await page.waitForTimeout(800);
+  expect(await scale()).toBe(before);
+});
+test('map_box_follows_viewport_resize', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openPage(page);
+  await openBox(page, 'aircraft');
+  // The Weather box is short enough to never be clipped; the Aircraft box is tall enough to follow the map's height.
+  await page.setViewportSize({ width: 1280, height: 300 });
+  const inside = async () => {
+    const map = await page.locator('#map').boundingBox();
+    const box = await page.locator('#box-aircraft').boundingBox();
+    return map.y + map.height - (box.y + box.height);
+  };
+  await expect.poll(inside).toBeGreaterThanOrEqual(0);
+  const small = await page.locator('#box-aircraft').evaluate((el) => el.clientHeight);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect.poll(() => page.locator('#box-aircraft').evaluate((el) => el.clientHeight)).toBeGreaterThan(small);
+  expect(await inside()).toBeGreaterThanOrEqual(0);
+});
 test('map_box_open_state_survives_reload_and_table', async ({ page }) => {
   await openPage(page);
   await openBox(page, 'layers');

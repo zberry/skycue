@@ -24,7 +24,7 @@ constexpr seconds kAirbornePair{10};    // our choice: airborne even/odd pair wi
 constexpr seconds kSurfacePair{30};     // our choice: surface pair window
 constexpr seconds kSurfacePairSlow{60}; // our choice: surface pair window when the last gs <= 25 kt
 constexpr float kSlowGsKt = 25.0f;
-constexpr seconds kLocalLastPos{30};    // design 5.5 step 2: last position usable for a local decode
+constexpr seconds kLocalLastPos{60};    // design 5.5 step 2: last position usable for a local decode (readsb's value)
 constexpr seconds kSurfaceRefAge{300};  // design 5.5 step 1: last position usable as surface reference
 constexpr double kLocalRefNm = 180.0;   // our choice: reference-based local decode range (airborne)
 constexpr double kRangeNm = 300.0;      // our choice: reasonableness range from the reference/first position
@@ -490,10 +490,10 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
     o.track_deg = ks.track.fresh(now_, kFieldFresh);
     o.baro_rate_fpm = ks.baro_rate.fresh(now_, kFieldFresh);
     o.geom_rate_fpm = ks.geom_rate.fresh(now_, kFieldFresh);
-    o.callsign = ks.callsign.fresh(now_, kFieldFresh);
-    o.squawk = ks.squawk.fresh(now_, kFieldFresh);
+    o.callsign = ks.callsign.has ? std::optional(ks.callsign.value) : std::nullopt;  // identity: lives with the key
+    o.squawk = ks.squawk.has ? std::optional(ks.squawk.value) : std::nullopt;  // identity: lives with the key
     o.emergency = ks.emergency.fresh(now_, kFieldFresh);
-    o.category = ks.category.fresh(now_, kFieldFresh);
+    o.category = ks.category.has ? std::optional(ks.category.value) : std::nullopt;  // identity: lives with the key
     o.nic = ks.nic.fresh(now_, kFieldFresh);
     o.nac_p = ks.nac_p.fresh(now_, kFieldFresh);
     o.rssi = rssiOf(ks);

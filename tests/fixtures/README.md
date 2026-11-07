@@ -62,6 +62,24 @@ one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
   `--lat 52.0 --lon 4.5 --max-range 500` for readsb.
 - sha256: `fa433eb8dc2ec9cf6ebd40c1bf0a095ae753960d5e8c42ae6da15cc28eb3baea`
 
+## raw/modes-120s.golden.jsonl.gz
+
+What readsb 3.16.21 makes of `raw/modes-120s.csv.gz`, committed (about 13 KB; the
+capture itself is not) so `decode_golden` can compare the 1090 decoder with it. It is
+aircraft data only: one JSON object per address, sorted by hex, with `positions` (the
+number of changes of readsb's reported position), `second` and `last` position
+(`t`, `lat`, `lon`), and, from the line that carried the last position, `alt_baro`,
+`gs`, `track`, `baro_rate`, `geom_rate`, `flight`, `category`, `squawk`, `nic`, `nac_p`
+where readsb had them. `gen_raw_golden.sh READSB RAWPLAY CSV_GZ OUT_GZ` makes it: it
+starts readsb without `--lat`/`--lon` (global CPR decoding only, as the test feeds
+the decoder) with a raw input port and a JSON output port that includes aircraft
+without positions, plays the capture in with `skycue-rawplay --speed 1` (real
+time, about two minutes; faster playback breaks readsb's position speed check, which
+uses its own clock), collects the JSON lines and reduces them with
+`gen_raw_golden.py` (Python 3 standard library only). Both binaries are arguments.
+readsb also decodes Comm-B and TC29 content that skycued does not, so vertical rates
+and `nac_p` appear in the golden more often than in the decoder's output.
+
 ## raw/uat-sample.txt.gz
 
 - Origin: https://github.com/flightaware/dump978, file `sample-data.txt.gz`

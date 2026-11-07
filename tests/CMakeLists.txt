@@ -576,3 +576,15 @@ target_link_libraries(test_decode_frame_source PRIVATE skycued_core Boost::unit_
 target_compile_definitions(test_decode_frame_source PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_decode_frame_source)
 add_test(NAME decode_frame_source COMMAND test_decode_frame_source)
+
+# The 1090 decoder against readsb on the 120 s capture: positions, altitude,
+# speed, rates and identity from fixtures/raw/modes-120s.golden.jsonl.gz
+# (skips when the fetched capture or the golden is absent).
+find_package(ZLIB REQUIRED)
+add_executable(test_decode_golden test_decode_golden.cpp)
+target_link_libraries(test_decode_golden PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
+target_compile_definitions(test_decode_golden PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_decode_golden)
+add_test(NAME decode_golden COMMAND test_decode_golden)
+set_tests_properties(decode_golden PROPERTIES TIMEOUT 120)

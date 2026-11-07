@@ -103,17 +103,28 @@ grep -q "file://$tmp/nowhere/o/modes/c1/modes.csv.gz" "$out" || fail "(a) output
 
 # (a2) the same without the test overrides: the script's own pins. --offline
 # with an empty cache lists every built-in URL and SHA-256, and downloads nothing.
-env -u SKYCUE_CAPTURE_PINS -u SKYCUE_CAPTURE_URL_BASE "$script" --cache "$tmp/ca2" --fixtures "$tmp/fxa2" --offline >"$out" 2>&1
+# The pin count is not fixed: every "pin " line the script declares must be
+# well formed (name, 64-hex SHA-256, https URL), the four original cache names
+# must be among them, and the run must list each one. SKYCUE_FETCH_IQ=1 lifts
+# the opt-in skip of the zenodo-* pin so that it is listed as well.
+env -u SKYCUE_CAPTURE_PINS -u SKYCUE_CAPTURE_URL_BASE SKYCUE_FETCH_IQ=1 "$script" --cache "$tmp/ca2" --fixtures "$tmp/fxa2" --offline >"$out" 2>&1
 rc=$?
 [ "$rc" -eq 1 ] || fail "(a2) --offline with the built-in pins and an empty cache exited $rc, want 1"
-builtin=$(grep -E '^pin [^ ]+ [0-9a-f]{64} https://raw\.githubusercontent\.com/' "$script")
-[ "$(printf '%s\n' "$builtin" | wc -l)" -eq 4 ] || fail "(a2) the script should have four built-in pins"
+declared=$(grep -c '^pin ' "$script")
+builtin=$(grep -E '^pin [^ ]+ [0-9a-f]{64} https://' "$script")
+[ "$declared" -ge 4 ] || fail "(a2) the script declares fewer than four pins"
+[ "$(printf '%s\n' "$builtin" | grep -c .)" -eq "$declared" ] || fail "(a2) a declared pin line is malformed (want a name, a 64-hex SHA-256 and an https URL)"
+for n in $cache_names; do printf '%s\n' "$builtin" | grep -q "^pin $n " || fail "(a2) the built-in pins lack $n"; done
 while read -r _ name hash url; do
   grep -q -- "$name" "$out" || fail "(a2) output does not name $name"
   grep -q -- "SHA-256 $hash" "$out" || fail "(a2) output does not list the SHA-256 of $name"
   grep -qF -- "$url" "$out" || fail "(a2) output does not list the URL of $name"
 done <<<"$builtin"
 [ ! -e "$tmp/fxa2/raw" ] && [ ! -e "$tmp/ca2/fisb-decode-tg30.978" ] || fail "(a2) installed or downloaded something"
+# (a2) without SKYCUE_FETCH_IQ=1 the zenodo-* pin is skipped, not listed.
+env -u SKYCUE_CAPTURE_PINS -u SKYCUE_CAPTURE_URL_BASE -u SKYCUE_FETCH_IQ "$script" --cache "$tmp/ca3" --fixtures "$tmp/fxa3" --offline >"$out" 2>&1
+[ "$?" -eq 1 ] || fail "(a2) --offline without SKYCUE_FETCH_IQ exited other than 1"
+! grep -q 'zenodo-' "$out" || fail "(a2) the zenodo-* pin was listed without SKYCUE_FETCH_IQ=1"
 
 # (a3) -h prints the whole header comment: its first line and its last.
 run -h

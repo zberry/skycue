@@ -53,7 +53,7 @@ struct CprFields {
     uint32_t lat17, lon17;
     bool surface;
 };
-CprFields decodeCpr(const Frame& f);  // TC5-8, 9-18, 20-22
+std::optional<CprFields> decodeCpr(const Frame& f);  // TC5-8, 9-18, 20-22; else nullopt
 
 std::optional<std::string> decodeEmergency(const Frame& f);  // TC28 ST1: "none".."downed_aircraft"; 7 -> nullopt
 std::optional<std::string> decodeSquawkTc28(const Frame& f);

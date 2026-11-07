@@ -139,7 +139,7 @@ BOOST_AUTO_TEST_CASE(velocity_subtype1)
     BOOST_CHECK_SMALL(*v->track_deg - 182.88f, 0.1f);
     BOOST_REQUIRE(v->rate_fpm.has_value());
     BOOST_CHECK_EQUAL(*v->rate_fpm, -832);
-    BOOST_CHECK(!v->rate_is_geom);
+    BOOST_CHECK(v->rate_is_geom);  // source bit 0 = GNSS
     BOOST_REQUIRE(v->gnss_baro_diff_ft.has_value());
     BOOST_CHECK_EQUAL(*v->gnss_baro_diff_ft, 550);
 }
@@ -152,7 +152,7 @@ BOOST_AUTO_TEST_CASE(velocity_subtype3_has_no_track)
     BOOST_CHECK(!v->track_deg.has_value());
     BOOST_REQUIRE(v->rate_fpm.has_value());
     BOOST_CHECK_EQUAL(*v->rate_fpm, -2304);
-    BOOST_CHECK(v->rate_is_geom);
+    BOOST_CHECK(!v->rate_is_geom);  // source bit 1 = barometric
     BOOST_CHECK(!v->gnss_baro_diff_ft.has_value());
 }
 
@@ -185,11 +185,15 @@ BOOST_AUTO_TEST_CASE(airborne_position_fields)
 {
     const Frame f = frameFromHex(kAirPos);
     BOOST_CHECK_EQUAL(typeCode(f), 11);
-    const CprFields c = decodeCpr(f);
+    const auto cp = decodeCpr(f);
+    BOOST_REQUIRE(cp.has_value());
+    const CprFields& c = *cp;
     BOOST_CHECK(!c.odd);
     BOOST_CHECK(!c.surface);
     BOOST_CHECK_EQUAL(c.lat17, 93000u);
     BOOST_CHECK_EQUAL(c.lon17, 51372u);
+    BOOST_CHECK(!decodeCpr(frameFromHex(kIdent)).has_value());
+    BOOST_CHECK(!decodeCpr(frameFromHex(kVelA)).has_value());
     const auto alt = altitudeAc12(f.bits(40, 12));
     BOOST_REQUIRE(alt.has_value());
     BOOST_CHECK_EQUAL(*alt, 38000);
@@ -200,9 +204,10 @@ BOOST_AUTO_TEST_CASE(surface_position_fields)
     const Frame f = frameFromHex(kSurface);
     BOOST_CHECK_EQUAL(typeCode(f), 7);
     BOOST_CHECK_EQUAL(capability(f), 4);
-    const CprFields c = decodeCpr(f);
-    BOOST_CHECK(c.surface);
-    BOOST_CHECK(!c.odd);
+    const auto cs = decodeCpr(f);
+    BOOST_REQUIRE(cs.has_value());
+    BOOST_CHECK(cs->surface);
+    BOOST_CHECK(!cs->odd);
     const SurfaceMovement m = decodeSurfaceMovement(f);
     BOOST_REQUIRE(m.gs_kt.has_value());
     BOOST_CHECK_SMALL(*m.gs_kt - 18.0f, 0.01f);  // movement code 42

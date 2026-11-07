@@ -165,8 +165,9 @@ std::optional<Velocity> decodeVelocity(const Frame& f)
     }
     // ST 3/4 carry heading and airspeed, not a ground vector: left absent.
 
-    // Source bit: 0 barometric, 1 geometric (Annex 10 Vol IV).
-    v.rate_is_geom = f.bits(67, 1) != 0;
+    // Vertical rate source bit: 0 GNSS (geometric), 1 barometric (Doc 9871
+    // Table A-2-9; The 1090 MHz Riddle, airborne velocity chapter).
+    v.rate_is_geom = f.bits(67, 1) == 0;
     const uint32_t vr = f.bits(69, 9);
     if (vr != 0) {
         const int32_t mag = (static_cast<int32_t>(vr) - 1) * 64;
@@ -211,13 +212,14 @@ SurfaceMovement decodeSurfaceMovement(const Frame& f)
     return m;
 }
 
-CprFields decodeCpr(const Frame& f)
+std::optional<CprFields> decodeCpr(const Frame& f)
 {
-    CprFields c{};
     const int tc = typeCode(f);
-    c.surface = tc >= 5 && tc <= 8;
-    if (tc < 0)
-        return c;
+    const bool surface = tc >= 5 && tc <= 8;
+    if (!surface && !(tc >= 9 && tc <= 18) && !(tc >= 20 && tc <= 22))
+        return std::nullopt;
+    CprFields c{};
+    c.surface = surface;
     c.odd = f.bits(53, 1) != 0;
     c.lat17 = f.bits(54, 17);
     c.lon17 = f.bits(71, 17);

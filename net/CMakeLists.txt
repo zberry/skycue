@@ -21,9 +21,11 @@ endif()
 
 add_library(skycue_net STATIC
   src/backoff.cpp
+  src/dialer.cpp
   src/endpoint.cpp
   src/framer.cpp
-  src/log.cpp)
+  src/log.cpp
+  src/tcp_options.cpp)
 add_library(skycue::net ALIAS skycue_net)
 set_target_properties(skycue_net PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skycue_net PUBLIC

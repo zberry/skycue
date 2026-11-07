@@ -225,7 +225,7 @@ input.invalid { border-color: var(--blocked); }
 /* The config panel (spec 3.4, 7): over the drawer at the strip's right end,
    above the bar; the field look of the Receiver tab's #input-form. */
 #alerts-config {
-  position: absolute; right: 8px; bottom: 32px; z-index: 1; width: 360px; max-width: calc(100% - 16px);
+  position: absolute; right: 8px; bottom: var(--alert-strip); z-index: 1; width: 360px; max-width: calc(100% - 16px);
   max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 8px;
   background: var(--panel); border: 1px solid var(--line); border-bottom: none;
 }

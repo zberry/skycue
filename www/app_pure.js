@@ -1432,6 +1432,59 @@
       v.trailAhead === VIEW_DEFAULTS.trailAhead;
   }
 
+  // Map toolbar, layer set and badges (map chrome spec).
+  // The toolbar opens one box at a time; a click on the open box closes it.
+  var MAP_BOXES = ['map', 'aircraft', 'layers', 'weather'];
+  function mapBoxName(stored) {
+    return typeof stored === 'string' && MAP_BOXES.indexOf(stored) >= 0 ? stored : null;
+  }
+  function mapBoxToggle(open, clicked) {
+    return clicked === open ? null : mapBoxName(clicked);
+  }
+  // The map layer set: which overlays are on. Stored as a JSON object keyed
+  // by these ids; unknown keys are ignored.
+  var LAYER_IDS = ['regional', 'conus', 'rasters', 'tfr', 'sigmet', 'airmet', 'cwa', 'sua'];
+  var LAYER_DEFAULTS = Object.freeze({
+    regional: true, conus: true, rasters: false, tfr: false,
+    sigmet: false, airmet: false, cwa: false, sua: false
+  });
+  // The object a layer set arrives as: an object, or a JSON string of one.
+  // Anything else (parse failure, array, scalar, null) gives null.
+  function layersSource(obj) {
+    if (typeof obj === 'string') {
+      try { obj = JSON.parse(obj); } catch (e) { return null; }
+    }
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : null;
+  }
+  function normalizeLayers(obj) {
+    var src = layersSource(obj);
+    var out = {};
+    LAYER_IDS.forEach(function (id) {
+      out[id] = src && Object.prototype.hasOwnProperty.call(src, id) ? !!src[id] : LAYER_DEFAULTS[id];
+    });
+    return out;
+  }
+  function normalizeLayersPartial(obj) {
+    var src = layersSource(obj);
+    var out = {};
+    if (!src) return out;
+    LAYER_IDS.forEach(function (id) {
+      if (Object.prototype.hasOwnProperty.call(src, id)) out[id] = !!src[id];
+    });
+    return out;
+  }
+  function layersOnCount(state) {
+    var all = normalizeLayers(state);
+    return LAYER_IDS.filter(function (id) { return all[id] === true; }).length;
+  }
+  // Whether the Weather badge shows a dot: a box that is on but faded, or on
+  // and not drawn while FIS-B is present. items: [{on, drawn, faded}].
+  function weatherDot(items, fisbPresent) {
+    return (items || []).some(function (it) {
+      return !!it && ((it.on && it.faded) || (it.on && !it.drawn && !!fisbPresent));
+    });
+  }
+
   // Saved filter sets (spec 4): skycue.viewSets is {version: 1, sets:
   // [{name, view, hideFiltered}]}, at most VIEW_SETS_MAX named Display-filter
   // states. A name is trimmed and cut to VIEW_SET_NAME_MAX; '' is no name.
@@ -1831,6 +1884,9 @@
     VIEW_DEFAULTS: VIEW_DEFAULTS, normalizeView: normalizeView, viewActiveCount: viewActiveCount,
     TRAIL_SHOWS: TRAIL_SHOWS, TRAIL_COLOR_BY: TRAIL_COLOR_BY, TRAIL_AHEAD_MIN: TRAIL_AHEAD_MIN,
     viewTrailsDefault: viewTrailsDefault,
+    MAP_BOXES: MAP_BOXES, mapBoxName: mapBoxName, mapBoxToggle: mapBoxToggle,
+    LAYER_IDS: LAYER_IDS, LAYER_DEFAULTS: LAYER_DEFAULTS, normalizeLayers: normalizeLayers,
+    normalizeLayersPartial: normalizeLayersPartial, layersOnCount: layersOnCount, weatherDot: weatherDot,
     projectPoint: projectPoint, aheadNm: aheadNm, AHEAD_STEP_NM: AHEAD_STEP_NM, projectAhead: projectAhead,
     VIEW_SETS_MAX: VIEW_SETS_MAX, VIEW_SET_NAME_MAX: VIEW_SET_NAME_MAX, viewSetName: viewSetName,
     normalizeViewSets: normalizeViewSets, viewSetMatches: viewSetMatches, putViewSet: putViewSet, utcDate: utcDate,

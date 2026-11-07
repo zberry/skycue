@@ -1158,6 +1158,47 @@ test('viewSetMatches', () => {
   assert.strictEqual(P.viewSetMatches(set, P.normalizeView({ search: 'dal' }), true), false);
   assert.strictEqual(P.viewSetMatches(set, P.normalizeView({ search: 'ual' }), false), false);
 });
+test('mapBoxName and mapBoxToggle', () => {
+  assert.deepStrictEqual(P.MAP_BOXES, ['map', 'aircraft', 'layers', 'weather']);
+  assert.strictEqual(P.mapBoxName('layers'), 'layers');
+  assert.strictEqual(P.mapBoxName('Layers'), null);
+  assert.strictEqual(P.mapBoxName(''), null);
+  assert.strictEqual(P.mapBoxName(null), null);
+  assert.strictEqual(P.mapBoxName(7), null);
+  assert.strictEqual(P.mapBoxToggle(null, 'map'), 'map');
+  assert.strictEqual(P.mapBoxToggle('map', 'map'), null);
+  assert.strictEqual(P.mapBoxToggle('map', 'weather'), 'weather');
+  assert.strictEqual(P.mapBoxToggle('map', 'bogus'), null);
+});
+test('normalizeLayers: defaults, strings and garbage', () => {
+  assert.deepStrictEqual(P.LAYER_IDS, ['regional', 'conus', 'rasters', 'tfr', 'sigmet', 'airmet', 'cwa', 'sua']);
+  assert.deepStrictEqual(P.normalizeLayers(null), P.LAYER_DEFAULTS);
+  assert.deepStrictEqual(P.normalizeLayers('not json'), P.LAYER_DEFAULTS);
+  assert.deepStrictEqual(P.normalizeLayers([]), P.LAYER_DEFAULTS);
+  const n = P.normalizeLayers('{"regional":false,"tfr":"yes","bogus":true}');
+  assert.deepStrictEqual(n, { regional: false, conus: true, rasters: false, tfr: true, sigmet: false, airmet: false, cwa: false, sua: false });
+  assert.strictEqual(Object.keys(n).length, 8);
+});
+test('normalizeLayersPartial: garbage', () => {
+  assert.deepStrictEqual(P.normalizeLayersPartial(undefined), {});
+  assert.deepStrictEqual(P.normalizeLayersPartial('x'), {});
+  assert.deepStrictEqual(P.normalizeLayersPartial([]), {});
+  assert.deepStrictEqual(P.normalizeLayersPartial({ regional: 'yes', bogus: true, sua: 0 }), { regional: true, sua: false });
+});
+test('layersOnCount', () => {
+  assert.strictEqual(P.layersOnCount(null), 2);
+  assert.strictEqual(P.layersOnCount({ regional: false, conus: false }), 0);
+  assert.strictEqual(P.layersOnCount({ tfr: true, sua: true }), 4);
+});
+test('weatherDot: faded, missing, no fisb', () => {
+  const ok = { on: true, drawn: true, faded: false };
+  assert.strictEqual(P.weatherDot([ok, ok], true), false);
+  assert.strictEqual(P.weatherDot([ok, { on: true, drawn: true, faded: true }], true), true);
+  assert.strictEqual(P.weatherDot([{ on: false, drawn: true, faded: true }], true), false);
+  assert.strictEqual(P.weatherDot([{ on: true, drawn: false, faded: false }], true), true);
+  assert.strictEqual(P.weatherDot([{ on: true, drawn: false, faded: false }], false), false);
+  assert.strictEqual(P.weatherDot([], true), false);
+});
 test('putViewSet: add, replace, cap', () => {
   let r = P.putViewSet(P.normalizeViewSets(null), 'A', P.normalizeView({ search: 'ual' }), false);
   assert.strictEqual(r.replaced, false);

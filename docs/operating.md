@@ -528,15 +528,15 @@ tree; Leaflet under `vendor/leaflet/`, ECharts under `vendor/echarts/`).
 The left panel has two groups: **Output filters** (what is sent to the
 cue clients: range, elevation and the allow and block lists, see
 [Filters and lists](#filters-and-lists)) and **Display filters** (this
-browser only). Display filters starts with a "Hide filtered" checkbox (off
-by default, remembered per browser): when on, aircraft that are not `sent` or `allow_listed` are not
-drawn and the panel shows how many are hidden. It only changes what this page
-draws, not the filters, lists, recordings or cue outputs.
+browser only). The map settings that used to sit here (Trails, "Non-matching
+on the map", "Hide filtered") now live in the Aircraft box of the map
+toolbar, top left of the map: see [The map toolbar](#the-map-toolbar).
+"Hide filtered" (off by default, remembered per browser) leaves out of the
+map and the table the aircraft that are not `sent` or `allow_listed`; the box
+shows how many are hidden. It only changes what this page draws, not the
+filters, lists, recordings or cue outputs.
 
-Under it, the **Trails** group sets how the aircraft trails are drawn (see
-[Trails](#trails)).
-
-Below that, the rest of Display filters narrows what this browser's map and
+Display filters narrows what this browser's map and
 table show. The search matches the hex, callsign, registration or squawk
 (`/` puts the cursor in it, Escape clears it); altitude, speed and range
 take a minimum and a maximum (the "ground" box says whether aircraft on
@@ -545,11 +545,11 @@ decisions (sent, allow, range, elev, blocked) and classes (airline,
 private, military, unknown); "emergency only" keeps
 aircraft declaring an emergency or squawking 7500, 7600 or 7700; Category
 picks the emitter category and Country the country of registration.
-"Non-matching on the map" either hides the other aircraft or dims them to
-faint symbols without labels or trails; the table leaves them out. The
-section shows "showing N of M" and a Clear button, and its heading the
+"Non-matching on the map" (in the Aircraft box) either hides the other
+aircraft or dims them to faint symbols without labels or trails; the table
+leaves them out. The section shows "showing N of M" and a Clear button, and its heading the
 number of active settings. The settings are remembered per browser
-(localStorage `skycue.view`) and combine with "Hide filtered"; the selected
+(localStorage `skycue.view`) and combine with "Hide filtered" (Aircraft box); the selected
 aircraft always stays shown. The class and the country are estimates, from
 the ICAO address, the callsign and the category (an address that is not an
 ICAO address, such as a TIS-B track file, gets no country and no
@@ -557,32 +557,40 @@ address-based military class); the Track panel shows them as "Class (est.)"
 and "Country". Like "Hide filtered", Display filters only changes what
 this page shows, not the filters, lists, recordings or cue outputs.
 
-**Saved filter sets.** The "Sets" row at the top of Display filters keeps
-named sets of every Display filter setting together with "Hide filtered".
-Choosing a set in the list applies it at once; "— current —" leaves the
-settings as they are. **Save** asks for a name (up to 40 characters) and
-saves the current settings under it; a name already taken is replaced
-after a confirmation. **Delete** (after a confirmation) removes the chosen
-set, and **⋯** holds Rename, Move up, Move down, Export… and Import….
-Once the settings no longer equal the chosen set, the list shows
-"<name> (modified)"; choosing the set again applies it again. The keys 1
-to 9 apply the first nine sets and 0 clears the Display filters to their
-defaults, like Clear (not while typing in a field). Up to 20 sets are kept,
-in localStorage `skycue.viewSets`.
+**Saved views.** The "Views" row at the top of Display filters keeps
+named views: every Display filter setting together with "Hide filtered" and
+the four map boxes (the Map box's style, Borders and Cities, the Layers
+box's layer set, and the Weather box's radar opacity). Choosing a view in
+the list applies it at once; "— current —" leaves the settings as they are.
+**Save** asks for a name (up to 40 characters) and saves the current
+settings under it; a name already taken is replaced after a confirmation.
+**Delete** (after a confirmation) removes the chosen view, and **⋯** holds
+Rename, Move up, Move down, Export… and Import…. Once the settings no
+longer equal the chosen view, the list shows "<name> (modified)"; choosing
+the view again applies it again. A view only sets the map fields this
+install can show (a view saved with Dark applied to an install without
+tiles leaves the style alone) and never opens or closes a box. Views saved
+before the map boxes existed have no map part: recalling one changes the
+Display filters and "Hide filtered" and leaves the map as it is. The keys 1
+to 9 apply the first nine views and 0 clears the Display filters to their
+defaults, like Clear (not while typing in a field). Up to 20 views are kept,
+in localStorage `skycue.viewSets` (version 2).
 
 **Export…** downloads `skycue-settings-<date>.json` (the UTC date): the
-filter sets and the alert settings (the rules, their parameters, the watch
+views and the alert settings (the rules, their parameters, the watch
 list and Mute; see [Alerts](#alerts)), so one file carries a whole setup
-to another browser. **Import…** reads such a file (at most 1 MB), says
-what it holds and which of your sets a merge would replace, and offers
-**Replace**, **Merge** and **Cancel**. Replace takes the file's sets and
+to another browser. The file is `skycue_settings` version 2 (views with
+their map part); version 1 files, from before the map boxes, still import,
+their views without a map part. **Import…** reads such a file (at most 1 MB), says
+what it holds and which of your views a merge would replace, and offers
+**Replace**, **Merge** and **Cancel**. Replace takes the file's views and
 alert settings instead of yours (a file without alert settings leaves
-yours as they are). Merge keeps your sets in their order,
+yours as they are). Merge keeps your views in their order,
 replaces the ones with a name the file also has, adds the file's other
-sets at the end up to 20 (the rest are named as not imported), takes the
+views at the end up to 20 (the rest are named as not imported), takes the
 file's rules one by one (a rule the file lacks stays as it is) and adds
 the file's watch list to yours; your Mute stays. Either way the strip
-stays shown or hidden, and its drawer open or closed, as it was. The sets
+stays shown or hidden, and its drawer open or closed, as it was. The views
 and the alert settings are this browser's only: an import or an export is
 never sent to skycued.
 
@@ -600,12 +608,13 @@ closed, or no stats for 5 s); it reconnects by itself.
 
 ### Trails
 
-The **Trails** group in Display filters (under "Hide filtered") sets how
-the aircraft trails are drawn. Its settings are remembered per browser
-with the rest of Display filters (localStorage `skycue.view`), are part of
-the saved filter sets (and so of the number keys 1 to 9), and Clear (or the
-0 key) puts them back to their defaults; they do not count in the heading's
-number of active settings. The trail length is `TRAIL_SECONDS` in every setting.
+The **Trails** group at the top of the Aircraft box (the toolbar's aircraft
+button, see [The map toolbar](#the-map-toolbar)) sets how the aircraft
+trails are drawn. Its settings are remembered per browser with the rest of
+Display filters (localStorage `skycue.view`), are part of the saved views
+(and so of the number keys 1 to 9), and Clear (or the 0 key) puts them back
+to their defaults; they do not count in the Display filters heading's number
+of active settings. The trail length is `TRAIL_SECONDS` in every setting.
 
 **Show**: `all` (the default) draws a trail for every aircraft on the map;
 `selected` only for the selected aircraft; `off` none. The positions are
@@ -642,7 +651,7 @@ last line shows that grey. Every step of the altitude scale is at least
 only dashed line from an aircraft's symbol is its projection ahead
 (dashed airspace outlines are something else: cancelled shapes).
 
-A filter set saved before the Trails group existed takes the Trails
+A view saved before the Trails group existed takes the Trails
 settings the page had when it was first opened with this version (once),
 so applying it keeps them rather than resetting Trails.
 
@@ -685,7 +694,7 @@ an aircraft at that altitude is above the mask. Aircraft without a position
 are only in the table.
 
 **Measuring a distance.** The ruler button (title "Measure") under the
-zoom buttons arms the ruler. Click the map (or an aircraft, a weather
+zoom buttons, above the box buttons, arms the ruler. Click the map (or an aircraft, a weather
 symbol or a ground station, to use its position) for the start; as the
 mouse moves a dashed line follows it, labelled with the great-circle
 distance in nm and km and the initial bearing in degrees true (`066°T`);
@@ -1003,19 +1012,28 @@ on the map only when its station's position is known
 ([Report locations](#report-locations-fisb-locationsjson)); otherwise the
 list says "no position". At most 300 symbols are drawn, those in view.
 
-"Other rasters" in the layer control shows one more FIS-B raster at a time
-(lightning, icing, turbulence, cloud tops) from a product dropdown; icing
-and turbulence add an altitude band dropdown (default the lowest band with
-data). The winds and raster picks stay until what they name is no longer
+The weather layers are in two map boxes. The **Layers** box holds the
+checklist: "Radar (regional)" and "Radar (CONUS)" (on by default), "Other
+rasters", and one layer per airspace shape family (NOTAM / TFR, SIGMET,
+AIRMET, CWA, SUA; off by default). The set is remembered per browser
+(localStorage `skycue.layers`) and the number of layers on shows on the
+Layers button. "Other rasters" shows one more FIS-B raster at a time
+(lightning, icing, turbulence, cloud tops): the **Weather** box then offers
+a product dropdown, and icing and turbulence add an altitude band dropdown
+(default the lowest band with data). The winds and raster picks stay until what they name is no longer
 offered; a reconnect, which reloads everything, keeps them.
 
-The "Radar opacity" slider at the bottom right of the map, beside the
-radar's age, sets how opaque the NEXRAD layers ("Radar (regional)" and
-"Radar (CONUS)") and the "Other rasters" product are drawn, from 0.2 to 1
-(default 0.7); a radar older than 15 min (regional) or 30 min (CONUS) is
-drawn at half of it. The slider is disabled, and dimmed, while none of
-these is drawn (no mosaic on a layer that is on, no raster product). Its
-value is remembered per browser (localStorage `skycue.radarOpacity`).
+The **Weather** box (the cloud button) holds the radar's age, the "Radar
+opacity" slider, the radar and airspace legends and the raster controls.
+The slider sets how opaque the NEXRAD layers ("Radar (regional)" and "Radar
+(CONUS)") and the "Other rasters" product are drawn, from 0.2 to 1 (default
+0.7); a radar older than 15 min (regional) or 30 min (CONUS) is drawn at half
+of it. The slider is disabled, and dimmed, while none of these is drawn (no
+mosaic on a layer that is on, no raster product). Its value is remembered per
+browser (localStorage `skycue.radarOpacity`) and is part of a saved view. A
+dot on the Weather button, with the box closed, says that a radar layer that
+is switched on is stale (drawn at half opacity), or has no mosaic while the
+daemon has FIS-B ground stations.
 
 ### Receiver tab
 
@@ -1202,10 +1220,32 @@ source tree, run `scripts/maps/make-tiles.sh` and `scripts/maps/make-overlays.sh
 from it as above (`scripts/maps/skycue-make-maps --map-dir DIR` works
 there too, with the scripts beside it).
 
+### The map toolbar
+
+One vertical toolbar sits top left of the map: zoom in, zoom out, the
+Measure button (see [Measuring a distance](#the-map-and-its-colours)), a
+divider, then four icon buttons: **Map**, **Aircraft**, **Layers** and
+**Weather**. Each opens a box to its right; one box is open at a time,
+clicking the open button (or another one) closes it, and Escape closes it
+when focus is inside the box (the ruler, when armed, takes Escape first).
+A box is shortened to stay above the alert strip. The open box is remembered
+per browser (localStorage `skycue.mapBox`); a browser that has not stored
+one starts with all the boxes folded.
+
+- **Map**: style, Borders and Cities, below. The button is left out when the
+  install has neither tiles nor overlays.
+- **Aircraft**: Trails (see [Trails](#trails)), "Non-matching on the map"
+  and "Hide filtered" with the number of aircraft it hides.
+- **Layers**: the overlay checklist, with the number of layers on shown on
+  the button.
+- **Weather**: radar age and opacity, the legends and the raster controls
+  (see [Weather tab and weather reports](#weather-tab-and-weather-reports)).
+
 ### Map style and overlays
 
-The small box under the zoom and Measure buttons sets how the map looks; every choice is
-remembered per browser and only changes what this page draws.
+The Map box sets how the map looks; every choice is
+remembered per browser, is part of a saved view, and only changes what this
+page draws.
 
 - **Map: Light / Dark.** Light shows the tiles as they were made; Dark
   darkens them with a CSS filter on the tile layer only (inverted, hue turned
@@ -1464,7 +1504,7 @@ and NOTAM/TFR, AIRMET, SIGMET and SUA reports with their shapes. It keeps
 the current products until they expire, records them as `fisb-*.jsonl`
 when `RECORD_FORMATS` includes `jsonl`, serves them under `/api/fisb/`, and
 draws them on the web map (radar on by default; NOTAM / TFR, SIGMET,
-AIRMET, CWA, SUA and the other rasters in the layer control) and in the
+AIRMET, CWA, SUA and the other rasters in the Layers box) and in the
 **Weather** tab of the side panel. `skycue-fisb` decodes an uplink file
 offline. What is decoded and what is not, the store's rules, the CLI and
 the limits: [fisb.md](fisb.md). FIS-B is for situational awareness only,

@@ -93,7 +93,7 @@ same pattern: `alerts_pure.js` holds the rules (`RULES`), the
 edge-triggered engine (`createEngine`: dedupe, 5-minute quiet period,
 10 s input hold-off, the snapshot baseline), the normalisers of
 localStorage `skycue.alerts` and `skycue.alertLog` and the settings file
-of the filter sets' Export…/Import… (`settingsFile`, `parseSettings`,
+of the views' Export…/Import… (`settingsFile`, `parseSettings`,
 `mergeSettings`); under node it loads `./app_pure.js` itself, in the page
 it uses `window.skycuePure`. `alerts_view.js` draws the strip, the drawer
 and `#alerts-config` and plays the tones, from the host object `app.js`
@@ -121,8 +121,8 @@ on a region's edge (`tileInsideRegions`, from `tiles/meta.json`).
 
 From the `fisb` status in the snapshot the page GETs `/api/fisb/text`,
 `/api/fisb/shapes` and the NEXRAD mosaics, then applies the `fisb_*`
-WebSocket items (docs/web-api.md, FIS-B). Map layers (the layer control,
-top right): "Radar (regional)" and "Radar (CONUS)" (on by default), "Other
+WebSocket items (docs/web-api.md, FIS-B). Map layers (the Layers box, see
+"Map toolbar"): "Radar (regional)" and "Radar (CONUS)" (on by default), "Other
 rasters" (lightning, icing, turbulence, cloud tops: one at a time from a
 product dropdown, legend marked approximate; icing and turbulence also get
 an altitude band dropdown, `≈ 4,000 ft` per 3-bit code, bands without data
@@ -131,7 +131,7 @@ the band; `rasterProducts`, `defaultBand`) and one layer per shape family (NOTAM
 SIGMET, AIRMET/G-AIRMET, CWA, SUA; off by default). A mosaic's blocks are
 expanded from their RLE and painted on one canvas over their box (rows
 spaced in Web Mercator, at most 4096 x 4096), shown as an image overlay;
-the opacity slider and radar age sit bottom right, and a radar older than
+the opacity slider and radar age are in the Weather box, and a radar older than
 15 min (regional) or 30 min (CONUS) is drawn at half opacity
 (`radarOpacity`). Cancelled shapes are dashed, shapes not yet in force
 (`pending`) dotted and dimmed (`shapeStyle`). Clicking a shape shows its text, times and
@@ -193,11 +193,14 @@ server error is set with `textContent`, never as markup.
 
 The left panel is `#output-filters` (range, elevation, ring, the allow and
 block lists and Save as baseline: what is sent to cue clients), then `#view`
-("Display filters"), then the legend. `#view` holds "Hide filtered" and the
-per-browser view settings (`normalizeView`, localStorage `skycue.view`);
+("Display filters"), then the legend. `#view` holds the Views row
+(`#view-set-select`) and the per-browser view settings (`normalizeView`,
+localStorage `skycue.view`); "Hide filtered" (`#hide-filtered`), the
+"Non-matching on the map" mode and the Trails group are part of the same
+view but sit in the Aircraft box (`#box-aircraft`, see "Map toolbar");
 `viewMatches` decides a track, `trackClass` and `trackCountry` estimate its class and
 country, and `viewShows` in `app.js` exempts the selected track.
-The Trails group (`#view-trails`) is part of the view: `trailShow`
+The Trails group (`#view-trails`, in the Aircraft box) is part of the view: `trailShow`
 (`P.TRAIL_SHOWS`; `trailShown` in `app.js`) says which entries have a
 trail. An entry without one has no `path.trail` at all (`e.trail` null;
 `drawTrail` makes or removes it, `renderEntry` calls it when that changes,
@@ -215,7 +218,7 @@ of `P.altitudeColor`, `ALT_COLORS` split at `ALT_BOUNDS_FT`) as
 then transparent. A run without a value is solid in `P.TRAIL_NONE_COLOR`
 (neutral grey) at a lower opacity; no trail polyline is dashed.
 `P.viewSetsFillTrails` (in `initTrails`, after the `skycue.trailSignal`
-take-over) gives stored sets without the Trails fields the current ones,
+take-over) gives stored views without the Trails fields the current ones,
 once, and saves the store. `#trail-signal-legend` is
 `P.signalLegend`, `#trail-alt-legend` `P.altitudeLegend`. The runs are kept
 up to date in place (`updateTrail`: `P.trailRunsAppend` on a new position,
@@ -232,10 +235,45 @@ is `destinationPoint`) at most `AHEAD_STEP_NM` apart. `updateAhead` makes,
 moves or removes it on every `renderEntry` and `drawTrail`; only an entry
 with a trail has one, and `removeTrail` takes it too.
 
+## Map toolbar
+
+`initToolbar` builds one `L.Control.Zoom` subclass, top left: the zoom
+buttons, the Measure button (`#ruler-toggle`), a divider and one button per
+name in `P.MAP_BOXES` (`#tb-map`, `#tb-aircraft`, `#tb-layers`,
+`#tb-weather`). The boxes (`#box-map`, `#box-aircraft`, `#box-layers`,
+`#box-weather`) start in `#map-boxes` in `index.html` and are moved beside
+their buttons. `openBox(name)` shows one box and folds the rest (`null`
+folds all; a name whose button is hidden counts as `null`, as for `#tb-map`
+without tiles or overlays); `toggleBox` goes through `P.mapBoxToggle`, and
+the open name is stored in localStorage `skycue.mapBox`
+(`P.mapBoxName` normalises what is read; the first call is `initial`, which
+does not store). `sizeBox` puts the box level with its button and caps its
+height above the alert strip, on every `openBox` and map `resize`. The
+document's Escape closes the open box when focus is inside it, after the
+ruler.
+
+The layer set is `layersState()` (the `P.LAYER_IDS` booleans read from the
+map) and `setLayers(partial)` (`P.normalizeLayersPartial`); every layer
+group's add and remove runs `onLayerChange`, which saves it to localStorage
+`skycue.layers` (`saveLayers`), updates the count on the Layers button
+(`updateLayersBadge`, `P.layersOnCount`) and the dot on the Weather button
+(`updateWeatherDot`, `P.weatherDot`). `P.normalizeLayers` fills defaults
+(`LAYER_DEFAULTS`). The Leaflet layer control is moved into `#box-layers`.
+
+A saved view's map part is `currentMapView()` (style and overlays only where
+this install offers them, the layer set, the radar opacity) and
+`applyMapView(m)`, which sets only what is there and honourable and never
+opens a box; `applyViewSet` calls it when the set has a `map`. In
+`app_pure.js` `VIEW_SETS_VERSION` is 2, `normalizeMapView` keeps only valid
+map fields, `mapViewMatches` and `viewSetMatches` decide the "(modified)"
+state and `putViewSet` stores a view with its map part. The settings file
+(`alerts_pure.js`) is `skycue_settings` version 2 (`SETTINGS_VERSION`);
+`parseSettings` still accepts version 1.
+
 ## Ruler
 
 The "Measure" button (`#ruler-toggle`, a `leaflet-bar` control top left,
-under the zoom buttons, so the alert strip's lift of `.leaflet-bottom` never
+under the zoom buttons and above the box buttons, so the alert strip's lift of `.leaflet-bottom` never
 reaches it) arms `ruler` in `app.js`: every click handler on the map (the map, the
 aircraft, the FIS-B shapes and symbols, the device and station markers)
 asks `rulerTakes` first, which gives the point to `rulerClick` instead,

@@ -26,7 +26,9 @@ add_library(skycue_net STATIC
   src/framer.cpp
   src/listener.cpp
   src/log.cpp
-  src/tcp_options.cpp)
+  src/tcp_options.cpp
+  src/udp_receiver.cpp
+  src/udp_sender.cpp)
 add_library(skycue::net ALIAS skycue_net)
 set_target_properties(skycue_net PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(skycue_net PUBLIC

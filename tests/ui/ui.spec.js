@@ -1755,6 +1755,22 @@ test('map_boxes_one_at_a_time_and_escape', async ({ page }) => {
   await page.click('#tb-weather');
   await expect(page.locator('#box-weather')).toBeHidden();
 });
+test('map_toolbar_keyboard_space_and_enter', async ({ page }) => {
+  await openPage(page);
+  await page.locator('a.leaflet-control-zoom-in').focus();
+  for (let i = 0; i < 8 && (await page.evaluate(() => document.activeElement.id)) !== 'tb-aircraft'; i++) await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => document.activeElement.id)).toBe('tb-aircraft');
+  await page.keyboard.press(' ');
+  await expect(page.locator('#box-aircraft')).toBeVisible();
+  await expect(page.locator('#tb-aircraft')).toHaveAttribute('aria-expanded', 'true');
+  await page.locator('#view-trail-color').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#box-aircraft')).toBeHidden();
+  expect(await page.evaluate(() => document.activeElement.id)).toBe('tb-aircraft');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#box-aircraft')).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
 test('map_box_open_state_survives_reload_and_table', async ({ page }) => {
   await openPage(page);
   await openBox(page, 'layers');

@@ -374,6 +374,15 @@
           toolbar.boxes[name] = $('box-' + name);
           wrap.appendChild(toolbar.boxes[name]);
         });
+        // role="button" promises Space as well as Enter: Enter is the anchor's
+        // own click, Space is turned into one (zoom buttons included).
+        L.DomEvent.on(bar, 'keydown', function (ev) {
+          var t = ev.target;
+          if ((ev.key === ' ' || ev.key === 'Spacebar') && t.tagName === 'A' && t.parentNode === bar) {
+            L.DomEvent.preventDefault(ev);
+            t.click();
+          }
+        });
         var pen = $('map-boxes');
         if (pen.parentNode) pen.parentNode.removeChild(pen);
         L.DomEvent.disableClickPropagation(wrap);

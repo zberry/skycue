@@ -393,7 +393,7 @@
 
   function sizeBox(name) {
     var box = toolbar.boxes[name];
-    var alerts = $('map-wrap').classList.contains('alerts-on') ? 32 : 0;
+    var alerts = $('map-wrap').classList.contains('alerts-on') ? $('alerts').offsetHeight : 0;
     box.style.top = toolbar.buttons[name].offsetTop + 'px';
     box.style.maxHeight = Math.max(0, map.getContainer().clientHeight - box.offsetTop - 10 - alerts) + 'px';
   }
@@ -3628,7 +3628,8 @@
         selectTrack: function (key) { showMain('map'); select(key); },
         openReceiver: function () { openPanel('receiver'); },
         openStatsAircraft: function (key) { showMain('stats'); if (statsView) statsView.openAircraft(key); },
-        tracks: function () { return Array.from(tracks.values()).map(function (e) { return e.t; }); }
+        tracks: function () { return Array.from(tracks.values()).map(function (e) { return e.t; }); },
+        layoutChanged: function () { if (toolbar && openBoxName) sizeBox(openBoxName); }
       });
     } else {
       $('alerts-toggle').hidden = true;

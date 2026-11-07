@@ -836,6 +836,17 @@ test('alerts_strip_leaves_map_controls_clear', async ({ page }) => {
   await page.locator('#stats-toggle').click();
 });
 
+test('alerts_strip_arrival_resizes_open_box', async ({ page }) => {
+  await alertsOnly(page, ['emergency']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await openBox(page, 'aircraft');
+  await inject(page);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  const s = await page.locator('#alerts').boundingBox();
+  await expect.poll(async () => { const b = await page.locator('#box-aircraft').boundingBox(); return b.y + b.height; }).toBeLessThanOrEqual(s.y + 1);
+});
+
 test('alerts_survive_garbage_storage', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('skycue.alerts', '{"rules":7,"hidden":"x"}');
@@ -1722,6 +1733,11 @@ test('map_boxes_one_at_a_time_and_escape', async ({ page }) => {
   expect(box.width).toBeLessThanOrEqual(260);
   const mapBox = await page.locator('#map').boundingBox();
   expect(box.y + box.height).toBeLessThanOrEqual(mapBox.y + mapBox.height);
+  // Every box fits without scrolling at 1280x720.
+  await openBox(page, 'aircraft');
+  const air = await page.locator('#box-aircraft').evaluate((e) => ({ over: e.scrollHeight - e.clientHeight, bottom: e.getBoundingClientRect().bottom }));
+  expect(air.over).toBeLessThanOrEqual(0);
+  expect(air.bottom).toBeLessThanOrEqual(mapBox.y + mapBox.height);
   // The radar slider is disabled here (no radar products), so Escape is tried from a control that can take focus.
   await openBox(page, 'aircraft');
   await page.locator('#view-trail-color').focus();

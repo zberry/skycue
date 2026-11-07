@@ -298,6 +298,7 @@
       var wrap = $('map-wrap');
       wrap.classList.toggle('alerts-on', view.shown);
       if (view.shown) wrap.style.setProperty('--alerts-h', $('alerts').offsetHeight + 'px');
+      if (host.layoutChanged) host.layoutChanged();   // map boxes size themselves against the strip
     }
     function render() {
       var rows = engine.rows();

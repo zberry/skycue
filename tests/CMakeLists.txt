@@ -586,5 +586,16 @@ skycue_set_warnings(test_decode_golden)
 add_test(NAME decode_golden COMMAND test_decode_golden)
 set_tests_properties(decode_golden PROPERTIES TIMEOUT 120)
 
+# The 1090 decoder against OpenSky's decoded fields for the same frames
+# (fixtures/opensky/*, fetched and unpacked by fetch-test-captures.sh; skips
+# when absent).
+add_executable(test_decode_opensky test_decode_opensky.cpp)
+target_link_libraries(test_decode_opensky PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_opensky PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_decode_opensky)
+add_test(NAME decode_opensky COMMAND test_decode_opensky)
+set_tests_properties(decode_opensky PROPERTIES TIMEOUT 120)
+
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

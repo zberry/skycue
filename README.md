@@ -27,11 +27,29 @@ Download the `.deb`, the `.rpm` or the source tarball from the
 
 ## What it does
 
-**Inputs.** skycued reads readsb's JSON position output, dump978-fa's raw
-UAT port and pingStation 3 receivers (uAvionix's small networked
-ADS-B/UAT receiver; JSON or ASTERIX CAT021), and merges
-them into one track table. Further inputs are added in the web page or in an
-inputs file, and the page shows the health of every one. Details:
+**Inputs.** skycued takes aircraft from:
+
+- **readsb**, through its JSON position output (`--net-json-port 30047`, with
+  aircraft that have no position included). This is the readsb you already
+  run, as a service or inside ultrafeeder. UAT aircraft reach skycue through
+  readsb too, once readsb has a `uat_in` connector to dump978-fa.
+- **Any other 1090 MHz decoder that serves Beast output**, such as
+  dump1090-fa under PiAware, dump1090-mutability, or a readsb on another
+  machine: a small network-only readsb converts the Beast stream to the JSON
+  output skycue reads. The installing guide has a ready unit file for it
+  ([PiAware](docs/installing.md#piaware-dump1090-fa)).
+- **dump978-fa**, through its raw UAT port (30978): the 978 MHz frames and
+  the FIS-B weather uplinks (USA).
+- **pingStation 3** receivers (uAvionix's small networked ADS-B/UAT
+  receiver), as JSON or ASTERIX CAT021 over UDP or TCP. Each one is a named
+  input you add in the web page or in the inputs file; several can run at
+  once.
+- **Recordings**, for running without hardware: a JSONL recording skycued
+  made earlier (`--replay`), or the decoders' raw output captured with
+  `skycue-rawrec`.
+
+Everything merges into one track table, and the page's Receiver tab shows
+the health of every input. Details:
 [docs/operating.md](docs/operating.md#the-inputs-file).
 
 **Decisions and cues.** For each aircraft skycued decides whether to

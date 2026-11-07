@@ -16,6 +16,7 @@ skycue_add_fuzzer(web SOURCES fuzz_web.cpp)
 skycue_add_fuzzer(ws SOURCES fuzz_ws.cpp LIBS Threads::Threads)
 skycue_add_fuzzer(pingstation SOURCES fuzz_pingstation.cpp)
 skycue_add_fuzzer(config_files SOURCES fuzz_config_files.cpp)
+skycue_add_fuzzer(net_line_framer SOURCES fuzz_net_line_framer.cpp LIBS skycue_net)
 
 # The harness names, one per line, for scripts/dev/run-fuzz.sh --bin-dir.
 get_property(_skycue_fuzz_names GLOBAL PROPERTY SKYCUE_FUZZ_TARGETS)

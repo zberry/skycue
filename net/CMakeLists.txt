@@ -20,7 +20,9 @@ if(NOT TARGET Threads::Threads)
 endif()
 
 add_library(skycue_net STATIC
+  src/backoff.cpp
   src/endpoint.cpp
+  src/framer.cpp
   src/log.cpp)
 add_library(skycue::net ALIAS skycue_net)
 set_target_properties(skycue_net PROPERTIES POSITION_INDEPENDENT_CODE ON)

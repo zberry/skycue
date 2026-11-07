@@ -1589,12 +1589,12 @@
   // where it is; {error} when the name is empty or the store is full.
   function putViewSet(store, name, view, hideFiltered, mapView) {
     name = viewSetName(name);
-    if (name === '') return { error: 'A filter set needs a name.' };
+    if (name === '') return { error: 'A view needs a name.' };
     var sets = store.sets.slice(), set = { name: name, view: normalizeView(view), hideFiltered: !!hideFiltered };
     var m = normalizeMapView(mapView);
     if (m !== undefined) set.map = m;
     var i = sets.map(function (s) { return s.name; }).indexOf(name);
-    if (i < 0 && sets.length >= VIEW_SETS_MAX) return { error: 'At most ' + VIEW_SETS_MAX + ' filter sets: delete one first.' };
+    if (i < 0 && sets.length >= VIEW_SETS_MAX) return { error: 'At most ' + VIEW_SETS_MAX + ' views: delete one first.' };
     if (i >= 0) sets[i] = set; else sets.push(set);
     return { store: { version: VIEW_SETS_VERSION, sets: sets }, replaced: i >= 0, index: i >= 0 ? i : sets.length - 1 };
   }

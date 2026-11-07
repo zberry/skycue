@@ -41,6 +41,7 @@
   // the set last applied or saved (null: "— current —").
   var VIEW_SETS_KEY = 'skycue.viewSets';
   var viewSets = P.normalizeViewSets(storeGet(VIEW_SETS_KEY));
+  var overlayOffer = { borders: false, cities: false };   // set in initMapView
   var activeSet = null;
   // The alert config's store (alerts_view.js owns it; the settings import
   // writes it only without the strip). AP: alerts_pure.js, may be absent.
@@ -281,7 +282,7 @@
     map.createPane('cityLabels');
     map.getPane('cityLabels').style.zIndex = 450;   // over the shapes, under the aircraft (markerPane, 600)
     map.getPane('cityLabels').style.pointerEvents = 'none';
-    var offer = P.overlayOffer(overlayMeta);
+    var offer = overlayOffer = P.overlayOffer(overlayMeta);
     // The style only changes tiles: without them its row is left out, and
     // the Map button too when there are no overlays either.
     $('map-style-row').hidden = !haveTiles;
@@ -497,7 +498,7 @@
   function setMapStyle(style, initial) {
     view.style = P.mapStyle(style);
     $('map-style').value = view.style;
-    if (!initial) storeSet(VIEW_KEYS.style, view.style);
+    if (!initial) { storeSet(VIEW_KEYS.style, view.style); syncViewSetSelect(); }
     var pane = map.getPane('tilePane');
     pane.style.filter = P.tileFilter(view.style);
     pane.classList.toggle('tiles-dark', view.style === 'dark');
@@ -508,7 +509,7 @@
   function setOverlay(name, on, initial) {
     view[name] = !!on;
     $('ov-' + name).checked = view[name];
-    if (!initial) storeSet(VIEW_KEYS[name], view[name] ? '1' : '0');
+    if (!initial) { storeSet(VIEW_KEYS[name], view[name] ? '1' : '0'); syncViewSetSelect(); }
     if (name === 'borders') showBorders();
     else { if (!initial) citiesFailed = false; drawCities(); }
   }
@@ -942,6 +943,12 @@
     if (fill.filled) {
       viewSets = fill.store;
       saveViewSets();
+    } else {
+      // Upgrade in place: a store from an older version is written back once
+      // as the current version (after the Trails fill, which reads the raw one).
+      var old2 = null;
+      try { old2 = JSON.parse(storeGet(VIEW_SETS_KEY)); } catch (err) { old2 = null; }
+      if (old2 && typeof old2 === 'object' && old2.version !== P.VIEW_SETS_VERSION) saveViewSets();
     }
     applyTrailOptions();
   }
@@ -1167,7 +1174,7 @@
     sel.appendChild(new Option('— current —', ''));
     viewSets.sets.forEach(function (set, i) { sel.appendChild(new Option(set.name, String(i))); });
     var active = activeSet === null ? null : viewSets.sets[activeSet];
-    if (active && !P.viewSetMatches(active, viewFilter, hideFiltered)) {
+    if (active && !P.viewSetMatches(active, viewFilter, hideFiltered, currentMapView())) {
       // Right after the active set's own option, so the arrow keys on the
       // closed select step from the set's place in the list.
       var marker = new Option(active.name + ' (modified)', 'modified');
@@ -1181,24 +1188,48 @@
     item('up').disabled = activeSet === null || activeSet === 0;
     item('down').disabled = activeSet === null || activeSet === n - 1;
   }
-  // The whole set: every View field and Hide filtered.
+  // The map side of a saved view: what this install can show and the
+  // per-browser layer set and radar opacity (the groups exist after initMap).
+  function currentMapView() {
+    var m = { radarOpacity: radarOpacity() };
+    if (map) m.layers = layersState();
+    if (haveTiles) m.style = view.style;
+    if (overlayOffer.borders) m.borders = view.borders;
+    if (overlayOffer.cities) m.cities = view.cities;
+    return m;
+  }
+  // Only the fields this install can honour; never opens or closes a box.
+  function applyMapView(m) {
+    if (!m || !map) return;
+    if (m.style !== undefined && haveTiles) setMapStyle(m.style);
+    if (m.borders !== undefined && overlayOffer.borders) setOverlay('borders', m.borders);
+    if (m.cities !== undefined && overlayOffer.cities) setOverlay('cities', m.cities);
+    if (m.layers !== undefined) setLayers(m.layers);
+    if (m.radarOpacity !== undefined) {
+      $('radar-opacity').value = String(m.radarOpacity);
+      storeSet(RADAR_OPACITY_KEY, $('radar-opacity').value);
+      applyRadarOpacity();
+    }
+  }
+  // The whole set: every View field, Hide filtered and the map.
   function applyViewSet(i) {
     var set = viewSets.sets[i];
     if (!set) return;
     activeSet = i;
     setViewFilters(set.view);
     setHideFiltered(set.hideFiltered);
+    if (set.map) applyMapView(set.map);
   }
   function viewSetMsg(text, isError) { showMsg($('view-set-msg'), text, isError); }
   function saveViewSet() {
     var current = activeSet === null ? '' : viewSets.sets[activeSet].name;
-    var raw = window.prompt('Name for this filter set', current);
+    var raw = window.prompt('Name for this view', current);
     if (raw === null) return;
     var name = P.viewSetName(raw);
     if (name === '') return;
     var taken = viewSets.sets.some(function (s) { return s.name === name; });
-    if (taken && !window.confirm('Replace the filter set "' + name + '"?')) return;
-    var r = P.putViewSet(viewSets, name, viewFilter, hideFiltered);
+    if (taken && !window.confirm('Replace the view "' + name + '"?')) return;
+    var r = P.putViewSet(viewSets, name, viewFilter, hideFiltered, currentMapView());
     if (r.error) { viewSetMsg(r.error, true); return; }
     viewSets = r.store;
     activeSet = r.index;
@@ -1208,7 +1239,7 @@
   }
   function deleteViewSet() {
     if (activeSet === null) return;
-    if (!window.confirm('Delete the filter set "' + viewSets.sets[activeSet].name + '"?')) return;
+    if (!window.confirm('Delete the view "' + viewSets.sets[activeSet].name + '"?')) return;
     viewSets.sets.splice(activeSet, 1);
     activeSet = null;
     saveViewSets();
@@ -1218,7 +1249,7 @@
   function renameViewSet() {
     if (activeSet === null) return;
     var set = viewSets.sets[activeSet];
-    var raw = window.prompt('Name for this filter set', set.name);
+    var raw = window.prompt('Name for this view', set.name);
     if (raw === null) return;
     var name = P.viewSetName(raw);
     if (name === '' || name === set.name) return;
@@ -1270,7 +1301,7 @@
     $('settings-import').hidden = !pending;
     if (!pending) { $('settings-import-text').textContent = ''; return; }
     var r = pending.parsed;
-    var text = pending.name + ': ' + r.sets.length + ' filter sets' +
+    var text = pending.name + ': ' + r.sets.length + ' views' +
       (r.alerts ? ' and the alert settings' : '') + '. Replace yours, or merge?';
     var replaced = AP.mergeSettings({ sets: viewSets.sets, alerts: currentAlerts() }, r, 'merge').replacedNames;
     if (replaced.length) text += '\nMerge replaces: ' + replaced.join(', ');
@@ -1302,14 +1333,14 @@
     if (!pendingImport) return;
     var r = pendingImport.parsed;
     var m = AP.mergeSettings({ sets: viewSets.sets, alerts: currentAlerts() }, r, mode);
-    viewSets = P.normalizeViewSets({ version: 1, sets: m.sets });
+    viewSets = P.normalizeViewSets({ version: P.VIEW_SETS_VERSION, sets: m.sets });
     if (mode === 'replace') activeSet = null;
     saveViewSets();
     if (alertsView) alertsView.setConfig(m.alerts); // stores skycue.alerts
     else storeSet(ALERTS_KEY, JSON.stringify(m.alerts));
     setImportPanel(null);
     var n = r.sets.length - m.droppedNames.length;
-    viewSetMsg('Imported ' + n + ' filter sets.' + (m.droppedNames.length ? '\nNot imported (at most ' +
+    viewSetMsg('Imported ' + n + ' views.' + (m.droppedNames.length ? '\nNot imported (at most ' +
       P.VIEW_SETS_MAX + ' sets): ' + m.droppedNames.join(', ') : ''));
     syncViewSetSelect();
   }
@@ -1945,6 +1976,7 @@
     $('radar-opacity').addEventListener('input', function () {
       storeSet(RADAR_OPACITY_KEY, $('radar-opacity').value);
       applyRadarOpacity();
+      syncViewSetSelect();
     });
     syncOpacityControl();
     $('raster-select').addEventListener('change', function () {

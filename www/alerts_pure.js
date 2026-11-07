@@ -185,7 +185,7 @@
     alerts.hidden = cur.hidden;
     alerts.drawer = cur.drawer;
     return {
-      sets: P.normalizeViewSets({ version: 1, sets: sets }).sets, alerts: normalizeConfig(alerts),
+      sets: P.normalizeViewSets({ version: P.VIEW_SETS_VERSION, sets: sets }).sets, alerts: normalizeConfig(alerts),
       replacedNames: replacedNames, droppedNames: droppedNames
     };
   }

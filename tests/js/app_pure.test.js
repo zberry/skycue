@@ -1260,7 +1260,7 @@ test('putViewSet: add, replace, cap', () => {
   assert.strictEqual(r.store.sets[0].hideFiltered, true);
   const full = { version: 1, sets: [] };
   for (let i = 0; i < 20; i++) full.sets.push({ name: 'S' + i, view: P.normalizeView(null), hideFiltered: false });
-  assert.deepStrictEqual(P.putViewSet(full, 'New', P.normalizeView(null), false), { error: 'At most 20 filter sets: delete one first.' });
+  assert.deepStrictEqual(P.putViewSet(full, 'New', P.normalizeView(null), false), { error: 'At most 20 views: delete one first.' });
   assert.strictEqual(P.putViewSet(full, 'S3', P.normalizeView(null), true).replaced, true, 'replacing at the cap is allowed');
   assert.strictEqual(full.sets.length, 20);
 });

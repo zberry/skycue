@@ -2677,6 +2677,32 @@ test.describe('map tiles fallback', () => {
     await expect(page.locator('.city-label')).toHaveCount(0);
     expect(pageErrors).toEqual([]);
   });
+
+  test('saved_view_restores_map_style_and_a_layer', async ({ page }) => {
+    await openPage(page);
+    await openBox(page, 'map');
+    await page.locator('#map-style').selectOption('dark');
+    await page.locator('#ov-borders').check();
+    await openBox(page, 'layers');
+    await layerToggle(page, 'SUA').check();
+    await openBox(page, 'weather');
+    // This daemon has no radar, so the slider is disabled: set it as a script would.
+    await page.evaluate(() => { const r = document.getElementById('radar-opacity'); r.value = '0.4'; r.dispatchEvent(new Event('input', { bubbles: true })); });
+    page.once('dialog', (d) => d.accept('Night'));
+    await page.click('#view-set-save');
+    const stored = JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets')));
+    expect(stored.version).toBe(2);
+    expect(stored.sets[0].map).toEqual({ style: 'dark', borders: true, cities: false, radarOpacity: 0.4,
+      layers: { regional: true, conus: true, rasters: false, tfr: false, sigmet: false, airmet: false, cwa: false, sua: true } });
+    await openBox(page, 'map');
+    await page.locator('#map-style').selectOption('light');
+    await expect(page.locator('#view-set-select option:checked')).toHaveText(/\(modified\)/);
+    await page.locator('body').press('1');
+    expect(await page.locator('#map-style').inputValue()).toBe('dark');
+    await expect(page.locator('#view-set-select option:checked')).toHaveText('Night');
+    expect(await page.evaluate(() => window.skycueApp.layers().sua)).toBe(true);
+    expect(await page.evaluate(() => window.skycueApp.mapBox())).toBe('map');   // recalling a view never changes the open box
+  });
 });
 
 // Overlays without tiles, against the skycued run.sh starts with a www that
@@ -3293,12 +3319,12 @@ test('view_sets_save_apply_modified_rename_delete_keys', async ({ page }) => {
   let question = null;
   page.once('dialog', (d) => { question = d.message(); d.accept('Airlines'); });
   await page.click('#view-set-save');
-  expect(question).toBe('Name for this filter set');
+  expect(question).toBe('Name for this view');
   expect(await setSelectedText(page)).toBe('Airlines');
   await expect(page.locator('#view-set-delete')).toBeEnabled();
   const ual = await page.evaluate(() => window.skycuePure.normalizeView({ search: 'ual' }));
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))))
-    .toEqual({ version: 2, sets: [{ name: 'Airlines', view: ual, hideFiltered: false }] });
+    .toEqual({ version: 2, sets: [{ name: 'Airlines', view: ual, hideFiltered: false, map: { layers: { regional: true, conus: true, rasters: false, tfr: false, sigmet: false, airmet: false, cwa: false, sua: false }, radarOpacity: 0.7 } }] });
   await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'dal' }));
   expect(await setSelectedText(page)).toBe('Airlines (modified)');
   await page.evaluate(() => {
@@ -3388,7 +3414,7 @@ test('view_sets_save_apply_modified_rename_delete_keys', async ({ page }) => {
   expect(await setSelectedText(page)).toBe('Airliners');
   page.once('dialog', (d) => { question = d.message(); d.accept(); });
   await page.click('#view-set-delete');
-  expect(question).toBe('Delete the filter set "Airliners"?');
+  expect(question).toBe('Delete the view "Airliners"?');
   expect(await setOptionTexts(page)).toEqual(['— current —', 'Emerg']);
   await expect(page.locator('#view-set-select')).toHaveValue('');
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets.map((x) => x.name)).toEqual(['Emerg']);
@@ -3449,16 +3475,16 @@ test('settings_export_then_import_restores_sets', async ({ page }) => {
   expect(data.alerts.rules.emergency.enabled).toBe(true);
   expect(Object.prototype.hasOwnProperty.call(data.alerts, 'hidden')).toBe(false);
   const ual = await page.evaluate(() => window.skycuePure.normalizeView({ search: 'ual' }));
-  expect(data.sets[0]).toEqual({ name: 'A', view: ual, hideFiltered: false });
+  expect(data.sets[0]).toEqual({ name: 'A', view: ual, hideFiltered: false, map: { layers: { regional: true, conus: true, rasters: false, tfr: false, sigmet: false, airmet: false, cwa: false, sua: false }, radarOpacity: 0.7 } });
 
   await deleteSets(page, ['A', 'B']);
   await importFile(page, file);
   await expect(page.locator('#settings-import')).toBeVisible();
-  await expect(page.locator('#settings-import-text')).toContainText('2 filter sets and the alert settings');
+  await expect(page.locator('#settings-import-text')).toContainText('2 views and the alert settings');
   await expect(page.locator('#settings-import-text')).not.toContainText('Merge replaces');
   await page.click('#settings-import-replace');
   await expect(page.locator('#settings-import')).toBeHidden();
-  await expect(page.locator('#view-set-msg')).toHaveText('Imported 2 filter sets.');
+  await expect(page.locator('#view-set-msg')).toHaveText('Imported 2 views.');
   expect(await setOptionTexts(page)).toEqual(['— current —', 'A', 'B']);
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))).sets.map((x) => x.name)).toEqual(['A', 'B']);
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.alerts'))).rules.emergency.enabled).toBe(true);
@@ -3470,7 +3496,7 @@ test('settings_export_then_import_restores_sets', async ({ page }) => {
   await expect(page.locator('#settings-import-text')).toContainText('Merge replaces: B');
   await page.click('#settings-import-merge');
   expect(await setOptionTexts(page)).toEqual(['— current —', 'C', 'B', 'A']);
-  await expect(page.locator('#view-set-msg')).toHaveText('Imported 2 filter sets.');
+  await expect(page.locator('#view-set-msg')).toHaveText('Imported 2 views.');
   expect(writes).toEqual([]);
   await deleteSets(page, ['C', 'B', 'A']);
 });
@@ -3488,7 +3514,7 @@ test('settings_import_bad_and_hostile_files', async ({ page }) => {
   const hostile = '<img src=x onerror="window.__xss=3">';
   await page.setInputFiles('#settings-file', { name: '<b>h</b>.json', mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify({ skycue_settings: 1, sets: [{ name: hostile, view: { search: hostile } }] })) });
-  await expect(page.locator('#settings-import-text')).toHaveText('<b>h</b>.json: 1 filter sets. Replace yours, or merge?');
+  await expect(page.locator('#settings-import-text')).toHaveText('<b>h</b>.json: 1 views. Replace yours, or merge?');
   await page.click('#settings-import-replace');
   expect(await setOptionTexts(page)).toEqual(['— current —', hostile]);
   await page.selectOption('#view-set-select', { label: hostile });
@@ -4830,4 +4856,26 @@ test('stats_ledger_survives_restart', async () => {
   expect(r.body.key).toBe(k.key);
   expect(r.body.first_seen).toBe(k.first_seen);
   expect(r.body.observations).toBeGreaterThanOrEqual(k.observations);
+});
+
+test('old_view_without_map_fields_leaves_map_alone', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('skycue.viewSets', JSON.stringify({ version: 1, sets: [{ name: 'Old', view: { search: 'ual' }, hideFiltered: false }] }));
+    localStorage.setItem('skycue.layers', JSON.stringify({ regional: false, conus: false, sua: true }));
+  });
+  await openPage(page);
+  await page.locator('body').press('1');
+  await expect(page.locator('#view-search')).toHaveValue('ual');
+  expect(await page.evaluate(() => window.skycueApp.layers())).toEqual(
+    { regional: false, conus: false, rasters: false, tfr: false, sigmet: false, airmet: false, cwa: false, sua: true });
+  const stored = JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets')));
+  expect(stored.version).toBe(2);
+  expect(Object.prototype.hasOwnProperty.call(stored.sets[0], 'map')).toBe(false);
+  await expect(page.locator('#view-set-select option:checked')).toHaveText('Old');
+});
+test('views_label_and_copy', async ({ page }) => {
+  await openPage(page);
+  await expect(page.locator('label[for="view-set-select"]')).toHaveText('Views');
+  await expect(page.locator('#view-set-save')).toHaveAttribute('title', /view/);
+  expect(await page.textContent('body')).not.toMatch(/filter set/i);
 });

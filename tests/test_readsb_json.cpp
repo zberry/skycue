@@ -451,3 +451,16 @@ BOOST_AUTO_TEST_CASE(json_writer_output_is_valid_utf8)
     BOOST_TEST(w("\xF4\x90\x80\x80") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"}");  // > U+10FFFF
     BOOST_TEST(w("\xF0\x9F\x9B\xA9\x7F") == "{\"k\":\"\xF0\x9F\x9B\xA9\x7F\"}");          // 4 bytes, DEL kept
 }
+
+BOOST_AUTO_TEST_CASE(readsb_tisb_type_sets_rebroadcast)
+{
+    auto tisb = parseReadsbLine(R"({"now":5,"hex":"abc123","type":"tisb_icao","lat":38.95,"lon":-77.1})");
+    BOOST_REQUIRE(tisb);
+    BOOST_TEST(tisb->rebroadcast);
+    auto adsr = parseReadsbLine(R"({"now":5,"hex":"abc123","type":"adsr_icao","lat":38.95,"lon":-77.1})");
+    BOOST_REQUIRE(adsr);
+    BOOST_TEST(!adsr->rebroadcast);
+    auto direct = parseReadsbLine(R"({"now":5,"hex":"abc123","type":"adsb_icao","lat":38.95,"lon":-77.1})");
+    BOOST_REQUIRE(direct);
+    BOOST_TEST(!direct->rebroadcast);
+}

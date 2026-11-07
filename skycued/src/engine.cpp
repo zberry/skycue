@@ -270,7 +270,10 @@ void Engine::handleObservation(const TrackObservation& obs)
     // The send decision runs on the steady clock at arrival, not on the data
     // clock's anchor: an observation stamped behind the data clock leaves the
     // anchor where it is, and MAX_INTERVAL_S resends must not stall with it.
-    process(obs, table_.apply(obs), steady::now(), obs.lat.has_value());
+    TrackState& state = table_.apply(obs);
+    if (table_.lastApplySuppressedPosition())
+        ++rebroadcast_suppressed_;
+    process(obs, state, steady::now(), obs.lat.has_value());
 }
 
 void Engine::handleUplink(std::chrono::system_clock::time_point when, const std::string& hex)
@@ -828,6 +831,7 @@ EngineStats Engine::stats() const
     s.observations = observations_;
     s.sent_updates = sent_updates_;
     s.sent_drops = sent_drops_;
+    s.rebroadcast_suppressed = rebroadcast_suppressed_;
     s.tracks_total = table_.size();
     table_.forEach([&](const TrackState& t) { s.tracks_forwarded += t.currently_forwarded ? 1 : 0; });
     const Input* readsb = inputs_->builtin("readsb");

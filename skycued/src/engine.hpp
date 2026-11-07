@@ -309,7 +309,7 @@ private:
     std::chrono::system_clock::time_point last_obs_time_{};
     std::chrono::steady_clock::time_point last_obs_steady_{};
     unsigned lost_gen_ = 0;
-    uint64_t observations_ = 0, sent_updates_ = 0, sent_drops_ = 0;
+    uint64_t observations_ = 0, sent_updates_ = 0, sent_drops_ = 0, rebroadcast_suppressed_ = 0;
     struct DropCounters {  // countDropIn's fields; EngineStats copies them
         uint64_t drops_timeout = 0, drops_filtered = 0, drops_source_lost = 0;
         uint64_t drops_blocked = 0, drops_out_of_range = 0, drops_below_elevation = 0, drops_no_position = 0;

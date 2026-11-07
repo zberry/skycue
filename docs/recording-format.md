@@ -172,6 +172,7 @@ lines above).
 | `nac_p` | integer | navigation accuracy (position), 0-255 |
 | `rssi` | number | signal level, dBFS |
 | `raw` | string | the original input line (JSONL only): the readsb JSON line; for a pingStation JSON input the datagram text, on the first observation of a datagram only (a `{"aircraft":[...]}` datagram with several aircraft is recorded once, the other observations have no `raw`); for a CAT021 input `cat021:` and the record's bytes as hex |
+| `rebroadcast` | boolean | a rebroadcast copy (TIS-B, ADS-R); present only when true (JSONL only) |
 | `input` | string | id of the input that produced the observation; absent when not known |
 
 Example (wrapped here):

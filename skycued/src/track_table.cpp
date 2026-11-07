@@ -12,14 +12,18 @@ template <class T> void mergeField(std::optional<T>& into, const std::optional<T
         into = from;
 }
 
+constexpr std::chrono::seconds kRebroadcastHold{10};
+
 bool hasPosition(const TrackObservation& o) { return o.lat.has_value() && o.lon.has_value(); }
 
 } // namespace
 
 TrackState& TrackTable::apply(const TrackObservation& obs)
 {
+    last_suppressed_ = false;
     auto it = tracks_.find(obs.id);
-    if (it == tracks_.end()) {
+    const bool existing = it != tracks_.end();
+    if (!existing) {
         TrackState fresh;
         fresh.id = obs.id;
         fresh.latest.id = obs.id;
@@ -29,8 +33,10 @@ TrackState& TrackTable::apply(const TrackObservation& obs)
     TrackState& s = it->second;
     TrackObservation& l = s.latest;
 
-    s.source = obs.source;
-    l.source = obs.source;
+    if (!(obs.rebroadcast && existing)) {
+        s.source = obs.source;
+        l.source = obs.source;
+    }
     l.received_time = obs.received_time;
     // An observation whose input does not say whether the target is on the
     // ground (on_ground unset) keeps the last known value.
@@ -41,10 +47,20 @@ TrackState& TrackTable::apply(const TrackObservation& obs)
     s.last_input = obs.input_id;
 
     if (hasPosition(obs)) {
-        l.lat = obs.lat;
-        l.lon = obs.lon;
-        l.position_time = obs.position_time.value_or(obs.received_time);
-        s.last_position_time = *l.position_time;
+        const auto when = obs.position_time.value_or(obs.received_time);
+        const bool direct_fresh =
+            s.last_direct_position_time != std::chrono::system_clock::time_point{} &&
+            when - s.last_direct_position_time < kRebroadcastHold;
+        if (obs.rebroadcast && direct_fresh) {
+            last_suppressed_ = true;
+        } else {
+            l.lat = obs.lat;
+            l.lon = obs.lon;
+            l.position_time = when;
+            s.last_position_time = when;
+            if (!obs.rebroadcast)
+                s.last_direct_position_time = when;
+        }
     }
 
     mergeField(l.alt_baro_ft, obs.alt_baro_ft);

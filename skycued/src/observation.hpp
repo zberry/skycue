@@ -26,6 +26,9 @@ struct TrackObservation {
     std::optional<double> rssi;
     std::string raw_line;  // kept for the received recording
     std::string input_id;  // the input that produced it; empty when not known
+    // A rebroadcast copy (TIS-B, ADS-R): its position yields to a fresh direct
+    // one (TrackTable::apply).
+    bool rebroadcast = false;
 };
 
 // Where the Engine gets its observations: readsb's JSON port or a replay.

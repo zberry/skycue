@@ -317,6 +317,7 @@ The stats object:
 |-----|---------|
 | `observations` | observations received |
 | `sent_updates`, `sent_drops` | messages forwarded |
+| `rebroadcast_suppressed` | rebroadcast (TIS-B, ADS-R) positions ignored because the track had a direct position younger than 10 s |
 | `drops_timeout`, `drops_filtered`, `drops_source_lost` | `sent_drops` by reason (shutdown drops are only in `sent_drops`) |
 | `drops_blocked`, `drops_out_of_range`, `drops_below_elevation`, `drops_no_position` | `drops_filtered` by the filter decision that dropped the track; they sum to `drops_filtered` |
 | `tracks_total`, `tracks_forwarded` | tracks in the table / being forwarded now |

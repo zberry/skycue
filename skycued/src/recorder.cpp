@@ -336,6 +336,22 @@ bool getInput(const JsonObject& j, const char* k, Obs& o)
     return true;
 }
 
+void putRebroadcast(const Obs& o, Record& r, const char* k)
+{
+    if (o.rebroadcast)
+        r.push_back(boolField(k, true));
+}
+bool getRebroadcast(const JsonObject& j, const char* k, Obs& o)
+{
+    if (!j.has(k))
+        return true;
+    auto v = j.getString(k);
+    if (!v || (*v != "true" && *v != "false"))
+        return false;
+    o.rebroadcast = *v == "true";
+    return true;
+}
+
 struct ObsKey {
     const char* key;
     bool csv;  // also a column of the received CSV, in table order before uplink_hex
@@ -367,6 +383,7 @@ const ObsKey kObsKeys[] = {
     {"nac_p", true, putInt<uint8_t, &Obs::nac_p>, getInt<uint8_t, &Obs::nac_p>},
     {"rssi", true, putReal<&Obs::rssi>, getReal<&Obs::rssi>},
     {"raw", false, putRaw, getRaw},
+    {"rebroadcast", false, putRebroadcast, getRebroadcast},  // JSONL only; absent means false
     {"input", false, putInput, getInput},  // the received CSV's last column (receivedColumns)
 };
 

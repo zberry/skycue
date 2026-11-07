@@ -461,3 +461,18 @@ BOOST_AUTO_TEST_CASE(keys_idle_and_full_eviction) {
     BOOST_CHECK_EQUAL(r.c().evicted, 1u);
     BOOST_CHECK_EQUAL(r.dec.keys(), 2u);
 }
+
+BOOST_AUTO_TEST_CASE(decoder_marks_rebroadcast_class) {
+    for (int cf : {2, 5, 6}) {
+        Rig r;
+        r.feed(df18(cf, kAddr, airbornePosition(11, encodeCpr(kP0, false, false), 20000)), 0.0);
+        r.feed(df18(cf, kAddr, airbornePosition(11, encodeCpr(kP0, true, false), 20000)), 0.5);
+        BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
+        BOOST_CHECK(r.obs[0].rebroadcast);
+    }
+    Rig d;
+    d.feed(air(kP0, false), 0.0);
+    d.feed(air(kP0, true), 0.5);
+    BOOST_REQUIRE_EQUAL(d.obs.size(), 1u);
+    BOOST_CHECK(!d.obs[0].rebroadcast);
+}

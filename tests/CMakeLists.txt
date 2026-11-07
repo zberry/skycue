@@ -550,5 +550,14 @@ foreach(f IN LISTS _script_tests)
   set_tests_properties(script_${name} PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
 endforeach()
 
+# script_test_net_standalone (registered by the glob above) configures and
+# builds a copy of net/ alone: the cmake and compiler of this build, a
+# timeout of 300 s.
+if(TEST script_test_net_standalone)
+  set_tests_properties(script_test_net_standalone PROPERTIES
+    TIMEOUT 300
+    ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
+endif()
+
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

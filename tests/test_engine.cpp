@@ -1001,3 +1001,21 @@ BOOST_AUTO_TEST_CASE(filter_history_load_before_start)
     });
     t.join();
 }
+
+BOOST_AUTO_TEST_CASE(engine_counts_rebroadcast_suppressed)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(baseConfig(), fakeSource(src));
+    fx.t.call([&] {
+        src->connection(true);
+        TrackObservation d = nearbyObservation(0x777777, 0);
+        src->emit(d);
+        TrackObservation r = nearbyObservation(0x777777, 0.01);
+        r.rebroadcast = true;
+        r.source = skycue::Source::tisb;
+        r.received_time = d.received_time + 100ms;
+        r.position_time = r.received_time;
+        src->emit(r);
+    });
+    BOOST_TEST(fx.stats().rebroadcast_suppressed == 1u);
+}

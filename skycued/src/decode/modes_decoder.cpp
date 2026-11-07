@@ -499,6 +499,7 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
     o.rssi = rssiOf(ks);
     o.raw_line = "*" + coding::toHex(f.bytes, true) + ";";
     o.input_id = input_id_;
+    o.rebroadcast = ks.key.rebroadcast;
     ++counters_.observations;
     handler_(o);
 }

@@ -161,6 +161,7 @@ bool mapAircraft(const JsonObject& a, const std::string& text, const PingContext
         obs.source = Source::other;
     if (qualifier == std::optional<int64_t>(2) || qualifier == std::optional<int64_t>(3))
         obs.source = Source::tisb;
+    obs.rebroadcast = qualifier == std::optional<int64_t>(2) || qualifier == std::optional<int64_t>(3);
 
     obs.received_time = ctx.arrival;
     ClockCheck clock = checkDeviceTime(std::nullopt, ctx.arrival, ctx.time_mode);

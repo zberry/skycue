@@ -194,3 +194,62 @@ BOOST_AUTO_TEST_CASE(expire_never_positioned_by_seen)
     BOOST_TEST(gone[0].address == 0x3u);
     BOOST_TEST(table.size() == 0u);
 }
+
+BOOST_AUTO_TEST_CASE(rebroadcast_position_suppressed_while_direct_fresh)
+{
+    TrackTable table;
+    auto d = obs(0xABC123, kT0, true);
+    d.lat = 38.9;
+    d.lon = -77.0;
+    table.apply(d);
+    BOOST_TEST(!table.lastApplySuppressedPosition());
+
+    auto r = obs(0xABC123, kT0 + 100ms, true);
+    r.rebroadcast = true;
+    r.source = Source::tisb;
+    r.lat = 39.5;
+    r.lon = -76.0;
+    r.callsign = "TISB1";
+    const auto& s = table.apply(r);
+    BOOST_TEST(table.lastApplySuppressedPosition());
+    BOOST_TEST(*s.latest.lat == 38.9);
+    BOOST_TEST(*s.latest.lon == -77.0);
+    BOOST_TEST(*s.latest.callsign == "TISB1");  // other fields still merge
+    BOOST_TEST(static_cast<int>(s.source) == static_cast<int>(Source::adsb_1090));
+
+    auto late = obs(0xABC123, kT0 + 10500ms, true);
+    late.rebroadcast = true;
+    late.source = Source::tisb;
+    late.lat = 39.5;
+    late.lon = -76.0;
+    const auto& s2 = table.apply(late);
+    BOOST_TEST(!table.lastApplySuppressedPosition());
+    BOOST_TEST(*s2.latest.lat == 39.5);
+}
+
+BOOST_AUTO_TEST_CASE(direct_position_always_applies)
+{
+    TrackTable table;
+    auto d = obs(0xABC123, kT0, true);
+    table.apply(d);
+    auto r = obs(0xABC123, kT0 + 1s, true);
+    r.rebroadcast = true;
+    table.apply(r);
+    auto d2 = obs(0xABC123, kT0 + 2s, true);
+    d2.lat = 40.0;
+    d2.lon = -78.0;
+    const auto& s = table.apply(d2);
+    BOOST_TEST(!table.lastApplySuppressedPosition());
+    BOOST_TEST(*s.latest.lat == 40.0);
+}
+
+BOOST_AUTO_TEST_CASE(rebroadcast_alone_is_not_suppressed)
+{
+    TrackTable table;
+    auto r = obs(0xABC124, kT0, true);
+    r.rebroadcast = true;
+    r.source = Source::tisb;
+    const auto& s = table.apply(r);
+    BOOST_TEST(!table.lastApplySuppressedPosition());
+    BOOST_TEST(s.latest.lat.has_value());
+}

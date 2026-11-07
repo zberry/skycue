@@ -119,6 +119,7 @@ std::optional<TrackObservation> parse(const std::string& line)
 
     const std::string type = json->getString("type").value_or("");
     obs.source = sourceForType(type);
+    obs.rebroadcast = type.compare(0, 5, "tisb_") == 0;  // adsr_* is UAT received directly here
     if (type == "tisb_trackfile")
         obs.id.type = AddressType::tisb_trackfile;
     else if (non_icao)

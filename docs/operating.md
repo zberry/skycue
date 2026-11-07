@@ -528,16 +528,16 @@ tree; Leaflet under `vendor/leaflet/`, ECharts under `vendor/echarts/`).
 The left panel has two groups: **Output filters** (what is sent to the
 cue clients: range, elevation and the allow and block lists, see
 [Filters and lists](#filters-and-lists)) and **Display filters** (this
-browser only). The map settings that used to sit here (Trails, "Non-matching
-on the map", "Hide filtered") now live in the Aircraft box of the map
-toolbar, top left of the map: see [The map toolbar](#the-map-toolbar).
+browser only). The map settings (Trails, "Non-matching on the map", "Hide
+filtered") are in the Aircraft box of the map toolbar, top left of the map:
+see [The map toolbar](#the-map-toolbar).
 "Hide filtered" (off by default, remembered per browser) leaves out of the
 map and the table the aircraft that are not `sent` or `allow_listed`; the box
 shows how many are hidden. It only changes what this page draws, not the
 filters, lists, recordings or cue outputs.
 
-Display filters narrows what this browser's map and
-table show. The search matches the hex, callsign, registration or squawk
+The Display filters narrow what this browser's map and
+table show, and nothing else. The search matches the hex, callsign, registration or squawk
 (`/` puts the cursor in it, Escape clears it); altitude, speed and range
 take a minimum and a maximum (the "ground" box says whether aircraft on
 the ground are included; their altitude counts as 0); the pills pick

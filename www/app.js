@@ -1219,6 +1219,7 @@
     setViewFilters(set.view);
     setHideFiltered(set.hideFiltered);
     if (set.map) applyMapView(set.map);
+    syncViewSetSelect();   // the opacity (last) has no sync of its own
   }
   function viewSetMsg(text, isError) { showMsg($('view-set-msg'), text, isError); }
   function saveViewSet() {

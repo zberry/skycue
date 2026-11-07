@@ -4879,3 +4879,15 @@ test('views_label_and_copy', async ({ page }) => {
   await expect(page.locator('#view-set-save')).toHaveAttribute('title', /view/);
   expect(await page.textContent('body')).not.toMatch(/filter set/i);
 });
+test('recalled_view_restores_radar_opacity_without_modified_marker', async ({ page }) => {
+  await openPage(page);
+  const setOpacity = (v) => page.evaluate((x) => { const r = document.getElementById('radar-opacity'); r.value = x; r.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+  await setOpacity('0.4');
+  page.once('dialog', (d) => d.accept('Dim'));
+  await page.click('#view-set-save');
+  await setOpacity('0.9');
+  await expect(page.locator('#view-set-select option:checked')).toHaveText('Dim (modified)');
+  await page.locator('body').press('1');
+  await expect(page.locator('#view-set-select option:checked')).toHaveText('Dim');
+  expect(await page.locator('#radar-opacity').inputValue()).toBe('0.4');
+});

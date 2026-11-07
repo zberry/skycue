@@ -23,6 +23,7 @@ add_library(skycue_net STATIC
   src/backoff.cpp
   src/dialer.cpp
   src/endpoint.cpp
+  src/fanout.cpp
   src/framer.cpp
   src/listener.cpp
   src/log.cpp

@@ -40,7 +40,7 @@ public:
     Fanout(const Fanout&) = delete;
     Fanout& operator=(const Fanout&) = delete;
 
-    void attach(std::shared_ptr<Listener> l); // publishes with sendAll; peer events re-emitted via onPeerUp/onPeerDown
+    void attach(const std::shared_ptr<Listener>& l); // publishes with sendAll; peer events re-emitted via onPeerUp/onPeerDown
     void attach(std::shared_ptr<Dialer> d);   // publishes with send
     void attach(std::shared_ptr<UdpSender> u); // publishes with send
     // Attaching the same destination twice is a no-op; detaching one that is
@@ -49,7 +49,7 @@ public:
     void detach(const std::shared_ptr<Dialer>& d);
     void detach(const std::shared_ptr<UdpSender>& u);
 
-    void publish(Buf b);
+    void publish(const Buf& b);
 
     // Greeting hook: called when a TCP peer of an attached listener connects,
     // from the listener's accept handler. sendToThatPeer queues a buffer for

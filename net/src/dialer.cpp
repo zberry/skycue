@@ -100,7 +100,7 @@ void Dialer::connect()
     auto sock = im.socket;
     auto self = shared_from_this();
     im.resolver.async_resolve(im.host, std::to_string(im.port),
-                             [self, gen, sock](const boost::system::error_code& ec, tcp::resolver::results_type results) {
+                             [self, gen, sock](const boost::system::error_code& ec, const tcp::resolver::results_type& results) {
         auto& m = *self->impl_;
         if (gen != m.gen)
             return;

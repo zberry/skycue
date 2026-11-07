@@ -40,7 +40,7 @@ public:
     void stop();
     // One datagram per target; a no-op before start(). An oversize buffer
     // counts once in `dropped` per target; it is logged once a minute per target.
-    void send(Buf b);
+    void send(const Buf& b);
     std::size_t targets() const;            // usable targets after start()
     const Counters& counters() const;
 

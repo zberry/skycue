@@ -188,7 +188,7 @@ void Listener::bindAndListen(bool throwOnFailure)
     acceptLoop(m.gen, acc);
 }
 
-void Listener::acceptLoop(uint64_t gen, std::shared_ptr<tcp::acceptor> acc)
+void Listener::acceptLoop(uint64_t gen, const std::shared_ptr<tcp::acceptor>& acc)
 {
     auto& im = *impl_;
     auto s = std::make_shared<Session>(im.io, 0);
@@ -281,7 +281,7 @@ void Listener::closeSession(const std::shared_ptr<Session>& s, const std::string
     }
 }
 
-void Listener::readLoop(uint64_t gen, std::shared_ptr<Session> s)
+void Listener::readLoop(uint64_t gen, const std::shared_ptr<Session>& s)
 {
     auto& im = *impl_;
     s->rbuf.resize(im.opts.tcp.chunk_bytes);
@@ -314,7 +314,7 @@ void Listener::send(uint64_t stream, Buf b)
     sendTo(s, std::move(b));
 }
 
-void Listener::sendAll(Buf b)
+void Listener::sendAll(const Buf& b)
 {
     auto& m = *impl_;
     if (!b)
@@ -343,7 +343,7 @@ void Listener::sendTo(const std::shared_ptr<Session>& s, Buf b)
         writeLoop(m.gen, s);
 }
 
-void Listener::writeLoop(uint64_t gen, std::shared_ptr<Session> s)
+void Listener::writeLoop(uint64_t gen, const std::shared_ptr<Session>& s)
 {
     if (s->queue.empty())
         return;

@@ -48,7 +48,7 @@ public:
     bool listening() const;
     uint16_t localPort() const; // the bound port (port 0 asks the OS); 0 until bound
     void send(uint64_t stream, Buf b); // per-peer queue; over the cap the peer is closed (dropped++)
-    void sendAll(Buf b);
+    void sendAll(const Buf& b);
     std::size_t peers() const;
     const Counters& counters() const; // read on the io thread only
 
@@ -58,11 +58,11 @@ private:
     struct Session;
     std::unique_ptr<Impl> impl_;
     void bindAndListen(bool throwOnFailure);
-    void acceptLoop(uint64_t gen, std::shared_ptr<boost::asio::ip::tcp::acceptor> acc);
+    void acceptLoop(uint64_t gen, const std::shared_ptr<boost::asio::ip::tcp::acceptor>& acc);
     void adopt(const std::shared_ptr<Session>& s);
     void closeSession(const std::shared_ptr<Session>& s, const std::string& why);
-    void readLoop(uint64_t gen, std::shared_ptr<Session> s);
-    void writeLoop(uint64_t gen, std::shared_ptr<Session> s);
+    void readLoop(uint64_t gen, const std::shared_ptr<Session>& s);
+    void writeLoop(uint64_t gen, const std::shared_ptr<Session>& s);
     void sendTo(const std::shared_ptr<Session>& s, Buf b);
 };
 

@@ -231,7 +231,7 @@ void UdpReceiver::bindAndJoin()
     receiveLoop(m.gen, rx);
 }
 
-void UdpReceiver::receiveLoop(uint64_t gen, std::shared_ptr<Rx> rx)
+void UdpReceiver::receiveLoop(uint64_t gen, const std::shared_ptr<Rx>& rx)
 {
     auto self = shared_from_this();
     rx->sock.async_receive_from(asio::buffer(rx->buf), rx->from,

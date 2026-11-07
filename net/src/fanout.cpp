@@ -33,7 +33,7 @@ Fanout::Fanout(boost::asio::io_context&) : st_(std::make_shared<State>()) {}
 
 Fanout::~Fanout() = default;
 
-void Fanout::attach(std::shared_ptr<Listener> l)
+void Fanout::attach(const std::shared_ptr<Listener>& l)
 {
     if (!l || contains(st_->listeners, l))
         return;
@@ -83,7 +83,7 @@ void Fanout::detach(const std::shared_ptr<Dialer>& d) { erase(st_->dialers, d); 
 
 void Fanout::detach(const std::shared_ptr<UdpSender>& u) { erase(st_->senders, u); }
 
-void Fanout::publish(Buf b)
+void Fanout::publish(const Buf& b)
 {
     if (!b)
         return;

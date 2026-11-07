@@ -200,7 +200,7 @@ void UdpSender::stop()
     m.resolved.clear();
 }
 
-void UdpSender::send(Buf b)
+void UdpSender::send(const Buf& b)
 {
     auto& m = *impl_;
     if (!m.running || !b)

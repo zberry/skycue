@@ -61,7 +61,7 @@ private:
     struct Rx;
     std::unique_ptr<Impl> impl_;
     void bindAndJoin();
-    void receiveLoop(uint64_t gen, std::shared_ptr<Rx> rx);
+    void receiveLoop(uint64_t gen, const std::shared_ptr<Rx>& rx);
     void fail(const std::string& why);
 };
 

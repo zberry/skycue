@@ -10,7 +10,8 @@
 // reported and retried as in UdpListener. The acceptor sets reuse_address,
 // which on Linux only allows binding past TIME_WAIT: a port another process
 // listens on still shows as a bind failure. Accepted sockets use TCP
-// keepalive (enableKeepalive), so a vanished peer frees its slot.
+// keepalive, so a vanished peer frees its slot. An adapter over
+// skycue::net::Listener.
 
 #include "inputs/transport.hpp"
 

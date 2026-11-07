@@ -7,6 +7,7 @@
 // counted in rejectedPeer() and dropped. The socket does not set
 // reuse_address, so a port another process holds shows as a bind failure.
 // It asks for a 4 MiB receive buffer (best effort) so a burst survives a slow consumer.
+// An adapter over skycue::net::UdpReceiver.
 
 #include "inputs/transport.hpp"
 

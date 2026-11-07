@@ -1,147 +1,81 @@
 #include "inputs/tcp_connect_client.hpp"
 
-#include <boost/asio/connect.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/steady_timer.hpp>
+#include "skycue/net/dialer.hpp"
 
-#include <algorithm>
-#include <array>
-#include <chrono>
 #include <utility>
 
 namespace skycued {
 
 namespace asio = boost::asio;
-using asio::ip::tcp;
-using boost::system::error_code;
-
-namespace {
-// The LineClient backoff (line_client.cpp); keep the two in step.
-constexpr std::chrono::milliseconds kMinBackoff{500};
-constexpr std::chrono::milliseconds kMaxBackoff{10000};
-}  // namespace
+namespace net = skycue::net;
 
 struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Impl> {
-    Impl(asio::io_context& io_, std::string host_, uint16_t port_)
-        : resolver(io_), sock(io_), timer(io_), host(std::move(host_)), port(port_)
+    Impl(asio::io_context& io, std::string host, uint16_t port)
     {
+        net::TcpOptions o;
+        o.keepalive = true;
+        o.nodelay = false;  // this side only reads
+        o.chunk_bytes = kChunkBytes;
+        boost::system::error_code ec;
+        remote = asio::ip::make_address(host, ec);  // unspecified when the host is a name
+        dialer = net::Dialer::create(io, std::move(host), port, o);
     }
 
-    tcp::resolver resolver;
-    tcp::socket sock;
-    asio::steady_timer timer;
-    std::string host;
-    uint16_t port;
-    std::array<uint8_t, kChunkBytes> buf{};
-    std::chrono::milliseconds backoff = kMinBackoff;
-    bool session = false;
+    std::shared_ptr<net::Dialer> dialer;
     asio::ip::address remote;
+    uint64_t stream = 0;  // the connection that is up (or was last)
+    std::string lib_error_seen;
 
-    std::string where() const { return host + ":" + std::to_string(port); }
-
-    void connect()
-    {
-        if (stopping)
-            return;
-        std::weak_ptr<Impl> weak = shared_from_this();
-        resolver.async_resolve(host, std::to_string(port),
-                               [weak](const error_code& ec, const tcp::resolver::results_type& results) {
-                                   auto self = weak.lock();
-                                   if (!self || self->stopping)
-                                       return;
-                                   if (ec) {
-                                       self->retry("resolve " + self->where() + ": " + ec.message());
-                                       return;
-                                   }
-                                   asio::async_connect(self->sock, results,
-                                                       [weak](const error_code& cec, const tcp::endpoint& ep) {
-                                                           auto s = weak.lock();
-                                                           if (!s || s->stopping)
-                                                               return;
-                                                           if (cec) {
-                                                               s->retry("connect " + s->where() + ": " + cec.message());
-                                                               return;
-                                                           }
-                                                           s->connectedNow(ep.address());
-                                                       });
-                               });
-    }
-
-    void connectedNow(const asio::ip::address& addr)
-    {
-        backoff = kMinBackoff;
-        enableKeepalive(sock);
-        session = true;
-        remote = addr;
-        peers = 1;
-        ++connects;
-        if (on_conn)
-            on_conn(true);
-        if (!stopping)
-            read();
-    }
-
-    void retry(std::string why)
-    {
-        last_error = std::move(why);
-        error_code ignored;
-        sock.close(ignored);
-        timer.expires_after(backoff);
-        backoff = std::min(backoff * 2, kMaxBackoff);
-        std::weak_ptr<Impl> weak = shared_from_this();
-        timer.async_wait([weak](const error_code& ec) {
-            auto self = weak.lock();
-            if (!ec && self && !self->stopping)
-                self->connect();
-        });
-    }
-
-    void read()
+    void wire()
     {
         std::weak_ptr<Impl> weak = shared_from_this();
-        sock.async_read_some(asio::buffer(buf), [weak](const error_code& ec, std::size_t n) {
+        dialer->onData([weak](const uint8_t* data, std::size_t n) {
             auto self = weak.lock();
             if (!self || self->stopping)
                 return;
-            if (n > 0) {
-                self->bytes += n;
-                if (self->on_data)
-                    self->on_data(TransportData{self->buf.data(), n, self->connects, self->remote});
+            if (self->on_data)
+                self->on_data(TransportData{data, n, self->stream, self->remote});
+        });
+        dialer->onConnection([weak](bool up) {
+            auto self = weak.lock();
+            if (!self || self->stopping)
+                return;
+            if (up) {
+                self->stream = self->dialer->counters().connects;
+            } else if (self->on_stream_closed) {
+                self->on_stream_closed(self->stream);
                 if (self->stopping)
                     return;
             }
-            if (ec) {
-                self->lost(ec);
-                return;
-            }
-            self->read();
+            if (self->on_conn)
+                self->on_conn(up);
         });
+        sync = [weak] {
+            if (auto self = weak.lock())
+                self->copyCounters();
+        };
     }
 
-    void lost(const error_code& ec)
+    void copyCounters()
     {
-        session = false;
-        peers = 0;
-        if (on_stream_closed)
-            on_stream_closed(connects);
-        if (stopping)
-            return;
-        if (on_conn)
-            on_conn(false);
-        if (stopping)
-            return;
-        retry("disconnected from " + where() + ": " + ec.message());
+        const auto& c = dialer->counters();
+        bytes = c.bytes_in;
+        connects = c.connects;
+        peers = dialer->connected() ? 1 : 0;
+        // Sticky, as it always was: a later success does not clear it.
+        if (!c.last_error.empty() && c.last_error != lib_error_seen) {
+            lib_error_seen = c.last_error;
+            last_error = c.last_error;
+        }
     }
 
     void shutdown()
     {
+        if (!stopping)
+            copyCounters();
         stopping = true;
-        session = false;
+        dialer->stop();
         peers = 0;
-        error_code ignored;
-        timer.cancel(ignored);
-        resolver.cancel();
-        sock.close(ignored);
     }
 };
 
@@ -149,6 +83,7 @@ TcpConnectClient::TcpConnectClient(asio::io_context& io, std::string host, uint1
     : impl_(std::make_shared<Impl>(io, std::move(host), port))
 {
     state_ = impl_;
+    impl_->wire();
 }
 
 TcpConnectClient::~TcpConnectClient() { impl_->shutdown(); }
@@ -158,11 +93,11 @@ void TcpConnectClient::start()
     if (impl_->started || impl_->stopping)
         return;
     impl_->started = true;
-    impl_->connect();
+    impl_->dialer->start();
 }
 
 void TcpConnectClient::stop() { impl_->shutdown(); }
 
-bool TcpConnectClient::connected() const { return impl_->session; }
+bool TcpConnectClient::connected() const { return !impl_->stopping && impl_->dialer->connected(); }
 
 }  // namespace skycued

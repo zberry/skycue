@@ -4,16 +4,16 @@
 #include "inputs/tcp_listener.hpp"
 #include "inputs/udp_listener.hpp"
 
-#ifdef __linux__
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/socket.h>
-#endif
+#include "log.hpp"
+
+#include "skycue/net/log.hpp"
 
 #include <stdexcept>
 #include <utility>
 
 namespace skycued {
+
+namespace net = skycue::net;
 
 Transport::~Transport() = default;
 
@@ -23,15 +23,35 @@ void Transport::onStreamClosed(std::function<void(uint64_t)> handler) { state_->
 
 void Transport::onConnection(std::function<void(bool)> handler) { state_->on_conn = std::move(handler); }
 
-uint64_t Transport::connects() const { return state_->connects; }
+uint64_t Transport::connects() const
+{
+    sync();
+    return state_->connects;
+}
 
-uint64_t Transport::bytes() const { return state_->bytes; }
+uint64_t Transport::bytes() const
+{
+    sync();
+    return state_->bytes;
+}
 
-uint64_t Transport::rejectedPeer() const { return state_->rejected_peer; }
+uint64_t Transport::rejectedPeer() const
+{
+    sync();
+    return state_->rejected_peer;
+}
 
-std::size_t Transport::peers() const { return state_->peers; }
+std::size_t Transport::peers() const
+{
+    sync();
+    return state_->peers;
+}
 
-const std::string& Transport::lastError() const { return state_->last_error; }
+const std::string& Transport::lastError() const
+{
+    sync();
+    return state_->last_error;
+}
 
 std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer)
 {
@@ -44,17 +64,19 @@ std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer)
     return addr;
 }
 
-void enableKeepalive(boost::asio::ip::tcp::socket& sock)
+void installNetLogSink()
 {
-    boost::system::error_code ignored;
-    sock.set_option(boost::asio::socket_base::keep_alive(true), ignored);
-#ifdef __linux__
-    const int fd = sock.native_handle();
-    const int idle = 30, interval = 10, count = 3;
-    ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
-    ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof interval);
-    ::setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof count);
-#endif
+    net::setLogSink([](net::LogLevel level, const std::string& msg) {
+        LogLevel l = LogLevel::debug;
+        switch (level) {
+        case net::LogLevel::debug: l = LogLevel::debug; break;
+        case net::LogLevel::info: l = LogLevel::info; break;
+        case net::LogLevel::warn: l = LogLevel::warn; break;
+        case net::LogLevel::error: l = LogLevel::error; break;
+        }
+        if (logEnabled(l))
+            logWrite(l, "net: " + msg);
+    });
 }
 
 std::unique_ptr<Transport> makeTransport(boost::asio::io_context& io, const InputDef& def)

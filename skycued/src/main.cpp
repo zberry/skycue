@@ -202,6 +202,7 @@ int run(int argc, char** argv)
         return 2;
     }
     setLogLevel(*level);
+    installNetLogSink();
     if (config_path.empty()) {
         std::cerr << "skycued: --config is required\n";
         return 2;

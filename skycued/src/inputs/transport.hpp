@@ -9,6 +9,8 @@
 // byte stream (a TCP connection; 0 for UDP) so the input keeps a framer per
 // stream and resets it on onStreamClosed.
 //
+// The adapters sit on skycue::net (UdpReceiver, Listener, Dialer).
+//
 // Threading: lives on the caller's io_context; call everything from its
 // thread. Register callbacks before start(). Callbacks may call stop(); no
 // callback runs after stop(), which is idempotent. Destroying a transport
@@ -45,6 +47,9 @@ struct TransportState {
     std::size_t peers = 0;
     std::string last_error;
     bool started = false, stopping = false;
+    // Copies the library component's counters into the fields above; called
+    // before each read of them (the library has no events for every change).
+    std::function<void()> sync;
 };
 
 class Transport {
@@ -70,6 +75,11 @@ public:
 
 protected:
     Transport() = default;
+    void sync() const
+    {
+        if (state_ && state_->sync)
+            state_->sync();
+    }
     std::shared_ptr<TransportState> state_;  // set by the derived constructor
 };
 
@@ -77,11 +87,9 @@ protected:
 // Throws std::invalid_argument when it is not an IP address.
 std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer);
 
-// For the TCP transports, which only read: turns on TCP keepalive (on Linux
-// idle 30 s, probes every 10 s, 3 probes) so a peer that vanished without a
-// FIN or RST is dropped in about a minute, freeing its listener slot or
-// starting a reconnect. Best effort: a failing option is ignored.
-void enableKeepalive(boost::asio::ip::tcp::socket& sock);
+// Routes the network library's log messages ("net: ...") to skycued's logger.
+// Call once, before any transport or line client starts.
+void installNetLogSink();
 
 // The transport a pingStation input definition names. Throws
 // std::invalid_argument for any other type.

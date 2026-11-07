@@ -1,146 +1,114 @@
 #include "inputs/udp_listener.hpp"
 
-#include "log.hpp"
+#include "skycue/net/udp_receiver.hpp"
 
-#include <boost/asio/ip/udp.hpp>
 #include <boost/asio/post.hpp>
-#include <boost/asio/socket_base.hpp>
 #include <boost/asio/steady_timer.hpp>
 
-#include <chrono>
-#include <optional>
+#include <sys/socket.h>
+
 #include <utility>
-#include <vector>
 
 namespace skycued {
 
 namespace asio = boost::asio;
-using asio::ip::udp;
+namespace net = skycue::net;
 using boost::system::error_code;
 
-constexpr int kReceiveBufferBytes = 4 * 1024 * 1024;
+namespace {
+// The library reports a bind, a loss or a rebind only through bound(), so the
+// adapter looks at it this often to raise onConnection.
+constexpr std::chrono::milliseconds kWatchEvery{20};
+}  // namespace
 
 struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
-    Impl(asio::io_context& io_, std::string bind_, uint16_t port_, const std::string& peer_,
-         std::chrono::milliseconds rebind_delay_)
-        : io(io_), sock(io_), timer(io_), bind(std::move(bind_)), port(port_), peer(parsePeerFilter(peer_)),
-          rebind_delay(rebind_delay_), buf(kBufferBytes)
+    Impl(asio::io_context& io_, std::string bind, uint16_t port, const std::string& peer,
+         std::chrono::milliseconds rebind_delay)
+        : io(io_), timer(io_)
     {
+        parsePeerFilter(peer);  // the same error text as the other transports
+        net::UdpReceiveOptions o;
+        o.peer = peer;
+        o.rebind_delay = rebind_delay;
+        receiver = net::UdpReceiver::create(io_, std::move(bind), port, std::move(o));
     }
 
     asio::io_context& io;
-    udp::socket sock;
     asio::steady_timer timer;
-    std::string bind;
-    uint16_t port;
-    std::optional<asio::ip::address> peer;
-    std::chrono::milliseconds rebind_delay;
-    std::vector<uint8_t> buf;
-    udp::endpoint sender;
-    bool bound = false;
-    int rcvbuf = 0;  // granted receive buffer, bytes
-    // When last_error last named a refused peer (at most once a second).
-    std::optional<std::chrono::steady_clock::time_point> peer_noted;
+    std::shared_ptr<net::UdpReceiver> receiver;
+    // What was last reported through onConnection; connected() answers with
+    // it so the callbacks, the counter and the state never disagree.
+    bool was_bound = false;
+    std::string lib_error_seen;
 
-    void open()
-    {
-        if (stopping)
-            return;
-        error_code ec;
-        const auto addr = asio::ip::make_address(bind, ec);
-        if (!ec)
-            sock.open(addr.is_v6() ? udp::v6() : udp::v4(), ec);
-        if (!ec) {
-            // Best effort, before bind: a burst (a fast replay) must not overrun
-            // the kernel default while a slow consumer catches up.
-            error_code ignored;
-            sock.set_option(asio::socket_base::receive_buffer_size(kReceiveBufferBytes), ignored);
-            asio::socket_base::receive_buffer_size got;
-            sock.get_option(got, ignored);
-            rcvbuf = ignored ? 0 : got.value();
-            LOG_INFO("udp " << bind << ":" << port << ": receive buffer " << rcvbuf << " bytes");
-            sock.bind(udp::endpoint(addr, port), ec);
-        }
-        if (ec) {
-            error_code ignored;
-            sock.close(ignored);
-            last_error = "bind " + bind + ":" + std::to_string(port) + ": " + ec.message();
-            retryLater();
-            return;
-        }
-        bound = true;
-        ++connects;
-        if (on_conn)
-            on_conn(true);
-        if (!stopping)
-            receive();
-    }
-
-    void retryLater()
-    {
-        timer.expires_after(rebind_delay);
-        std::weak_ptr<Impl> weak = shared_from_this();
-        timer.async_wait([weak](const error_code& ec) {
-            auto self = weak.lock();
-            if (!ec && self && !self->stopping)
-                self->open();
-        });
-    }
-
-    void receive()
+    void wire()
     {
         std::weak_ptr<Impl> weak = shared_from_this();
-        sock.async_receive_from(asio::buffer(buf), sender, [weak](const error_code& ec, std::size_t n) {
+        receiver->onDatagram([weak](const uint8_t* data, std::size_t n, const asio::ip::udp::endpoint& from) {
             auto self = weak.lock();
             if (!self || self->stopping)
                 return;
-            if (ec) {
-                self->failed(ec);
-                return;
-            }
-            self->deliver(n);
-            if (!self->stopping)
-                self->receive();
+            if (self->on_data)
+                self->on_data(TransportData{data, n, 0, from.address()});
         });
+        sync = [weak] {
+            if (auto self = weak.lock())
+                self->copyCounters();
+        };
     }
 
-    void deliver(std::size_t n)
+    void copyCounters()
     {
-        const auto from = sender.address();
-        if (peer && from != *peer) {
-            ++rejected_peer;
-            const auto now = std::chrono::steady_clock::now();
-            if (!peer_noted || now - *peer_noted >= std::chrono::seconds(1)) {
-                peer_noted = now;
-                last_error = "datagram from " + from.to_string() + " refused (not the configured peer)";
-            }
-            return;
+        const auto& c = receiver->counters();
+        bytes = c.bytes_in;
+        rejected_peer = c.rejected_peer;
+        // Sticky, as it always was: a later success does not clear it.
+        if (!c.last_error.empty() && c.last_error != lib_error_seen) {
+            lib_error_seen = c.last_error;
+            last_error = c.last_error;
         }
-        bytes += n;
-        if (on_data)
-            on_data(TransportData{buf.data(), n, 0, from});
     }
 
-    // A receive error closes the socket and binds again after the delay.
-    void failed(const error_code& ec)
+    void begin()
     {
-        last_error = "receive: " + ec.message();
-        error_code ignored;
-        sock.close(ignored);
-        bound = false;
-        if (on_conn)
-            on_conn(false);
-        if (!stopping)
-            retryLater();
+        if (stopping)
+            return;
+        receiver->start();
+        watch();
+    }
+
+    void watch()
+    {
+        if (stopping)
+            return;
+        const bool now = receiver->bound();
+        if (now != was_bound) {
+            was_bound = now;
+            if (now)
+                ++connects;
+            if (on_conn)
+                on_conn(now);
+            if (stopping)
+                return;
+        }
+        timer.expires_after(kWatchEvery);
+        std::weak_ptr<Impl> weak = shared_from_this();
+        timer.async_wait([weak](const error_code& ec) {
+            auto self = weak.lock();
+            if (!ec && self)
+                self->watch();
+        });
     }
 
     void shutdown()
     {
+        if (!stopping)
+            copyCounters();
         stopping = true;
-        bound = false;
+        was_bound = false;
         error_code ignored;
         timer.cancel(ignored);
-        sock.close(ignored);
+        receiver->stop();
     }
 };
 
@@ -149,6 +117,7 @@ UdpListener::UdpListener(asio::io_context& io, std::string bind, uint16_t port, 
     : impl_(std::make_shared<Impl>(io, std::move(bind), port, peer, rebind_delay))
 {
     state_ = impl_;
+    impl_->wire();
 }
 
 UdpListener::~UdpListener() { impl_->shutdown(); }
@@ -162,14 +131,22 @@ void UdpListener::start()
     std::weak_ptr<Impl> weak = impl_;
     asio::post(impl_->io, [weak] {
         if (auto self = weak.lock())
-            self->open();
+            self->begin();
     });
 }
 
 void UdpListener::stop() { impl_->shutdown(); }
 
-bool UdpListener::connected() const { return impl_->bound; }
+bool UdpListener::connected() const { return impl_->was_bound; }
 
-int UdpListener::receiveBufferBytes() const { return impl_->rcvbuf; }
+int UdpListener::receiveBufferBytes() const
+{
+    const int fd = impl_->receiver->nativeHandleForTest();
+    if (fd < 0)
+        return 0;
+    int v = 0;
+    socklen_t len = sizeof v;
+    return ::getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &v, &len) == 0 ? v : 0;
+}
 
 }  // namespace skycued

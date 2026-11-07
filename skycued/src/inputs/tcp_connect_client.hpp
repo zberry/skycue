@@ -2,11 +2,12 @@
 
 // TcpConnectClient: connects to host:port (a pingStation in server mode,
 // spec §5.2) and delivers what it reads in chunks of up to kChunkBytes.
-// Reconnects with the LineClient backoff: 0.5 s doubling to 10 s, reset by a
-// successful connect. Connected means it has a session. `stream` is the
+// An adapter over skycue::net::Dialer: reconnects with its backoff (0.5 s
+// doubling to 10 s, reset by a successful connect). Connected means it has a
+// session. `stream` is the
 // connection number (1, 2, ...); onStreamClosed(stream) fires on every
 // disconnect, before onConnection(false). lastError holds the last resolve,
-// connect or read failure. The socket uses TCP keepalive (enableKeepalive),
+// connect or read failure. The socket uses TCP keepalive,
 // so a peer that vanished is noticed and the client reconnects.
 
 #include "inputs/transport.hpp"

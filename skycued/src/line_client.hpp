@@ -4,7 +4,9 @@
 // with exponential backoff (0.5 s doubling to 10 s; reset by a successful
 // connect). Shared by ReadsbJsonSource and Dump978RawSource.
 //
-// Lines: a trailing '\r' is removed and empty lines are skipped. A line
+// Built on skycue::net::Dialer (connect, backoff) and net::LineFramer.
+//
+// Lines: every '\r' is removed and empty lines are skipped. A line
 // longer than kMaxLineBytes is discarded up to its newline and counted in
 // linesRejected(). A partial line is thrown away when the connection drops.
 //

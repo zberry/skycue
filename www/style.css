@@ -116,10 +116,24 @@ input.invalid { border-color: var(--blocked); }
 /* Leaflet's disabled zoom button (at min or max zoom) is #f4f4f4 too. */
 .leaflet-bar a.leaflet-disabled, .leaflet-bar a.leaflet-disabled:hover,
 .leaflet-bar a.leaflet-disabled:focus { background: var(--panel); color: var(--muted); }
-/* The ruler (app.js initRuler): a button under the zoom control, a crosshair
-   while armed, the label a dark box that reads on either map style. */
-.leaflet-bar a.ruler-toggle { display: flex; align-items: center; justify-content: center; }
-.leaflet-bar a.ruler-toggle.active { color: var(--accent); background: var(--panel-2); }
+/* The toolbar (app.js initToolbar): zoom, the ruler (a crosshair while armed,
+   its label a dark box that reads on either map style), a divider and the
+   four box buttons. */
+.leaflet-bar a.ruler-toggle, .leaflet-bar a.tb-box { display: flex; align-items: center; justify-content: center; position: relative; }
+.leaflet-bar a.active { color: var(--accent); background: var(--panel-2); }
+.tb-sep { display: block; height: 1px; margin: 3px 6px; background: var(--line); }
+.tb-badge {
+  position: absolute; right: 1px; bottom: 1px; min-width: 12px; height: 12px; padding: 0 2px; border-radius: 6px;
+  font-size: 9px; line-height: 12px; text-align: center; background: var(--accent); color: var(--bg);
+}
+.tb-dot { position: absolute; right: 3px; top: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--elev); }
+.map-toolbar { position: relative; }
+.map-box {
+  position: absolute; left: calc(100% + 8px); top: 0; width: max-content; max-width: 260px; overflow-y: auto;
+  background: rgba(22, 27, 34, .92); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px;
+  font-size: 12px; color: var(--muted);
+}
+#box-layers .leaflet-control-layers { float: none; margin: 0; padding: 0; background: none; border: none !important; }
 #map.ruler-armed, #map.ruler-armed .leaflet-interactive { cursor: crosshair; }
 /* The label's box sits on the end point (0 x 0); the span is placed right
    of and above it, or left (flip-x) / below (flip-y) near an edge. */
@@ -440,14 +454,10 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .leaflet-control-layers-expanded { padding: 6px 10px 6px 8px; }
 .leaflet-control-layers label { margin: 2px 0; }
 .leaflet-control-layers .sw { margin: 0 4px 0 2px; }
-.wx-control {
-  background: rgba(22, 27, 34, .92); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px;
-  font-size: 12px; color: var(--muted); max-width: 300px;
-}
-.wx-control label { color: var(--muted); }
-.wx-control input[type="range"] { width: 120px; vertical-align: middle; padding: 0; }
+#box-weather label { color: var(--muted); }
+#box-weather input[type="range"] { width: 120px; vertical-align: middle; padding: 0; }
 #radar-opacity-row.disabled { opacity: .45; }   /* nothing it controls is drawn: like a disabled button */
-.wx-control select { max-width: 200px; font-size: 12px; margin: 4px 0; }
+#box-weather select { max-width: 200px; font-size: 12px; margin: 4px 0; }
 #radar-age { color: var(--text); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 .legend-note { margin-top: 4px; }
 .legend-note span { color: var(--text); border-bottom: 2px dashed var(--muted); }
@@ -461,12 +471,8 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .legend-item .sw { margin-right: 4px; }
 
 /* map style and overlays (the Dark filter itself is set from app_pure.js) */
-.view-control {
-  background: rgba(22, 27, 34, .92); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px;
-  font-size: 12px; color: var(--muted);
-}
-.view-control select { font-size: 12px; padding: 2px 4px; }
-.view-control label.check { margin-top: 4px; color: var(--text); }
+#box-map select { font-size: 12px; padding: 2px 4px; }
+#box-map label.check { margin-top: 4px; color: var(--text); }
 .city-label { white-space: nowrap; pointer-events: none; }
 .city-label .city-dot {
   position: absolute; left: -2.5px; top: -2.5px; width: 5px; height: 5px; border-radius: 50%;
@@ -602,13 +608,16 @@ label.check input { width: auto; margin: 0; }
 .band { display: flex; align-items: center; gap: 4px; }
 .band input { flex: 1 1 0; width: 0; min-width: 0; }
 .band span { color: var(--muted); flex: none; }
-#view label.check { display: flex; margin: 6px 0 0; }
+#view label.check, #box-aircraft label.check { display: flex; margin: 6px 0 0; }
 /* The Trails group: its settings indented under the heading, a rule at the left. */
-#filters .trails-head { color: var(--text); }
+#box-aircraft label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px; }
+#box-aircraft select { width: 100%; }
+#box-aircraft .view-label { color: var(--muted); font-size: 12px; margin: 8px 0 4px; }
+#box-aircraft .trails-head { color: var(--text); }
 .trails { padding-left: 8px; border-left: 2px solid var(--line); margin-bottom: 8px; }
-#filters .trails > .view-label:first-child { margin-top: 2px; }
+#box-aircraft .trails > .view-label:first-child { margin-top: 2px; }
 .trail-show { gap: 12px; flex-wrap: wrap; }
-#view .trail-show label.check { margin: 0; color: var(--text); font-size: 13px; }
+#box-aircraft .trail-show label.check { margin: 0; color: var(--text); font-size: 13px; }
 /* Colour by signal / altitude: the scale under the option, weak (low) to strong (high). */
 .sig-legend { margin: 4px 0 0; font-size: 11px; color: var(--muted); }
 .sig-steps { margin-top: 1px; }

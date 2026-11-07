@@ -216,7 +216,7 @@
   function initMap(tiles) {
     haveTiles = !!(tiles && tiles.tiles);
     map = L.map('map', {
-      zoomControl: true,
+      zoomControl: false,
       attributionControl: haveTiles,
       minZoom: haveTiles && typeof tiles.minZoom === 'number' ? tiles.minZoom : 2,
       maxZoom: 14,
@@ -244,12 +244,13 @@
       if (rulerTakes(ev)) return;
       deselect();
     });
-    initRuler();
+    initToolbar();
     initFisbLayers();
     initMapView();
     // Markers for what arrived before the map existed.
     updateDeviceMarkers();
     if (fisb.status) updateStationMarkers(fisb.status.stations || []);
+    openBox(P.mapBoxName(storeGet(BOX_KEY)), true);
   }
 
   // ---- map style and overlays ------------------------------------------------
@@ -281,27 +282,12 @@
     map.getPane('cityLabels').style.zIndex = 450;   // over the shapes, under the aircraft (markerPane, 600)
     map.getPane('cityLabels').style.pointerEvents = 'none';
     var offer = P.overlayOffer(overlayMeta);
-    var ViewControl = L.Control.extend({
-      options: { position: 'topleft' },
-      onAdd: function () {
-        // The style only changes tiles: without them it is left out, and
-        // the box too when there are no overlays either.
-        var div = L.DomUtil.create('div', 'view-control');
-        div.hidden = !haveTiles && !offer.borders && !offer.cities;
-        div.innerHTML =
-          '<div id="map-style-row"' + (haveTiles ? '' : ' hidden') + '>' +
-          '<label for="map-style">Map</label> <select id="map-style">' +
-          '<option value="light">Light</option><option value="dark">Dark</option></select></div>' +
-          '<label class="check" for="ov-borders"' + (offer.borders ? '' : ' hidden') + '>' +
-          '<input id="ov-borders" type="checkbox"> Borders</label>' +
-          '<label class="check" for="ov-cities"' + (offer.cities ? '' : ' hidden') + '>' +
-          '<input id="ov-cities" type="checkbox"> Cities</label>';
-        L.DomEvent.disableClickPropagation(div);
-        L.DomEvent.disableScrollPropagation(div);
-        return div;
-      }
-    });
-    new ViewControl().addTo(map);
+    // The style only changes tiles: without them its row is left out, and
+    // the Map button too when there are no overlays either.
+    $('map-style-row').hidden = !haveTiles;
+    $('ov-borders').parentNode.hidden = !offer.borders;
+    $('ov-cities').parentNode.hidden = !offer.cities;
+    $('tb-map').hidden = !haveTiles && !offer.borders && !offer.cities;
     $('map-style').addEventListener('change', function () { setMapStyle($('map-style').value); });
     $('ov-borders').addEventListener('change', function () { setOverlay('borders', $('ov-borders').checked); });
     $('ov-cities').addEventListener('change', function () { setOverlay('cities', $('ov-cities').checked); });
@@ -325,12 +311,28 @@
   var RULER_COLOR = '#ff4fa3';   // none of the decision colours; reads on Light and Dark
   var ruler = { armed: false, start: null, end: null, fixed: false, button: null, line: null, dot: null, label: null, dblZoom: false };
 
-  function initRuler() {
-    var RulerControl = L.Control.extend({
+  // ---- toolbar and its boxes ---------------------------------------------------
+  // One bar top left: zoom, measure, then four buttons (Map, Aircraft, Layers,
+  // Weather) that fold a box out to the right. One box is open at a time and
+  // the choice is kept in this browser. The boxes are in index.html (their
+  // controls are wired before the map exists) and move into the bar here.
+  var BOX_KEY = 'skycue.mapBox';
+  var BOX_SVG = {
+    map: '<path d="M1.5 3.5l4-1.5 5 1.5 4-1.5v10l-4 1.5-5-1.5-4 1.5zM5.5 2v10.5M10.5 3.5V14"/>',
+    aircraft: '<path d="M8 1.5c.7 0 1 .7 1 1.5v3.5l5.5 3.5v1.5L9 9.5V13l1.5 1.2v1H5.5v-1L7 13V9.5l-5.5 2.5v-1.5L7 6.5V3c0-.8.3-1.5 1-1.5z"/>',
+    layers: '<path d="M8 2l6.5 3L8 8 1.5 5zM1.5 8L8 11l6.5-3M1.5 11L8 14l6.5-3"/>',
+    weather: '<path d="M4.5 12.5a3 3 0 0 1-.4-5.97A4 4 0 0 1 11.8 5.6 3.5 3.5 0 0 1 11.5 12.5z"/>'
+  };
+  var toolbar = null, openBoxName = null;
+
+  function initToolbar() {
+    var Toolbar = L.Control.Zoom.extend({
       options: { position: 'topleft' },
-      onAdd: function () {
-        var div = L.DomUtil.create('div', 'leaflet-bar ruler-control');
-        var a = L.DomUtil.create('a', 'ruler-toggle', div);
+      onAdd: function (m) {
+        var wrap = L.DomUtil.create('div', 'map-toolbar');
+        var bar = L.Control.Zoom.prototype.onAdd.call(this, m);
+        wrap.appendChild(bar);
+        var a = L.DomUtil.create('a', 'ruler-toggle', bar);
         a.href = '#';
         a.id = 'ruler-toggle';
         a.title = 'Measure';
@@ -338,19 +340,48 @@
         a.setAttribute('aria-label', 'Measure');
         a.setAttribute('aria-pressed', 'false');
         a.innerHTML = RULER_SVG;
-        L.DomEvent.disableClickPropagation(div);
         L.DomEvent.on(a, 'click', function (ev) {
           L.DomEvent.preventDefault(ev);
           if (ruler.armed) clearRuler(); else armRuler();
         });
         // The fixed measurement, for screen readers (the live one would chatter).
-        ruler.live = L.DomUtil.create('span', 'sr-only', div);
+        ruler.live = L.DomUtil.create('span', 'sr-only', bar);
         ruler.live.setAttribute('aria-live', 'polite');
         ruler.button = a;
-        return div;
+        var sep = L.DomUtil.create('span', 'tb-sep', bar);
+        sep.setAttribute('aria-hidden', 'true');
+        toolbar = { bar: bar, buttons: {}, boxes: {} };
+        P.MAP_BOXES.forEach(function (name) {
+          var label = name.charAt(0).toUpperCase() + name.slice(1);
+          var b = L.DomUtil.create('a', 'tb-box', bar);
+          b.id = 'tb-' + name;
+          b.href = '#';
+          b.title = label;
+          b.setAttribute('role', 'button');
+          b.setAttribute('aria-label', label);
+          b.setAttribute('aria-expanded', 'false');
+          b.setAttribute('aria-controls', 'box-' + name);
+          b.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" ' +
+            'stroke-width="1.3" stroke-linejoin="round" aria-hidden="true">' + BOX_SVG[name] + '</svg>' +
+            (name === 'layers' ? '<span id="layers-badge" class="tb-badge" hidden></span>' : '') +
+            (name === 'weather' ? '<span id="weather-dot" class="tb-dot" hidden></span>' : '');
+          L.DomEvent.on(b, 'click', function (ev) {
+            L.DomEvent.preventDefault(ev);
+            toggleBox(name);
+          });
+          toolbar.buttons[name] = b;
+          toolbar.boxes[name] = $('box-' + name);
+          wrap.appendChild(toolbar.boxes[name]);
+        });
+        var pen = $('map-boxes');
+        if (pen.parentNode) pen.parentNode.removeChild(pen);
+        L.DomEvent.disableClickPropagation(wrap);
+        L.DomEvent.disableScrollPropagation(wrap);
+        return wrap;
       }
     });
-    new RulerControl().addTo(map);
+    new Toolbar().addTo(map);
+    map.on('resize', function () { if (openBoxName) sizeBox(openBoxName); });
     // On the container, not the map: markers do not pass their mousemove on.
     L.DomEvent.on(map.getContainer(), 'mousemove', function (ev) {
       if (!ruler.armed || !ruler.start || ruler.fixed) return;
@@ -359,6 +390,30 @@
       drawRuler();
     });
   }
+
+  function sizeBox(name) {
+    var box = toolbar.boxes[name];
+    var alerts = $('map-wrap').classList.contains('alerts-on') ? 32 : 0;
+    box.style.top = toolbar.buttons[name].offsetTop + 'px';
+    box.style.maxHeight = Math.max(0, map.getContainer().clientHeight - box.offsetTop - 10 - alerts) + 'px';
+  }
+
+  // name: a box name or null (all folded). A name whose button is hidden is null.
+  function openBox(name, initial) {
+    if (!toolbar) return;
+    if (name && toolbar.buttons[name].hidden) name = null;
+    P.MAP_BOXES.forEach(function (n) {
+      var on = n === name;
+      toolbar.boxes[n].hidden = !on;
+      toolbar.buttons[n].setAttribute('aria-expanded', on ? 'true' : 'false');
+      toolbar.buttons[n].classList.toggle('active', on);
+    });
+    openBoxName = name;
+    if (name) sizeBox(name);
+    if (!initial) storeSet(BOX_KEY, name || '');
+  }
+
+  function toggleBox(name) { openBox(P.mapBoxToggle(openBoxName, name)); }
 
   function armRuler() {
     ruler.armed = true;
@@ -1878,34 +1933,14 @@
       shapeGroups[s[0]] = L.layerGroup();
       overlays[swatchName(P.SHAPE_COLORS[s[0]], s[1])] = shapeGroups[s[0]];
     });
-    L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(map);
+    var layersCtl = L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(map);
+    $('box-layers').appendChild(layersCtl.getContainer());
     rasterGroup.on('add', function () { $('raster-box').hidden = false; loadRaster(); });
     rasterGroup.on('remove', function () { $('raster-box').hidden = true; });
     [radarGroups.regional, radarGroups.conus, rasterGroup].forEach(function (g) {
       g.on('add remove', syncOpacityControl);
     });
 
-    var WxControl = L.Control.extend({
-      options: { position: 'bottomright' },
-      onAdd: function () {
-        var div = L.DomUtil.create('div', 'wx-control');
-        div.innerHTML =
-          '<div id="radar-age">radar –</div>' +
-          '<div id="radar-opacity-row"><label for="radar-opacity">Radar opacity</label> ' +
-          '<input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7"></div>' +
-          '<div id="radar-legend" class="legend-row"></div>' +
-          '<div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span>: not yet in force · ' +
-          '<span class="ln-cancelled">dashed</span>: cancelled</div>' +
-          '<div id="raster-box" hidden>' +
-          '<label for="raster-select">Raster</label> <select id="raster-select"></select> ' +
-          '<select id="raster-band" aria-label="Altitude band" hidden></select>' +
-          '<div id="raster-legend"></div></div>';
-        L.DomEvent.disableClickPropagation(div);
-        L.DomEvent.disableScrollPropagation(div);
-        return div;
-      }
-    });
-    new WxControl().addTo(map);
     $('radar-opacity').value = String(P.radarOpacityValue(storeGet(RADAR_OPACITY_KEY)));
     $('radar-opacity').addEventListener('input', function () {
       storeSet(RADAR_OPACITY_KEY, $('radar-opacity').value);
@@ -3620,6 +3655,11 @@
       if (ev.key === 'Escape') {
         setViewSetMenu(false);
         if (ruler.armed) clearRuler();   // the ruler, not the panel too
+        else if (openBoxName && $('box-' + openBoxName).contains(document.activeElement)) {
+          var n = openBoxName;
+          openBox(null);
+          $('tb-' + n).focus();
+        }
         else closePanel();
       }
       else if (!slashFocusesSearch(ev)) digitAppliesSet(ev);
@@ -3647,6 +3687,7 @@
 
   // Test hooks (tests/ui/ui.spec.js); read-only views of the page state.
   window.skycueApp = {
+    mapBox: function () { return openBoxName; },
     markers: function () {
       var out = [];
       tracks.forEach(function (e) {

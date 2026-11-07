@@ -83,8 +83,8 @@ test('page_loads_without_console_errors', async ({ page }) => {
   await expect(page.locator('#ov-borders')).toBeHidden();
   await expect(page.locator('#ov-cities')).toBeHidden();
   const tiles = (await api('/api/tiles-available')).body;
-  if (tiles.tiles) await expect(page.locator('#map-style')).toBeVisible();
-  else await expect(page.locator('.view-control')).toBeHidden();
+  if (tiles.tiles) { await openBox(page, 'map'); await expect(page.locator('#map-style')).toBeVisible(); }
+  else await expect(page.locator('#tb-map')).toBeHidden();
   if (!tiles.tiles) {
     await expect.poll(() => page.locator('path.graticule').count()).toBeGreaterThan(0);
     await expect(page.locator('.leaflet-control-scale')).toBeVisible();
@@ -1083,6 +1083,7 @@ async function injectSignalTrack(page) {
 test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 10);
+  await openBox(page, 'aircraft');
   await expect(page.locator('#view-trail-color')).toHaveValue('decision');
   await expect(page.locator('#trail-signal-legend')).toBeHidden();
   await injectSignalTrack(page);
@@ -1170,6 +1171,7 @@ test('trail_signal_old_setting_carries_over', async ({ page }) => {
     localStorage.setItem('skycue.view', JSON.stringify({ search: '' }));
   });
   await openPage(page);
+  await openBox(page, 'aircraft');
   await expect(page.locator('#view-trail-color')).toHaveValue('signal');
   expect(await page.evaluate(() => localStorage.getItem('skycue.trailSignal'))).toBe(null);
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view'))).trailColor).toBe('signal');
@@ -1213,6 +1215,7 @@ test('trail_signal_dims_when_signal_ages_out', async ({ page }) => {
 test('trail_signal_treats_readsb_floor_as_no_signal', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 1);
+  await openBox(page, 'aircraft');
   await page.locator('#view-trail-color').selectOption('signal');
   const hex = 'fff0a2';
   const at = (i, rssi) => page.evaluate((a) => window.skycueApp.injectTestMarker({ hex: a.hex, addr_type: 'icao',
@@ -1305,6 +1308,7 @@ test('trail_altitude_colours_climb', async ({ page }) => {
       alt_baro_ft: i === 0 || i === 3 ? undefined : alt, alt_geom_ft: i === 3 ? alt : undefined,
       position_time: new Date(now - 30000 - (11 - i) * 6000).toISOString() }));
   }, { hex, alts });
+  await openBox(page, 'aircraft');
   await page.locator('#view-trail-color').selectOption('altitude');
   const legend = page.locator('#trail-alt-legend');
   await expect(legend).toBeVisible();
@@ -1352,6 +1356,7 @@ async function trailCounts(page) {
 test('trails_show_all_selected_off', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 3);
+  await openBox(page, 'aircraft');
   await expect(page.locator('input[name="view-trail-show"][value="all"]')).toBeChecked();
   await injectSignalTrack(page);
   await page.locator(`.ac-marker[data-hex="${SIG_HEX}"] .ac-glyph`).click();
@@ -1426,6 +1431,7 @@ test('trail_project_ahead', async ({ page }) => {
   expect(await ahead()).toBe(null);
   expect(await page.locator('path.trail-ahead').count()).toBe(0);
 
+  await openBox(page, 'aircraft');
   await page.locator('#view-trail-ahead').selectOption('2');
   let a = await ahead();
   expect(a.dashed).toBe(true);
@@ -1468,11 +1474,13 @@ test('trail_project_ahead', async ({ page }) => {
   expect(await page.locator('path.trail-ahead').count()).toBe(1);
   expect(await ahead()).not.toBe(null);
   // Nothing selected: no trail and no projection at all.
+  await page.keyboard.press('Escape');   // folds the Aircraft box while focus is in it
   await page.keyboard.press('Escape');
   await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(null);
   expect(await page.locator('path.trail').count()).toBe(0);
   expect(await page.locator('path.trail-ahead').count()).toBe(0);
   expect(await ahead()).toBe(null);
+  await openBox(page, 'aircraft');
   await page.evaluate((h) => window.skycueApp.selectHex(h), hex);
   await expect.poll(() => page.evaluate(() => window.skycueApp.selected())).toBe(hex);
   expect(await page.locator('path.trail-ahead').count()).toBe(1);
@@ -1510,6 +1518,7 @@ test('trails_old_sets_keep_current_trails', async ({ page }) => {
 test('trails_settings_in_sets_and_reload', async ({ page }) => {
   await openPage(page);
   await waitMarkers(page, 1);
+  await openBox(page, 'aircraft');
   await page.locator('input[name="view-trail-show"][value="selected"]').check();
   await page.locator('#view-trail-color').selectOption('altitude');
   await page.locator('#view-trail-ahead').selectOption('5');
@@ -1680,11 +1689,87 @@ test('ruler_toggle_matches_zoom_buttons_after_disarm', async ({ page }) => {
   expect(await bg('a.leaflet-control-zoom-in')).toBe(zoom);
   expect(await fg('a.leaflet-control-zoom-in')).not.toBe(idleText);
 });
+async function openBox(page, name) {
+  const btn = page.locator('#tb-' + name);
+  if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
+  await expect(page.locator('#box-' + name)).toBeVisible();
+}
+test('map_toolbar_tucked_on_load_and_order', async ({ page }) => {
+  await openPage(page);
+  for (const b of ['map', 'aircraft', 'layers', 'weather']) await expect(page.locator('#box-' + b)).toBeHidden();
+  expect(await page.evaluate(() => window.skycueApp.mapBox())).toBe(null);
+  const order = await page.$$eval('.map-toolbar .leaflet-bar > a', (as) => as.map((a) => a.id || a.className.split(' ')[0]));
+  expect(order).toEqual(['leaflet-control-zoom-in', 'leaflet-control-zoom-out', 'ruler-toggle', 'tb-map', 'tb-aircraft', 'tb-layers', 'tb-weather']);
+  expect(await page.locator('.leaflet-top.leaflet-right .leaflet-control, .leaflet-bottom.leaflet-right .leaflet-control-layers, .wx-control, .view-control').count()).toBe(0);
+  for (const b of ['map', 'aircraft', 'layers', 'weather']) {
+    const btn = page.locator('#tb-' + b);
+    await expect(btn).toHaveAttribute('aria-controls', 'box-' + b);
+    await expect(btn).toHaveAttribute('aria-label', b[0].toUpperCase() + b.slice(1));
+  }
+});
+test('map_boxes_one_at_a_time_and_escape', async ({ page }) => {
+  await openPage(page);
+  await openBox(page, 'aircraft');
+  await expect(page.locator('#tb-aircraft')).toHaveAttribute('aria-expanded', 'true');
+  await openBox(page, 'weather');
+  await expect(page.locator('#box-aircraft')).toBeHidden();
+  await expect(page.locator('#tb-aircraft')).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#tb-weather')).toHaveClass(/\bactive\b/);
+  const bar = await page.locator('.map-toolbar .leaflet-bar').boundingBox();
+  const box = await page.locator('#box-weather').boundingBox();
+  expect(box.x).toBeGreaterThan(bar.x + bar.width);
+  expect(Math.abs(box.y - (await page.locator('#tb-weather').boundingBox()).y)).toBeLessThan(2);
+  expect(box.width).toBeLessThanOrEqual(260);
+  const mapBox = await page.locator('#map').boundingBox();
+  expect(box.y + box.height).toBeLessThanOrEqual(mapBox.y + mapBox.height);
+  // The radar slider is disabled here (no radar products), so Escape is tried from a control that can take focus.
+  await openBox(page, 'aircraft');
+  await page.locator('#view-trail-color').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#box-aircraft')).toBeHidden();
+  expect(await page.evaluate(() => document.activeElement && document.activeElement.id)).toBe('tb-aircraft');
+  await page.click('#tb-weather');
+  await page.click('#tb-weather');
+  await expect(page.locator('#box-weather')).toBeHidden();
+});
+test('map_box_open_state_survives_reload_and_table', async ({ page }) => {
+  await openPage(page);
+  await openBox(page, 'layers');
+  expect(await page.evaluate(() => localStorage.getItem('skycue.mapBox'))).toBe('layers');
+  await page.reload();
+  await page.waitForFunction(() => window.skycueApp && window.skycueApp.connected());
+  await expect(page.locator('#box-layers')).toBeVisible();
+  await expect(layerToggle(page, 'Radar (regional)')).toBeChecked();
+  await page.click('#table-toggle');
+  await page.click('#table-toggle');
+  await expect(page.locator('#box-layers')).toBeVisible();
+});
+test('map_box_hidden_button_ignores_stored_state', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('skycue.mapBox', 'map'); });
+  await openPage(page);   // main daemon: no tiles, no overlays, so the Map button is hidden
+  await expect(page.locator('#tb-map')).toBeHidden();
+  await expect(page.locator('#box-map')).toBeHidden();
+  expect(await page.evaluate(() => window.skycueApp.mapBox())).toBe(null);
+});
+test('aircraft_box_controls_apply', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 10);
+  await openBox(page, 'aircraft');
+  await expect(page.locator('#box-aircraft #hide-filtered')).toHaveCount(1);
+  await expect(page.locator('#box-aircraft #view-trails')).toHaveCount(1);
+  await expect(page.locator('#box-aircraft input[name="view-map-mode"]')).toHaveCount(2);
+  await expect(page.locator('#view #hide-filtered, #view #view-trails, #view input[name="view-map-mode"]')).toHaveCount(0);
+  await page.locator('#view-trail-color').selectOption('signal');
+  await expect(page.locator('#trail-signal-legend')).toBeVisible();
+  await page.locator('#hide-filtered').check();
+  expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(true);
+});
 
 // The main daemon has no radar or raster: the opacity slider has nothing to
 // act on, so it is disabled and its row dimmed.
 test('radar_opacity_disabled_without_products', async ({ page }) => {
   await openPage(page);
+  await openBox(page, 'weather');
   await expect(page.locator('label[for="radar-opacity"]')).toHaveText('Radar opacity');
   await expect(page.locator('#radar-opacity')).toBeDisabled();
   await expect(page.locator('#radar-opacity-row')).toHaveClass(/\bdisabled\b/);
@@ -1701,6 +1786,7 @@ test.describe('fisb radar (tg30)', () => {
     expect(status.radar.conus.blocks).toBeGreaterThan(0);
     await openFisbPage(page);
     // Radar on by default, every other layer off.
+    await openBox(page, 'layers');
     await expect(layerToggle(page, 'Radar (regional)')).toBeChecked();
     await expect(layerToggle(page, 'Radar (CONUS)')).toBeChecked();
     for (const name of ['Other rasters', 'NOTAM / TFR', 'SIGMET', 'AIRMET', 'CWA', 'SUA']) {
@@ -1724,9 +1810,11 @@ test.describe('fisb radar (tg30)', () => {
     expect(b[1][0]).toBeCloseTo(north, 4);
     expect(b[0][1]).toBeCloseTo(west, 4);
     // Radar age from the product time, ticking.
+    await openBox(page, 'weather');
     await expect(page.locator('#radar-age')).toContainText(/\d+ (s|min)/);
     await expect(page.locator('#stat-radar-age')).toHaveText(/\d+ (s|min)/);
     // Toggling the regional layer removes and restores its overlay.
+    await openBox(page, 'layers');
     await layerToggle(page, 'Radar (regional)').uncheck();
     await expect(page.locator('img.fisb-radar-regional')).toHaveCount(0);
     await layerToggle(page, 'Radar (regional)').check();
@@ -1739,6 +1827,7 @@ test.describe('fisb radar (tg30)', () => {
     const img = page.locator('img.leaflet-image-layer.fisb-radar-regional');
     await expect(img).toHaveCount(1);
     const opacity = () => img.evaluate((el) => Number(getComputedStyle(el).opacity));
+    await openBox(page, 'weather');
     await page.locator('#radar-opacity').fill('0.4');
     await expect.poll(opacity).toBeCloseTo(0.4, 2);
     await page.locator('#radar-opacity').fill('1');
@@ -1752,10 +1841,13 @@ test.describe('fisb radar (tg30)', () => {
   // this browser across a reload.
   test('radar_opacity_reaches_rasters_and_persists', async ({ page }) => {
     await openFisbPage(page);
+    await openBox(page, 'weather');
     const slider = page.locator('#radar-opacity');
     await expect(slider).toBeEnabled();
     await expect(page.locator('#radar-opacity-row')).not.toHaveClass(/\bdisabled\b/);
+    await openBox(page, 'layers');
     await layerToggle(page, 'Other rasters').check();
+    await openBox(page, 'weather');
     await page.locator('#raster-select').selectOption('70');
     await page.locator('#raster-band').selectOption('0');
     const raster = page.locator('img.leaflet-image-layer.fisb-raster');
@@ -1776,17 +1868,23 @@ test.describe('fisb radar (tg30)', () => {
 
   test('radar_opacity_follows_layer_toggles', async ({ page }) => {
     await openFisbPage(page);
+    await openBox(page, 'weather');
     const slider = page.locator('#radar-opacity');
     await expect(slider).toBeEnabled();
+    await openBox(page, 'layers');
     await layerToggle(page, 'Radar (regional)').uncheck();
     await layerToggle(page, 'Radar (CONUS)').uncheck();
     await expect(slider).toBeDisabled();
+    await openBox(page, 'weather');
     await expect(page.locator('#radar-opacity-row')).toHaveClass(/\bdisabled\b/);
+    await openBox(page, 'layers');
     await layerToggle(page, 'Other rasters').check();
+    await openBox(page, 'weather');
     await page.locator('#raster-select').selectOption('70');
     await page.locator('#raster-band').selectOption('0');
     await expect(page.locator('img.leaflet-image-layer.fisb-raster')).toHaveCount(1);
     await expect(slider).toBeEnabled();
+    await openBox(page, 'layers');
     await layerToggle(page, 'Other rasters').uncheck();
     await expect(slider).toBeDisabled();
   });
@@ -1801,6 +1899,7 @@ test.describe('fisb radar (tg30)', () => {
     const at = (iso) => page.evaluate((t) => window.skycueApp.setDataClock(t), iso);
     const plus = (iso, min) => new Date(Date.parse(iso) + min * 60000).toISOString();
     const reg = status.radar.regional.product_time, conus = status.radar.conus.product_time;
+    await openBox(page, 'weather');
     const base = Number(await page.locator('#radar-opacity').inputValue());
     let o = await at(plus(reg, 14));
     expect(o.regional).toEqual({ opacity: base, faded: false });
@@ -1823,7 +1922,9 @@ test.describe('fisb radar (tg30)', () => {
 
   test('other_rasters_layer_and_legend', async ({ page }) => {
     await openFisbPage(page);
+    await openBox(page, 'layers');
     await layerToggle(page, 'Other rasters').check();
+    await openBox(page, 'weather');
     const sel = page.locator('#raster-select');
     await expect.poll(() => sel.locator('option').count()).toBeGreaterThanOrEqual(4);
     await sel.selectOption('70');
@@ -1833,12 +1934,15 @@ test.describe('fisb radar (tg30)', () => {
     await expect(page.locator('#raster-legend')).toContainText('approximate');
     await sel.selectOption('103');
     await expect(page.locator('#raster-legend')).toContainText(/lightning/i);
+    await openBox(page, 'layers');
     await layerToggle(page, 'Other rasters').uncheck();
     await expect(page.locator('img.fisb-raster')).toHaveCount(0);
   });
   test('raster_band_select', async ({ page }) => {
     await openFisbPage(page);
+    await openBox(page, 'layers');
     await layerToggle(page, 'Other rasters').check();
+    await openBox(page, 'weather');
     await page.locator('#raster-select').selectOption('70');
     const band = page.locator('#raster-band');
     await expect(band).toBeVisible();
@@ -1853,11 +1957,13 @@ test.describe('fisb radar (tg30)', () => {
     const errors = watchErrors(page);
     await openFisbPage(page);
     await page.locator('#wx-toggle').click();
+    await openBox(page, 'layers');
     await layerToggle(page, 'Other rasters').check();
     const status = (await apiAt(RADAR_BASE, '/api/fisb/status')).body;
     const codes = status.rasters.filter((h) => h.product === 70).map((h) => h.altitude_code).sort((a, b) => a - b);
     expect(codes.length).toBeGreaterThan(1);
     const top = String(codes[codes.length - 1]);   // not the default (the lowest)
+    await openBox(page, 'weather');
     await page.locator('#raster-select').selectOption('70');
     await page.locator('#raster-band').selectOption(top);
     await expect.poll(() => page.evaluate(() => window.skycueApp.windsPickers().period)).toBe(6);
@@ -1892,6 +1998,7 @@ test.describe('fisb radar (tg30)', () => {
   test('fisb_screenshots_radar', async ({ page }, testInfo) => {
     await openFisbPage(page);
     await expect.poll(() => page.evaluate(() => window.skycueApp.radarStats().painted)).toBeGreaterThan(0);
+    await openBox(page, 'layers');
     await layerToggle(page, 'SIGMET').check();
     await page.locator('#wx-toggle').click();
     await expect(page.locator('#pane-weather')).toBeVisible();
@@ -1960,6 +2067,7 @@ test.describe('fisb radar (tg30)', () => {
         geometry: { type: 'Polygon', coordinates: [sq] },
         properties: { key, product: 8, name: 'NOTAM', text: 'RULER TEST', geom: 'polygon', cancelled: false, agl: false, shape: 0 } }]
     });
+    await openBox(page, 'layers');
     await layerToggle(page, 'NOTAM / TFR').check();
     const shape = page.locator(`path.fisb-tfr[data-key="${key}"]`);
     await expect(shape).toHaveCount(1);
@@ -2046,6 +2154,7 @@ test.describe('fisb radar (tg30)', () => {
     // A report, then an airspace shape: the report's expiry leaves the shape card alone.
     await page.locator('.wx-sym.wx-metar[data-station="KCVG"]').click();
     await expect(page.locator('#shape-title')).toHaveText('METAR KCVG');
+    await openBox(page, 'layers');
     await layerToggle(page, 'NOTAM / TFR').check();
     await expect.poll(() => page.locator('path.fisb-tfr').count()).toBeGreaterThan(0);
     const i = await clickableIndex(page, 'path.fisb-tfr');
@@ -2110,6 +2219,7 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     expect(shapes.length).toBeGreaterThan(0);
     await openFisbPage(page);
     await expect(page.locator('path.fisb-tfr')).toHaveCount(0);   // off by default
+    await openBox(page, 'layers');
     await layerToggle(page, 'NOTAM / TFR').check();
     await expect.poll(() => page.locator('path.fisb-tfr').count()).toBe(shapes.length);
     const i = await clickableIndex(page, 'path.fisb-tfr');
@@ -2180,7 +2290,9 @@ test.describe('fisb text and airspace (2015 sample)', () => {
   test('pending_shape_drawn_dashed_and_dim', async ({ page }) => {
     const errors = watchErrors(page);
     await openFisbPage(page);
+    await openBox(page, 'layers');
     await layerToggle(page, 'SIGMET').check();
+    await openBox(page, 'weather');
     await expect(page.locator('#shape-legend')).toContainText('not yet in force');
     const key = '12-15-996--1';
     const item = (pending) => ({ type: 'fisb_shape', product: 12, key, features: [{ type: 'Feature', id: key + '/0',
@@ -2208,6 +2320,7 @@ test.describe('fisb text and airspace (2015 sample)', () => {
   test('twgo_text_update_clears_old_shape', async ({ page }) => {
     const errors = watchErrors(page);
     await openFisbPage(page);
+    await openBox(page, 'layers');
     await layerToggle(page, 'NOTAM / TFR').check();
     const key = '8-15-997-ZOA-1';
     const path = page.locator(`path.fisb-tfr[data-key="${key}"]`);
@@ -2310,6 +2423,7 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     await openFisbPage(page);
     const paths = page.locator('path.fisb-sigmet');
     await expect(paths).toHaveCount(0);
+    await openBox(page, 'layers');
     await layerToggle(page, 'SIGMET').check();
     await expect(paths).toHaveCount(sig.length);
     await layerToggle(page, 'SIGMET').uncheck();
@@ -2339,6 +2453,7 @@ test.describe('fisb text and airspace (2015 sample)', () => {
 
   test('fisb_screenshots_weather', async ({ page }, testInfo) => {
     await openFisbPage(page);
+    await openBox(page, 'layers');
     await layerToggle(page, 'NOTAM / TFR').check();
     await layerToggle(page, 'SIGMET').check();
     await expect.poll(() => page.locator('path.fisb-sigmet').count()).toBeGreaterThan(0);
@@ -2442,6 +2557,7 @@ test.describe('map tiles fallback', () => {
         tile: f('.leaflet-tile-pane'), marker: f('.leaflet-marker-pane'), overlay: f('.leaflet-overlay-pane'),
         labels: f('.leaflet-cityLabels-pane'), raster: f('.leaflet-fisbRaster-pane') };
     });
+    await openBox(page, 'map');
     expect(await page.locator('#map-style').inputValue()).toBe('light');
     expect(await panes()).toEqual({ tileClass: false, tile: 'none', marker: 'none', overlay: 'none', labels: 'none', raster: 'none' });
     await page.locator('#map-style').selectOption('dark');
@@ -2464,6 +2580,7 @@ test.describe('map tiles fallback', () => {
     page.on('pageerror', (e) => pageErrors.push(String(e)));
     await openPage(page);
     await waitMarkers(page, 1);   // the map has fitted the range ring: setView below is not undone
+    await openBox(page, 'map');
     await expect(page.locator('#ov-cities')).toBeVisible();
     await expect(page.locator('#ov-borders')).toBeVisible();
     expect(await page.locator('#ov-cities').isChecked()).toBe(false);
@@ -2516,7 +2633,8 @@ test.describe('overlays without tiles', () => {
     expect((await apiAt(OVERLAYS_BASE, '/api/tiles-available')).body.tiles).toBe(false);
     await openPage(page);
     await waitMarkers(page, 1);
-    await expect(page.locator('.view-control')).toBeVisible();
+    await expect(page.locator('#tb-map')).toBeVisible();
+    await openBox(page, 'map');
     await expect(page.locator('#map-style')).toBeHidden();
     await expect(page.locator('#ov-borders')).toBeVisible();
     await expect(page.locator('#ov-cities')).toBeVisible();
@@ -2534,6 +2652,7 @@ test.describe('overlays without tiles', () => {
     page.on('pageerror', (e) => pageErrors.push(String(e)));
     await openPage(page);
     await waitMarkers(page, 1);
+    await openBox(page, 'map');
     await expect(page.locator('#ov-cities')).toBeVisible();
     let asked = 0;
     page.on('request', (r) => { if (r.url().endsWith('/overlays/cities.json')) asked++; });
@@ -2939,8 +3058,10 @@ test('left_panel_groups_output_then_display_filters', async ({ page }, testInfo)
   await expect(page.locator('#output-filters form.list-add[data-list="allow"]')).toHaveCount(1);
   await expect(page.locator('#output-filters form.list-add[data-list="block"]')).toHaveCount(1);
   await expect(page.locator('#output-filters #save-baseline')).toHaveCount(1);
-  await expect(page.locator('#view #hide-filtered')).toHaveCount(1);
-  await expect(page.locator('#view #hidden-count')).toHaveCount(1);
+  await expect(page.locator('#view #hide-filtered')).toHaveCount(0);
+  await expect(page.locator('#view #hidden-count')).toHaveCount(0);
+  await expect(page.locator('#box-aircraft #hide-filtered')).toHaveCount(1);
+  await expect(page.locator('#box-aircraft #hidden-count')).toHaveCount(1);
   const fit = await page.$eval('#filters', (f) => ({
     overflowX: f.scrollWidth - f.clientWidth,
     scrollable: f.scrollHeight > f.clientHeight ? getComputedStyle(f).overflowY : 'fits',
@@ -3062,6 +3183,8 @@ test('view_decision_pill_narrows_table', async ({ page }) => {
 test('view_persists_across_reload_and_slash_focuses_search', async ({ page }) => {
   await openTable(page);
   await page.fill('#view-search', 'dal');
+  await page.click('#table-toggle');                          // the map again: the boxes live there
+  await openBox(page, 'aircraft');
   await page.check('input[name="view-map-mode"][value="dim"]');
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view')))).toMatchObject({ search: 'dal', mapMode: 'dim' });
   await page.reload(); await openPage(page); await waitMarkers(page, 1);
@@ -3115,7 +3238,7 @@ test('view_sets_save_apply_modified_rename_delete_keys', async ({ page }) => {
   await expect(page.locator('#view-set-delete')).toBeEnabled();
   const ual = await page.evaluate(() => window.skycuePure.normalizeView({ search: 'ual' }));
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.viewSets'))))
-    .toEqual({ version: 1, sets: [{ name: 'Airlines', view: ual, hideFiltered: false }] });
+    .toEqual({ version: 2, sets: [{ name: 'Airlines', view: ual, hideFiltered: false }] });
   await page.evaluate(() => window.skycueApp.setViewFilters({ search: 'dal' }));
   expect(await setSelectedText(page)).toBe('Airlines (modified)');
   await page.evaluate(() => {
@@ -3136,6 +3259,7 @@ test('view_sets_save_apply_modified_rename_delete_keys', async ({ page }) => {
   await page.locator('body').press('2');
   expect(await page.evaluate(() => window.skycueApp.getViewFilters().emergency)).toBe(true);
   expect(await page.evaluate(() => window.skycueApp.getHideFiltered())).toBe(true);
+  await openBox(page, 'aircraft');
   await expect(page.locator('#hide-filtered')).toBeChecked();
   await page.locator('body').press('0');
   const defaults = await page.evaluate(() => window.skycuePure.VIEW_DEFAULTS);
@@ -3260,7 +3384,7 @@ test('settings_export_then_import_restores_sets', async ({ page }) => {
   expect(download.suggestedFilename()).toMatch(/^skycue-settings-\d{4}-\d{2}-\d{2}\.json$/);
   const file = await download.path();
   const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  expect(data.skycue_settings).toBe(1);
+  expect(data.skycue_settings).toBe(2);
   expect(data.sets.map((s) => s.name)).toEqual(['A', 'B']);
   expect(data.alerts.rules.emergency.enabled).toBe(true);
   expect(Object.prototype.hasOwnProperty.call(data.alerts, 'hidden')).toBe(false);
@@ -3335,6 +3459,7 @@ test('view_dim_mode_ghosts_non_matches', async ({ page }) => {
   const total = await page.evaluate(() => window.skycueApp.markers().length);
   const trailsBefore = await page.evaluate(() => window.skycueApp.markers().filter((m) => m.trail > 0).map((m) => m.hex));
   expect(trailsBefore.length).toBeGreaterThan(1);
+  await openBox(page, 'aircraft');
   await page.check('input[name="view-map-mode"][value="dim"]');
   await page.fill('#view-search', TARGET);
   // Every marker stays; all but the target are dimmed and have no trail.
@@ -3402,6 +3527,8 @@ test('view_selected_track_survives_filter', async ({ page }) => {
   await expect.poll(async () => (await tableRows(page)).length).toBe(0);
   await expect(page.locator('#view-count')).toHaveText(/^showing 0 of \d+$/);
   // In dim mode the same filter ghosts every marker instead.
+  await page.click('#table-toggle');                            // the map again: the boxes live there
+  await openBox(page, 'aircraft');
   await page.check('input[name="view-map-mode"][value="dim"]');
   await expect.poll(() => page.evaluate(() => {
     const ms = window.skycueApp.markers();
@@ -3413,6 +3540,7 @@ test('view_composes_with_hide_filtered', async ({ page }) => {
   await openPage(page); await waitMarkers(page, 10);
   await page.evaluate(() => window.skycueApp.setHideFiltered(true));
   const hiddenOnly = await page.evaluate(() => window.skycueApp.markers().length);
+  await openBox(page, 'aircraft');
   const hiddenText = await page.locator('#hidden-count').textContent();
   await page.fill('#view-search', 'ual');
   // UAL1423 (sent) and UAL455 (sent or filtered, as the fixture has it).

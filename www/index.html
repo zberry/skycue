@@ -76,19 +76,19 @@
     <section id="view" aria-labelledby="view-heading">
       <h2 id="view-heading">Display filters <span id="view-badge"></span></h2>
       <p class="view-sub">this browser only</p>
-      <label for="view-set-select">Sets</label>
+      <label for="view-set-select">Views</label>
       <div class="row view-sets">
-        <select id="view-set-select" title="Saved filter sets: keys 1–9 apply one, 0 clears"></select>
-        <button id="view-set-save" type="button" title="Save the current Display filters as a set">Save</button>
-        <button id="view-set-delete" type="button" title="Delete the chosen set" disabled>Delete</button>
-        <button id="view-set-more" type="button" title="More set actions" aria-label="More set actions"
+        <select id="view-set-select" title="Saved views: keys 1–9 apply one, 0 clears"></select>
+        <button id="view-set-save" type="button" title="Save the current Display filters and map settings as a view">Save</button>
+        <button id="view-set-delete" type="button" title="Delete the chosen view" disabled>Delete</button>
+        <button id="view-set-more" type="button" title="More view actions" aria-label="More view actions"
           aria-haspopup="menu" aria-expanded="false" aria-controls="view-set-menu">⋯</button>
-        <div id="view-set-menu" role="menu" aria-label="Filter set actions" hidden>
+        <div id="view-set-menu" role="menu" aria-label="View actions" hidden>
           <button type="button" role="menuitem" data-act="rename">Rename</button>
           <button type="button" role="menuitem" data-act="up">Move up</button>
           <button type="button" role="menuitem" data-act="down">Move down</button>
-          <button type="button" role="menuitem" data-act="export" title="Download the filter sets and the alert settings as a file">Export…</button>
-          <button type="button" role="menuitem" data-act="import" title="Load filter sets and alert settings from a file">Import…</button>
+          <button type="button" role="menuitem" data-act="export" title="Download the views and the alert settings as a file">Export…</button>
+          <button type="button" role="menuitem" data-act="import" title="Load views and alert settings from a file">Import…</button>
         </div>
       </div>
       <input id="settings-file" type="file" accept=".json,application/json" hidden>
@@ -101,32 +101,6 @@
         </div>
       </div>
       <p id="view-set-msg" class="msg" role="status"></p>
-      <label class="check" for="hide-filtered"><input id="hide-filtered" type="checkbox"> Hide filtered</label>
-      <p id="hidden-count" class="msg" role="status"></p>
-      <p class="view-label trails-head" id="view-trails-label">Trails</p>
-      <div id="view-trails" class="trails" role="group" aria-labelledby="view-trails-label">
-        <p class="view-label" id="view-trail-show-label">Show</p>
-        <div class="row trail-show" role="radiogroup" aria-labelledby="view-trail-show-label">
-          <label class="check" title="A trail for every aircraft drawn"><input type="radio" name="view-trail-show" value="all" checked> all</label>
-          <label class="check" title="A trail only for the selected aircraft"><input type="radio" name="view-trail-show" value="selected"> selected</label>
-          <label class="check" title="No trails (the positions are still kept)"><input type="radio" name="view-trail-show" value="off"> off</label>
-        </div>
-        <label for="view-trail-color">Colour by</label>
-        <select id="view-trail-color" title="What colours each aircraft's trail">
-          <option value="decision">decision</option>
-          <option value="signal">signal (RSSI)</option>
-          <option value="altitude">altitude</option>
-        </select>
-        <div id="trail-signal-legend" class="sig-legend" aria-label="Trail signal scale" hidden></div>
-        <div id="trail-alt-legend" class="sig-legend" aria-label="Trail altitude scale" hidden></div>
-        <label for="view-trail-ahead">Project ahead</label>
-        <select id="view-trail-ahead" title="A dashed line from each aircraft along its track: where it gets to in this time at its ground speed, flying straight">
-          <option value="0">off</option>
-          <option value="1">1 min</option>
-          <option value="2">2 min</option>
-          <option value="5">5 min</option>
-        </select>
-      </div>
       <label for="view-search">Search</label>
       <input id="view-search" type="text" placeholder="hex, callsign or reg" autocomplete="off" spellcheck="false" title="Press / to search">
       <label for="view-alt-min">Altitude (ft)</label>
@@ -168,11 +142,6 @@
       <select id="view-category"></select>
       <label for="view-country">Country</label>
       <select id="view-country"></select>
-      <p class="view-label" id="view-map-label">Non-matching on the map</p>
-      <div class="row view-map-mode" role="radiogroup" aria-labelledby="view-map-label">
-        <label class="check"><input type="radio" name="view-map-mode" value="hide" checked> hide</label>
-        <label class="check"><input type="radio" name="view-map-mode" value="dim"> dim</label>
-      </div>
       <div class="row view-foot">
         <p id="view-count" class="msg" role="status"></p>
         <button id="view-clear" type="button" disabled>Clear</button>
@@ -188,6 +157,57 @@
   </aside>
   <div id="map-wrap">
     <div id="map" aria-label="Map"></div>
+    <div id="map-boxes" hidden>
+      <div id="box-map" class="map-box" role="group" aria-label="Map" hidden>
+        <div id="map-style-row"><label for="map-style">Map</label> <select id="map-style"><option value="light">Light</option><option value="dark">Dark</option></select></div>
+        <label class="check" for="ov-borders"><input id="ov-borders" type="checkbox"> Borders</label>
+        <label class="check" for="ov-cities"><input id="ov-cities" type="checkbox"> Cities</label>
+      </div>
+      <div id="box-aircraft" class="map-box" role="group" aria-label="Aircraft" hidden>
+        <p class="view-label trails-head" id="view-trails-label">Trails</p>
+        <div id="view-trails" class="trails" role="group" aria-labelledby="view-trails-label">
+          <p class="view-label" id="view-trail-show-label">Show</p>
+          <div class="row trail-show" role="radiogroup" aria-labelledby="view-trail-show-label">
+            <label class="check" title="A trail for every aircraft drawn"><input type="radio" name="view-trail-show" value="all" checked> all</label>
+            <label class="check" title="A trail only for the selected aircraft"><input type="radio" name="view-trail-show" value="selected"> selected</label>
+            <label class="check" title="No trails (the positions are still kept)"><input type="radio" name="view-trail-show" value="off"> off</label>
+          </div>
+          <label for="view-trail-color">Colour by</label>
+          <select id="view-trail-color" title="What colours each aircraft's trail">
+            <option value="decision">decision</option>
+            <option value="signal">signal (RSSI)</option>
+            <option value="altitude">altitude</option>
+          </select>
+          <div id="trail-signal-legend" class="sig-legend" aria-label="Trail signal scale" hidden></div>
+          <div id="trail-alt-legend" class="sig-legend" aria-label="Trail altitude scale" hidden></div>
+          <label for="view-trail-ahead">Project ahead</label>
+          <select id="view-trail-ahead" title="A dashed line from each aircraft along its track: where it gets to in this time at its ground speed, flying straight">
+            <option value="0">off</option>
+            <option value="1">1 min</option>
+            <option value="2">2 min</option>
+            <option value="5">5 min</option>
+          </select>
+        </div>
+        <p class="view-label" id="view-map-label">Non-matching on the map</p>
+        <div class="row view-map-mode" role="radiogroup" aria-labelledby="view-map-label">
+          <label class="check"><input type="radio" name="view-map-mode" value="hide" checked> hide</label>
+          <label class="check"><input type="radio" name="view-map-mode" value="dim"> dim</label>
+        </div>
+        <label class="check" for="hide-filtered"><input id="hide-filtered" type="checkbox"> Hide filtered</label>
+        <p id="hidden-count" class="msg" role="status"></p>
+      </div>
+      <div id="box-layers" class="map-box" role="group" aria-label="Layers" hidden></div>
+      <div id="box-weather" class="map-box" role="group" aria-label="Weather" hidden>
+        <div id="radar-age">radar –</div>
+        <div id="radar-opacity-row"><label for="radar-opacity">Radar opacity</label> <input id="radar-opacity" type="range" min="0.2" max="1" step="0.05" value="0.7"></div>
+        <div id="radar-legend" class="legend-row"></div>
+        <div id="shape-legend" class="legend-note">Airspace: <span class="ln-pending">dotted, dim</span>: not yet in force · <span class="ln-cancelled">dashed</span>: cancelled</div>
+        <div id="raster-box" hidden>
+          <label for="raster-select">Raster</label> <select id="raster-select"></select> <select id="raster-band" aria-label="Altitude band" hidden></select>
+          <div id="raster-legend"></div>
+        </div>
+      </div>
+    </div>
     <div id="table-view" hidden>
       <table>
         <thead><tr>

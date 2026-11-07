@@ -363,7 +363,10 @@ BOOST_AUTO_TEST_CASE(dialer_connect_timeout_moves_to_next_address)
     const auto t0 = std::chrono::steady_clock::now();
     t.call([&] { d->start(); });
     BOOST_REQUIRE(test::eventually([&] { return d->connected(); }, slow(std::chrono::seconds(2))));
-    BOOST_CHECK(std::chrono::steady_clock::now() - t0 < slow(std::chrono::seconds(2)));
+    const auto took = std::chrono::steady_clock::now() - t0;
+    BOOST_CHECK(took < slow(std::chrono::seconds(2)));
+    // The first address was passed by the timeout, not by an immediate error.
+    BOOST_CHECK(took >= milliseconds(250));
     BOOST_TEST(t.call([&] { return d->counters().connects; }) == 1u);
     t.call([&] { d->stop(); srv->stopAll(); });
 }
@@ -383,4 +386,29 @@ BOOST_AUTO_TEST_CASE(dialer_zero_length_buf_dropped_and_counted)
     BOOST_TEST(test::eventually([&] { return srv->received() == "x"; }));
     BOOST_TEST(t.call([&] { return d->counters().messages_out; }) == 1u);
     t.call([&] { d->stop(); srv->stopAll(); });
+}
+
+BOOST_AUTO_TEST_CASE(dialer_stale_connect_timer_does_not_close_live_connection)
+{
+    // A 1 ms timeout against a server that accepts at once: the timer and the
+    // connect handler race; a timer that lost must never close the socket.
+    test::IoThread t;
+    auto srv = t.call([&] { return TestServer::create(t.io); });
+    TcpOptions o;
+    o.connect_timeout = milliseconds(1);
+    std::atomic<int> downs{0};
+    for (int i = 0; i < 50; ++i) {
+        auto d = Dialer::create(t.io, "127.0.0.1", srv->port(), o);
+        d->onConnection([&](bool up) {
+            if (!up)
+                ++downs;
+        });
+        t.call([&] { d->start(); });
+        test::eventually([&] { return d->connected(); }, slow(std::chrono::seconds(2)));
+        std::this_thread::sleep_for(milliseconds(3)); // let a stale timer handler run
+        BOOST_CHECK(d->connected());
+        t.call([&] { d->stop(); });
+    }
+    BOOST_TEST(downs.load() == 0);
+    t.call([&] { srv->stopAll(); });
 }

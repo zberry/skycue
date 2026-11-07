@@ -31,8 +31,9 @@ class Dialer : public std::enable_shared_from_this<Dialer> {
 public:
     static std::shared_ptr<Dialer> create(boost::asio::io_context& io, std::string host, uint16_t port,
                                           TcpOptions o = {});
-    // For tests: connects to the given endpoints in order, without resolving
-    // anything, so a test can pin the order of the addresses.
+    // Test support: connects to the given endpoints in order, without
+    // resolving anything, so a test can pin the order of the addresses.
+    // Not for production use.
     static std::shared_ptr<Dialer> create(boost::asio::io_context& io,
                                           std::vector<boost::asio::ip::tcp::endpoint> endpoints, TcpOptions o = {});
     ~Dialer();

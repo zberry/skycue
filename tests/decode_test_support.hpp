@@ -121,7 +121,10 @@ inline Bytes df5(uint32_t addr, uint32_t id13, int fs = 0) { return shortAp(5, f
 
 inline Me airbornePosition(int tc, const cpr_msg& m, int32_t alt_ft, bool bit8 = false) {
     Me me;
-    me.set(0, 5, static_cast<uint64_t>(tc)).set(7, 1, bit8 ? 1 : 0).set(8, 12, ac12Alt(alt_ft));
+    // TC 20-22 carry GNSS height in whole metres (no Q bit); TC 9-18 the barometric AC12.
+    const uint64_t field = (tc >= 20 && tc <= 22) ? static_cast<uint64_t>(std::lround(alt_ft / 3.28084))
+                                                  : ac12Alt(alt_ft);
+    me.set(0, 5, static_cast<uint64_t>(tc)).set(7, 1, bit8 ? 1 : 0).set(8, 12, field);
     me.set(21, 1, m.odd ? 1 : 0).set(22, 17, m.lat17).set(39, 17, m.lon17);
     return me;
 }

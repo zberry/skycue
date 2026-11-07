@@ -189,10 +189,12 @@ void Dialer::connectNext(uint64_t gen, const std::shared_ptr<tcp::socket>& sock,
         auto& st = *self->impl_;
         if (gen != st.gen)
             return;
-        if (at->step == step)
-            st.connect_timer.cancel();
+        // Void the timer of this address, also when its handler is already queued.
+        const bool timed_out = at->timed_out;
+        ++at->step;
+        st.connect_timer.cancel();
         if (cec) {
-            at->last_error = ep.address().to_string() + ": " + (at->timed_out ? std::string("timed out") : cec.message());
+            at->last_error = ep.address().to_string() + ": " + (timed_out ? std::string("timed out") : cec.message());
             self->connectNext(gen, sock, at);
             return;
         }

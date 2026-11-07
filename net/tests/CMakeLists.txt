@@ -58,3 +58,9 @@ if(COMMAND skycue_set_warnings)
 endif()
 add_test(NAME net_fanout COMMAND test_net_fanout)
 set_tests_properties(net_fanout PROPERTIES TIMEOUT 60)
+
+# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor when the host
+# project provides the helper (cmake/Hardening.cmake); standalone, unscaled.
+if(COMMAND skycue_scale_test_timeouts)
+  skycue_scale_test_timeouts()
+endif()

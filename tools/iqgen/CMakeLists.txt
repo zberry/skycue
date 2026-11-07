@@ -4,10 +4,8 @@
 # (synthesisers, CU8 writer, resampler), so the tests can link it.
 find_package(ZLIB REQUIRED)
 add_library(skycue_iqgen_core STATIC
-  bits.cpp
   inputs.cpp
   iq_writer.cpp
-  modes_crc.cpp
   placement.cpp
   reed_solomon.cpp
   resample.cpp

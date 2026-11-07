@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace iqgen {
+namespace skycued::coding {
 
 // The remainder of the frame's bits (all of them, parity field included)
 // divided by the generator: 0 for a correct DF11 with IID 0 or DF17/18; the
@@ -20,4 +20,10 @@ int modesDf(const std::vector<uint8_t>& frame);
 // DF11 (7 bytes) or DF17/18 (14 bytes) with a residual of exactly 0.
 bool modesClean(const std::vector<uint8_t>& frame);
 
-}  // namespace iqgen
+// Single-bit correction of a 14-byte frame whose residual is non-zero: if the
+// residual equals the syndrome of exactly one bit position outside the 5 DF
+// bits, flip that bit and return true. Never corrects a 7-byte frame, a DF
+// bit or two bits; the frame is left unchanged when it returns false.
+bool syndromeFix1(std::vector<uint8_t>& frame);
+
+}  // namespace skycued::coding

@@ -406,6 +406,13 @@ skycue_set_warnings(test_transports)
 add_test(NAME transports COMMAND test_transports)
 set_tests_properties(transports PROPERTIES TIMEOUT 60)
 
+# Mode S CRC, bit helpers and single-bit syndrome correction.
+add_executable(test_coding test_coding.cpp)
+target_link_libraries(test_coding PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_coding PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_coding)
+add_test(NAME coding COMMAND test_coding)
+
 # Inputs and the InputManager: pingStation inputs over real sockets, the
 # inputs file, hand edits and the lifecycle.
 add_executable(test_inputs test_inputs.cpp)

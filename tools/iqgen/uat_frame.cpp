@@ -1,6 +1,6 @@
 #include "uat_frame.hpp"
 
-#include "bits.hpp"
+#include "coding/bits.hpp"
 
 #include <stdexcept>
 
@@ -111,8 +111,8 @@ std::vector<uint8_t> uatFrameBits(const std::vector<uint8_t>& payload)
     const bool uplink = uatKindForPayload(payload.size()) == UatKind::uplink;
     std::vector<uint8_t> bits;
     bits.reserve(kSyncBits + 8 * encoded.size());
-    appendBits(bits, uplink ? kUplinkSyncWord : kDownlinkSyncWord, kSyncBits);
-    appendBytes(bits, encoded.data(), encoded.size());
+    skycued::coding::appendBits(bits, uplink ? kUplinkSyncWord : kDownlinkSyncWord, kSyncBits);
+    skycued::coding::appendBytes(bits, encoded.data(), encoded.size());
     return bits;
 }
 

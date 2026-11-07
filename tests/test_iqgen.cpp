@@ -5,10 +5,10 @@
 
 #include "gz_line_reader.hpp"
 
-#include "bits.hpp"
+#include "coding/bits.hpp"
 #include "inputs.hpp"
 #include "iq_writer.hpp"
-#include "modes_crc.hpp"
+#include "coding/modes_crc.hpp"
 #include "placement.hpp"
 #include "reed_solomon.hpp"
 #include "resample.hpp"
@@ -32,6 +32,7 @@
 #include <vector>
 
 using namespace iqgen;
+using namespace skycued::coding;
 namespace tt = boost::test_tools;
 
 namespace {

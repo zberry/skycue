@@ -1,6 +1,6 @@
 #include "inputs.hpp"
 
-#include "bits.hpp"
+#include "coding/bits.hpp"
 #include "gz_line_reader.hpp"
 #include "raw_formats.hpp"
 #include "uat_frame.hpp"
@@ -54,7 +54,7 @@ bool ignorable(const std::string& line)
 std::vector<uint8_t> hexBytes(const std::string& hex)
 {
     std::vector<uint8_t> out;
-    parseHex(hex, out);  // the parsers only hand on valid hex
+    skycued::coding::parseHex(hex, out);  // the parsers only hand on valid hex
     return out;
 }
 
@@ -193,7 +193,7 @@ std::vector<TimedFrame> readUatFile(const std::string& path, InputStats& stats)
         const std::size_t semi = u->text.find(';');
         const std::string hex = u->text.substr(1, semi == std::string::npos ? std::string::npos : semi - 1);
         TimedFrame t;
-        if (!parseHex(hex, t.payload) || !uatKindForPayload(t.payload.size())) {
+        if (!skycued::coding::parseHex(hex, t.payload) || !uatKindForPayload(t.payload.size())) {
             // A stratux log keeps whatever the radio handed on; skip such lines there.
             if (u->offset_ns) {
                 ++stats.skipped;

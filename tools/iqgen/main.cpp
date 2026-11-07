@@ -10,10 +10,10 @@
 // Next to OUT.cu8 the generators write OUT.frames.txt: one line per frame,
 // "<output sample offset> <hex> <expected|optional>[ overlap]".
 
-#include "bits.hpp"
+#include "coding/bits.hpp"
 #include "inputs.hpp"
 #include "iq_writer.hpp"
-#include "modes_crc.hpp"
+#include "coding/modes_crc.hpp"
 #include "placement.hpp"
 #include "resample.hpp"
 #include "synth.hpp"
@@ -410,9 +410,9 @@ int generate(bool uat, int argc, char** argv)
     if (!side.open())
         return ioError("writing " + side.path() + ": " + errnoText());
     for (const auto& f : placed.frames) {
-        const bool exp = !f.overlap && (uat || iqgen::modesClean(f.payload));
+        const bool exp = !f.overlap && (uat || skycued::coding::modesClean(f.payload));
         expected += exp ? 1 : 0;
-        side.stream() << f.start / per << ' ' << iqgen::toHex(f.payload, !uat) << ' '
+        side.stream() << f.start / per << ' ' << skycued::coding::toHex(f.payload, !uat) << ' '
                       << (exp ? "expected" : "optional") << (f.overlap ? " overlap" : "") << '\n';
     }
     if (!side.close())

@@ -14,9 +14,9 @@
 //      payload; on failure out is unchanged.
 // Seeds: seeds/iqgen_coding/ (docs/hardening.md "Fuzzing").
 
-#include "bits.hpp"
+#include "coding/bits.hpp"
 #include "fuzz_util.hpp"
-#include "modes_crc.hpp"
+#include "coding/modes_crc.hpp"
 #include "reed_solomon.hpp"
 #include "uat_frame.hpp"
 
@@ -71,26 +71,26 @@ void modesCrc(const std::string& payload)
     std::vector<uint8_t> frame(n, 0);
     std::copy_n(payload.begin(), std::min(n, payload.size()), frame.begin());
     frame[n - 3] = frame[n - 2] = frame[n - 1] = 0;
-    const uint32_t crc = iqgen::modesCrcResidual(frame);
+    const uint32_t crc = skycued::coding::modesCrcResidual(frame);
     FUZZ_CHECK(crc <= 0xffffffu);
     frame[n - 3] = static_cast<uint8_t>(crc >> 16);
     frame[n - 2] = static_cast<uint8_t>(crc >> 8);
     frame[n - 1] = static_cast<uint8_t>(crc);
-    FUZZ_CHECK(iqgen::modesCrcResidual(frame) == 0);
+    FUZZ_CHECK(skycued::coding::modesCrcResidual(frame) == 0);
 }
 
 void hex(const std::string& payload)
 {
     const std::vector<uint8_t> sentinel{0xde, 0xad};
     std::vector<uint8_t> out = sentinel;
-    if (!iqgen::parseHex(payload, out)) {
+    if (!skycued::coding::parseHex(payload, out)) {
         FUZZ_CHECK(out == sentinel);
         return;
     }
     std::string lower = payload;
     for (char& c : lower)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    FUZZ_CHECK(iqgen::toHex(out, false) == lower);
+    FUZZ_CHECK(skycued::coding::toHex(out, false) == lower);
 }
 
 }  // namespace

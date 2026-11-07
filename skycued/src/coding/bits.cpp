@@ -1,8 +1,8 @@
-#include "bits.hpp"
+#include "coding/bits.hpp"
 
 #include <stdexcept>
 
-namespace iqgen {
+namespace skycued::coding {
 
 namespace {
 
@@ -62,4 +62,4 @@ void appendBytes(std::vector<uint8_t>& bits, const uint8_t* p, std::size_t n)
         appendBits(bits, p[i], 8);
 }
 
-}  // namespace iqgen
+}  // namespace skycued::coding

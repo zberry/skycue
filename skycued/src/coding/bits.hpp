@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace iqgen {
+namespace skycued::coding {
 
 // Even length, [0-9a-fA-F] only (no prefix, no separators). On success out
 // holds the bytes; on failure it is left unchanged.
@@ -22,4 +22,4 @@ void appendBits(std::vector<uint8_t>& bits, uint64_t value, unsigned nbits);
 // Each of the n bytes at p, MSB first.
 void appendBytes(std::vector<uint8_t>& bits, const uint8_t* p, std::size_t n);
 
-}  // namespace iqgen
+}  // namespace skycued::coding

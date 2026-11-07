@@ -1,6 +1,6 @@
 #include "synth.hpp"
 
-#include "bits.hpp"
+#include "coding/bits.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -50,7 +50,7 @@ void ModesSynth::addFrame(int64_t start_tick, const std::vector<uint8_t>& frame)
     for (int64_t p : kPreambleTicks)
         addPulse(start_tick + p);
     std::vector<uint8_t> bits;
-    appendBytes(bits, frame.data(), frame.size());
+    skycued::coding::appendBytes(bits, frame.data(), frame.size());
     for (std::size_t b = 0; b < bits.size(); ++b) {
         const int64_t chip = start_tick + kDataStartTicks + static_cast<int64_t>(b) * kTicksPerUs;
         addPulse(bits[b] ? chip : chip + kPulseTicks);

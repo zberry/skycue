@@ -6,6 +6,7 @@
 # them at fuzz time (scripts/dev/run-fuzz.sh).
 
 skycue_add_fuzzer(readsb_line SOURCES fuzz_readsb_line.cpp)
+skycue_add_fuzzer(decode_1090 SOURCES fuzz_decode_1090.cpp)
 skycue_add_fuzzer(raw_formats SOURCES fuzz_raw_formats.cpp)
 skycue_add_fuzzer(recording SOURCES fuzz_recording.cpp)
 skycue_add_fuzzer(fisb_decoder SOURCES fuzz_fisb_decoder.cpp)

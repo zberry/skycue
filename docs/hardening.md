@@ -627,6 +627,23 @@ static-analysis run (`scripts/dev/run-static.sh`) analyses `net/src` with the
 rest of the library and daemon sources; `net/tests` is not analysed, like
 `tests/`.
 
+## The 1090 decoder
+
+The frame decoder (`skycued/src/decode/`) has the libFuzzer harness
+`decode_1090` (`tests/fuzz/fuzz_decode_1090.cpp`): the input is cut into
+7 and 14 byte frames by a length byte and fed to a `ModesDecoder` with a
+64-key table, so eviction runs too; it must not throw, every frame must be
+counted, and `lat`/`lon` of an observation are both set or neither. Seed:
+`seeds/decode_1090/seed-1.bin` (one DF17 identification frame and one DF11
+frame, each after its length byte). Run it like the others with
+`scripts/dev/run-fuzz.sh decode_1090`.
+
+The robustness test is an ordinary ctest, so every sanitizer and fuzz tree
+runs it: `ctest -R '^decode_robustness$'` (10 MB of random bytes, single and
+multiple bit flips against a clean synthetic flight, key table limits, wrong
+frame lengths; fixed PRNG seeds). `ctest -R '^(decode_|coding)'` runs all the
+decoder tests.
+
 ## Soak
 
 ### Running

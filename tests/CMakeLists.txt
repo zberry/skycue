@@ -435,6 +435,14 @@ target_compile_definitions(test_decode_modes PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_decode_modes)
 add_test(NAME decode_modes COMMAND test_decode_modes)
 
+# Damaged input: random bytes, bit flips, key table limits, wrong frame lengths.
+add_executable(test_decode_robustness test_decode_robustness.cpp)
+target_link_libraries(test_decode_robustness PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_robustness PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_decode_robustness)
+add_test(NAME decode_robustness COMMAND test_decode_robustness)
+set_tests_properties(decode_robustness PROPERTIES TIMEOUT 120)
+
 # Inputs and the InputManager: pingStation inputs over real sockets, the
 # inputs file, hand edits and the lifecycle.
 add_executable(test_inputs test_inputs.cpp)

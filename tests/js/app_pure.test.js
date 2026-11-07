@@ -1131,15 +1131,15 @@ test('viewActiveCount', () => {
 test('normalizeViewSets: field by field and caps', () => {
   assert.strictEqual(P.VIEW_SETS_MAX, 20);
   assert.strictEqual(P.VIEW_SET_NAME_MAX, 40);
-  assert.deepStrictEqual(P.normalizeViewSets('x'), { version: 1, sets: [] });
-  assert.deepStrictEqual(P.normalizeViewSets(null), { version: 1, sets: [] });
-  assert.deepStrictEqual(P.normalizeViewSets({ sets: 'nope' }), { version: 1, sets: [] });
+  assert.deepStrictEqual(P.normalizeViewSets('x'), { version: 2, sets: [] });
+  assert.deepStrictEqual(P.normalizeViewSets(null), { version: 2, sets: [] });
+  assert.deepStrictEqual(P.normalizeViewSets({ sets: 'nope' }), { version: 2, sets: [] });
   const s = P.normalizeViewSets({ version: 1, sets: [
     { name: ' A ', view: { search: 'ual', mapMode: 'bogus' }, hideFiltered: 1 },
     { name: 'A', view: {} }, { name: '', view: {} }, { name: 7 },
     { name: 'L'.repeat(50), view: null, hideFiltered: 'yes' }
   ] });
-  assert.strictEqual(s.version, 1);
+  assert.strictEqual(s.version, 2);
   assert.deepStrictEqual(s.sets.map((x) => x.name), ['A', 'L'.repeat(40)]);
   assert.deepStrictEqual(s.sets[0].view, P.normalizeView({ search: 'ual' }));
   assert.strictEqual(s.sets[0].hideFiltered, true);
@@ -1198,6 +1198,51 @@ test('weatherDot: faded, missing, no fisb', () => {
   assert.strictEqual(P.weatherDot([{ on: true, drawn: false, faded: false }], true), true);
   assert.strictEqual(P.weatherDot([{ on: true, drawn: false, faded: false }], false), false);
   assert.strictEqual(P.weatherDot([], true), false);
+});
+test('normalizeMapView: partial, valid fields only', () => {
+  assert.strictEqual(P.normalizeMapView(undefined), undefined);
+  assert.strictEqual(P.normalizeMapView('x'), undefined);
+  assert.strictEqual(P.normalizeMapView([]), undefined);
+  assert.deepStrictEqual(P.normalizeMapView({}), {});
+  assert.deepStrictEqual(P.normalizeMapView({ style: 'dark', borders: 1, cities: 0, radarOpacity: 0.4, layers: { tfr: 1, bogus: 1 }, junk: 1 }),
+    { style: 'dark', borders: true, cities: false, layers: { tfr: true }, radarOpacity: 0.4 });
+  assert.deepStrictEqual(P.normalizeMapView({ style: 'sepia', radarOpacity: 5, layers: 'x' }), {});
+  assert.deepStrictEqual(P.normalizeMapView({ radarOpacity: '0.5' }), {});
+});
+test('normalizeViewSets: version 2, old sets keep no map', () => {
+  assert.strictEqual(P.VIEW_SETS_VERSION, 2);
+  const s = P.normalizeViewSets({ version: 1, sets: [{ name: 'Old', view: {}, hideFiltered: false }, { name: 'New', view: {}, hideFiltered: true, map: { style: 'dark', layers: { sua: true } } }] });
+  assert.strictEqual(s.version, 2);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(s.sets[0], 'map'), false);
+  assert.deepStrictEqual(s.sets[1].map, { style: 'dark', layers: { sua: true } });
+  assert.deepStrictEqual(P.normalizeViewSets({ sets: [{ name: 'E', view: {}, map: {} }] }).sets[0].map, {});
+});
+test('mapViewMatches and viewSetMatches with a map', () => {
+  const cur = { style: 'light', borders: false, cities: false, layers: P.LAYER_DEFAULTS, radarOpacity: 0.7 };
+  assert.strictEqual(P.mapViewMatches(undefined, cur), true);
+  assert.strictEqual(P.mapViewMatches({}, cur), true);
+  assert.strictEqual(P.mapViewMatches({ style: 'light', layers: { conus: true } }, cur), true);
+  assert.strictEqual(P.mapViewMatches({ style: 'dark' }, cur), false);
+  assert.strictEqual(P.mapViewMatches({ layers: { conus: false } }, cur), false);
+  assert.strictEqual(P.mapViewMatches({ radarOpacity: 0.4 }, cur), false);
+  assert.strictEqual(P.mapViewMatches({ style: 'dark' }, { layers: P.LAYER_DEFAULTS, radarOpacity: 0.7 }), true, 'no tiles: style cannot be honoured, so it matches');
+  assert.strictEqual(P.mapViewMatches({ style: 'dark', layers: { tfr: true }, radarOpacity: 0.3 }, undefined), true, 'no current map view');
+  assert.strictEqual(P.mapViewMatches({ style: 'dark' }, null), true);
+  assert.strictEqual(P.mapViewMatches({ style: 'dark' }, 'x'), true);
+  const set = P.normalizeViewSets({ sets: [{ name: 'A', view: { search: 'ual' }, hideFiltered: false, map: { style: 'dark' } }] }).sets[0];
+  assert.strictEqual(P.viewSetMatches(set, P.normalizeView({ search: 'ual' }), false, cur), false);
+  assert.strictEqual(P.viewSetMatches(set, P.normalizeView({ search: 'ual' }), false, Object.assign({}, cur, { style: 'dark' })), true);
+  assert.strictEqual(P.viewSetMatches(set, P.normalizeView({ search: 'ual' }), false), true, 'old call shape');
+  const old = P.normalizeViewSets({ sets: [{ name: 'B', view: { search: 'ual' } }] }).sets[0];
+  assert.strictEqual(P.viewSetMatches(old, P.normalizeView({ search: 'ual' }), false, cur), true);
+});
+test('putViewSet records the map view', () => {
+  const cur = { style: 'light', borders: true, layers: P.LAYER_DEFAULTS, radarOpacity: 0.7 };
+  const r = P.putViewSet({ version: 2, sets: [] }, 'A', {}, false, cur);
+  assert.strictEqual(r.store.version, 2);
+  assert.deepStrictEqual(r.store.sets[0].map, { style: 'light', borders: true, layers: P.LAYER_DEFAULTS, radarOpacity: 0.7 });
+  const r2 = P.putViewSet({ version: 2, sets: [] }, 'B', {}, false);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(r2.store.sets[0], 'map'), false);
 });
 test('putViewSet: add, replace, cap', () => {
   let r = P.putViewSet(P.normalizeViewSets(null), 'A', P.normalizeView({ search: 'ual' }), false);
@@ -1589,8 +1634,8 @@ test('viewSetsFillTrails: old sets get the current Trails fields once; newer set
   const again = P.viewSetsFillTrails(r.store, P.normalizeView(null));
   assert.strictEqual(again.filled, 0);
   assert.deepStrictEqual(again.store, r.store);
-  assert.deepStrictEqual(P.viewSetsFillTrails(null, cur), { store: { version: 1, sets: [] }, filled: 0 });
-  assert.deepStrictEqual(P.viewSetsFillTrails('{', cur), { store: { version: 1, sets: [] }, filled: 0 });
+  assert.deepStrictEqual(P.viewSetsFillTrails(null, cur), { store: { version: 2, sets: [] }, filled: 0 });
+  assert.deepStrictEqual(P.viewSetsFillTrails('{', cur), { store: { version: 2, sets: [] }, filled: 0 });
   assert.strictEqual(raw.sets[0].view.trailShow, undefined, 'the input is not changed');
 });
 test('TRAIL_NONE_COLOR is neutral: not a scale or a decision colour', () => {

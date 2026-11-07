@@ -113,11 +113,11 @@
   }
 
   // ---- settings file (spec 4.4, 11 "Import merge") ----
-  // {skycue_settings: 1, sets: [...], alerts: {mute, rules, watch}}: the
+  // {skycue_settings: 2, sets: [...], alerts: {mute, rules, watch}}: the
   // filter sets and the alert config, never the strip's hidden and drawer
   // state. Import validates it with the stores' own normalisers.
 
-  var SETTINGS_VERSION = 1;
+  var SETTINGS_VERSION = 2;
   var SETTINGS_MAX_BYTES = 1048576;
 
   // The alert config as the file carries it.
@@ -137,12 +137,12 @@
     var obj;
     try { obj = JSON.parse(text); } catch (e) { return { ok: false, error: 'not JSON' }; }
     if (!isObject(obj) || typeof obj.skycue_settings !== 'number') return { ok: false, error: 'not a skycue settings file' };
-    if (obj.skycue_settings !== SETTINGS_VERSION) return { ok: false, error: 'unsupported version ' + obj.skycue_settings };
+    if (obj.skycue_settings !== 1 && obj.skycue_settings !== SETTINGS_VERSION) return { ok: false, error: 'unsupported version ' + obj.skycue_settings };
     var inAlerts = isObject(obj.alerts) ? obj.alerts : null;
     var inRules = inAlerts && isObject(inAlerts.rules) ? inAlerts.rules : {};
     return {
       ok: true,
-      sets: P.normalizeViewSets({ version: 1, sets: obj.sets }).sets,
+      sets: P.normalizeViewSets({ version: P.VIEW_SETS_VERSION, sets: obj.sets }).sets,
       alerts: inAlerts ? normalizeConfig(inAlerts) : null,
       alertRules: RULES.map(function (r) { return r.id; }).filter(function (id) { return isObject(inRules[id]); })
     };

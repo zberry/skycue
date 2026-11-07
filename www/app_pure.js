@@ -1485,13 +1485,32 @@
     });
   }
 
-  // Saved filter sets (spec 4): skycue.viewSets is {version: 1, sets:
-  // [{name, view, hideFiltered}]}, at most VIEW_SETS_MAX named Display-filter
-  // states. A name is trimmed and cut to VIEW_SET_NAME_MAX; '' is no name.
+  // Saved views (spec 4): skycue.viewSets is {version: 2, sets:
+  // [{name, view, hideFiltered, map?}]}, at most VIEW_SETS_MAX named
+  // Display-filter states. The optional map holds the map as saved (style,
+  // borders, cities, layers, radarOpacity), each field only when valid; a
+  // set saved before version 2 has no map and leaves the map alone. A name
+  // is trimmed and cut to VIEW_SET_NAME_MAX; '' is no name.
+  var VIEW_SETS_VERSION = 2;
   var VIEW_SETS_MAX = 20;
   var VIEW_SET_NAME_MAX = 40;
   function viewSetName(v) {
     return typeof v === 'string' ? v.trim().slice(0, VIEW_SET_NAME_MAX).trim() : '';
+  }
+  // A set's map view: undefined when `obj` is not an object, else only the
+  // valid fields present (possibly {}).
+  function normalizeMapView(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return undefined;
+    var out = {};
+    if (obj.style === 'light' || obj.style === 'dark') out.style = obj.style;
+    if (obj.borders !== undefined) out.borders = !!obj.borders;
+    if (obj.cities !== undefined) out.cities = !!obj.cities;
+    if (obj.layers && typeof obj.layers === 'object' && !Array.isArray(obj.layers)) {
+      out.layers = normalizeLayersPartial(obj.layers);
+    }
+    if (typeof obj.radarOpacity === 'number' && isFinite(obj.radarOpacity) &&
+        obj.radarOpacity >= 0.2 && obj.radarOpacity <= 1) out.radarOpacity = obj.radarOpacity;
+    return out;
   }
   // Any input (an object, a JSON string, garbage) to a store. Each set's
   // fields fall back on their own; a set without a name, or with the name of
@@ -1508,9 +1527,12 @@
       var name = viewSetName(s.name);
       if (name === '' || Object.prototype.hasOwnProperty.call(seen, name)) continue;
       seen[name] = true;
-      sets.push({ name: name, view: normalizeView(s.view), hideFiltered: viewBool(s.hideFiltered, false) });
+      var set = { name: name, view: normalizeView(s.view), hideFiltered: viewBool(s.hideFiltered, false) };
+      var m = normalizeMapView(s.map);
+      if (m !== undefined) set.map = m;
+      sets.push(set);
     }
-    return { version: 1, sets: sets };
+    return { version: VIEW_SETS_VERSION, sets: sets };
   }
   // Sets saved before the Trails group existed lack its fields; applying
   // one would put Trails back to the defaults. `raw` is the stored store
@@ -1537,22 +1559,44 @@
     }
     return { store: normalizeViewSets(raw), filled: filled };
   }
-  // Whether the current state (a view and the Hide filtered flag) is the set's.
-  function viewSetMatches(set, view, hideFiltered) {
+  // Whether the map as saved (undefined for an old set) is the current map
+  // view: every field the set holds equals the current one. A field the
+  // current view lacks (the install cannot honour it) counts as a match, and
+  // so does a missing current view.
+  function mapViewMatches(stored, current) {
+    if (stored === undefined) return true;
+    var cur = current && typeof current === 'object' ? current : {};
+    var own = Object.prototype.hasOwnProperty;
+    var ok = ['style', 'borders', 'cities', 'radarOpacity'].every(function (k) {
+      return !own.call(stored, k) || cur[k] === undefined || stored[k] === cur[k];
+    });
+    if (!ok) return false;
+    if (stored.layers && cur.layers && typeof cur.layers === 'object') {
+      return LAYER_IDS.every(function (id) {
+        return !own.call(stored.layers, id) || cur.layers[id] === undefined || stored.layers[id] === cur.layers[id];
+      });
+    }
+    return true;
+  }
+  // Whether the current state (a view, the Hide filtered flag and, when
+  // given, the map view) is the set's.
+  function viewSetMatches(set, view, hideFiltered, mapView) {
     return JSON.stringify(normalizeView(set.view)) === JSON.stringify(normalizeView(view)) &&
-      !!set.hideFiltered === !!hideFiltered;
+      !!set.hideFiltered === !!hideFiltered && mapViewMatches(set.map, mapView);
   }
   // A new store with the set `name` holding this state: a set of the same
   // name is replaced in place, else the set is added at the end. `index` is
   // where it is; {error} when the name is empty or the store is full.
-  function putViewSet(store, name, view, hideFiltered) {
+  function putViewSet(store, name, view, hideFiltered, mapView) {
     name = viewSetName(name);
     if (name === '') return { error: 'A filter set needs a name.' };
     var sets = store.sets.slice(), set = { name: name, view: normalizeView(view), hideFiltered: !!hideFiltered };
+    var m = normalizeMapView(mapView);
+    if (m !== undefined) set.map = m;
     var i = sets.map(function (s) { return s.name; }).indexOf(name);
     if (i < 0 && sets.length >= VIEW_SETS_MAX) return { error: 'At most ' + VIEW_SETS_MAX + ' filter sets: delete one first.' };
     if (i >= 0) sets[i] = set; else sets.push(set);
-    return { store: { version: 1, sets: sets }, replaced: i >= 0, index: i >= 0 ? i : sets.length - 1 };
+    return { store: { version: VIEW_SETS_VERSION, sets: sets }, replaced: i >= 0, index: i >= 0 ? i : sets.length - 1 };
   }
 
   // The UTC calendar date of a time as YYYY-MM-DD (the downloads' file names).
@@ -1886,6 +1930,7 @@
     viewTrailsDefault: viewTrailsDefault,
     MAP_BOXES: MAP_BOXES, mapBoxName: mapBoxName, mapBoxToggle: mapBoxToggle,
     LAYER_IDS: LAYER_IDS, LAYER_DEFAULTS: LAYER_DEFAULTS, normalizeLayers: normalizeLayers,
+    VIEW_SETS_VERSION: VIEW_SETS_VERSION, normalizeMapView: normalizeMapView, mapViewMatches: mapViewMatches,
     normalizeLayersPartial: normalizeLayersPartial, layersOnCount: layersOnCount, weatherDot: weatherDot,
     projectPoint: projectPoint, aheadNm: aheadNm, AHEAD_STEP_NM: AHEAD_STEP_NM, projectAhead: projectAhead,
     VIEW_SETS_MAX: VIEW_SETS_MAX, VIEW_SET_NAME_MAX: VIEW_SET_NAME_MAX, viewSetName: viewSetName,

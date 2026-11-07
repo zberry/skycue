@@ -111,17 +111,25 @@ const vset = (name, view, hideFiltered) => ({ name, view: P.normalizeView(view),
 const parsedFile = (o) => { const r = A.parseSettings(JSON.stringify(Object.assign({ skycue_settings: 1 }, o))); assert.ok(r.ok, r.error); return r; };
 
 test('settingsFile: shape', () => {
-  assert.strictEqual(A.SETTINGS_VERSION, 1);
+  assert.strictEqual(A.SETTINGS_VERSION, 2);
   assert.strictEqual(A.SETTINGS_MAX_BYTES, 1048576);
   const c = A.defaultConfig();
   c.hidden = true; c.drawer = true; c.mute = true; c.watch = ['ual'];
   const f = A.settingsFile({ version: 1, sets: [vset('A', { search: 'ual' })] }, c);
   assert.deepStrictEqual(Object.keys(f), ['skycue_settings', 'sets', 'alerts']);
-  assert.strictEqual(f.skycue_settings, 1);
+  assert.strictEqual(f.skycue_settings, 2);
   assert.deepStrictEqual(Object.keys(f.alerts), ['mute', 'rules', 'watch']);
   assert.deepStrictEqual(f.alerts, { mute: true, rules: A.defaultConfig().rules, watch: ['ual'] });
   assert.deepStrictEqual(f.sets, [vset('A', { search: 'ual' })]);
   assert.deepStrictEqual(A.exportConfig(c), f.alerts);
+});
+
+test('settings file carries a set map view', () => {
+  const set = Object.assign(vset('M', { search: 'ual' }), { map: { style: 'dark', layers: { sua: true } } });
+  const f = A.settingsFile({ version: 2, sets: [set] }, A.defaultConfig());
+  const r = A.parseSettings(JSON.stringify(f));
+  assert.ok(r.ok, r.error);
+  assert.deepStrictEqual(r.sets[0].map, { style: 'dark', layers: { sua: true } });
 });
 
 test('parseSettings: validation', () => {
@@ -129,7 +137,9 @@ test('parseSettings: validation', () => {
   assert.deepStrictEqual(A.parseSettings('{"sets":[]}'), { ok: false, error: 'not a skycue settings file' });
   assert.deepStrictEqual(A.parseSettings('[1]'), { ok: false, error: 'not a skycue settings file' });
   assert.deepStrictEqual(A.parseSettings('null'), { ok: false, error: 'not a skycue settings file' });
-  assert.deepStrictEqual(A.parseSettings('{"skycue_settings":2}'), { ok: false, error: 'unsupported version 2' });
+  assert.deepStrictEqual(A.parseSettings('{"skycue_settings":3}'), { ok: false, error: 'unsupported version 3' });
+  assert.strictEqual(A.parseSettings('{"skycue_settings":1}').ok, true, 'version 1 files still import');
+  assert.strictEqual(A.parseSettings('{"skycue_settings":2}').ok, true);
   const r = parsedFile({
     sets: [{ name: 'A', view: { search: 'ual' }, hideFiltered: true }, { name: 'B', view: 'bogus' }],
     alerts: { rules: { watch: { enabled: true } }, watch: ['ual'] }

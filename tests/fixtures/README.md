@@ -34,9 +34,11 @@ These files are not in the repository. Without them the test cases that read
 them are skipped (the skip message names the file).
 
 `scripts/fixtures/fetch-test-captures.sh [--cache DIR] [--fixtures DIR] [--offline]`
-downloads the four captures below from their upstream repositories at the
-pinned commits, checks their SHA-256 values and installs `raw/modes-120s.csv.gz`,
-`raw/uat-sample.txt.gz`, `raw/stratux-uat-2015.log.gz` and `fisb/tg30.978`, then
+downloads the captures below from their upstream repositories (or, for OpenSky
+and Zenodo, their data hosts) at pinned URLs, checks their SHA-256 values and installs
+`raw/modes-120s.csv.gz`, `raw/uat-sample.txt.gz`, `raw/stratux-uat-2015.log.gz`,
+`fisb/tg30.978`, `raw/pymodes-*.csv`, `raw/dump1090-modes1.bin` and `opensky/*/`
+(`iq/porto-awec2026/` only with `SKYCUE_FETCH_IQ=1`), then
 regenerates `fisb/received-with-uplinks.jsonl` and `fisb/received-tg30.jsonl`
 with the generators in `fisb/`. These paths are git-ignored. The pins are in
 one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
@@ -48,6 +50,8 @@ one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
 | uat sample | flightaware/dump978 | `f40aa9a0d2d0a0067c0c628b44ba316f7049b8ce` |
 | stratux log | cyoung/stratux | `1a0d1ca9e94d1c98ae1f4305e073fdd6b5a810be` |
 | tg30 | rand-projects/fisb-decode | `c3d3b0473429336b1a98672b2e8b276c24d49765` |
+| pyModeS tests/data | junzis/pyModeS | `487cfd6139ecea10a833afea2e58f631dc875702` |
+| modes1.bin | MalcolmRobb/dump1090 | `bff92c4ad772a0a8d433f788d39dae97e00e4dbe` |
 
 ## raw/modes-120s.csv.gz
 
@@ -223,3 +227,98 @@ Hand-written for this repository, committed, no third-party data: 19 invented
 PIREP texts in two `#` header lines plus one report per line, used by
 `pirep_ov_forms_from_fixture` in `tests/js/app_pure.test.js`. See
 `fisb/README.md`.
+
+## raw/pymodes-adsb.csv, raw/pymodes-commb-df20.csv, raw/pymodes-commb-df21.csv
+
+- Origin: https://github.com/junzis/pyModeS, files `tests/data/sample_data_adsb.csv`,
+  `sample_data_commb_df20.csv` and `sample_data_commb_df21.csv` at commit
+  `487cfd6139ecea10a833afea2e58f631dc875702` (renamed here, content unchanged).
+- Licence: GPL-3.0 (the pyModeS repository's licence; no separate data licence). Fetched
+  only, never committed or distributed in releases, like `modes-120s.csv.gz`.
+- Content: `pymodes-adsb.csv`: 2,000 DF17 frames over 730 s from 2016-03-15 (1,032
+  addresses; type codes 11 position 937, 19 velocity 965, 4 identification 98; the
+  origin of the capture is not stated). `pymodes-commb-df20.csv` and `-df21.csv`: 5,000 DF20
+  and 5,000 DF21 Comm-B replies each (189 and 158 addresses), from 2017-05-21, about 26
+  s and 61 s; the Comm-B payloads (BDS 4,0, 5,0, 6,0 and others) are what makes
+  them useful, as ADS-B captures hold none.
+- Line format: `epoch,"HEX","icao",typecode` (adsb) and `epoch,ICAO,HEX` (commb); epoch
+  in whole seconds, many frames share one second; the commb files start with a UTF-8
+  byte order mark. Sizes 107,902 and 240,003 bytes each.
+- Use: hand-run with a loop that strips the columns; no test reads them yet. They cover
+  the DF20/21 path (altitude, identity code, no ADS-B content) that the 120 s capture
+  barely touches.
+- sha256: `7534e8186adec1aa44589c27d6059d0cde102c12d7e77c2584041f33afb99d9f` (adsb),
+  `4c3ac03dd47c1280a9b98fb7e951fa52afa33597421f25a8068fd23f12195a08` (df20),
+  `b119c3cd26a9c0ec16ad13ef1b8a7d85f0bf63543ac405118aeb5fd17c68e509` (df21)
+
+## raw/dump1090-modes1.bin
+
+- Origin: https://github.com/MalcolmRobb/dump1090, file `testfiles/modes1.bin` at commit
+  `bff92c4ad772a0a8d433f788d39dae97e00e4dbe` (renamed here).
+- Licence: BSD-3-Clause (the repository's licence; no separate data licence).
+- Content: 713,736 bytes of raw 8-bit unsigned I/Q at 2 MS/s from an RTL-SDR, about
+  0.18 s with a handful of Mode S frames. It is IQ, not a Beast stream: it exercises a
+  demodulator, not the frame decoder. No test reads it yet.
+- sha256: `3a33e16025da8669149c780075950b4e908ca036ea21f9583c113f60d5fb3094`
+
+## opensky/
+
+- Origin: the OpenSky Network sample bucket, `https://s3.opensky-network.org/data-samples/incident-data/`,
+  five tarballs (the pin lines in the fetch script give each file name and SHA-256).
+  Each tarball is one aircraft's extract of OpenSky's Trino tables; the fetch script
+  unpacks the position, velocity and identification tables and the README.txt into
+  `opensky/<name>/` (the other tables, rollcall/allcall/ACAS, operational status and
+  state vectors, stay in the cache).
+- Licence: CC BY 4.0, stated in each tarball's README ("Cite Schaefer et al. (2014),
+  'Bringing up OpenSky'"). Attribution: OpenSky Network, https://opensky-network.org.
+  The data is real flights, including two diversions and a fatal accident; do not republish
+  derived material without that in mind.
+- Content, by file (rows of the unpacked tables; one row per reception, the same frame
+  seen by several sensors may be one row with `msgcount` > 1):
+
+  | Name | Aircraft | Window | position | velocity | identification |
+  | --- | --- | --- | --- | --- | --- |
+  | `fz1073_2026-09-30_dubai-tabuk` | 8965d1, airliner | 2026-09-30 | 4,798 | 4,466 | 460 |
+  | `n722bd_2026-11-01_florida` | a9ab17, Learjet 60 | 2026-11-01 | 12,954 | 8,876 | 1,340 |
+  | `n931tt_2026-10-13_wisconsin` | aceb1b, PA-46 | 2026-10-13/14 | 11,801 | 7,676 | 1,178 |
+  | `os82_2026-10-18_telaviv-sofia-vienna` | 440604, airliner | 2026-10-18/19 | 25,713 | 20,807 | 2,610 |
+  | `xauci_2025-01-31_philadelphia` | 0d086e, Learjet 55 | 2025-01-31 | 22,820 | 20,527 | 1,938 |
+
+- Columns used: `rawmsg` (the frame, hex), `mintime` (receive time, epoch seconds, ms
+  resolution), `icao24`; position: `lat`, `lon`, `alt` (metres), `baroalt`, `surface`;
+  velocity: `velocity` (m/s), `heading`; identification: `identity` (callsign, space
+  padded). Surface frames are present in `n722bd` (about 470) and `os82` (about 510). No
+  DF18 (TIS-B/ADS-R): each file is one aircraft.
+- What it exercises: the whole airborne path of the decoder (position, altitude, velocity,
+  identification) against another decoder's output for the same frames, in `decode_opensky`
+  (`tests/test_decode_opensky.cpp`). Skipped when absent.
+- Not unpacked: the other tables (rollcall DF4/5/20/21, allcall DF11, ACAS, operational
+  status, state vectors); they stay in the cache tarballs.
+
+## iq/porto-awec2026/ (only with SKYCUE_FETCH_IQ=1)
+
+- Origin: Zenodo record 23342598, "Aircraft radio data - AWEC 2026" (DOI
+  10.5281/zenodo.23342598), file `AWEC2026_ADSB_Data.zip` (19,575,669 bytes), unpacked to
+  `recording.bin`, `aircraft.csv`, `messages.csv`, `positions.csv`, `candidates.csv`,
+  `readme.md` and `license.md` (the `__MACOSX` and `.DS_Store` entries are dropped).
+- Licence: CC BY 4.0, Conrado Guimaraes da Costa, University of Porto (license.md).
+- Content: `recording.bin`, 72,876,032 bytes, 8-bit unsigned I/Q at 2 MS/s, 18.2 s from
+  an RTL-SDR with a 3 m antenna and no LNA, urban; `messages.csv` the 122 frames of one
+  aircraft (407181) with decoded fields, `positions.csv` 10 positions, `candidates.csv`
+  all 278 demodulator candidates with CRC validity and quality scores.
+- Use: a demodulator reference (including CRC-failed candidates); no test reads it yet.
+  Not fetched by default to keep the download small (the zip is 20 MB, 73 MB unpacked).
+- sha256 of the zip: `407f9d8ebf6451afb7ffa12c768286235f4791fdc8e03fce8136b621108114b9`
+
+## Not used, and why
+
+- Madrid IQ (Zenodo 23360412, CC BY 4.0): 640 MB, 20 s at 8 MS/s; too large to fetch with
+  the rest. An opt-in manual download from the record page for demodulator benchmarks;
+  not pinned.
+- OpenSky's full raw archive (Trino/Impala): needs an account and research terms.
+- ADS-B Exchange samples: commercial licence. adsb.lol globe_history: ODbL, decoded
+  traces and huge. Zenodo 7923702 and 3937483: non-commercial licences.
+- IEEE DataPort recordings: need a login, so no pinned URL.
+- EETAC Radarcape days (Zenodo 10054835): decoded SBS text, 150 to 500 MB a day.
+- UAT: no public 978 MHz IQ recording was found; the Stratux `example.dump978` and
+  `example.radar` uplink-only files carry no timestamps and are not pinned.

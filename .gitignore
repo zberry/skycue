@@ -30,3 +30,5 @@ skycue.runtime.json.rejected
 /tests/fixtures/fisb/tg30.978
 /tests/fixtures/fisb/received-with-uplinks.jsonl
 /tests/fixtures/fisb/received-tg30.jsonl
+/tests/fixtures/opensky/
+/tests/fixtures/iq/

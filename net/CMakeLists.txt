@@ -24,6 +24,7 @@ add_library(skycue_net STATIC
   src/dialer.cpp
   src/endpoint.cpp
   src/framer.cpp
+  src/listener.cpp
   src/log.cpp
   src/tcp_options.cpp)
 add_library(skycue::net ALIAS skycue_net)

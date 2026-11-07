@@ -75,6 +75,14 @@ void sendPlain(const std::string& to, uint16_t port, const std::string& data, co
     s.send_to(asio::buffer(data), udp::endpoint(asio::ip::make_address(to), port));
 }
 
+UdpTarget target(const std::string& host, uint16_t port)
+{
+    UdpTarget t;
+    t.host = host;
+    t.port = port;
+    return t;
+}
+
 constexpr const char* kGroup = "239.255.77.1";
 
 // True when the receiver could not join because this host has no usable
@@ -113,7 +121,7 @@ BOOST_AUTO_TEST_CASE(udp_delivers_datagrams_and_peer)
 
     auto s = t.call([&] {
         auto x = UdpSender::create(t.io);
-        x->addTarget({"127.0.0.1", port});
+        x->addTarget(target("127.0.0.1", port));
         return x;
     });
     BOOST_CHECK_EQUAL(t.call([&] { return s->start(); }), 1u);
@@ -154,6 +162,8 @@ BOOST_AUTO_TEST_CASE(udp_peer_filter)
     sendPlain("127.0.0.1", r->localPort(), "nope", "127.0.0.1");
     BOOST_REQUIRE(eventually([&] { return t.call([&] { return r->counters().rejected_peer; }) == 1u; }));
     BOOST_CHECK_EQUAL(got->count(), 0u);
+    const std::string err = t.call([&] { return r->counters().last_error; });
+    BOOST_CHECK(err.find("127.0.0.1") != std::string::npos);
     sendPlain("127.0.0.1", r->localPort(), "yes", "127.0.0.2");
     BOOST_REQUIRE(eventually([&] { return got->count() == 1; }));
     BOOST_CHECK_EQUAL(got->at(0), "yes");
@@ -203,7 +213,7 @@ BOOST_AUTO_TEST_CASE(udp_multicast_join_and_receive_on_loopback)
     BOOST_REQUIRE(r->bound());
     auto s = t.call([&] {
         auto x = UdpSender::create(t.io);
-        UdpTarget tg{kGroup, port};
+        UdpTarget tg = target(kGroup, port);
         tg.iface = "127.0.0.1";
         tg.loopback = true;
         x->addTarget(tg);
@@ -236,7 +246,7 @@ BOOST_AUTO_TEST_CASE(udp_two_multicast_receivers_share_a_port)
     BOOST_REQUIRE(r2->bound());
     auto s = t.call([&] {
         auto x = UdpSender::create(t.io);
-        UdpTarget tg{kGroup, port};
+        UdpTarget tg = target(kGroup, port);
         tg.iface = "127.0.0.1";
         x->addTarget(tg);
         return x;
@@ -294,7 +304,7 @@ BOOST_AUTO_TEST_CASE(udp_sender_sets_ttl_interface_loopback)
     IoThread t;
     auto s = t.call([&] {
         auto x = UdpSender::create(t.io);
-        UdpTarget tg{kGroup, 4000};
+        UdpTarget tg = target(kGroup, 4000);
         tg.iface = "127.0.0.1";
         tg.ttl = 4;
         tg.loopback = false;
@@ -313,6 +323,49 @@ BOOST_AUTO_TEST_CASE(udp_sender_sets_ttl_interface_loopback)
     t.call([&] { s->stop(); return 0; });
 }
 
+BOOST_AUTO_TEST_CASE(udp_sender_sets_interface_per_target)
+{
+    IoThread t;
+    auto s = t.call([&] {
+        auto x = UdpSender::create(t.io);
+        UdpTarget a = target(kGroup, 4000);
+        a.iface = "127.0.0.1";
+        UdpTarget b = target(kGroup, 4000);
+        x->addTarget(a);
+        x->addTarget(b);
+        return x;
+    });
+    BOOST_CHECK_EQUAL(t.call([&] { return s->start(); }), 2u);
+    const int fd = t.call([&] { return s->nativeHandleForTest(); });
+    BOOST_REQUIRE(fd >= 0);
+    auto ifaddr = [&] {
+        in_addr ifa{};
+        socklen_t len = sizeof ifa;
+        BOOST_REQUIRE_EQUAL(::getsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &ifa, &len), 0);
+        return ifa.s_addr;
+    };
+    // After start() the second target's setting is in force.
+    BOOST_CHECK_EQUAL(ifaddr(), htonl(INADDR_ANY));
+    // A send visits both targets, leaving the socket as the last one set it;
+    // sending only to the first target must not leave the other's setting.
+    t.call([&] { s->send(makeBuf("x")); return 0; });
+    BOOST_CHECK_EQUAL(ifaddr(), htonl(INADDR_ANY));
+    auto s1 = t.call([&] {
+        auto x = UdpSender::create(t.io);
+        UdpTarget a = target(kGroup, 4000);
+        a.iface = "127.0.0.1";
+        x->addTarget(a);
+        return x;
+    });
+    BOOST_CHECK_EQUAL(t.call([&] { return s1->start(); }), 1u);
+    const int fd1 = t.call([&] { return s1->nativeHandleForTest(); });
+    in_addr ifa{};
+    socklen_t len = sizeof ifa;
+    BOOST_REQUIRE_EQUAL(::getsockopt(fd1, IPPROTO_IP, IP_MULTICAST_IF, &ifa, &len), 0);
+    BOOST_CHECK_EQUAL(ifa.s_addr, htonl(INADDR_LOOPBACK));
+    t.call([&] { s->stop(); s1->stop(); return 0; });
+}
+
 BOOST_AUTO_TEST_CASE(udp_sender_skips_unresolvable_target)
 {
     IoThread t;
@@ -321,8 +374,8 @@ BOOST_AUTO_TEST_CASE(udp_sender_skips_unresolvable_target)
     BOOST_REQUIRE(eventually([&] { return r->bound(); }));
     auto s = t.call([&] {
         auto x = UdpSender::create(t.io);
-        x->addTarget({"no-such-host.invalid", 1});
-        x->addTarget({"127.0.0.1", r->localPort()});
+        x->addTarget(target("no-such-host.invalid", 1));
+        x->addTarget(target("127.0.0.1", r->localPort()));
         return x;
     });
     BOOST_CHECK_EQUAL(t.call([&] { return s->start(); }), 1u);
@@ -342,7 +395,7 @@ BOOST_AUTO_TEST_CASE(udp_sender_drops_oversize)
     BOOST_REQUIRE(eventually([&] { return r->bound(); }));
     auto s = t.call([&] {
         auto x = UdpSender::create(t.io, 100);
-        x->addTarget({"127.0.0.1", r->localPort()});
+        x->addTarget(target("127.0.0.1", r->localPort()));
         return x;
     });
     BOOST_CHECK_EQUAL(t.call([&] { return s->start(); }), 1u);

@@ -8,9 +8,9 @@
 #include <boost/asio/ip/multicast.hpp>
 #include <boost/asio/socket_base.hpp>
 
-#include <net/if.h>
-
 #include <atomic>
+#include <chrono>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -29,15 +29,6 @@ asio::ip::address unmap(const asio::ip::address& a)
     return a;
 }
 
-// An IPv6 interface is named by index or by name.
-unsigned interfaceIndex(const std::string& s)
-{
-    if (s.empty())
-        return 0;
-    if (s.find_first_not_of("0123456789") == std::string::npos)
-        return static_cast<unsigned>(std::stoul(s));
-    return ::if_nametoindex(s.c_str());
-}
 } // namespace
 
 // Everything one open socket needs while an operation on it is in flight.
@@ -65,6 +56,7 @@ struct UdpReceiver::Impl {
     uint64_t gen = 0; // changes on start() and stop(); voids handlers of an earlier run
     bool running = false;
     bool failed_before = false;
+    std::optional<std::chrono::steady_clock::time_point> peer_noted;
     std::atomic<bool> up{false};
     std::atomic<uint16_t> bound_port{0};
     std::function<void(const uint8_t*, std::size_t, const udp::endpoint&)> on_datagram;
@@ -256,7 +248,12 @@ void UdpReceiver::receiveLoop(uint64_t gen, std::shared_ptr<Rx> rx)
         const auto from = rx->from;
         if (m.has_peer_filter && unmap(from.address()) != m.peer_addr) {
             ++m.counters.rejected_peer;
-            log(LogLevel::debug, "datagram from " + from.address().to_string() + " rejected (not the configured peer)");
+            // Named in last_error at most once a second.
+            const auto now = std::chrono::steady_clock::now();
+            if (!m.peer_noted || now - *m.peer_noted >= std::chrono::seconds(1)) {
+                m.peer_noted = now;
+                m.counters.last_error = "datagram from " + from.address().to_string() + " refused (not the configured peer)";
+            }
         } else {
             ++m.counters.messages_in;
             m.counters.bytes_in += n;

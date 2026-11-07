@@ -47,6 +47,9 @@ Endpoint parseEndpoint(const EndpointFields& f, Role role, bool allow_port_zero 
 // IPv6 addresses in brackets.
 std::string describe(const Endpoint& e);
 
+// An IPv6 interface given as an index ("2") or a name ("eth0"); 0 for "" or an unknown name.
+unsigned interfaceIndex(const std::string& s);
+
 bool isMulticast(const boost::asio::ip::address& a);
 
 // "tcp_listen" | "tcp_connect" | "udp"

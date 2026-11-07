@@ -32,10 +32,15 @@ public:
     UdpSender(const UdpSender&) = delete;
     UdpSender& operator=(const UdpSender&) = delete;
 
-    void addTarget(const UdpTarget& t);     // before start()
-    std::size_t start();                    // resolves; unresolvable targets are logged, skipped; returns the usable count
+    // Ignored once start() has been called (until stop()).
+    void addTarget(const UdpTarget& t);
+    // Resolves host names synchronously, so it may block on name resolution:
+    // call it before serving, not from a latency-sensitive path.
+    std::size_t start();                    // unresolvable targets are logged, skipped; returns the usable count
     void stop();
-    void send(Buf b);                       // one datagram per target; oversize: dropped++ and logged once a minute
+    // One datagram per target; a no-op before start(). An oversize buffer
+    // counts once in `dropped` per target; it is logged once a minute per target.
+    void send(Buf b);
     std::size_t targets() const;            // usable targets after start()
     const Counters& counters() const;
 

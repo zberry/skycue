@@ -1,10 +1,21 @@
 #include "skycue/net/endpoint.hpp"
 
+#include <net/if.h>
+
 #include <boost/system/error_code.hpp>
 
 #include <cstddef>
 
 namespace skycue::net {
+
+unsigned interfaceIndex(const std::string& s)
+{
+    if (s.empty())
+        return 0;
+    if (s.find_first_not_of("0123456789") == std::string::npos)
+        return static_cast<unsigned>(std::stoul(s));
+    return ::if_nametoindex(s.c_str());
+}
 
 namespace {
 

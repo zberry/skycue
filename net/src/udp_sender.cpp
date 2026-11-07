@@ -7,8 +7,6 @@
 #include <boost/asio/ip/multicast.hpp>
 #include <boost/asio/ip/udp.hpp>
 
-#include <net/if.h>
-
 #include <chrono>
 #include <optional>
 #include <vector>
@@ -20,15 +18,6 @@ using asio::ip::udp;
 
 namespace {
 constexpr std::chrono::seconds kErrorLogEvery{60};
-
-unsigned interfaceIndex(const std::string& s)
-{
-    if (s.empty())
-        return 0;
-    if (s.find_first_not_of("0123456789") == std::string::npos)
-        return static_cast<unsigned>(std::stoul(s));
-    return ::if_nametoindex(s.c_str());
-}
 } // namespace
 
 namespace {
@@ -75,23 +64,28 @@ struct UdpSender::Impl {
         if (fs.applied && *fs.applied == key)
             return {};
         boost::system::error_code ec;
-        if (!t.cfg.iface.empty()) {
-            if (t.ep.address().is_v4()) {
+        // Always set, also when empty (the default interface), so a send never
+        // inherits the interface of the target before it.
+        if (t.ep.address().is_v4()) {
+            asio::ip::address_v4 ifa = asio::ip::address_v4::any();
+            if (!t.cfg.iface.empty()) {
                 const auto a = asio::ip::make_address(t.cfg.iface, ec);
                 if (!ec && a.is_v4())
-                    fs.sock->set_option(asio::ip::multicast::outbound_interface(a.to_v4()), ec);
+                    ifa = a.to_v4();
                 else if (!ec)
                     ec = asio::error::invalid_argument;
-            } else {
-                const unsigned idx = interfaceIndex(t.cfg.iface);
-                if (idx == 0)
-                    ec = asio::error::invalid_argument;
-                else
-                    fs.sock->set_option(asio::ip::multicast::outbound_interface(idx), ec);
             }
-            if (ec)
-                return "multicast interface " + t.cfg.iface + ": " + ec.message();
+            if (!ec)
+                fs.sock->set_option(asio::ip::multicast::outbound_interface(ifa), ec);
+        } else {
+            const unsigned idx = interfaceIndex(t.cfg.iface);
+            if (!t.cfg.iface.empty() && idx == 0)
+                ec = asio::error::invalid_argument;
+            else
+                fs.sock->set_option(asio::ip::multicast::outbound_interface(idx), ec);
         }
+        if (ec)
+            return "multicast interface " + t.cfg.iface + ": " + ec.message();
         fs.sock->set_option(asio::ip::multicast::hops(t.cfg.ttl), ec);
         if (!ec)
             fs.sock->set_option(asio::ip::multicast::enable_loopback(t.cfg.loopback), ec);
@@ -122,7 +116,11 @@ std::shared_ptr<UdpSender> UdpSender::create(asio::io_context& io, std::size_t m
 UdpSender::UdpSender(asio::io_context& io, std::size_t max_datagram) : impl_(std::make_unique<Impl>(io, max_datagram)) {}
 UdpSender::~UdpSender() = default;
 
-void UdpSender::addTarget(const UdpTarget& t) { impl_->configured.push_back(t); }
+void UdpSender::addTarget(const UdpTarget& t)
+{
+    if (!impl_->running)
+        impl_->configured.push_back(t);
+}
 std::size_t UdpSender::targets() const { return impl_->resolved.size(); }
 const Counters& UdpSender::counters() const { return impl_->counters; }
 int UdpSender::nativeHandleForTest() const

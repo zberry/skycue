@@ -561,3 +561,10 @@ endif()
 
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()
+
+# Beast and AVR frames as decoder input.
+add_executable(test_decode_frame_source test_decode_frame_source.cpp)
+target_link_libraries(test_decode_frame_source PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_frame_source PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_decode_frame_source)
+add_test(NAME decode_frame_source COMMAND test_decode_frame_source)

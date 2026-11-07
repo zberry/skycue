@@ -614,6 +614,18 @@ target. Whole tree (daemon, tools, tests, examples), Release:
 `SKYCUE_WERROR` (default `OFF`) turns compiler warnings into errors; the
 default argument list is unchanged.
 
+## The net library
+
+`net/` (skycue::net, see `net/README.md`) is part of these runs. Its tests
+(`net_endpoint`, `net_framer`, `net_backoff`, `net_dialer`, `net_listener`,
+`net_udp`, `net_fanout`) are ordinary ctests, so every sanitizer and fuzz
+tree runs them with the library compiled with the same instrumentation and
+the slow factor applied; `ctest -R '^net_'` runs just those. The line framer
+has the libFuzzer harness `net_line_framer` (`tests/fuzz/fuzz_net_line_framer.cpp`),
+run like the others with `scripts/dev/run-fuzz.sh net_line_framer`. The
+static-analysis run lists `skycued`, `libskycue` and `tools` only (see
+Static analysis), so `net/` is not analysed by it yet.
+
 ## Soak
 
 ### Running

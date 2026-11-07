@@ -48,8 +48,8 @@ public:
     void stop();
     bool listening() const;
     uint16_t localPort() const; // the bound port (port 0 asks the OS); 0 until bound
-    void send(uint64_t stream, Buf b); // per-peer queue; over the cap the peer is closed (dropped++)
-    void sendAll(const Buf& b);
+    void send(uint64_t stream, const Buf& b); // per-peer queue; over the cap the peer is closed (dropped++); an empty Buf is dropped (dropped++)
+    void sendAll(const Buf& b); // an empty Buf is dropped and counted once per peer
     std::size_t peers() const;
     const Counters& counters() const; // read on the io thread only
 
@@ -63,8 +63,8 @@ private:
     void adopt(const std::shared_ptr<Session>& s);
     void closeSession(const std::shared_ptr<Session>& s, const std::string& why);
     void readLoop(uint64_t gen, const std::shared_ptr<Session>& s);
-    void writeLoop(uint64_t gen, const std::shared_ptr<Session>& s);
-    void sendTo(const std::shared_ptr<Session>& s, Buf b);
+    void sendTo(const std::shared_ptr<Session>& s, const Buf& b);
+    void retire(Session& s); // folds the session's write counts into the totals and drops its queue
 };
 
 } // namespace skycue::net

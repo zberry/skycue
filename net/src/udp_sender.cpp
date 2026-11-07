@@ -8,6 +8,7 @@
 #include <boost/asio/ip/udp.hpp>
 
 #include <chrono>
+#include <iterator>
 #include <optional>
 #include <vector>
 
@@ -156,7 +157,17 @@ std::size_t UdpSender::start()
                 log(LogLevel::warn, "udp " + m.counters.last_error + " (skipped)");
                 continue;
             }
-            r.ep = results.begin()->endpoint();
+            // One address per target: the first IPv4 one, else the first.
+            auto pick = results.begin();
+            for (auto it = results.begin(); it != results.end(); ++it) {
+                if (it->endpoint().address().is_v4()) {
+                    pick = it;
+                    break;
+                }
+            }
+            r.ep = pick->endpoint();
+            log(LogLevel::debug, "udp target " + r.name + " resolved to " + r.ep.address().to_string() + " (of " +
+                                     std::to_string(std::distance(results.begin(), results.end())) + " addresses)");
         }
         r.multicast = isMulticast(r.ep.address());
         auto& fs = m.familyOf(r.ep);
@@ -206,6 +217,10 @@ void UdpSender::send(const Buf& b)
     if (!m.running || !b)
         return;
     for (auto& t : m.resolved) {
+        if (b->empty()) { // a zero-length datagram carries nothing; see buffer.hpp
+            ++m.counters.dropped;
+            continue;
+        }
         if (b->size() > m.max_datagram) {
             ++m.counters.dropped;
             m.noteError(t, "datagram of " + std::to_string(b->size()) + " bytes exceeds " +

@@ -8,6 +8,13 @@
 
 namespace skycue::net {
 
+boost::asio::ip::address unmapV4(const boost::asio::ip::address& a)
+{
+    if (a.is_v6() && a.to_v6().is_v4_mapped())
+        return boost::asio::ip::make_address_v4(boost::asio::ip::v4_mapped, a.to_v6());
+    return a;
+}
+
 unsigned interfaceIndex(const std::string& s)
 {
     if (s.empty())

@@ -2,6 +2,11 @@
 
 // Buf: an immutable byte buffer shared between the queues of many peers, so a
 // message fanned out to N connections is stored once.
+//
+// A zero-length Buf carries nothing and is never sent: Dialer::send,
+// Listener::send and sendAll, and UdpSender::send drop it and count it in
+// `dropped` (a null Buf is ignored without counting). A zero-length datagram
+// is therefore not a way to signal anything through this library.
 
 #include <cstddef>
 #include <cstdint>

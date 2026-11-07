@@ -2,12 +2,10 @@
 
 #include "skycue/net/backoff.hpp"
 #include "skycue/net/log.hpp"
+#include "skycue/net/write_queue.hpp"
 
-#include <boost/asio/connect.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/write.hpp>
-
-#include <deque>
 #include <vector>
 
 namespace skycue::net {
@@ -16,41 +14,60 @@ namespace asio = boost::asio;
 using asio::ip::tcp;
 
 struct Dialer::Impl {
-    Impl(asio::io_context& io_, std::string h, uint16_t p, TcpOptions o)
-        : io(io_), host(std::move(h)), port(p), opts(o), resolver(io_), retry(io_),
-          backoff(o.min_backoff, o.max_backoff)
+    Impl(asio::io_context& io_, std::string h, uint16_t p, TcpOptions o, std::vector<tcp::endpoint> f)
+        : io(io_), host(std::move(h)), port(p), opts(o), fixed(std::move(f)), resolver(io_), retry(io_),
+          connect_timer(io_), backoff(o.min_backoff, o.max_backoff)
     {
+    }
+    // Folds the write counts of the connection that ended into the totals.
+    void retireQueue()
+    {
+        if (!wq)
+            return;
+        closed_bytes_out += wq->bytesWritten();
+        closed_messages_out += wq->messagesWritten();
+        wq->clear();
+        wq.reset();
     }
     asio::io_context& io;
     std::string host;
     uint16_t port;
     TcpOptions opts;
+    std::vector<tcp::endpoint> fixed; // test-only: connect to these instead of resolving
     tcp::resolver resolver;
     RetryTimer retry;
+    asio::steady_timer connect_timer; // the connect timeout of the address being tried
     Backoff backoff;
     std::shared_ptr<tcp::socket> socket; // handlers of composed operations hold it too, so a reset is safe
     uint64_t stop_epoch = 0; // changes on stop(); suppresses notifications posted earlier
     std::vector<uint8_t> rbuf;
     std::function<void(const uint8_t*, std::size_t)> on_data;
     std::function<void(bool)> on_conn;
-    Counters counters;
+    mutable Counters counters;
+    uint64_t closed_bytes_out = 0;    // written on connections that ended
+    uint64_t closed_messages_out = 0;
     uint64_t attempts = 0;
     uint64_t gen = 0;       // changes on every connection attempt and on stop()
     bool running = false;
     bool failed_before = false; // a failure since the last success was already logged at warn
     std::atomic<bool> up{false};
-    std::deque<Buf> queue;  // the first `in_flight` entries are being written
-    std::size_t in_flight = 0;
-    std::size_t queued_bytes = 0;
+    std::unique_ptr<WriteQueue> wq; // exists while connected
 };
 
 std::shared_ptr<Dialer> Dialer::create(asio::io_context& io, std::string host, uint16_t port, TcpOptions o)
 {
-    return std::shared_ptr<Dialer>(new Dialer(io, std::move(host), port, o));
+    return std::shared_ptr<Dialer>(new Dialer(io, std::move(host), port, o, {}));
 }
 
-Dialer::Dialer(asio::io_context& io, std::string host, uint16_t port, TcpOptions o)
-    : impl_(std::make_unique<Impl>(io, std::move(host), port, o))
+std::shared_ptr<Dialer> Dialer::create(asio::io_context& io, std::vector<tcp::endpoint> endpoints, TcpOptions o)
+{
+    std::string name = endpoints.empty() ? std::string("(none)") : endpoints.front().address().to_string();
+    const uint16_t port = endpoints.empty() ? 0 : endpoints.front().port();
+    return std::shared_ptr<Dialer>(new Dialer(io, std::move(name), port, o, std::move(endpoints)));
+}
+
+Dialer::Dialer(asio::io_context& io, std::string host, uint16_t port, TcpOptions o, std::vector<tcp::endpoint> fixed)
+    : impl_(std::make_unique<Impl>(io, std::move(host), port, o, std::move(fixed)))
 {
 }
 
@@ -59,7 +76,13 @@ Dialer::~Dialer() = default;
 void Dialer::onData(std::function<void(const uint8_t*, std::size_t)> h) { impl_->on_data = std::move(h); }
 void Dialer::onConnection(std::function<void(bool)> h) { impl_->on_conn = std::move(h); }
 bool Dialer::connected() const { return impl_->up.load(); }
-const Counters& Dialer::counters() const { return impl_->counters; }
+const Counters& Dialer::counters() const
+{
+    auto& m = *impl_;
+    m.counters.bytes_out = m.closed_bytes_out + (m.wq ? m.wq->bytesWritten() : 0);
+    m.counters.messages_out = m.closed_messages_out + (m.wq ? m.wq->messagesWritten() : 0);
+    return m.counters;
+}
 uint64_t Dialer::attempts() const { return impl_->attempts; }
 
 void Dialer::start()
@@ -80,16 +103,24 @@ void Dialer::stop()
     ++m.gen;
     ++m.stop_epoch;
     m.retry.cancel();
+    m.connect_timer.cancel();
     boost::system::error_code ec;
     m.resolver.cancel();
     if (m.socket)
         m.socket->close(ec);
     m.socket.reset();
     m.up = false;
-    m.queue.clear();
-    m.in_flight = 0;
-    m.queued_bytes = 0;
+    m.retireQueue();
 }
+
+// The addresses of one attempt and where it is in them.
+struct Dialer::Attempt {
+    std::vector<tcp::endpoint> eps;
+    std::size_t next = 0;
+    uint64_t step = 0;    // changes per address; voids the timer of an earlier one
+    bool timed_out = false;
+    std::string last_error;
+};
 
 void Dialer::connect()
 {
@@ -99,6 +130,12 @@ void Dialer::connect()
     im.socket = std::make_shared<tcp::socket>(im.io);
     auto sock = im.socket;
     auto self = shared_from_this();
+    if (!im.fixed.empty()) {
+        auto at = std::make_shared<Attempt>();
+        at->eps = im.fixed;
+        connectNext(gen, sock, at);
+        return;
+    }
     im.resolver.async_resolve(im.host, std::to_string(im.port),
                              [self, gen, sock](const boost::system::error_code& ec, const tcp::resolver::results_type& results) {
         auto& m = *self->impl_;
@@ -108,29 +145,84 @@ void Dialer::connect()
             self->lost(gen, "resolve " + m.host + ": " + ec.message());
             return;
         }
-        asio::async_connect(*sock, results,
-                            [self, gen, sock](const boost::system::error_code& cec, const tcp::endpoint&) {
-            auto& st = *self->impl_;
-            if (gen != st.gen)
-                return;
-            if (cec) {
-                self->lost(gen, "connect " + st.host + ":" + std::to_string(st.port) + ": " + cec.message());
-                return;
-            }
-            applyTcpOptions(*sock, st.opts);
-            st.backoff.reset();
-            st.failed_before = false;
-            ++st.counters.connects;
-            st.counters.last_error.clear();
-            st.up = true;
-            log(LogLevel::info, "connected to " + st.host + ":" + std::to_string(st.port));
-            if (st.on_conn)
-                st.on_conn(true);
-            if (gen != st.gen)
-                return; // the callback stopped or closed us
-            self->readLoop(gen);
-        });
+        auto at = std::make_shared<Attempt>();
+        for (const auto& r : results)
+            at->eps.push_back(r.endpoint());
+        self->connectNext(gen, sock, at);
     });
+}
+
+void Dialer::connectNext(uint64_t gen, const std::shared_ptr<tcp::socket>& sock, const std::shared_ptr<Attempt>& at)
+{
+    auto& m = *impl_;
+    if (gen != m.gen)
+        return;
+    if (at->next >= at->eps.size()) {
+        lost(gen, "connect " + m.host + ":" + std::to_string(m.port) + ": " +
+                      (at->last_error.empty() ? "no address" : at->last_error));
+        return;
+    }
+    const tcp::endpoint ep = at->eps[at->next++];
+    const uint64_t step = ++at->step;
+    at->timed_out = false;
+    boost::system::error_code ec;
+    sock->close(ec);
+    sock->open(ep.protocol(), ec);
+    if (ec) {
+        at->last_error = ep.address().to_string() + ": " + ec.message();
+        connectNext(gen, sock, at);
+        return;
+    }
+    auto self = shared_from_this();
+    if (m.opts.connect_timeout.count() > 0) {
+        m.connect_timer.expires_after(m.opts.connect_timeout);
+        m.connect_timer.async_wait([self, gen, sock, at, step](const boost::system::error_code& tec) {
+            auto& st = *self->impl_;
+            if (tec || gen != st.gen || at->step != step)
+                return;
+            at->timed_out = true;
+            boost::system::error_code ignore;
+            sock->close(ignore); // aborts the connect, whose handler moves on
+        });
+    }
+    sock->async_connect(ep, [self, gen, sock, at, ep, step](const boost::system::error_code& cec) {
+        auto& st = *self->impl_;
+        if (gen != st.gen)
+            return;
+        if (at->step == step)
+            st.connect_timer.cancel();
+        if (cec) {
+            at->last_error = ep.address().to_string() + ": " + (at->timed_out ? std::string("timed out") : cec.message());
+            self->connectNext(gen, sock, at);
+            return;
+        }
+        self->connected(gen, sock);
+    });
+}
+
+void Dialer::connected(uint64_t gen, const std::shared_ptr<tcp::socket>& sock)
+{
+    auto& st = *impl_;
+    applyTcpOptions(*sock, st.opts);
+    st.backoff.reset();
+    st.failed_before = false;
+    ++st.counters.connects;
+    st.counters.last_error.clear();
+    st.wq = std::make_unique<WriteQueue>(sock, st.opts.send_cap);
+    {
+        std::weak_ptr<Dialer> weak = shared_from_this();
+        st.wq->start([weak, gen](const boost::system::error_code& wec) {
+            if (auto self = weak.lock())
+                self->lost(gen, std::string("write: ") + wec.message());
+        });
+    }
+    st.up = true;
+    log(LogLevel::info, "connected to " + st.host + ":" + std::to_string(st.port));
+    if (st.on_conn)
+        st.on_conn(true);
+    if (gen != st.gen)
+        return; // the callback stopped or closed us
+    readLoop(gen);
 }
 
 void Dialer::lost(uint64_t gen, const std::string& why)
@@ -142,12 +234,11 @@ void Dialer::lost(uint64_t gen, const std::string& why)
     const bool was_up = m.up.exchange(false);
     boost::system::error_code ec;
     m.resolver.cancel();
+    m.connect_timer.cancel();
     if (m.socket)
         m.socket->close(ec);
     m.socket.reset();
-    m.queue.clear();
-    m.in_flight = 0;
-    m.queued_bytes = 0;
+    m.retireQueue();
     m.counters.last_error = why;
     log(m.failed_before && !was_up ? LogLevel::debug : LogLevel::warn, why);
     m.failed_before = true;
@@ -195,55 +286,19 @@ void Dialer::readLoop(uint64_t gen)
     });
 }
 
-void Dialer::send(Buf b)
+void Dialer::send(const Buf& b)
 {
     auto& m = *impl_;
     if (!b)
         return;
-    if (!m.up) {
+    if (!m.up || b->empty()) {
         ++m.counters.dropped;
         return;
     }
-    if (m.queued_bytes + b->size() > m.opts.send_cap) {
+    if (!m.wq->enqueue(b)) {
         ++m.counters.dropped;
         lost(m.gen, "send queue over " + std::to_string(m.opts.send_cap) + " bytes");
-        return;
     }
-    m.queued_bytes += b->size();
-    m.queue.push_back(std::move(b));
-    if (m.in_flight == 0)
-        writeLoop(m.gen);
-}
-
-void Dialer::writeLoop(uint64_t gen)
-{
-    auto& im = *impl_;
-    if (im.queue.empty())
-        return;
-    im.in_flight = im.queue.size();
-    std::vector<asio::const_buffer> bufs;
-    bufs.reserve(im.in_flight);
-    for (std::size_t i = 0; i < im.in_flight; ++i)
-        bufs.emplace_back(im.queue[i]->data(), im.queue[i]->size());
-    auto self = shared_from_this();
-    auto sock = im.socket;
-    asio::async_write(*sock, bufs, [self, gen, sock](const boost::system::error_code& ec, std::size_t n) {
-        auto& m = *self->impl_;
-        if (gen != m.gen)
-            return;
-        if (ec) {
-            self->lost(gen, std::string("write: ") + ec.message());
-            return;
-        }
-        m.counters.bytes_out += n;
-        for (std::size_t i = 0; i < m.in_flight; ++i) {
-            m.queued_bytes -= m.queue.front()->size();
-            m.queue.pop_front();
-            ++m.counters.messages_out;
-        }
-        m.in_flight = 0;
-        self->writeLoop(gen);
-    });
 }
 
 } // namespace skycue::net

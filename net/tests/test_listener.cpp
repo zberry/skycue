@@ -390,3 +390,23 @@ BOOST_AUTO_TEST_CASE(tcp_listen_ipv6_loopback)
     BOOST_CHECK(eventually([&] { return rec->dataOf(1) == "v6\n"; }));
     t.call([&] { l->stop(); });
 }
+
+BOOST_AUTO_TEST_CASE(zero_length_buf_dropped_and_counted)
+{
+    IoThread t;
+    auto rec = std::make_shared<Rec>();
+    const uint16_t port = freeTcpPort();
+    auto l = startListener(t, port, {}, rec);
+    BOOST_REQUIRE(eventually([&] { return l->listening(); }));
+    Client a;
+    a.connect(loopback(port));
+    BOOST_REQUIRE(eventually([&] { return rec->peerEvents() == 1; }));
+    t.call([&] {
+        l->send(1, makeBuf(std::string_view("")));
+        l->sendAll(makeBuf(std::string_view("")));
+        l->send(1, makeBuf(std::string_view("ok")));
+    });
+    BOOST_CHECK_EQUAL(a.read(2, slow(std::chrono::seconds(2))), "ok");
+    BOOST_CHECK_EQUAL(t.call([&] { return l->counters().dropped; }), 2u);
+    t.call([&] { l->stop(); });
+}

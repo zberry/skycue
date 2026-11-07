@@ -29,7 +29,8 @@ void erase(std::vector<std::shared_ptr<T>>& v, const std::shared_ptr<T>& p)
 
 } // namespace
 
-Fanout::Fanout(boost::asio::io_context&) : st_(std::make_shared<State>()) {}
+Fanout::Fanout() : st_(std::make_shared<State>()) {}
+Fanout::Fanout(boost::asio::io_context&) : Fanout() {}
 
 Fanout::~Fanout() = default;
 
@@ -48,7 +49,7 @@ void Fanout::attach(const std::shared_ptr<Listener>& l)
             auto h = st->up; // a copy: the hook may re-register
             auto lp = wl.lock();
             if (h && lp) {
-                std::function<void(Buf)> to = [lp, stream](Buf b) { lp->send(stream, std::move(b)); };
+                std::function<void(Buf)> to = [lp, stream](const Buf& b) { lp->send(stream, b); };
                 h(to);
             }
         } else {

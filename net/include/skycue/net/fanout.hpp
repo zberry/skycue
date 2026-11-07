@@ -35,6 +35,8 @@ namespace skycue::net {
 
 class Fanout {
 public:
+    Fanout();
+    // Older form: the io_context was never used. Kept for existing callers.
     explicit Fanout(boost::asio::io_context& io);
     ~Fanout();
     Fanout(const Fanout&) = delete;

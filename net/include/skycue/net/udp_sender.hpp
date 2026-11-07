@@ -5,7 +5,10 @@
 // one thread). One socket is opened per address family, at start(), only for
 // the families the usable targets need. Sends are non-blocking: a datagram the
 // kernel cannot take at once is dropped and counted. After stop() nothing is
-// sent.
+// sent. A host name that resolves to several addresses is sent to at one
+// only: the first IPv4 address, or the first address when there is none; the
+// choice is logged at debug. An empty Buf is dropped and counted once per
+// target.
 
 #include "skycue/net/buffer.hpp"
 #include "skycue/net/counters.hpp"

@@ -52,6 +52,10 @@ unsigned interfaceIndex(const std::string& s);
 
 bool isMulticast(const boost::asio::ip::address& a);
 
+// An IPv4-mapped IPv6 address (::ffff:a.b.c.d) as the IPv4 address it carries;
+// any other address unchanged. Peer filters compare addresses after this.
+boost::asio::ip::address unmapV4(const boost::asio::ip::address& a);
+
 // "tcp_listen" | "tcp_connect" | "udp"
 const char* transportName(Transport t);
 std::optional<Transport> parseTransport(std::string_view s);

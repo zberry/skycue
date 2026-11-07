@@ -12,7 +12,7 @@ endif()
 add_test(NAME net_endpoint COMMAND test_net_endpoint)
 set_tests_properties(net_endpoint PROPERTIES TIMEOUT 60)
 
-foreach(_t framer backoff)
+foreach(_t framer backoff write_queue)
   add_executable(test_net_${_t} test_${_t}.cpp)
   target_link_libraries(test_net_${_t} PRIVATE skycue_net Boost::unit_test_framework Threads::Threads)
   target_compile_definitions(test_net_${_t} PRIVATE BOOST_TEST_DYN_LINK)

@@ -1,14 +1,15 @@
 #include "skycue/net/listener.hpp"
 
 #include "skycue/net/backoff.hpp"
+#include "skycue/net/endpoint.hpp"
 #include "skycue/net/log.hpp"
+#include "skycue/net/write_queue.hpp"
 
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/write.hpp>
 
 #include <atomic>
-#include <deque>
 #include <map>
 #include <stdexcept>
 #include <vector>
@@ -21,26 +22,19 @@ using asio::ip::tcp;
 namespace {
 constexpr std::chrono::milliseconds kAcceptRetry{100};
 constexpr std::chrono::seconds kAcceptWarnEvery{10};
-
-// Treats an IPv4-mapped IPv6 address as the IPv4 address it carries.
-asio::ip::address unmap(const asio::ip::address& a)
-{
-    if (a.is_v6() && a.to_v6().is_v4_mapped())
-        return asio::ip::make_address_v4(asio::ip::v4_mapped, a.to_v6());
-    return a;
-}
 } // namespace
 
 struct Listener::Session {
-    Session(asio::io_context& io, uint64_t id) : stream(id), socket(std::make_shared<tcp::socket>(io)) {}
+    Session(asio::io_context& io, uint64_t id, std::size_t cap)
+        : stream(id), socket(std::make_shared<tcp::socket>(io)), wq(socket, cap)
+    {
+    }
     uint64_t stream;
     std::shared_ptr<tcp::socket> socket; // handlers of composed operations hold the session, so a close is safe
     tcp::endpoint who;
     std::vector<uint8_t> rbuf;
     bool closed = false;
-    std::deque<Buf> queue; // the first `in_flight` entries are being written
-    std::size_t in_flight = 0;
-    std::size_t queued_bytes = 0;
+    WriteQueue wq;
 };
 
 struct Listener::Impl {
@@ -69,7 +63,9 @@ struct Listener::Impl {
     std::atomic<uint16_t> bound_port{0};
     std::function<void(uint64_t, const uint8_t*, std::size_t)> on_data;
     std::function<void(uint64_t, bool, const tcp::endpoint&)> on_peer;
-    Counters counters;
+    mutable Counters counters;
+    uint64_t closed_bytes_out = 0;    // written by sessions that are gone
+    uint64_t closed_messages_out = 0;
 };
 
 std::shared_ptr<Listener> Listener::create(asio::io_context& io, std::string bind, uint16_t port, ListenOptions o)
@@ -83,7 +79,7 @@ Listener::Listener(asio::io_context& io, std::string bind, uint16_t port, Listen
     auto& m = *impl_;
     if (!m.opts.peer.empty()) {
         boost::system::error_code ec;
-        m.peer_addr = unmap(asio::ip::make_address(m.opts.peer, ec));
+        m.peer_addr = unmapV4(asio::ip::make_address(m.opts.peer, ec));
         if (ec)
             throw std::invalid_argument("listener peer is not an IP address: " + m.opts.peer);
         m.has_peer_filter = true;
@@ -97,7 +93,17 @@ void Listener::onPeer(std::function<void(uint64_t, bool, const tcp::endpoint&)> 
 bool Listener::listening() const { return impl_->up.load(); }
 uint16_t Listener::localPort() const { return impl_->bound_port.load(); }
 std::size_t Listener::peers() const { return impl_->sessions.size(); }
-const Counters& Listener::counters() const { return impl_->counters; }
+const Counters& Listener::counters() const
+{
+    auto& m = *impl_;
+    m.counters.bytes_out = m.closed_bytes_out;
+    m.counters.messages_out = m.closed_messages_out;
+    for (const auto& kv : m.sessions) {
+        m.counters.bytes_out += kv.second->wq.bytesWritten();
+        m.counters.messages_out += kv.second->wq.messagesWritten();
+    }
+    return m.counters;
+}
 
 void Listener::start()
 {
@@ -125,6 +131,7 @@ void Listener::stop()
     for (auto& kv : m.sessions) {
         kv.second->closed = true;
         kv.second->socket->close(ec);
+        retire(*kv.second);
     }
     m.sessions.clear();
     m.counters.peers = 0;
@@ -192,7 +199,7 @@ void Listener::bindAndListen(bool throwOnFailure)
 void Listener::acceptLoop(uint64_t gen, const std::shared_ptr<tcp::acceptor>& acc)
 {
     auto& im = *impl_;
-    auto s = std::make_shared<Session>(im.io, 0);
+    auto s = std::make_shared<Session>(im.io, 0, im.opts.tcp.send_cap);
     auto self = shared_from_this();
     acc->async_accept(*s->socket, s->who, [self, gen, acc, s](const boost::system::error_code& ec) {
         auto& m = *self->impl_;
@@ -229,7 +236,7 @@ void Listener::adopt(const std::shared_ptr<Session>& s)
 {
     auto& m = *impl_;
     boost::system::error_code ec;
-    const bool filtered = m.has_peer_filter && unmap(s->who.address()) != m.peer_addr;
+    const bool filtered = m.has_peer_filter && unmapV4(s->who.address()) != m.peer_addr;
     if (filtered || m.sessions.size() >= m.opts.max_peers) {
         ++m.counters.rejected_peer;
         log(LogLevel::debug, std::string("rejected peer ") + s->who.address().to_string() +
@@ -241,6 +248,16 @@ void Listener::adopt(const std::shared_ptr<Session>& s)
     s->stream = m.next_stream++;
     applyTcpOptions(*s->socket, m.opts.tcp);
     m.sessions[s->stream] = s;
+    {
+        std::weak_ptr<Listener> weak = shared_from_this();
+        std::weak_ptr<Session> ws = s;
+        s->wq.start([weak, ws](const boost::system::error_code& wec) {
+            auto self = weak.lock();
+            auto sess = ws.lock();
+            if (self && sess && !sess->closed)
+                self->closeSession(sess, std::string("write: ") + wec.message());
+        });
+    }
     m.counters.peers = m.sessions.size();
     ++m.counters.connects;
     log(LogLevel::info, "peer " + s->who.address().to_string() + ":" + std::to_string(s->who.port()) +
@@ -261,9 +278,7 @@ void Listener::closeSession(const std::shared_ptr<Session>& s, const std::string
     s->closed = true;
     boost::system::error_code ec;
     s->socket->close(ec);
-    s->queue.clear();
-    s->in_flight = 0;
-    s->queued_bytes = 0;
+    retire(*s);
     m.sessions.erase(s->stream);
     m.counters.peers = m.sessions.size();
     log(LogLevel::debug, "peer " + s->who.address().to_string() + " (stream " + std::to_string(s->stream) +
@@ -307,14 +322,16 @@ void Listener::readLoop(uint64_t gen, const std::shared_ptr<Session>& s)
     });
 }
 
-void Listener::send(uint64_t stream, Buf b)
+void Listener::send(uint64_t stream, const Buf& b)
 {
     auto& m = *impl_;
+    if (!b)
+        return;
     const auto it = m.sessions.find(stream);
-    if (it == m.sessions.end() || !b)
+    if (it == m.sessions.end())
         return;
     const auto s = it->second; // sendTo may erase the entry
-    sendTo(s, std::move(b));
+    sendTo(s, b);
 }
 
 void Listener::sendAll(const Buf& b)
@@ -330,49 +347,27 @@ void Listener::sendAll(const Buf& b)
         sendTo(s, b);
 }
 
-void Listener::sendTo(const std::shared_ptr<Session>& s, Buf b)
+void Listener::sendTo(const std::shared_ptr<Session>& s, const Buf& b)
 {
     auto& m = *impl_;
     if (s->closed)
         return;
-    if (s->queued_bytes + b->size() > m.opts.tcp.send_cap) {
+    if (b->empty()) {
         ++m.counters.dropped;
-        closeSession(s, "send queue over " + std::to_string(m.opts.tcp.send_cap) + " bytes");
         return;
     }
-    s->queued_bytes += b->size();
-    s->queue.push_back(std::move(b));
-    if (s->in_flight == 0)
-        writeLoop(m.gen, s);
+    if (!s->wq.enqueue(b)) {
+        ++m.counters.dropped;
+        closeSession(s, "send queue over " + std::to_string(m.opts.tcp.send_cap) + " bytes");
+    }
 }
 
-void Listener::writeLoop(uint64_t gen, const std::shared_ptr<Session>& s)
+void Listener::retire(Session& s)
 {
-    if (s->queue.empty())
-        return;
-    s->in_flight = s->queue.size();
-    std::vector<asio::const_buffer> bufs;
-    bufs.reserve(s->in_flight);
-    for (std::size_t i = 0; i < s->in_flight; ++i)
-        bufs.emplace_back(s->queue[i]->data(), s->queue[i]->size());
-    auto self = shared_from_this();
-    asio::async_write(*s->socket, bufs, [self, gen, s](const boost::system::error_code& ec, std::size_t n) {
-        auto& m = *self->impl_;
-        if (gen != m.gen || s->closed)
-            return;
-        if (ec) {
-            self->closeSession(s, std::string("write: ") + ec.message());
-            return;
-        }
-        m.counters.bytes_out += n;
-        for (std::size_t i = 0; i < s->in_flight; ++i) {
-            s->queued_bytes -= s->queue.front()->size();
-            s->queue.pop_front();
-            ++m.counters.messages_out;
-        }
-        s->in_flight = 0;
-        self->writeLoop(gen, s);
-    });
+    auto& m = *impl_;
+    m.closed_bytes_out += s.wq.bytesWritten();
+    m.closed_messages_out += s.wq.messagesWritten();
+    s.wq.clear();
 }
 
 } // namespace skycue::net

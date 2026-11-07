@@ -14,17 +14,18 @@ sinks out, all handled on one io thread.
 
 | Header | Contract |
 |---|---|
-| `endpoint.hpp` | `Endpoint`, `EndpointFields`, `parseEndpoint()`, `describe()`: turns raw config strings into a validated endpoint; every error names the field at fault (`EndpointError`). |
+| `endpoint.hpp` | `Endpoint`, `EndpointFields`, `parseEndpoint()`, `describe()`: turns raw config strings into a validated endpoint; every error names the field at fault (`EndpointError`). Also `unmapV4()`, which turns an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) into the IPv4 address it carries (used by the peer filters). |
 | `framer.hpp` | `LineFramer` (`\n`-delimited, `\r` dropped, empty lines skipped, an over-long line dropped whole and counted) and `DatagramFramer` (one datagram, one message). `out()` gets a pointer valid only during the call. |
-| `buffer.hpp` | `Buf`, an immutable shared byte buffer: a message fanned out to N peers is stored once. |
+| `buffer.hpp` | `Buf`, an immutable shared byte buffer: a message fanned out to N peers is stored once. A zero-length `Buf` is never sent: `Dialer::send`, `Listener::send`/`sendAll` and `UdpSender::send` drop it and count it in `dropped`. |
+| `write_queue.hpp` | `WriteQueue`: the send side of one TCP connection (queued `Buf`s, gather writes, a byte cap), shared by `Dialer` and `Listener`. |
 | `counters.hpp` | `Counters`: bytes and messages in and out, connects, rejected peers, drops, peer count, last error. |
 | `backoff.hpp` | `Backoff` (doubling delays, capped) and `RetryTimer` (one pending wait; a replaced or cancelled wait never fires). |
-| `tcp_options.hpp` | `TcpOptions` and `applyTcpOptions()`: keepalive, nodelay, read chunk, send cap, backoff bounds. Best effort: a failing option is logged and skipped. |
-| `dialer.hpp` | `Dialer`: one outbound TCP connection kept up; resolves, connects, reads in chunks, reconnects with backoff. `send()` is queued, and dropped and counted when not connected. |
+| `tcp_options.hpp` | `TcpOptions` and `applyTcpOptions()`: keepalive, nodelay, read chunk, send cap, backoff bounds, connect timeout. Best effort: a failing option is logged and skipped. |
+| `dialer.hpp` | `Dialer`: one outbound TCP connection kept up; resolves, connects, reads in chunks, reconnects with backoff. Each resolved address gets `connect_timeout` to connect, then the next address is tried. `send()` is queued, and dropped and counted when not connected. |
 | `listener.hpp` | `Listener`: a TCP server for many peers. Stream ids 1, 2, 3, ... never reused; per-peer send queue with a byte cap (over the cap the peer is closed); optional single permitted source address; rebinds after a failure. |
 | `udp_receiver.hpp` | `UdpReceiver`: datagrams from a unicast port or a multicast group; closes and retries after a bind, join or receive error. |
-| `udp_sender.hpp` | `UdpSender`: one datagram per buffer to every target, unicast or multicast; non-blocking, a datagram the kernel cannot take is dropped and counted. |
-| `fanout.hpp` | `Fanout`: owns a dynamic set of listeners, dialers and UDP senders and delivers one `Buf` to all of them. A slow or absent destination drops on its own; `publish()` never blocks. A greeting hook runs when a TCP peer connects. |
+| `udp_sender.hpp` | `UdpSender`: one datagram per buffer to every target, unicast or multicast; non-blocking, a datagram the kernel cannot take is dropped and counted. A host name that resolves to several addresses is sent to at one only: the first IPv4 address, else the first (logged at debug). |
+| `fanout.hpp` | `Fanout`: owns a dynamic set of listeners, dialers and UDP senders and delivers one `Buf` to all of them. A slow or absent destination drops on its own; `publish()` never blocks. A greeting hook runs when a TCP peer connects. Construct it with `Fanout()`; the older `Fanout(io_context&)` still works and ignores its argument. |
 | `log.hpp` | The process-wide log sink (below). |
 
 ## Endpoint fields
@@ -57,6 +58,7 @@ or `udp 239.1.1.5:4001 via 192.0.2.10 ttl 4`; IPv6 addresses are in brackets.
 | Read chunk | 16384 bytes |
 | Per-connection send cap | 1 MiB queued; above it the connection is closed and `dropped` is counted |
 | Reconnect backoff | 500 ms doubling to 10 s |
+| TCP connect timeout (per address) | 10 s (our choice; `TcpOptions::connect_timeout`, zero or less disables it) |
 | Listener `max_peers` | 16 |
 | Listener and UDP receiver rebind delay | 5 s |
 | `LineFramer` max line | 65536 bytes |
@@ -130,7 +132,7 @@ way.
 ## Tests
 
 The tests are Boost.Test programs in `tests/`: `net_endpoint`, `net_framer`,
-`net_backoff`, `net_dialer`, `net_listener`, `net_udp` and `net_fanout`. They
+`net_backoff`, `net_dialer`, `net_listener`, `net_udp`, `net_write_queue` and `net_fanout`. They
 are built when `SKYCUE_NET_BUILD_TESTS` is on (the default follows
 `SKYCUE_BUILD_TESTS`). From a build directory:
 

@@ -57,3 +57,10 @@ BOOST_AUTO_TEST_CASE(log_sink_receives_messages) {
     log(LogLevel::info, "dropped");
     BOOST_TEST(got == std::vector<std::string>{"hello"});
 }
+BOOST_AUTO_TEST_CASE(unmap_v4_mapped_addresses) {
+    namespace ip = boost::asio::ip;
+    BOOST_TEST(unmapV4(ip::make_address("::ffff:192.0.2.7")) == ip::make_address("192.0.2.7"));
+    BOOST_TEST(unmapV4(ip::make_address("192.0.2.7")) == ip::make_address("192.0.2.7"));
+    BOOST_TEST(unmapV4(ip::make_address("2001:db8::1")) == ip::make_address("2001:db8::1"));
+    BOOST_TEST(unmapV4(ip::make_address("::1")) == ip::make_address("::1"));
+}

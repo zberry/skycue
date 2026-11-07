@@ -185,8 +185,7 @@ BOOST_AUTO_TEST_CASE(udp_bind_failure_reported_and_retried)
     auto r = startReceiver(t, "127.0.0.1", port, o, got);
     BOOST_CHECK(!r->bound());
     BOOST_CHECK(!t.call([&] { return r->counters().last_error; }).empty());
-    std::this_thread::sleep_for(milliseconds(150));
-    BOOST_CHECK(!r->bound());
+    BOOST_CHECK(holds([&] { return !r->bound(); }, slow(milliseconds(150)))); // still held by the other socket
     holder.reset();
     BOOST_REQUIRE(eventually([&] { return r->bound(); }, slow(milliseconds(1000))));
     BOOST_CHECK_EQUAL(r->localPort(), port);
@@ -293,9 +292,7 @@ BOOST_AUTO_TEST_CASE(udp_two_multicast_receivers_different_groups_isolated)
     t.call([&] { s->send(makeBuf("x")); return 0; });
     BOOST_REQUIRE(eventually([&] { return g1->count() >= 1 && g2->count() >= 1; }));
     // Each receiver is bound to its own group, so each sees exactly one datagram.
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    BOOST_CHECK_EQUAL(g1->count(), 1u);
-    BOOST_CHECK_EQUAL(g2->count(), 1u);
+    BOOST_CHECK(holds([&] { return g1->count() == 1 && g2->count() == 1; }, slow(milliseconds(200))));
     t.call([&] { s->stop(); r1->stop(); r2->stop(); return 0; });
 }
 
@@ -333,8 +330,7 @@ BOOST_AUTO_TEST_CASE(udp_multicast_join_failure_reported_and_retried)
     const std::string first = t.call([&] { return r->counters().last_error; });
     BOOST_CHECK(!first.empty());
     BOOST_CHECK(first.find("join") != std::string::npos);
-    std::this_thread::sleep_for(milliseconds(200));
-    BOOST_CHECK(!r->bound());
+    BOOST_CHECK(holds([&] { return !r->bound(); }, slow(milliseconds(200)))); // the join keeps failing
     BOOST_CHECK(!t.call([&] { return r->counters().last_error; }).empty());
     t.call([&] { r->stop(); return 0; });
 }
@@ -442,8 +438,7 @@ BOOST_AUTO_TEST_CASE(udp_sender_drops_oversize)
     t.call([&] { s->send(makeBuf(std::string(200, 'x'))); return 0; });
     BOOST_CHECK_EQUAL(t.call([&] { return s->counters().dropped; }), 1u);
     BOOST_CHECK_EQUAL(t.call([&] { return s->counters().messages_out; }), 0u);
-    std::this_thread::sleep_for(milliseconds(100));
-    BOOST_CHECK_EQUAL(got->count(), 0u);
+    BOOST_CHECK(holds([&] { return got->count() == 0; }, slow(milliseconds(100))));
     t.call([&] { s->send(makeBuf(std::string(100, 'y'))); return 0; });
     BOOST_REQUIRE(eventually([&] { return got->count() == 1; }));
     t.call([&] { s->stop(); r->stop(); return 0; });
@@ -461,8 +456,7 @@ BOOST_AUTO_TEST_CASE(no_callback_after_stop)
     t.call([&] { r->stop(); return 0; });
     BOOST_CHECK(!r->bound());
     sendPlain("127.0.0.1", port, "two");
-    std::this_thread::sleep_for(milliseconds(100));
-    BOOST_CHECK_EQUAL(got->count(), 1u);
+    BOOST_CHECK(holds([&] { return got->count() == 1; }, slow(milliseconds(100))));
 
     // A callback that stops its receiver ends the loop at once.
     auto got2 = std::make_shared<Got>();
@@ -481,6 +475,5 @@ BOOST_AUTO_TEST_CASE(no_callback_after_stop)
     sendPlain("127.0.0.1", port2, "a");
     sendPlain("127.0.0.1", port2, "b");
     BOOST_REQUIRE(eventually([&] { return calls.load() >= 1; }));
-    std::this_thread::sleep_for(milliseconds(100));
-    BOOST_CHECK_EQUAL(calls.load(), 1);
+    BOOST_CHECK(holds([&] { return calls.load() == 1; }, slow(milliseconds(100))));
 }

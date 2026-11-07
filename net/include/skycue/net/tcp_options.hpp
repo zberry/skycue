@@ -16,6 +16,10 @@ struct TcpOptions {
     std::size_t chunk_bytes = 16384;
     std::size_t send_cap = 1u << 20; // queued bytes above this: the connection is closed, dropped++
     std::chrono::milliseconds min_backoff{500}, max_backoff{10000};
+    // Dialer only: how long one address may take to connect before the next
+    // resolved address is tried. 10 s is our choice, not a standard value;
+    // zero or less disables the timeout.
+    std::chrono::milliseconds connect_timeout{10000};
 };
 
 // Best effort: a failing option is logged at debug and skipped.

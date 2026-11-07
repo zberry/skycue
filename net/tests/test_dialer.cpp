@@ -346,3 +346,41 @@ BOOST_AUTO_TEST_CASE(dialer_cap_during_write_and_stop_cycling_is_safe)
     }
     t.call([&] { srv->stopAll(); });
 }
+
+BOOST_AUTO_TEST_CASE(dialer_connect_timeout_moves_to_next_address)
+{
+    // 10.255.255.1 is unroutable (a connect to it hangs), so the first address
+    // can only be passed by the connect timeout; the second one works.
+    test::IoThread t;
+    auto srv = t.call([&] { return TestServer::create(t.io); });
+    TcpOptions o;
+    o.connect_timeout = milliseconds(300);
+    const std::vector<tcp::endpoint> eps{
+        {asio::ip::make_address("10.255.255.1"), 9},
+        {asio::ip::make_address("127.0.0.1"), srv->port()},
+    };
+    auto d = Dialer::create(t.io, eps, o);
+    const auto t0 = std::chrono::steady_clock::now();
+    t.call([&] { d->start(); });
+    BOOST_REQUIRE(test::eventually([&] { return d->connected(); }, slow(std::chrono::seconds(2))));
+    BOOST_CHECK(std::chrono::steady_clock::now() - t0 < slow(std::chrono::seconds(2)));
+    BOOST_TEST(t.call([&] { return d->counters().connects; }) == 1u);
+    t.call([&] { d->stop(); srv->stopAll(); });
+}
+
+BOOST_AUTO_TEST_CASE(dialer_zero_length_buf_dropped_and_counted)
+{
+    test::IoThread t;
+    auto srv = t.call([&] { return TestServer::create(t.io); });
+    auto d = Dialer::create(t.io, "127.0.0.1", srv->port());
+    t.call([&] { d->start(); });
+    BOOST_REQUIRE(test::eventually([&] { return d->connected(); }));
+    t.call([&] {
+        d->send(makeBuf(std::string_view("")));
+        d->send(makeBuf(std::string_view("x")));
+    });
+    BOOST_TEST(t.call([&] { return d->counters().dropped; }) == 1u);
+    BOOST_TEST(test::eventually([&] { return srv->received() == "x"; }));
+    BOOST_TEST(t.call([&] { return d->counters().messages_out; }) == 1u);
+    t.call([&] { d->stop(); srv->stopAll(); });
+}

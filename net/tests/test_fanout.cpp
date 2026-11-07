@@ -361,3 +361,11 @@ BOOST_AUTO_TEST_CASE(fanout_peer_up_hook_can_greet)
     BOOST_CHECK_EQUAL(d.read(1, milliseconds(200)), "");
     t.call([&] { l->stop(); });
 }
+
+BOOST_AUTO_TEST_CASE(default_constructor)
+{
+    Fanout f;
+    BOOST_CHECK_EQUAL(f.destinations(), 0u);
+    f.publish(makeBuf(std::string_view("nobody listens")));
+    BOOST_CHECK_EQUAL(f.counters().dropped, 0u);
+}

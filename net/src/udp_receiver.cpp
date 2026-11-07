@@ -22,13 +22,6 @@ using asio::ip::udp;
 namespace {
 constexpr std::size_t kDatagramBuffer = 65537; // one byte more than any UDP payload, so nothing is cut silently
 
-asio::ip::address unmap(const asio::ip::address& a)
-{
-    if (a.is_v6() && a.to_v6().is_v4_mapped())
-        return asio::ip::make_address_v4(asio::ip::v4_mapped, a.to_v6());
-    return a;
-}
-
 } // namespace
 
 // Everything one open socket needs while an operation on it is in flight.
@@ -75,7 +68,7 @@ UdpReceiver::UdpReceiver(asio::io_context& io, std::string bind, uint16_t port, 
     auto& m = *impl_;
     boost::system::error_code ec;
     if (!m.opts.peer.empty()) {
-        m.peer_addr = unmap(asio::ip::make_address(m.opts.peer, ec));
+        m.peer_addr = unmapV4(asio::ip::make_address(m.opts.peer, ec));
         if (ec)
             throw std::invalid_argument("udp receiver peer is not an IP address: " + m.opts.peer);
         m.has_peer_filter = true;
@@ -246,7 +239,7 @@ void UdpReceiver::receiveLoop(uint64_t gen, const std::shared_ptr<Rx>& rx)
             return;
         }
         const auto from = rx->from;
-        if (m.has_peer_filter && unmap(from.address()) != m.peer_addr) {
+        if (m.has_peer_filter && unmapV4(from.address()) != m.peer_addr) {
             ++m.counters.rejected_peer;
             // Named in last_error at most once a second.
             const auto now = std::chrono::steady_clock::now();

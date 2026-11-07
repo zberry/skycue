@@ -86,4 +86,20 @@ bool eventually(Pred p, std::chrono::milliseconds limit = slow(std::chrono::seco
     return true;
 }
 
+// For "nothing happens" assertions: polls p every 5 ms for the whole window
+// and returns false at once when it turns false. A bounded poll instead of a
+// fixed sleep: it fails as soon as the unwanted event shows, and the window
+// (give it slow(...)) is the only wait that is unavoidable.
+template <class Pred>
+bool holds(Pred p, std::chrono::milliseconds window)
+{
+    const auto end = std::chrono::steady_clock::now() + window;
+    do {
+        if (!p())
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    } while (std::chrono::steady_clock::now() < end);
+    return true;
+}
+
 } // namespace skycue::net::test

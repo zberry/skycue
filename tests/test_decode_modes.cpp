@@ -110,21 +110,33 @@ BOOST_AUTO_TEST_CASE(pair_outside_window_stays_pending) {
     BOOST_CHECK_EQUAL(r.obs.size(), 1u);
 }
 
-BOOST_AUTO_TEST_CASE(nl_mismatch_pair_rejected_and_reset) {
+BOOST_AUTO_TEST_CASE(nl_mismatch_pair_waits_for_a_new_half) {
+    const cpr::Position a{10.46, 20.0}, b{10.48, 20.0};  // either side of an NL boundary
+    {
+        Rig r;
+        r.feed(air(a, false), 0.0);
+        r.feed(air(b, true), 0.5);
+        BOOST_CHECK_EQUAL(r.c().cpr_pending, 2u);
+        BOOST_CHECK_EQUAL(r.c().cpr_rejected, 0u);
+        BOOST_CHECK(r.obs.empty());
+        // The older (even) half was dropped: a lone even of the same NL as before does not pair.
+        r.feed(air(a, false), 1.5);
+        BOOST_CHECK_EQUAL(r.c().cpr_pending, 3u);
+        BOOST_CHECK_EQUAL(r.c().cpr_rejected, 0u);
+        BOOST_CHECK(r.obs.empty());
+        // That even is now the stored one (the odd was dropped in turn): a matching odd pairs.
+        r.feed(air(a, true), 2.0);
+        BOOST_CHECK_EQUAL(r.obs.size(), 1u);
+        BOOST_CHECK_EQUAL(r.c().cpr_rejected, 0u);
+    }
+    // The newer (odd) half is kept: a fresh even matching its NL produces a position.
     Rig r;
-    const cpr::Position a{10.46, 20.0}, b{10.48, 20.0};
     r.feed(air(a, false), 0.0);
     r.feed(air(b, true), 0.5);
-    BOOST_CHECK_EQUAL(r.c().cpr_rejected, 1u);
-    BOOST_CHECK(r.obs.empty());
-    // The stored even half was cleared: a lone odd does not pair with it.
-    r.feed(air(a, true), 0.8);
-    BOOST_CHECK_EQUAL(r.c().cpr_rejected, 1u);
-    BOOST_CHECK_EQUAL(r.c().cpr_pending, 2u);
-    BOOST_CHECK(r.obs.empty());
-    // Two halves that both arrived after the rejection pair.
-    r.feed(air(a, false), 1.0);
-    BOOST_CHECK_EQUAL(r.obs.size(), 1u);
+    r.feed(air(b, false), 1.5);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
+    BOOST_CHECK_SMALL(*r.obs[0].lat - b.lat, 1e-3);
+    BOOST_CHECK_EQUAL(r.c().cpr_rejected, 0u);
 }
 
 BOOST_AUTO_TEST_CASE(speed_check_rejects_jump) {
@@ -292,6 +304,7 @@ BOOST_AUTO_TEST_CASE(identity_change_emits_without_position) {
     BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
     BOOST_CHECK_EQUAL(*r.obs[0].callsign, "BBB2");
     BOOST_CHECK(!r.obs[0].lat && !r.obs[0].position_time);
+    BOOST_CHECK(!r.obs[0].on_ground);  // a lone ident frame asserts nothing about the ground
     r.feed(df17(kAddr, identification(4, 3, "CCC3")), 20.5);
     BOOST_CHECK_EQUAL(r.obs.size(), 1u);  // rate limited to once per second
     r.feed(df17(kAddr, identification(4, 3, "CCC3")), 21.2);

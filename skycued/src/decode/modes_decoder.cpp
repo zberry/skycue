@@ -111,6 +111,7 @@ void ModesDecoder::evictIdle() {
 void ModesDecoder::feed(const std::vector<uint8_t>& bytes, Clock::time_point arrival,
                         std::optional<uint8_t> signal) {
     ++counters_.frames;
+    frame_ground_.reset();
     auto f = classify(bytes);
     if (!f) {
         ++counters_.unknown_type;
@@ -148,7 +149,9 @@ void ModesDecoder::feed(const std::vector<uint8_t>& bytes, Clock::time_point arr
             // Control field table, design section 5.6.
             const unsigned cf = f->bits(5, 3);
             // Where the IMF bit sits is not in the public sources we have (design
-            // section 12): ME bit 8, the single-antenna flag's place in ADS-B.
+            // section 12): ME bit 8, the single-antenna flag's place in ADS-B. For surface
+            // position messages that bit is also a movement bit, so an IMF read there is
+            // unreliable until the differential test or a DF18 capture settles it.
             const bool imf = f->bits(39, 1) != 0;
             switch (cf) {
             case 0: break;
@@ -239,11 +242,11 @@ void ModesDecoder::onAp(const Frame& f, Clock::time_point arrival, std::optional
     }
     }
     if (f.df == 0 || f.df == 16) {
-        if (verticalStatusGround(f)) ks->on_ground.set(true, now_);
+        if (verticalStatusGround(f)) setGround(*ks, true);
     } else {
         const int fs = flightStatus(f);
-        if (fs == 1 || fs == 3) ks->on_ground.set(true, now_);
-        else if (fs == 0 || fs == 2) ks->on_ground.set(false, now_);
+        if (fs == 1 || fs == 3) setGround(*ks, true);
+        else if (fs == 0 || fs == 2) setGround(*ks, false);
     }
     ++counters_.decoded;
     emit(*ks, f, arrival, nullptr);
@@ -256,7 +259,7 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
     // the rebroadcast classes have their own keys, which no AP reply ever looks up.
     if (f.df == 17 || (f.df == 18 && f.bits(5, 3) == 0)) ks.confirmed.set(true, now_);
     if (signal) pushRssi(ks, *signal);
-    if (f.df == 17 && capability(f) == 4) ks.on_ground.set(true, now_);
+    if (f.df == 17 && capability(f) == 4) setGround(ks, true);
 
     const int tc = typeCode(f);
     std::optional<cpr::Position> accepted;
@@ -270,6 +273,11 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
         ++counters_.decoded;
     } else if ((tc >= 5 && tc <= 8) || (tc >= 9 && tc <= 18) || (tc >= 20 && tc <= 22)) {
         const auto c = decodeCpr(f);
+        if (!c) {  // cannot happen for these type codes; do not rely on that
+            ++counters_.unmapped;
+            emit(ks, f, arrival, nullptr);
+            return;
+        }
         const bool surface = c->surface;
         if (surface) {
             const SurfaceMovement mv = decodeSurfaceMovement(f);
@@ -278,13 +286,13 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
                 ks.last_gs_kt = *mv.gs_kt;
             }
             if (mv.track_deg) ks.track.set(*mv.track_deg, now_);
-            ks.on_ground.set(true, now_);
+            setGround(ks, true);
         } else {
             if (const auto alt = altitudeAc12(f.bits(40, 12))) {
                 if (tc <= 18) setField(ks, ks.alt_baro, *alt, now_, true);
                 else setField(ks, ks.alt_gnss, *alt, now_, true);
             }
-            ks.on_ground.set(false, now_);
+            setGround(ks, false);
         }
         const bool b = surface ? ks.tc31.nic_c : f.bits(39, 1) != 0;
         const int version = ks.tc31.seen ? ks.tc31.version : 0;
@@ -339,6 +347,11 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
     }
 
     emit(ks, f, arrival, accepted ? &*accepted : nullptr);
+}
+
+void ModesDecoder::setGround(KeyState& ks, bool g) {
+    ks.on_ground.set(g, now_);
+    frame_ground_ = g;
 }
 
 void ModesDecoder::reject(KeyState& ks) {
@@ -398,10 +411,13 @@ bool ModesDecoder::positionStep(KeyState& ks, const CprFields& c, cpr::Position&
         global = cand.has_value();
         if (!cand) {
             // The pair straddles an NL boundary: the global rule fails. A local decode may still
-            // apply (step 2); otherwise the pair is rejected.
+            // apply (step 2); otherwise it waits (step 3), it is not a rejection.
             cand = localDecode();
             if (!cand) {
-                reject(ks);
+                // Step 3: it decodes by neither rule and waits for a new partner. The
+                // newer half stays stored, the older one is dropped; no rejection.
+                ++counters_.cpr_pending;
+                ks.halves[kind][c.odd ? 0 : 1].has = false;
                 return false;
             }
         }
@@ -463,8 +479,10 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
         o.lon = pos->lon;
         o.position_time = arrival;
     }
+    // on_ground is asserted only by the triggering frame (design 7.1); the stored state
+    // (up to 60 s old) still decides whether the barometric altitude is suppressed.
     const auto ground = ks.on_ground.fresh(now_, kFieldFresh);
-    o.on_ground = ground;
+    o.on_ground = frame_ground_;
     if (!ground.value_or(false)) o.alt_baro_ft = ks.alt_baro.fresh(now_, kFieldFresh);  // ground suppresses it
     o.alt_geom_ft = ks.alt_gnss.fresh(now_, kFieldFresh);
     if (!o.alt_geom_ft) o.alt_geom_ft = ks.alt_derived.fresh(now_, kFieldFresh);

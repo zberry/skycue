@@ -51,6 +51,7 @@ private:
     void onDf11(const Frame& f, uint32_t residual, std::optional<uint8_t> signal);
     bool positionStep(KeyState& ks, const CprFields& c, cpr::Position& out);
     void reject(KeyState& ks);
+    void setGround(KeyState& ks, bool g);  // stores it and notes that this frame asserted it
     void emit(KeyState& ks, const Frame& f, Clock::time_point arrival, const cpr::Position* pos);
 
     DecoderConfig cfg_;
@@ -59,6 +60,7 @@ private:
     DecodeCounters counters_;
     TimePoint now_{};  // max-so-far arrival time
     bool have_now_ = false;
+    std::optional<bool> frame_ground_;  // what the frame being processed said about on_ground
     std::unordered_map<StateKey, KeyState, StateKeyHash> keys_;
     std::list<StateKey> lru_;  // oldest first
 };

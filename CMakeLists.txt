@@ -34,6 +34,7 @@ include(cmake/Hardening.cmake)
 enable_testing()
 
 add_subdirectory(libskycue)
+add_subdirectory(net)
 if(SKYCUE_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()

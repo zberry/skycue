@@ -657,8 +657,8 @@
     var ll = [r.lat, r.lon];
     if (!rangeRing) {
       rangeRing = L.circle(ll, {
-        radius: f.max_range_nm * NM, className: 'range-ring', color: '#58a6ff', weight: 1.5,
-        opacity: 0.8, fill: false, dashArray: '6 6', interactive: false
+        radius: f.max_range_nm * NM, className: 'range-ring', color: P.DECISION_COLORS.out_of_range, weight: 1.5,
+        opacity: 1, fill: false, dashArray: '6 6', interactive: false
       }).addTo(map);
     } else {
       rangeRing.setLatLng(ll);

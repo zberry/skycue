@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <string>
 
 namespace skycue::net {
 
@@ -20,6 +21,9 @@ struct TcpOptions {
     // resolved address is tried. 10 s is our choice, not a standard value;
     // zero or less disables the timeout.
     std::chrono::milliseconds connect_timeout{10000};
+    // Names the component in the log (see log.hpp); "" for none. A Listener
+    // takes it from ListenOptions::tcp.
+    std::string name;
 };
 
 // Best effort: a failing option is logged at debug and skipped.

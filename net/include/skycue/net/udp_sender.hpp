@@ -30,7 +30,8 @@ struct UdpTarget {
 
 class UdpSender : public std::enable_shared_from_this<UdpSender> {
 public:
-    static std::shared_ptr<UdpSender> create(boost::asio::io_context& io, std::size_t max_datagram = 65507);
+    static std::shared_ptr<UdpSender> create(boost::asio::io_context& io, std::size_t max_datagram = 65507,
+                                          std::string name = {}); // name: log prefix, see log.hpp
     ~UdpSender();
     UdpSender(const UdpSender&) = delete;
     UdpSender& operator=(const UdpSender&) = delete;
@@ -52,7 +53,7 @@ public:
     int nativeHandleForTest() const;
 
 private:
-    UdpSender(boost::asio::io_context& io, std::size_t max_datagram);
+    UdpSender(boost::asio::io_context& io, std::size_t max_datagram, std::string name);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

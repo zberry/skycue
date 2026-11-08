@@ -12,11 +12,13 @@
 namespace skycue::net {
 
 enum class LogLevel { debug, info, warn, error };
-using LogSink = std::function<void(LogLevel, const std::string&)>;
+// `name` is the component's own name from its options ("" when it has none);
+// the sink decides how to show it.
+using LogSink = std::function<void(LogLevel, const std::string& name, const std::string& message)>;
 
 // Process-wide. An empty function (nullptr) restores the default: discard.
 void setLogSink(LogSink sink);
 // Used by every component of the library.
-void log(LogLevel level, const std::string& msg);
+void log(LogLevel level, const std::string& name, const std::string& msg);
 
 } // namespace skycue::net

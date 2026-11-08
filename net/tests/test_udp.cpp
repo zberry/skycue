@@ -195,6 +195,41 @@ BOOST_AUTO_TEST_CASE(udp_bind_failure_reported_and_retried)
     t.call([&] { r->stop(); return 0; });
 }
 
+BOOST_AUTO_TEST_CASE(udp_state_callback_across_a_rebind)
+{
+    IoThread t;
+    auto got = std::make_shared<Got>();
+    asio::io_context io2;
+    auto holder = std::make_unique<udp::socket>(io2, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const uint16_t port = holder->local_endpoint().port();
+    UdpReceiveOptions o;
+    o.rebind_delay = milliseconds(50);
+    o.name = "udp-test";
+    std::mutex m;
+    std::vector<bool> states;
+    auto r = t.call([&] {
+        auto x = UdpReceiver::create(t.io, "127.0.0.1", port, o);
+        hook(*x, got);
+        x->onState([&](bool up) {
+            std::lock_guard<std::mutex> l(m);
+            states.push_back(up);
+        });
+        x->start();
+        return x;
+    });
+    // The failed first bind is not an event, and nothing runs inside start().
+    BOOST_CHECK(holds([&] { std::lock_guard<std::mutex> l(m); return states.empty(); }, slow(milliseconds(150))));
+    BOOST_CHECK_EQUAL(r->receiveBufferBytes(), 0);
+    holder.reset();
+    BOOST_REQUIRE(eventually([&] { std::lock_guard<std::mutex> l(m); return states.size() == 1; }, slow(milliseconds(1000))));
+    BOOST_CHECK(r->bound());
+    BOOST_CHECK_GE(r->receiveBufferBytes(), 256 * 1024);
+    t.call([&] { r->stop(); return 0; });
+    BOOST_CHECK_EQUAL(r->receiveBufferBytes(), 0);
+    BOOST_CHECK(holds([&] { std::lock_guard<std::mutex> l(m); return states == std::vector<bool>{true}; },
+                      slow(milliseconds(100)))); // stop() is silent
+}
+
 BOOST_AUTO_TEST_CASE(udp_multicast_join_and_receive_on_loopback)
 {
     IoThread t;

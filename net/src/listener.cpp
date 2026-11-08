@@ -177,7 +177,7 @@ void Listener::bindAndListen(bool throwOnFailure)
         boost::system::error_code ignore;
         acc->close(ignore);
         m.counters.last_error = why;
-        log(m.bind_failed_before ? LogLevel::debug : LogLevel::warn, why);
+        log(m.bind_failed_before ? LogLevel::debug : LogLevel::warn, m.opts.tcp.name, why);
         m.bind_failed_before = true;
         if (throwOnFailure) {
             m.running = false;
@@ -200,7 +200,7 @@ void Listener::bindAndListen(bool throwOnFailure)
     m.bind_failed_before = false;
     m.counters.last_error.clear();
     m.up = true;
-    log(LogLevel::info, "listening on " + m.bind + ":" + std::to_string(m.bound_port.load()));
+    log(LogLevel::debug, m.opts.tcp.name, "listening on " + m.bind + ":" + std::to_string(m.bound_port.load()));
     acceptLoop(m.gen, acc);
 }
 
@@ -221,9 +221,9 @@ void Listener::acceptLoop(uint64_t gen, const std::shared_ptr<tcp::acceptor>& ac
             if (!m.accept_warned || now - m.last_accept_warn >= kAcceptWarnEvery) {
                 m.accept_warned = true;
                 m.last_accept_warn = now;
-                log(LogLevel::warn, m.counters.last_error);
+                log(LogLevel::warn, m.opts.tcp.name, m.counters.last_error);
             } else {
-                log(LogLevel::debug, m.counters.last_error);
+                log(LogLevel::debug, m.opts.tcp.name, m.counters.last_error);
             }
             std::weak_ptr<Listener> weak = self;
             m.accept_retry.after(kAcceptRetry, [weak, gen, acc] {
@@ -247,8 +247,12 @@ void Listener::adopt(const std::shared_ptr<Session>& s)
     const bool filtered = m.has_peer_filter && unmapV4(s->who.address()) != m.peer_addr;
     if (filtered || m.sessions.size() >= m.opts.max_peers) {
         ++m.counters.rejected_peer;
-        log(LogLevel::debug, std::string("rejected peer ") + s->who.address().to_string() +
-                                 (filtered ? " (not the configured peer)" : " (peer limit)"));
+        // Both causes share the counter; last_error says which and who.
+        m.counters.last_error = "refused a connection from " + s->who.address().to_string() + ":" +
+                                std::to_string(s->who.port()) +
+                                (filtered ? " (not the configured peer)"
+                                          : ": already " + std::to_string(m.opts.max_peers) + " peers");
+        log(LogLevel::debug, m.opts.tcp.name, m.counters.last_error);
         s->closed = true;
         s->socket->close(ec);
         return;
@@ -268,7 +272,7 @@ void Listener::adopt(const std::shared_ptr<Session>& s)
     }
     m.counters.peers = m.sessions.size();
     ++m.counters.connects;
-    log(LogLevel::info, "peer " + s->who.address().to_string() + ":" + std::to_string(s->who.port()) +
+    log(LogLevel::debug, m.opts.tcp.name, "peer " + s->who.address().to_string() + ":" + std::to_string(s->who.port()) +
                             " connected as stream " + std::to_string(s->stream));
     const uint64_t gen = m.gen;
     if (const auto hook = m.on_peer) // a copy: the hook may replace the handler
@@ -289,7 +293,7 @@ void Listener::closeSession(const std::shared_ptr<Session>& s, const std::string
     retire(*s);
     m.sessions.erase(s->stream);
     m.counters.peers = m.sessions.size();
-    log(LogLevel::debug, "peer " + s->who.address().to_string() + " (stream " + std::to_string(s->stream) +
+    log(LogLevel::debug, m.opts.tcp.name, "peer " + s->who.address().to_string() + " (stream " + std::to_string(s->stream) +
                              ") closed: " + why);
     if (m.on_peer) {
         // Always asynchronous: the caller of send() must not be re-entered.

@@ -6,6 +6,7 @@
 
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/multicast.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/socket_base.hpp>
 
 #include <atomic>
@@ -52,6 +53,9 @@ struct UdpReceiver::Impl {
     std::optional<std::chrono::steady_clock::time_point> peer_noted;
     std::atomic<bool> up{false};
     std::atomic<uint16_t> bound_port{0};
+    std::atomic<int> rcvbuf{0};  // the receive buffer the socket was granted; 0 until bound
+    uint64_t stop_epoch = 0;     // changes on stop(); suppresses state notifications posted earlier
+    std::function<void(bool)> on_state;
     std::function<void(const uint8_t*, std::size_t, const udp::endpoint&)> on_datagram;
     Counters counters;
 };
@@ -89,6 +93,23 @@ void UdpReceiver::onDatagram(std::function<void(const uint8_t*, std::size_t, con
 bool UdpReceiver::bound() const { return impl_->up.load(); }
 uint16_t UdpReceiver::localPort() const { return impl_->bound_port.load(); }
 const Counters& UdpReceiver::counters() const { return impl_->counters; }
+int UdpReceiver::receiveBufferBytes() const { return impl_->rcvbuf.load(); }
+void UdpReceiver::onState(std::function<void(bool)> h) { impl_->on_state = std::move(h); }
+
+// Posted, never called from inside start(), stop() or a receive handler.
+void UdpReceiver::notifyState(bool bound)
+{
+    auto& m = *impl_;
+    if (!m.on_state)
+        return;
+    std::weak_ptr<UdpReceiver> weak = shared_from_this();
+    const uint64_t epoch = m.stop_epoch;
+    asio::post(m.io, [weak, epoch, bound] {
+        auto self = weak.lock();
+        if (self && self->impl_->stop_epoch == epoch && self->impl_->on_state)
+            self->impl_->on_state(bound);
+    });
+}
 int UdpReceiver::nativeHandleForTest() const
 {
     const auto& rx = impl_->rx;
@@ -112,11 +133,13 @@ void UdpReceiver::stop()
     m.running = false;
     ++m.gen;
     m.rebind.cancel();
+    ++m.stop_epoch;
     boost::system::error_code ec;
     if (m.rx)
         m.rx->sock.close(ec);
     m.rx.reset(); // handlers in flight keep their own reference
     m.up = false;
+    m.rcvbuf = 0;
 }
 
 void UdpReceiver::fail(const std::string& why)
@@ -127,10 +150,13 @@ void UdpReceiver::fail(const std::string& why)
         m.rx->sock.close(ignore);
         m.rx.reset();
     }
-    m.up = false;
+    const bool was_up = m.up.exchange(false);
+    m.rcvbuf = 0;
     m.counters.last_error = why;
-    log(m.failed_before ? LogLevel::debug : LogLevel::warn, why);
+    log(m.failed_before ? LogLevel::debug : LogLevel::warn, m.opts.name, why);
     m.failed_before = true;
+    if (was_up)
+        notifyState(false);
     std::weak_ptr<UdpReceiver> weak = shared_from_this();
     const uint64_t gen = m.gen;
     m.rebind.after(m.opts.rebind_delay, [weak, gen] {
@@ -173,8 +199,9 @@ void UdpReceiver::bindAndJoin()
         rx->sock.set_option(asio::socket_base::receive_buffer_size(static_cast<int>(m.opts.receive_buffer)), ignore);
         asio::socket_base::receive_buffer_size got;
         rx->sock.get_option(got, ignore);
+        m.rcvbuf = ignore ? 0 : got.value();
         if (!m.failed_before)
-            log(LogLevel::info, "udp " + where + ": receive buffer " + std::to_string(ignore ? 0 : got.value()) +
+            log(LogLevel::debug, m.opts.name, "udp " + where + ": receive buffer " + std::to_string(ignore ? 0 : got.value()) +
                                     " bytes");
     }
     if (multicast) {
@@ -220,7 +247,8 @@ void UdpReceiver::bindAndJoin()
     m.failed_before = false;
     m.counters.last_error.clear();
     m.up = true;
-    log(LogLevel::info, "udp receiving on " + where + (multicast ? " group " + m.opts.group : std::string()));
+    log(LogLevel::debug, m.opts.name, "udp receiving on " + where + (multicast ? " group " + m.opts.group : std::string()));
+    notifyState(true);
     receiveLoop(m.gen, rx);
 }
 

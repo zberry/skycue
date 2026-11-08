@@ -47,9 +47,10 @@ struct FamilySocket {
 } // namespace
 
 struct UdpSender::Impl {
-    Impl(asio::io_context& io_, std::size_t max) : io(io_), max_datagram(max) {}
+    Impl(asio::io_context& io_, std::size_t max, std::string n) : io(io_), max_datagram(max), name(std::move(n)) {}
     asio::io_context& io;
     std::size_t max_datagram;
+    std::string name;
     std::vector<UdpTarget> configured;
     std::vector<Resolved> resolved;
     FamilySocket v4, v6;
@@ -102,19 +103,22 @@ struct UdpSender::Impl {
         counters.last_error = t.name + ": " + why;
         const auto now = std::chrono::steady_clock::now();
         if (!t.logged || now - t.last_log >= kErrorLogEvery) {
-            log(LogLevel::warn, "udp send to " + counters.last_error);
+            log(LogLevel::warn, name, "udp send to " + counters.last_error);
             t.logged = true;
             t.last_log = now;
         }
     }
 };
 
-std::shared_ptr<UdpSender> UdpSender::create(asio::io_context& io, std::size_t max_datagram)
+std::shared_ptr<UdpSender> UdpSender::create(asio::io_context& io, std::size_t max_datagram, std::string name)
 {
-    return std::shared_ptr<UdpSender>(new UdpSender(io, max_datagram));
+    return std::shared_ptr<UdpSender>(new UdpSender(io, max_datagram, std::move(name)));
 }
 
-UdpSender::UdpSender(asio::io_context& io, std::size_t max_datagram) : impl_(std::make_unique<Impl>(io, max_datagram)) {}
+UdpSender::UdpSender(asio::io_context& io, std::size_t max_datagram, std::string name)
+    : impl_(std::make_unique<Impl>(io, max_datagram, std::move(name)))
+{
+}
 UdpSender::~UdpSender() = default;
 
 void UdpSender::addTarget(const UdpTarget& t)
@@ -154,7 +158,7 @@ std::size_t UdpSender::start()
             const auto results = resolver.resolve(cfg.host, std::to_string(cfg.port), ec);
             if (ec || results.begin() == results.end()) {
                 m.counters.last_error = "target " + r.name + ": " + (ec ? ec.message() : "no address");
-                log(LogLevel::warn, "udp " + m.counters.last_error + " (skipped)");
+                log(LogLevel::warn, m.name, "udp " + m.counters.last_error + " (skipped)");
                 continue;
             }
             // One address per target: the first IPv4 one, else the first.
@@ -166,7 +170,7 @@ std::size_t UdpSender::start()
                 }
             }
             r.ep = pick->endpoint();
-            log(LogLevel::debug, "udp target " + r.name + " resolved to " + r.ep.address().to_string() + " (of " +
+            log(LogLevel::debug, m.name, "udp target " + r.name + " resolved to " + r.ep.address().to_string() + " (of " +
                                      std::to_string(std::distance(results.begin(), results.end())) + " addresses)");
         }
         r.multicast = isMulticast(r.ep.address());
@@ -179,7 +183,7 @@ std::size_t UdpSender::start()
             if (ec) {
                 fs.sock.reset();
                 m.counters.last_error = "target " + r.name + ": open socket: " + ec.message();
-                log(LogLevel::warn, "udp " + m.counters.last_error + " (skipped)");
+                log(LogLevel::warn, m.name, "udp " + m.counters.last_error + " (skipped)");
                 continue;
             }
         }
@@ -187,11 +191,11 @@ std::size_t UdpSender::start()
             const std::string why = m.applyMulticast(r, fs);
             if (!why.empty()) {
                 m.counters.last_error = "target " + r.name + ": " + why;
-                log(LogLevel::warn, "udp " + m.counters.last_error + " (skipped)");
+                log(LogLevel::warn, m.name, "udp " + m.counters.last_error + " (skipped)");
                 continue;
             }
         }
-        log(LogLevel::info, "udp target " + r.name);
+        log(LogLevel::info, m.name, "udp target " + r.name);
         m.resolved.push_back(std::move(r));
     }
     return m.resolved.size();

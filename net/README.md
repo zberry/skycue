@@ -23,7 +23,7 @@ sinks out, all handled on one io thread.
 | `tcp_options.hpp` | `TcpOptions` and `applyTcpOptions()`: keepalive, nodelay, read chunk, send cap, backoff bounds, connect timeout. Best effort: a failing option is logged and skipped. |
 | `dialer.hpp` | `Dialer`: one outbound TCP connection kept up; resolves, connects, reads in chunks, reconnects with backoff. Each resolved address gets `connect_timeout` to connect, then the next address is tried. `send()` is queued, and dropped and counted when not connected. |
 | `listener.hpp` | `Listener`: a TCP server for many peers. Stream ids 1, 2, 3, ... never reused; per-peer send queue with a byte cap (over the cap the peer is closed); optional single permitted source address; rebinds after a failure. |
-| `udp_receiver.hpp` | `UdpReceiver`: datagrams from a unicast port or a multicast group; closes and retries after a bind, join or receive error. |
+| `udp_receiver.hpp` | `UdpReceiver`: datagrams from a unicast port or a multicast group; closes and retries after a bind, join or receive error. `onState(bool bound)` reports each bind (also a rebind) and each loss, posted; `receiveBufferBytes()` is the granted receive buffer. |
 | `udp_sender.hpp` | `UdpSender`: one datagram per buffer to every target, unicast or multicast; non-blocking, a datagram the kernel cannot take is dropped and counted. A host name that resolves to several addresses is sent to at one only: the first IPv4 address, else the first (logged at debug). |
 | `fanout.hpp` | `Fanout`: owns a dynamic set of listeners, dialers and UDP senders and delivers one `Buf` to all of them. A slow or absent destination drops on its own; `publish()` never blocks. Peer-up and peer-down hooks carry a Fanout-wide peer id and, for peer-up, the remote address and a send-to-that-peer function; `peerInfo(id)` gives that peer's send-side stats. Construct it with `Fanout()`; the older `Fanout(io_context&)` still works and ignores its argument. |
 | `log.hpp` | The process-wide log sink (below). |
@@ -109,8 +109,15 @@ group its own port.
 ## Log sink
 
 The library logs through `skycue::net::log()`, which discards by default.
-`setLogSink(fn)` installs a `void(LogLevel, const std::string&)` function
-(`debug`, `info`, `warn`, `error`); `setLogSink(nullptr)` restores the
+`setLogSink(fn)` installs a `void(LogLevel, const std::string& name, const
+std::string& message)` function (`debug`, `info`, `warn`, `error`);
+`name` is the `name` the component was created with (`TcpOptions::name` for
+`Dialer` and, through `ListenOptions::tcp`, `Listener`; `UdpReceiveOptions::name`;
+the third argument of `UdpSender::create`), empty when it has none, so a program
+with several inputs can prefix each line with its own label. Lifecycle lines
+(connected, listening, peer up and down, receiver bound) are `debug`; the first
+failure since the last success is `warn`, the retries after it `debug`.
+`setLogSink(nullptr)` restores the
 default. The sink may be called from any thread, so it must be thread-safe.
 
 ## Using it on its own

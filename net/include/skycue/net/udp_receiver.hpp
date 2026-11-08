@@ -36,6 +36,7 @@ struct UdpReceiveOptions {
     std::string iface;                      // join on this local interface address; "" = default
     std::size_t receive_buffer = 4u << 20;  // requested SO_RCVBUF, best effort
     std::chrono::milliseconds rebind_delay{5000};
+    std::string name;                       // log prefix, see log.hpp
 };
 
 class UdpReceiver : public std::enable_shared_from_this<UdpReceiver> {
@@ -54,6 +55,12 @@ public:
     void stop();
     bool bound() const;
     uint16_t localPort() const; // the bound port (port 0 asks the OS); 0 until bound
+    int receiveBufferBytes() const; // the receive buffer the socket was granted; 0 until bound
+    // Called (posted, so never from inside start(), stop() or a receive
+    // handler) with true after each successful bind and join, also a rebind,
+    // and with false when a bound socket is lost. A failed bind before the
+    // first success is not an event. After stop() returns no callback runs.
+    void onState(std::function<void(bool bound)> h);
     const Counters& counters() const; // read on the io thread only
 
     // For tests only: the native socket handle, -1 when not open.
@@ -67,6 +74,7 @@ private:
     void bindAndJoin();
     void receiveLoop(uint64_t gen, const std::shared_ptr<Rx>& rx);
     void fail(const std::string& why);
+    void notifyState(bool bound);
 };
 
 } // namespace skycue::net

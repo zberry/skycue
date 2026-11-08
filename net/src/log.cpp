@@ -20,7 +20,7 @@ void setLogSink(LogSink sink)
     g_sink = std::move(p);
 }
 
-void log(LogLevel level, const std::string& msg)
+void log(LogLevel level, const std::string& name, const std::string& msg)
 {
     std::shared_ptr<const LogSink> p;
     {
@@ -28,7 +28,7 @@ void log(LogLevel level, const std::string& msg)
         p = g_sink;
     }
     if (p)
-        (*p)(level, msg);
+        (*p)(level, name, msg);
 }
 
 } // namespace skycue::net

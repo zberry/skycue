@@ -15,8 +15,8 @@ using asio::ip::tcp;
 
 struct Dialer::Impl {
     Impl(asio::io_context& io_, std::string h, uint16_t p, TcpOptions o, std::vector<tcp::endpoint> f)
-        : io(io_), host(std::move(h)), port(p), opts(o), fixed(std::move(f)), resolver(io_), retry(io_),
-          connect_timer(io_), backoff(o.min_backoff, o.max_backoff)
+        : io(io_), host(std::move(h)), port(p), opts(std::move(o)), fixed(std::move(f)), resolver(io_), retry(io_),
+          connect_timer(io_), backoff(opts.min_backoff, opts.max_backoff)
     {
     }
     // Folds the write counts of the connection that ended into the totals.
@@ -57,18 +57,18 @@ struct Dialer::Impl {
 
 std::shared_ptr<Dialer> Dialer::create(asio::io_context& io, std::string host, uint16_t port, TcpOptions o)
 {
-    return std::shared_ptr<Dialer>(new Dialer(io, std::move(host), port, o, {}));
+    return std::shared_ptr<Dialer>(new Dialer(io, std::move(host), port, std::move(o), {}));
 }
 
 std::shared_ptr<Dialer> Dialer::create(asio::io_context& io, std::vector<tcp::endpoint> endpoints, TcpOptions o)
 {
     std::string name = endpoints.empty() ? std::string("(none)") : endpoints.front().address().to_string();
     const uint16_t port = endpoints.empty() ? 0 : endpoints.front().port();
-    return std::shared_ptr<Dialer>(new Dialer(io, std::move(name), port, o, std::move(endpoints)));
+    return std::shared_ptr<Dialer>(new Dialer(io, std::move(name), port, std::move(o), std::move(endpoints)));
 }
 
 Dialer::Dialer(asio::io_context& io, std::string host, uint16_t port, TcpOptions o, std::vector<tcp::endpoint> fixed)
-    : impl_(std::make_unique<Impl>(io, std::move(host), port, o, std::move(fixed)))
+    : impl_(std::make_unique<Impl>(io, std::move(host), port, std::move(o), std::move(fixed)))
 {
 }
 
@@ -232,7 +232,7 @@ void Dialer::connected(uint64_t gen, const std::shared_ptr<tcp::socket>& sock)
             st.remote = ep;
     }
     st.up = true;
-    log(LogLevel::info, "connected to " + st.host + ":" + std::to_string(st.port));
+    log(LogLevel::debug, st.opts.name, "connected to " + st.host + ":" + std::to_string(st.port));
     if (st.on_conn)
         st.on_conn(true);
     if (gen != st.gen)
@@ -255,15 +255,26 @@ void Dialer::lost(uint64_t gen, const std::string& why)
     m.socket.reset();
     m.retireQueue();
     m.counters.last_error = why;
-    log(m.failed_before && !was_up ? LogLevel::debug : LogLevel::warn, why);
+    // The first failure since the last success is a warning, the following
+    // ones debug; a warning names the peer (the debug line is read next to it).
+    const bool quiet = m.failed_before && !was_up;
     m.failed_before = true;
     if (m.running) {
         const auto delay = m.backoff.next();
+        const std::string retrying = "; retrying in " + std::to_string(delay.count()) + " ms";
+        if (quiet)
+            log(LogLevel::debug, m.opts.name, why + retrying);
+        else
+            log(LogLevel::warn, m.opts.name,
+                m.host + ":" + std::to_string(m.port) + ": " + why + retrying +
+                    " (further failures logged at debug level)");
         std::weak_ptr<Dialer> weak = shared_from_this();
         m.retry.after(delay, [weak] {
             if (auto self = weak.lock(); self && self->impl_->running)
                 self->connect();
         });
+    } else {
+        log(quiet ? LogLevel::debug : LogLevel::warn, m.opts.name, why);
     }
     if (was_up && m.on_conn) {
         // Always asynchronous: the caller of send() must not be re-entered.

@@ -51,11 +51,12 @@ BOOST_AUTO_TEST_CASE(ipv6_literals_accepted) {
 }
 BOOST_AUTO_TEST_CASE(log_sink_receives_messages) {
     std::vector<std::string> got;
-    setLogSink([&](LogLevel, const std::string& m) { got.push_back(m); });
-    log(LogLevel::info, "hello");
+    setLogSink([&](LogLevel, const std::string& n, const std::string& m) { got.push_back(n + "|" + m); });
+    log(LogLevel::info, "readsb", "hello");
+    log(LogLevel::info, "", "bare");
     setLogSink(nullptr);
-    log(LogLevel::info, "dropped");
-    BOOST_TEST(got == std::vector<std::string>{"hello"});
+    log(LogLevel::info, "", "dropped");
+    BOOST_TEST(got == (std::vector<std::string>{"readsb|hello", "|bare"}));
 }
 BOOST_AUTO_TEST_CASE(unmap_v4_mapped_addresses) {
     namespace ip = boost::asio::ip;

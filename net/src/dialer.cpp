@@ -252,6 +252,16 @@ void Dialer::connected(uint64_t gen, const std::shared_ptr<tcp::socket>& sock)
     st.failed_before = false;
     ++st.counters.connects;
     st.counters.last_error.clear();
+    // A loss whose notification is still posted comes first, so the host
+    // sees down for the old connection before up for the new one. This runs
+    // before the new connection becomes visible (up, the write queue, the
+    // peer): a handler for the old connection that stops or closes the dialer
+    // sees the old state, and connected()/peerInfo never report the new
+    // connection while the old one's down is delivered. The inline path is
+    // unreachable through posting order today; the order is defensive.
+    st.deliverDown();
+    if (gen != st.gen)
+        return;
     st.wq = std::make_unique<WriteQueue>(sock, st.opts.send_cap);
     {
         std::weak_ptr<Dialer> weak = shared_from_this();
@@ -268,11 +278,6 @@ void Dialer::connected(uint64_t gen, const std::shared_ptr<tcp::socket>& sock)
     }
     st.up = true;
     log(LogLevel::debug, st.opts.name, "connected to " + st.host + ":" + std::to_string(st.port));
-    // A loss whose notification is still posted comes first, so the host
-    // sees down for the old connection before up for the new one.
-    st.deliverDown();
-    if (gen != st.gen)
-        return;
     if (st.on_conn)
         st.on_conn(true);
     if (gen != st.gen)

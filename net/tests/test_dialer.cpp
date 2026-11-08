@@ -517,3 +517,37 @@ BOOST_AUTO_TEST_CASE(dialer_on_failure_reports_a_failed_lookup_and_is_silent_aft
     BOOST_TEST(whys.size() == 1u);
     BOOST_TEST(whys[0].rfind("resolve ", 0) == 0u);
 }
+
+BOOST_AUTO_TEST_CASE(dialer_down_delivered_before_new_connection_visible)
+{
+    test::IoThread t;
+    auto srv = t.call([&] { return TestServer::create(t.io); });
+    auto d = Dialer::create(t.io, "127.0.0.1", srv->port());
+    std::mutex m;
+    std::vector<bool> events;
+    std::vector<bool> connected_in_down;
+    d->onConnection([&](bool up) {
+        std::lock_guard<std::mutex> l(m);
+        events.push_back(up);
+        if (!up) {
+            connected_in_down.push_back(d->connected());
+            d->stop();
+            d->start();
+        }
+    });
+    t.call([&] { d->start(); });
+    BOOST_REQUIRE(test::eventually([&] {
+        std::lock_guard<std::mutex> l(m);
+        return events.size() == 1u;
+    }));
+    t.call([&] { srv->closeClient(); });
+    BOOST_REQUIRE(test::eventually([&] {
+        std::lock_guard<std::mutex> l(m);
+        return events.size() >= 3u;
+    }));
+    t.call([&] { d->stop(); srv->stopAll(); });
+    std::lock_guard<std::mutex> l(m);
+    BOOST_REQUIRE(connected_in_down.size() >= 1u);
+    BOOST_TEST(!connected_in_down[0]);
+    BOOST_TEST((events[0] && !events[1] && events[2])); // up, down, up
+}

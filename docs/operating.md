@@ -219,6 +219,10 @@ logs about a connection:
   (`forwarder: UDP target <host:port> skipped: <why>`), and a frame too large
   for a datagram is an ERROR (`forwarder: frame of N bytes too large for UDP,
   not sent`).
+- **Tools.** `skycue-pingsim` and `skycue-rawplay` dial with TCP keepalive
+  and with `TCP_NODELAY` off (unlike skycued). Their reconnect lines carry the
+  reason: `connect <host>:<port>: <address>: <why>; retrying in <N> ms`.
+  `skycue-pingsim` serves one client at a time.
 
 ## Replaying a JSONL recording
 

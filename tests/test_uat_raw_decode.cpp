@@ -82,17 +82,10 @@ InputDef builtinDump978(uint16_t port)
     return d;
 }
 
-// The captures carry no times and are replayed at wire speed, which a fix-to-fix speed check
-// (spec 5.5 step 4) would take for jumps. The arrival clock therefore advances ten seconds per
-// downlink handed to the decoder. Even so the capture holds jumps no aircraft flew (8.7 and 12.4 NM
-// between successive fixes of ad7233) and the check drops them. It runs on the io thread only.
 RawDecodeOptions decodeOn()
 {
     RawDecodeOptions o;
     o.enabled = true;
-    auto n = std::make_shared<int64_t>(0);
-    const auto base = std::chrono::system_clock::now();
-    o.clock = [n, base] { return base + std::chrono::seconds(10 * (*n)++); };
     return o;
 }
 
@@ -423,12 +416,11 @@ BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier, *skycue_test::needs_fixture("
     BOOST_TEST(per_type[0] == 169);
     BOOST_TEST(per_type[1] == 192);
     BOOST_TEST(per_type[2] == 78);
-    // The two ad7233 jumps (8.7 and 12.4 NM) fail the speed check; their frames count as no_position.
-    BOOST_TEST(k.decoded == 437u);
+    BOOST_TEST(k.decoded == 439u);
     BOOST_TEST(k.unmapped == 0u);
-    BOOST_TEST(k.no_position == 2u);
-    BOOST_TEST(k.cpr_rejected == 2u);
-    BOOST_TEST(k.decoder_observations == 438u);
+    BOOST_TEST(k.no_position == 0u);
+    BOOST_TEST(k.cpr_rejected == 0u);
+    BOOST_TEST(k.decoder_observations == 439u);
 }
 
 BOOST_AUTO_TEST_CASE(stratux_log_decodes, *skycue_test::needs_fixture("raw/stratux-uat-2015.log.gz"))
@@ -441,8 +433,7 @@ BOOST_AUTO_TEST_CASE(stratux_log_decodes, *skycue_test::needs_fixture("raw/strat
     const auto s = rig.state();
     BOOST_TEST(s.counters.frames == 3760u);  // the golden pairs the same 3,760 frames
     BOOST_TEST(s.counters.unknown_type == 0u);
-    BOOST_TEST(s.counters.decoded + s.counters.no_position == 3760u);
-    BOOST_TEST(s.counters.decoded == 3756u);  // the rest are fixes dropped by the speed check
+    BOOST_TEST(s.counters.decoded == 3760u);
     BOOST_TEST(s.counters.frames + s.counters.rejected >= f.down.size());
     BOOST_TEST(rig.uplinkCount() == f.up.size());
 }

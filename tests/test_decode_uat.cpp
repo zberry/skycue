@@ -375,49 +375,6 @@ BOOST_AUTO_TEST_CASE(change_without_position_is_gated)
     BOOST_CHECK_EQUAL(r.out.size(), 3u);
 }
 
-// Spec 5.5 step 4: a fix further from the last accepted one than 0.5 NM + elapsed x max(1.5 gs, 150 kt)
-// is dropped; a plausible one, or the same jump after enough time, is accepted.
-BOOST_AUTO_TEST_CASE(speed_check_drops_a_jump)
-{
-    Rig r;  // no reference: the first fix anchors
-    auto a = airborne();
-    a.ns_kt = 0;
-    a.ew_kt = 0;  // gs 0: the limit is the 150 kt floor
-    r.feed(a, 0.0);
-    BOOST_REQUIRE_EQUAL(r.out.size(), 1u);
-    auto jump = a;
-    jump.lat += 2.0 / 60.0;  // 2 NM north
-    r.feed(jump, 1.0);  // limit 0.5 + 1 x 150/3600 = 0.54 NM
-    BOOST_CHECK_EQUAL(r.dec.counters().cpr_rejected, 1u);
-    BOOST_CHECK_EQUAL(r.dec.counters().no_position, 1u);
-    for (const auto& o : r.out) BOOST_CHECK(!o.lat || std::fabs(*o.lat - a.lat) < 1e-4);
-    auto near = a;
-    near.lat += 0.1 / 60.0;  // 0.1 NM
-    r.feed(near, 2.0);
-    BOOST_CHECK_EQUAL(r.dec.counters().cpr_rejected, 1u);
-    BOOST_REQUIRE(r.last().lat);
-    BOOST_CHECK_SMALL(*r.last().lat - near.lat, 1e-4);
-    r.feed(jump, 62.0);  // 60 s on: the limit is 0.5 + 60 x 150/3600 = 3 NM
-    BOOST_CHECK_EQUAL(r.dec.counters().cpr_rejected, 1u);
-    BOOST_REQUIRE(r.last().lat);
-    BOOST_CHECK_SMALL(*r.last().lat - jump.lat, 1e-4);
-}
-
-BOOST_AUTO_TEST_CASE(speed_check_uses_ground_speed)
-{
-    Rig r;
-    auto a = airborne();  // 141 kt: 1.5 x gs = 212 kt
-    r.feed(a, 0.0);
-    auto b = a;
-    b.lat += 1.0 / 60.0;  // 1 NM in 10 s: limit 0.5 + 10 x 212/3600 = 1.09 NM
-    r.feed(b, 10.0);
-    BOOST_CHECK_EQUAL(r.dec.counters().cpr_rejected, 0u);
-    auto c = b;
-    c.lat += 1.2 / 60.0;  // 1.2 NM in 10 s: over
-    r.feed(c, 20.0);
-    BOOST_CHECK_EQUAL(r.dec.counters().cpr_rejected, 1u);
-}
-
 BOOST_AUTO_TEST_CASE(vertical_rate_change_emits_and_a_flip_drops_the_other_source)
 {
     Rig r;

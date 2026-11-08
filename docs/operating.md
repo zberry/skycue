@@ -309,10 +309,9 @@ else that is hex counts in `rejected`. What you get:
   `minimum_fuel` (the public table); dump978-fa prints `invalid` for it.
 - **Position range.** A position more than 300 NM from the input's
   reference (`ref_lat` and `ref_lon`, else `RECEIVER_LAT` and
-  `RECEIVER_LON`) is rejected and counted in `cpr_rejected`. So is a fix too
-  far from the aircraft's last accepted one to have been flown (0.5 NM plus the
-  elapsed time at 1.5 times its ground speed, between 150 and 1200 kt, or 100
-  kt on the ground), as for 1090. A change without a position (an altitude, say)
+  `RECEIVER_LON`) is rejected and counted in `cpr_rejected`. There is no
+  speed check against the previous fix (UAT positions are whole fixes, and the
+  error correction makes a corrupt one very rare). A change without a position (an altitude, say)
   is reported only after 10 s without an accepted position, and at most once a
   second. Call sign, category, squawk and emergency status are kept for as long
   as the aircraft is tracked, on both bands; all other fields for 60 s.

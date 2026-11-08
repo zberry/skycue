@@ -35,9 +35,6 @@ struct UatKeyState {
     std::list<StateKey>::iterator lru;
 
     std::optional<cpr::Position> first_pos;  // anchor of the range check without a reference
-    std::optional<cpr::Position> last_pos;   // last accepted fix, for the speed check (spec 5.5 step 4)
-    TimePoint last_pos_at{};
-    std::optional<float> last_gs_kt;         // last ground speed, never expired (as in ModesDecoder)
     std::optional<TimePoint> last_accept_at;  // last accepted position
     std::optional<TimePoint> last_change_emit;  // last observation emitted without a position
 

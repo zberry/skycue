@@ -6,7 +6,10 @@
 #include "coding/bits.hpp"
 
 // Rules: decoder spec sections 5.4 (altitude), 6 (address qualifiers) and 7
-// (observation production). Constants marked "our choice" are not cited values.
+// (observation production). Position: only the 300 NM range check of 5.5 step 4, not its speed
+// check. UAT positions are plain lat/lon (no CPR), so there is no decode ambiguity for a speed
+// check to catch; Reed-Solomon coding makes an undetected bit error in a position vanishingly
+// rare; and a speed gate on 978 only rejects fixes the reference decoder accepts. Constants marked "our choice" are not cited values.
 
 namespace skycued::decode {
 
@@ -15,7 +18,7 @@ namespace {
 using std::chrono::seconds;
 using skycue::AddressType;
 using skycue::Source;
-using namespace limits;  // range, speed and emission limits shared with the 1090 decoder
+using namespace limits;  // range and emission limits shared with the 1090 decoder
 
 constexpr seconds kFieldFresh{60};     // our choice: observations carry fields <= 60 s old
 constexpr std::size_t kRssiFrames = 8; // our choice: rssi is the mean power over the last 8 frames
@@ -34,8 +37,6 @@ std::optional<double> rssiOf(const UatKeyState& ks) {
     if (!(mean > 0.0) || !std::isfinite(mean)) return std::nullopt;
     return std::round(10.0 * std::log10(mean) * 10.0) / 10.0;
 }
-
-double secs(TimePoint a, TimePoint b) { return std::chrono::duration<double>(a - b).count(); }
 
 // Sets a timed field; flags a change when it is new, expired or replaced a different value.
 template <typename T>
@@ -136,10 +137,7 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
         else setField(ks, ks.alt_baro, *baro, now_);
     }
     if (geom) setField(ks, ks.alt_geom, *geom, now_);
-    if (sv.gs_kt) {
-        setField(ks, ks.gs, *sv.gs_kt, now_);
-        ks.last_gs_kt = static_cast<float>(*sv.gs_kt);
-    }
+    if (sv.gs_kt) setField(ks, ks.gs, *sv.gs_kt, now_);
     if (sv.track_deg) setField(ks, ks.track, *sv.track_deg, now_);
     if (sv.vrate_fpm) {
         const float r = static_cast<float>(*sv.vrate_fpm);
@@ -169,22 +167,11 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
         const std::optional<cpr::Position> anchor = cfg_.reference ? cfg_.reference : ks.first_pos;
         bool ok = std::isfinite(p.lat) && std::isfinite(p.lon) && std::fabs(p.lat) <= 90.0 &&
                   !(anchor && cpr::distanceNm(p, *anchor) > kRangeNm);
-        if (ok && ks.last_pos) {  // spec 5.5 step 4: speed reasonableness against the last accepted fix
-            const double elapsed = std::max(0.0, secs(now_, ks.last_pos_at));
-            const double gs = ks.last_gs_kt.value_or(0.0f);
-            const double kt = std::min(std::max(1.5 * gs, kSpeedMinKt), ground ? kSpeedCapSurfaceKt : kSpeedCapAirKt);
-            if (cpr::distanceNm(p, *ks.last_pos) > kSpeedBaseNm + elapsed * kt / 3600.0) ok = false;
-        }
         if (!ok) {
-            // The fix is dropped. As in the 1090 decoder the last accepted fix is forgotten, so the
-            // next fix restarts the speed check instead of being held to a possibly bad anchor.
-            ++counters_.cpr_rejected;
-            ks.last_pos.reset();
+            ++counters_.cpr_rejected;  // the fix is dropped; no stored position is touched
             dropped = true;
         } else {
             if (!ks.first_pos) ks.first_pos = p;
-            ks.last_pos = p;
-            ks.last_pos_at = now_;
             ks.last_accept_at = now_;
             accepted = p;  // every accepted in-range fix is new, even a repeat: position_time must advance
         }

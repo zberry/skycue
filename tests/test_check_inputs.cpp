@@ -181,13 +181,13 @@ BOOST_AUTO_TEST_CASE(check_inputs_skycued_probes_beast_port_and_warns)
                                                {"inputs.decoder", "\"skycued\""},
                                                {"inputs.readsb.beast_port", std::to_string(beast)}}),
                                      inputs, status);
-    BOOST_TEST(countLines(sky, "WARN: TRACK_DECODER=skycued: input 'rs2' (readsb JSON) and input 'readsb' (beast_raw)") == 1u, sky);
+    BOOST_TEST(countLines(sky, "WARN: inputs.decoder=skycued: input 'rs2' (readsb JSON) and input 'readsb' (beast_raw)") == 1u, sky);
     BOOST_TEST(sky.find("readsb 127.0.0.1:" + std::to_string(beast) + ": ") != std::string::npos, sky);
     BOOST_TEST((WIFEXITED(status) && WEXITSTATUS(status) == 1));  // nothing listens: unchanged rule
 
     // The default decoder: no WARN, the JSON port probed.
     const std::string def = runCheck(common, inputs, status);
-    BOOST_TEST(def.find("TRACK_DECODER") == std::string::npos, def);
+    BOOST_TEST(def.find("inputs.decoder") == std::string::npos, def);
     BOOST_TEST(def.find("readsb 127.0.0.1:30047: ") != std::string::npos, def);
 }
 
@@ -201,7 +201,7 @@ BOOST_AUTO_TEST_CASE(check_inputs_skycued_warns_for_readsb_json_with_uat_raw)
                             std::to_string(closedPort()) + "}";
     int with = 0, without = 0, builtin = 0;
     const std::string a = runCheck(common, R"({"version":2,"inputs":[)" + rs + "," + uat + "]}", with);
-    const std::string needle = "WARN: TRACK_DECODER=skycued: input 'rs2' (readsb JSON) and input 'u1' (uat_raw)";
+    const std::string needle = "WARN: inputs.decoder=skycued: input 'rs2' (readsb JSON) and input 'u1' (uat_raw)";
     BOOST_TEST(countLines(a, needle) == 1u, a);
     // The same inputs without the uat_raw: no such line, and the exit status is the connection rule's alone.
     const std::string b = runCheck(common, R"({"version":2,"inputs":[)" + rs + "]}", without);
@@ -213,5 +213,5 @@ BOOST_AUTO_TEST_CASE(check_inputs_skycued_warns_for_readsb_json_with_uat_raw)
     // Under the default decoder there is no WARN at all.
     int def = 0;
     const std::string d = runCheck(tomlConf({{"receiver.lat", "51.5"}}), R"({"version":2,"inputs":[)" + rs + "," + uat + "]}", def);
-    BOOST_TEST(d.find("TRACK_DECODER") == std::string::npos, d);
+    BOOST_TEST(d.find("inputs.decoder") == std::string::npos, d);
 }

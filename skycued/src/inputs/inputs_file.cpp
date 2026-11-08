@@ -294,18 +294,18 @@ std::vector<std::string> decoderWarnings(const std::vector<InputDef>& inputs, co
             continue;
         json_input = true;
         if (uat)
-            warnings.push_back("TRACK_DECODER=skycued: input '" + d.id + "' (readsb JSON) and input '" + uat->id +
+            warnings.push_back("inputs.decoder=skycued: input '" + d.id + "' (readsb JSON) and input '" + uat->id +
                                "' (" + inputTypeName(uat->type) +
                                ") both feed the track table, so 978 MHz aircraft are counted twice; disable one");
         if (beast)
-            warnings.push_back("TRACK_DECODER=skycued: input '" + d.id + "' (readsb JSON) and input '" + beast->id +
+            warnings.push_back("inputs.decoder=skycued: input '" + d.id + "' (readsb JSON) and input '" + beast->id +
                                "' (beast_raw) both feed the track table, so aircraft are counted twice; disable one");
     }
     if (!json_input)
         for (const OutputDef& o : outputs)
             if (o.enabled && o.kind == OutputKind::json) {
                 warnings.push_back(
-                    "TRACK_DECODER=skycued: the json output '" + o.id +
+                    "inputs.decoder=skycued: the json output '" + o.id +
                     "' carries nothing, since no readsb JSON input is enabled; it stays defined and enabled");
                 break;
             }

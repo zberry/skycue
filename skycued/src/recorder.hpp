@@ -57,7 +57,7 @@ struct RecorderConfig {
     // Reopen backoff after a failure; see Recorder. Settable for tests.
     std::chrono::milliseconds reopen_initial{5000};
     std::chrono::milliseconds reopen_max{300000};
-    // RECORD_MAX_GB in bytes; 0: no limit. Each time a new file pair is
+    // recording.max_gb in bytes; 0: no limit. Each time a new file pair is
     // started, retention::enforce(retention_dir, max_bytes, this pair) runs
     // (see retention.hpp). retention_dir "" means `dir`.
     uint64_t max_bytes = 0;

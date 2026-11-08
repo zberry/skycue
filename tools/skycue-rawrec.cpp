@@ -262,7 +262,7 @@ int run(int argc, char** argv)
         "rotate-mb", po::value(&rotate_mb)->default_value(256), "start a new file at this size (0: never)")(
         "rotate-min", po::value(&rotate_min)->default_value(60), "start a new file at this age (0: never)")(
         "max-gb", po::value(&max_gb)->default_value(0),
-        "keep the recordings within this many GB, deleting the oldest (0: no limit; RECORD_MAX_GB)")(
+        "keep the recordings within this many GB, deleting the oldest (0: no limit; recording.max_gb)")(
         "retention-dir", po::value(&retention_dir),
         "the directory --max-gb covers, with its raw/ (default: --dir)");
     // Test seams, not in --help.

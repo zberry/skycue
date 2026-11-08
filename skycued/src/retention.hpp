@@ -1,13 +1,13 @@
 #pragma once
 
-// Retention: keeps the recordings under RECORD_DIR within a byte budget
-// (RECORD_MAX_GB) by deleting the oldest files. Run by the Recorder and by
+// Retention: keeps the recordings under recording.dir within a byte budget
+// (recording.max_gb) by deleting the oldest files. Run by the Recorder and by
 // skycue-rawrec each time one of them starts a new file.
 //
 // Only our own file names are considered, in `dir` and `dir/raw`:
 //   (received|sent|fisb|beast|uat)-YYYYMMDD-HHMMSS[-N].(jsonl|csv|bin|txt)
 //   capture-<id>-YYYYMMDD-HHMMSS[-N].jsonl     (pingStation capture)
-//   raw-<id>-YYYYMMDD-HHMMSS[-N].(csv|bin|txt) (pingStation RECORD_RAW frames; the
+//   raw-<id>-YYYYMMDD-HHMMSS[-N].(csv|bin|txt) (pingStation recording.raw frames; the
 //                                               capture of a beast_raw or uat_raw input)
 // with <id> an input id, [a-z0-9-]{1,32}; names are parsed from the end, so
 // the stream is everything before the time stamp ("raw-ps-north").
@@ -50,7 +50,7 @@ RetentionResult enforce(const std::string& dir, uint64_t max_bytes, const std::s
 // The file-name rule above, for a bare name (no directory).
 bool isRecordingFileName(const std::string& name);
 
-// RECORD_MAX_GB in bytes (1 GB = 10^9 bytes); 0 stays 0.
+// recording.max_gb in bytes (1 GB = 10^9 bytes); 0 stays 0.
 uint64_t gigabytesToBytes(double gb);
 
 }  // namespace skycued

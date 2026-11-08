@@ -37,7 +37,7 @@ struct DaemonInfo {
 // The FIS-B report locations at the time of the request (Engine).
 struct LocationFacts {
     std::string learned_path;   // fisb-locations.json; "" when it is not saved this run
-    std::string operator_path;  // LOCATIONS_FILE resolved; "" for none
+    std::string operator_path;  // paths.locations_file resolved; "" for none
     std::size_t learned = 0, operator_rows = 0, operator_rejected = 0, operator_overflow = 0;
 };
 

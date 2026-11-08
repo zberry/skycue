@@ -15,11 +15,11 @@
 // Lines are cut as TransportInput::feedLines does; on tcp_connect the
 // connection is logged at INFO as it always was.
 //
-// With `capture: true` and a RECORD_DIR every published line is also written,
-// as received, to RECORD_DIR/raw-<id>-<stamp>.txt as "<epoch_ms> <line>"
+// With `capture: true` and a recording.dir every published line is also written,
+// as received, to recording.dir/raw-<id>-<stamp>.txt as "<epoch_ms> <line>"
 // (UatCaptureWriter; skycue-rawrec's form). Flushed on tick() and stop().
 //
-// With RawDecodeOptions::enabled (TRACK_DECODER=skycued) the input also owns
+// With RawDecodeOptions::enabled (inputs.decoder=skycued) the input also owns
 // one decode::UatDecoder fed with every '-' line after it was published,
 // counted and captured; '+' lines are never decoded. Its observations leave
 // through emitObservation with this input's id; state() copies the decoder's

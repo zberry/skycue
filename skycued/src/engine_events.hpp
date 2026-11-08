@@ -43,7 +43,7 @@ struct EngineStats {
     uint64_t drops_blocked = 0, drops_out_of_range = 0, drops_below_elevation = 0, drops_no_position = 0;
     uint64_t recorder_dropped_received = 0, recorder_dropped_sent = 0;  // Recorder::droppedRecords()
     uint32_t web_clients = 0;  // as set by Engine::setWebClientCount
-    // FIS-B (all 0 with FISB_ENABLE=no): uplinks fed to the decoder, products
+    // FIS-B (all 0 with fisb.enable=no): uplinks fed to the decoder, products
     // it decoded, uplinks that were not valid hex or not 432 bytes (or whose
     // information frames overran), segment sets awaiting segments, and raster
     // blocks held across every mosaic.

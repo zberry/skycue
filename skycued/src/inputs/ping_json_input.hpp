@@ -14,7 +14,7 @@
 // Both are flushed on tick() and stop().
 //
 // With `source: decode` (spec §8.2; RawDecodeOptions::enabled is ignored, the
-// input's own choice, also under TRACK_DECODER=readsb) the station's decoded
+// input's own choice, also under inputs.decoder=readsb) the station's decoded
 // fields are not used: every rawData frame is decoded by length (7/14 bytes by
 // a ModesDecoder, 18/34 by a UatDecoder), observations leave through
 // emitObservation with this input's id, and the parsed observations are

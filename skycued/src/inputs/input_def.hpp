@@ -39,7 +39,7 @@ struct InputDef {
     std::string group, iface;          // udp: a multicast group to join; iface is the "interface" key
     std::string format = "beast";      // beast_raw: "beast" or "avr"
     // beast_raw, uat_raw: the reference position for decoding (both or neither);
-    // absent: the receiver position (RECEIVER_LAT/LON), else none.
+    // absent: the receiver position (receiver.lat/lon), else none.
     std::optional<double> ref_lat, ref_lon;
     uint16_t port = 0;
     std::string edition = "2.5";       // pingstation_cat021

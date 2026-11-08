@@ -97,7 +97,7 @@ void putStats(JsonWriter& w, const EngineStats& s)
         inputs.push_back(line.str());
     }
     w.addRaw("inputs", jsonArray(inputs));
-    // The decoder totals over the decoding inputs; absent when none decodes (TRACK_DECODER=readsb).
+    // The decoder totals over the decoding inputs; absent when none decodes (inputs.decoder=readsb).
     InputCounters sum;
     std::uint64_t keys = 0;
     bool any = false;

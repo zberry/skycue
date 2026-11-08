@@ -874,15 +874,15 @@ BOOST_AUTO_TEST_CASE(output_vs_input_port_conflict)
 
 BOOST_AUTO_TEST_CASE(output_vs_reserved_cue_port)
 {
-    const std::vector<ReservedPort> reserved = {{"tcp", 30500, "the cue stream (CUE_TCP_PORT)"}};
+    const std::vector<ReservedPort> reserved = {{"tcp", 30500, "the cue stream (cues.tcp_port)"}};
     const OutputDef out = outDef(R"("id":"o","kind":"beast","transport":"tcp_listen","port":30500)");
-    BOOST_TEST(setErr3({}, {out}, reserved) == "port 30500/tcp is already used by the cue stream (CUE_TCP_PORT)");
+    BOOST_TEST(setErr3({}, {out}, reserved) == "port 30500/tcp is already used by the cue stream (cues.tcp_port)");
     BOOST_TEST(setErr3({}, {out}) == "");
 }
 
 BOOST_AUTO_TEST_CASE(input_vs_reserved_port_not_checked)
 {
-    const std::vector<ReservedPort> reserved = {{"tcp", 30500, "the cue stream (CUE_TCP_PORT)"}};
+    const std::vector<ReservedPort> reserved = {{"tcp", 30500, "the cue stream (cues.tcp_port)"}};
     const InputDef in = def(R"("id":"i","type":"pingstation_cat021","transport":"tcp_listen","port":30500)");
     BOOST_TEST(setErr3({in}, {}, reserved) == "");
 }

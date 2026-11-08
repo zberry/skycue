@@ -536,7 +536,7 @@ BOOST_AUTO_TEST_CASE(list_file_relative_to_state_dir)
     writeFile(f.conf, headConf({{"paths.state_dir", str(state)}, {"filters.allow_list_file", str("allow.list")}}));
     f.start();
     BOOST_TEST(f.allow() == (Strings{"a1b2c3"}));
-    // The overlay lives in STATE_DIR too, not next to the config.
+    // The overlay lives in paths.state_dir too, not next to the config.
     BOOST_TEST(f.fx->t.call([&] { return f.rc->overlayPath(); }) == state + "/skycue.runtime.json");
     Overlay d;
     d.allow_add = {"N123AB"};
@@ -544,7 +544,7 @@ BOOST_AUTO_TEST_CASE(list_file_relative_to_state_dir)
     BOOST_TEST(f.allow() == (Strings{"a1b2c3", "N123AB"}));
     BOOST_TEST(has(readAll(state + "/skycue.runtime.json"), "N123AB"));
     BOOST_TEST(!exists(f.path("skycue.runtime.json")));
-    // Save as baseline appends to the list file in STATE_DIR.
+    // Save as baseline appends to the list file in paths.state_dir.
     BOOST_TEST(f.promote() == "");
     BOOST_TEST(has(readAll(state + "/allow.list"), "N123AB"));
     BOOST_TEST(!exists(f.path("allow.list")));
@@ -552,8 +552,8 @@ BOOST_AUTO_TEST_CASE(list_file_relative_to_state_dir)
 
 BOOST_AUTO_TEST_CASE(list_reload_resolves_against_the_running_state_dir)
 {
-    // A live reload of a changed list file name resolves it against STATE_DIR as
-    // at startup: a changed STATE_DIR takes effect only on a restart.
+    // A live reload of a changed list file name resolves it against paths.state_dir as
+    // at startup: a changed paths.state_dir takes effect only on a restart.
     RtFx f{headConf()};
     const std::string state = f.path("state"), moved = f.path("moved");
     BOOST_REQUIRE(::mkdir(state.c_str(), 0755) == 0);
@@ -1036,7 +1036,7 @@ BOOST_AUTO_TEST_CASE(overlay_left_next_to_the_config_warns_when_state_dir_is_set
     BOOST_TEST(has(log, f.path("skycue.runtime.json")), log);
     BOOST_TEST(has(log, state + "/skycue.runtime.json"), log);
     BOOST_TEST(f.filters().max_range_nm == 150.0);  // not read from the old place
-    // With the overlay in STATE_DIR there is nothing to warn about.
+    // With the overlay in paths.state_dir there is nothing to warn about.
     RtFx g{headConf()};
     BOOST_REQUIRE(::mkdir(g.path("state").c_str(), 0755) == 0);
     writeFile(g.path("skycue.runtime.json"), "{\"version\": 1}\n");

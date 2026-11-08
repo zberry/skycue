@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the optional skycued LOCATIONS_FILE (id,lat,lon) from OurAirports.
+"""Build the optional skycued paths.locations_file (id,lat,lon) from OurAirports.
 
 Usage: python3 -I make-locations.py AIRPORTS_CSV NAVAIDS_CSV [-o OUT]
        python3 -I make-locations.py --help
@@ -18,7 +18,7 @@ import sys
 
 ID_RE = re.compile(r"^[A-Z0-9]{2,5}$")
 SAME_PLACE_NM = 1.0
-# skycued reads at most this many LOCATIONS_FILE ids (kMaxOperatorRows in
+# skycued reads at most this many paths.locations_file ids (kMaxOperatorRows in
 # skycued/src/fisb/location_index.hpp; the test pins the two).
 DAEMON_MAX_ROWS = 250000
 USAGE = "usage: make-locations.py AIRPORTS_CSV NAVAIDS_CSV [-o OUT]\n"

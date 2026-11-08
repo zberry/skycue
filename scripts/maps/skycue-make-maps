@@ -146,23 +146,23 @@ if [ -n "$owner" ]; then id -u "$owner" >/dev/null 2>&1 || bad "no user '$owner'
 
 if [ -z "$map" ] || [ ${#around[@]} = 1 ]; then
   [ -f "$config" ] && [ -r "$config" ] || die "cannot read $config (pass --config FILE, or --map-dir DIR)"
-  MAP_DIR= RECEIVER_LAT= RECEIVER_LON=
+  cfg_map_dir= cfg_lat= cfg_lon=
   if command -v skycued >/dev/null 2>&1; then
     # skycued is the only full parser: it applies every layer (file, overrides
     # file, SKYCUE_* environment) and prints the effective values as plain
     # assignments, which are evaluated here and never exported.
     dumped=$(skycued --config "$config" --dump-env) || die "skycued could not read $config (see above)"
     eval "$dumped"
-    MAP_DIR=${SKYCUE_PATHS_MAP_DIR-} RECEIVER_LAT=${SKYCUE_RECEIVER_LAT-} RECEIVER_LON=${SKYCUE_RECEIVER_LON-}
+    cfg_map_dir=${SKYCUE_PATHS_MAP_DIR-} cfg_lat=${SKYCUE_RECEIVER_LAT-} cfg_lon=${SKYCUE_RECEIVER_LON-}
   else
-    load_config "$config" MAP_DIR=paths.map_dir RECEIVER_LAT=receiver.lat RECEIVER_LON=receiver.lon
+    load_config "$config" cfg_map_dir=paths.map_dir cfg_lat=receiver.lat cfg_lon=receiver.lon
   fi
-  [ -n "$map" ] || map=$MAP_DIR
+  [ -n "$map" ] || map=$cfg_map_dir
   [ -n "$map" ] || die "paths.map_dir is not set in $config; pass --map-dir"
   if [ ${#around[@]} = 1 ]; then
-    [ -n "$RECEIVER_LAT" ] && [ -n "$RECEIVER_LON" ] ||
+    [ -n "$cfg_lat" ] && [ -n "$cfg_lon" ] ||
       die "receiver.lat and receiver.lon are not set in $config; set them, or pass --around LAT LON RADIUS_NM"
-    around=("$RECEIVER_LAT" "$RECEIVER_LON" "${around[0]}")
+    around=("$cfg_lat" "$cfg_lon" "${around[0]}")
   fi
 fi
 case $map in /*) ;; *) map=$PWD/$map ;; esac

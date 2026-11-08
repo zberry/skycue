@@ -3,8 +3,8 @@
 // BeastRawInput: a Beast binary stream (readsb --net-bo-port, dump1090, an
 // SDR front end) or AVR text over any transport (hub spec §5.1). It parses
 // nothing: each frame is published to the raw tap as `beast` exactly as it
-// was received, and, with `capture: true` and a RECORD_DIR, written to
-// RECORD_DIR/raw-<id>-<stamp>.bin (BeastCaptureWriter).
+// was received, and, with `capture: true` and a recording.dir, written to
+// recording.dir/raw-<id>-<stamp>.bin (BeastCaptureWriter).
 //
 // format "beast" (default): one beast::FrameSplitter per TCP stream and, for
 // UDP, per source address and port (a datagram is fed like a TCP chunk, so a frame may
@@ -20,7 +20,7 @@
 //
 // messages = frames published, bytes as received. Flushed on tick() and stop().
 //
-// With RawDecodeOptions::enabled (TRACK_DECODER=skycued) the input also owns
+// With RawDecodeOptions::enabled (inputs.decoder=skycued) the input also owns
 // one decode::ModesDecoder (frame decoder spec 7, 8) fed after publishFrame,
 // so the tap and the capture still see every frame. Its observations leave
 // through emitObservation with this input's id; state() copies the decoder's

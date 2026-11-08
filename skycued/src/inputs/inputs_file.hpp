@@ -64,7 +64,7 @@ std::string inputsFileJson(const InputsFile& file);
 // input ps-north" or "... by output beast-out" (receivers with a multicast
 // group share a port whatever their groups; a unicast and a multicast
 // receiver conflict); for an enabled output on a `reserved` port ("... by the
-// cue stream (CUE_TCP_PORT)"; inputs are not checked against reserved ports);
+// cue stream (cues.tcp_port)"; inputs are not checked against reserved ports);
 // and for an enabled udp output that sends to a group and port an enabled
 // input joins (a loop). A udp output binds nothing and never conflicts.
 // Outgoing connections never conflict. Returns WARN texts: an enabled output
@@ -74,13 +74,13 @@ std::string inputsFileJson(const InputsFile& file);
 struct ReservedPort {
     std::string protocol;  // "tcp" or "udp"
     uint16_t port = 0;
-    std::string owner;     // e.g. "the cue stream (CUE_TCP_PORT)"
+    std::string owner;     // e.g. "the cue stream (cues.tcp_port)"
 };
 std::vector<std::string> validateInputSet(const std::vector<InputDef>& inputs,
                                           const std::vector<OutputDef>& outputs = {},
                                           const std::vector<ReservedPort>& reserved = {});
 
-// The WARN texts that only apply under TRACK_DECODER=skycued, over the whole
+// The WARN texts that only apply under inputs.decoder=skycued, over the whole
 // input set (built-ins included): a readsb-type input beside an enabled
 // beast_raw input feeds every aircraft twice (one text per such readsb input,
 // naming both ids), and an enabled json output with no enabled readsb-type

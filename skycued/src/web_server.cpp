@@ -587,7 +587,7 @@ void WebServer::Impl::start()
         LOG_WARN("web: www directory " << cfg.www_dir << " does not exist; the UI pages will be 404 (the API works)");
     if (!cfg.map_dir.empty() && !isDirectory(cfg.map_dir))
         LOG_WARN("web: map directory " << cfg.map_dir
-                                       << " (MAP_DIR) does not exist; the map has no tiles or overlays (the API works)");
+                                       << " (paths.map_dir) does not exist; the map has no tiles or overlays (the API works)");
     Impl* self = this;  // stop() clears the sink before this goes away
     engine.onEvent([self](const EngineEvent& ev) { self->onEvent(ev); });
     runtime.onChange([self] { self->onRuntimeChange(); });

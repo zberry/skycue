@@ -169,9 +169,9 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
                 const InputsFile file = parseInputsFile(text);
                 std::vector<ReservedPort> reserved;
                 if (config.cue_tcp_port != 0)
-                    reserved.push_back({"tcp", config.cue_tcp_port, "the cue stream (CUE_TCP_PORT)"});
+                    reserved.push_back({"tcp", config.cue_tcp_port, "the cue stream (cues.tcp_port)"});
                 if (config.web_port != 0)
-                    reserved.push_back({"tcp", config.web_port, "the web server (WEB_PORT)"});
+                    reserved.push_back({"tcp", config.web_port, "the web server (web.port)"});
                 for (const auto& warning : validateInputSet(file.inputs, file.outputs, reserved))
                     warnings.push_back(warning);
                 const auto r = file.builtin_enabled.find("readsb");
@@ -413,10 +413,10 @@ int run(int argc, char** argv)
         rc.dir = config.record_dir;
         rc.jsonl = config.record_formats.count("jsonl") > 0;
         rc.csv = config.record_formats.count("csv") > 0;
-        rc.max_bytes = gigabytesToBytes(config.record_max_gb);  // RECORD_DIR and RECORD_DIR/raw together
+        rc.max_bytes = gigabytesToBytes(config.record_max_gb);  // recording.dir and recording.dir/raw together
         if (rc.max_bytes > 0)
             LOG_INFO("recordings under " << config.record_dir << " are kept within " << config.record_max_gb
-                                         << " GB (RECORD_MAX_GB), oldest deleted first");
+                                         << " GB (recording.max_gb), oldest deleted first");
         try {
             received = std::make_unique<Recorder>(rc, "received");
             sent = std::make_unique<Recorder>(rc, "sent");
@@ -442,9 +442,9 @@ int run(int argc, char** argv)
         mc.receiver_ref = std::make_pair(config.receiver_lat, config.receiver_lon);
     // An output may not take a port the daemon serves itself.
     if (config.cue_tcp_port != 0)
-        mc.reserved_ports.push_back({"tcp", config.cue_tcp_port, "the cue stream (CUE_TCP_PORT)"});
+        mc.reserved_ports.push_back({"tcp", config.cue_tcp_port, "the cue stream (cues.tcp_port)"});
     if (config.web_port != 0)
-        mc.reserved_ports.push_back({"tcp", config.web_port, "the web server (WEB_PORT)"});
+        mc.reserved_ports.push_back({"tcp", config.web_port, "the web server (web.port)"});
     auto inputs = std::make_unique<InputManager>(io, mc);
     {
         std::vector<std::string> cue_ids;
@@ -491,7 +491,7 @@ int run(int argc, char** argv)
                 }
             }
             if (use_dump978) {
-                // Decoding only under TRACK_DECODER=skycued; under readsb the line is counted and published alone.
+                // Decoding only under inputs.decoder=skycued; under readsb the line is counted and published alone.
                 RawDecodeOptions decode;
                 decode.enabled = mc.decode_raw;
                 decode.reference = mc.receiver_ref;
@@ -519,12 +519,12 @@ int run(int argc, char** argv)
     }
     engine->setHub(&hub);
     hub.onChanged([&engine] { engine->outputsChanged(); });
-    // The learned FIS-B report locations (fisb-locations.json in STATE_DIR,
-    // else next to the config) and LOCATIONS_FILE under them.
+    // The learned FIS-B report locations (fisb-locations.json in paths.state_dir,
+    // else next to the config) and paths.locations_file under them.
     try {
         engine->loadLocations(resolveStatePath(config, config_path, "fisb-locations.json"),
                               resolveStatePath(config, config_path, config.locations_file));
-        // The statistics (STATS_FILE, skycue.stats.json in STATE_DIR or next
+        // The statistics (stats.file, skycue.stats.json in paths.state_dir or next
         // to the config unless set; empty: not saved).
         engine->loadStats(resolveStatePath(config, config_path, config.stats_file),
                           std::chrono::seconds(config.stats_save_s));
@@ -532,7 +532,7 @@ int run(int argc, char** argv)
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
     }
-    // The runtime overlay (skycue.runtime.json in STATE_DIR, else next to the
+    // The runtime overlay (skycue.runtime.json in paths.state_dir, else next to the
     // config) on top of skycue.conf, and hot reload of both and of the list files.
     std::unique_ptr<RuntimeConfig> runtime;
     try {
@@ -582,10 +582,10 @@ int run(int argc, char** argv)
     }
     daemon.readsb = !replaying && use_readsb;
     daemon.dump978 = !replaying && use_dump978;
-    // The web UI (WEB_BIND:WEB_PORT); WEB_PORT=0: none.
+    // The web UI (web.bind:web.port); web.port=0: none.
     std::unique_ptr<WebServer> web;
     if (config.web_port == 0) {
-        LOG_INFO("web UI disabled (WEB_PORT=0)");
+        LOG_INFO("web UI disabled (web.port=0)");
     } else {
         WebConfig wc;
         wc.bind = config.web_bind;
@@ -614,7 +614,7 @@ int run(int argc, char** argv)
                       << config.cue_udp_targets.size() << " UDP target(s)"
                       << (replaying ? " (replaying " + replay_path + ")" : std::string()));
     if (config.cue_tcp_port == 0 && config.cue_tcp_connect_targets.empty() && config.cue_udp_targets.empty())
-        LOG_WARN("nowhere to forward to: CUE_TCP_PORT is 0 and CUE_TCP_CONNECT and CUE_UDP_TARGETS are empty");
+        LOG_WARN("nowhere to forward to: cues.tcp_port is 0 and cues.tcp_connect and cues.udp_targets are empty");
 
     runtime->startWatching();
 

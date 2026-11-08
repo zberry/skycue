@@ -16,7 +16,7 @@ SKYCUE_GDAL_IMAGE=ghcr.io/osgeo/gdal:ubuntu-small-3.9.3
 # and accepts the example's grammar subset only.
 # load_config FILE VAR=table.key...: read FILE (skycue.toml: a strict subset of
 # TOML, see packaging/skycue.toml.example) for the keys asked for, each
-# assigned to its shell variable: load_config "$f" MAP_DIR=paths.map_dir.
+# assigned to its shell variable: load_config "$f" map_dir=paths.map_dir.
 # Nothing in the file is expanded or executed. Tables, "basic strings" without
 # escapes, 'literal strings', numbers, true/false, arrays (skipped) and #
 # comments are read; a malformed line, or a key given twice, calls die with

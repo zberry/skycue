@@ -179,7 +179,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         else if (cfg.tcp_port != 0 || cfg.tcp_listen_ephemeral)
             LOG_INFO("forwarder: TCP listener disabled");
         else
-            LOG_INFO("forwarder: TCP listener disabled (CUE_TCP_PORT=0)");
+            LOG_INFO("forwarder: TCP listener disabled (cues.tcp_port=0)");
         helloToUdp();
 
         const auto now = steady::now();

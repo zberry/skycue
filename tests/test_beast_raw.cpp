@@ -478,7 +478,7 @@ BOOST_AUTO_TEST_CASE(capture_needs_record_dir_for_raw_types)
             t.call([&] { return m->create(defOf(def)); });
             BOOST_FAIL("capture without a record dir accepted: " << def);
         } catch (const skycued::InputDefError& e) {
-            BOOST_TEST(std::string(e.what()) == "capture needs RECORD_DIR");
+            BOOST_TEST(std::string(e.what()) == "capture needs recording.dir");
         }
     }
     t.call([&] { m.reset(); });
@@ -514,7 +514,7 @@ BOOST_AUTO_TEST_CASE(beast_tcp_listen_peer_filter)
     }
 }
 
-// ---- the decoder on beast_raw (TRACK_DECODER=skycued) ----
+// ---- the decoder on beast_raw (inputs.decoder=skycued) ----
 
 namespace {
 

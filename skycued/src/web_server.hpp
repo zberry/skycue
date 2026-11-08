@@ -50,7 +50,7 @@ struct WebConfig {
     std::string bind = "127.0.0.1";  // numeric address to listen on
     uint16_t port = 8080;            // 0: a port the OS picks (see localPort)
     std::string www_dir;             // static files
-    // /tiles/*, /overlays/* and /api/tiles-available (MAP_DIR); "": www_dir.
+    // /tiles/*, /overlays/* and /api/tiles-available (paths.map_dir); "": www_dir.
     // When set, those paths are read from here only, never from www_dir.
     std::string map_dir;
     const DaemonInfo* daemon = nullptr;  // for GET /api/config; must outlive the server

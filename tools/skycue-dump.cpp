@@ -342,7 +342,7 @@ int main(int argc, char** argv)
                                  "prints a pingStation capture file one record at a time, CAT021 decoded");
     desc.add_options()("help,h", "show this help")(
         "tcp", po::value(&tcp_ep), "connect to a skycued TCP port (default 127.0.0.1:30500)")(
-        "tcp-listen", po::value(&listen_ep), "listen on a TCP port for skycued to connect (CUE_TCP_CONNECT); "
+        "tcp-listen", po::value(&listen_ep), "listen on a TCP port for skycued to connect (cues.tcp_connect); "
                                              "any number of connections")(
         "udp", po::value(&udp_ep), "bind a UDP port and print the datagrams sent to it")(
         "json", "one JSON object per line instead of text")(

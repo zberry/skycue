@@ -46,7 +46,7 @@ ReceiverPosition makeReceiver(const Config& c)
 FilterSet makeFilters(const Config& c)
 {
     if (!std::isfinite(c.receiver_lat) || !std::isfinite(c.receiver_lon))
-        throw std::runtime_error("the receiver position (RECEIVER_LAT, RECEIVER_LON) is required");
+        throw std::runtime_error("the receiver position (receiver.lat, receiver.lon) is required");
     return FilterSet(makeReceiver(c), FilterConfig{c.max_range_nm, c.min_elevation_deg}, loadList(c.allow_list_path),
                      loadList(c.block_list_path));
 }
@@ -272,7 +272,7 @@ void Engine::handleObservation(const TrackObservation& obs)
         received_->writeObservation(obs);
     // The send decision runs on the steady clock at arrival, not on the data
     // clock's anchor: an observation stamped behind the data clock leaves the
-    // anchor where it is, and MAX_INTERVAL_S resends must not stall with it.
+    // anchor where it is, and cues.max_interval_s resends must not stall with it.
     TrackState& state = table_.apply(obs);
     if (table_.lastApplySuppressedPosition())
         ++rebroadcast_suppressed_;
@@ -772,7 +772,7 @@ void Engine::loadStats(const std::string& path, std::chrono::seconds save_interv
     stats_size_warned_ = false;
     last_stats_save_ = steady::now();
     if (path.empty()) {
-        LOG_INFO("stats: STATS_FILE is empty; the statistics are not saved");
+        LOG_INFO("stats: stats.file is empty; the statistics are not saved");
         return;
     }
     const StatsLoad loaded = loadStatsFile(path, stats_store_);
@@ -803,14 +803,14 @@ void Engine::saveStats()
 {
     // On the io thread: toJson of a full store (1440 + 720 buckets, 20000
     // aircraft, 40000 grid cells) is a noticeable fraction of a second, which
-    // one save per STATS_SAVE_S (default 300 s) accepts.
+    // one save per stats.save_s (default 300 s) accepts.
     last_stats_save_ = steady::now();
     try {
         const std::size_t bytes = saveStatsFile(stats_path_, stats_store_);
         stats_store_.markSaved();
         if (bytes > kStatsFileWarnBytes && !stats_size_warned_)
             LOG_WARN(stats_path_ << ": " << bytes << " bytes, close to the " << kStatsFileMaxBytes
-                                 << " a load accepts; consider a lower STATS_AIRCRAFT_MAX");
+                                 << " a load accepts; consider a lower stats.aircraft_max");
         stats_size_warned_ = bytes > kStatsFileWarnBytes;
         if (stats_save_failing_)
             LOG_INFO(stats_path_ << ": saved again");

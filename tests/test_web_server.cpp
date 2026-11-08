@@ -729,8 +729,8 @@ BOOST_AUTO_TEST_CASE(map_dir_missing_api_still_works)
     WebFx f(o);
     const std::string log = cap.text();
     BOOST_TEST(has(log, "WARN"));
-    BOOST_TEST(has(log, "MAP_DIR"));
-    BOOST_TEST(has(log, "map directory " + f.maps + " (MAP_DIR) does not exist"));
+    BOOST_TEST(has(log, "paths.map_dir"));
+    BOOST_TEST(has(log, "map directory " + f.maps + " (paths.map_dir) does not exist"));
     BOOST_TEST(get(f.port, "/api/tiles-available").body == "{\"tiles\":false,\"overlays\":false}");
     BOOST_TEST(get(f.port, "/api/state").status == 200u);
     BOOST_TEST(get(f.port, "/tiles/7/37/49.png").status == 404u);
@@ -1074,7 +1074,7 @@ BOOST_AUTO_TEST_CASE(post_list_add_drops_now)
     }
     BOOST_TEST(has(readAll(f.tmp.path + "/skycue.runtime.json"), "3A3A3A"));
 
-    // Removing it sends the track again at once (MIN_INTERVAL_S is 5 s).
+    // Removing it sends the track again at once (cues.min_interval_s is 5 s).
     size_t updates_a = 0;
     {
         std::lock_guard<std::mutex> lk(ev.m);
@@ -1558,7 +1558,7 @@ BOOST_AUTO_TEST_CASE(skycued_version_is_cmake_version)
 }
 
 // An explicitly empty --readsb-host or --dump978-host is a usage error (exit 2,
-// one line), as an empty READSB_HOST or DUMP978_HOST key is; also with
+// one line), as an empty inputs.readsb.host or inputs.dump978.host key is; also with
 // --check-inputs, which would otherwise probe an empty host.
 BOOST_AUTO_TEST_CASE(empty_host_flag_exits_2)
 {
@@ -2265,7 +2265,7 @@ BOOST_AUTO_TEST_CASE(stats_unknown_path_404)
 
 BOOST_AUTO_TEST_CASE(stats_decoder_object_only_with_decoding_inputs)
 {
-    {  // TRACK_DECODER=readsb: no decoder object
+    {  // inputs.decoder=readsb: no decoder object
         WebFx f;
         const pt::ptree s = parseJson(get(f.port, "/api/stats").body);
         BOOST_TEST(!s.get_child_optional("decoder"));

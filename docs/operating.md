@@ -356,8 +356,8 @@ every such input produces observations. What changes:
   skycued logs a WARN once per change and `--check-inputs` prints it:
 
   ```
-  WARN: TRACK_DECODER=skycued: input 'ps-extra' (readsb JSON) and input 'readsb' (beast_raw) both feed the track table, so aircraft are counted twice; disable one
-  WARN: TRACK_DECODER=skycued: the json output 'json' carries nothing, since no readsb JSON input is enabled; it stays defined and enabled
+  WARN: inputs.decoder=skycued: input 'ps-extra' (readsb JSON) and input 'readsb' (beast_raw) both feed the track table, so aircraft are counted twice; disable one
+  WARN: inputs.decoder=skycued: the json output 'json' carries nothing, since no readsb JSON input is enabled; it stays defined and enabled
   ```
 
   Disable one of the two inputs. Under `skycued`, `--check-inputs` probes
@@ -689,9 +689,9 @@ several multicast receivers may share a port. A listener may not take the
 port of the cue stream (`cues.tcp_port`) or of the web server (`web.port`). `"capture":true` needs `recording.dir`:
 it writes every datagram (or TCP block) the input receives to
 `recording.dir/capture-<id>-*.jsonl`, one JSON line each. Without `recording.dir`
-the web UI and the API refuse it (400 "capture needs RECORD_DIR"); in the
+the web UI and the API refuse it (400 "capture needs recording.dir"); in the
 file, at startup or in a hand edit, the entry is kept and runs, skycued logs
-one WARN ("capture needs RECORD_DIR: not capturing") and nothing is captured. With `recording.raw = true` a `pingstation_json` input also writes the raw 1090 and
+one WARN ("capture needs recording.dir: not capturing") and nothing is captured. With `recording.raw = true` a `pingstation_json` input also writes the raw 1090 and
 UAT frames the device includes (`rawData`) to `recording.dir/raw-<id>-*.csv` and
 `.txt`, which `skycue-rawplay` accepts like skycue-rawrec's
 files. A `pingstation_json` input may also decode those frames itself ([pingStation decode mode](#pingstation-decode-mode)). Both formats are in [recording-format.md](recording-format.md#pingstation-capture-and-raw-frames).

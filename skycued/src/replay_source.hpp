@@ -106,7 +106,7 @@ private:
 // ReplaySource as the Engine's ObservationSource: reports connected at
 // start() and lost when a non-looping replay ends, so the Engine handles a
 // finished replay like a lost readsb (tracks are dropped as source_lost
-// after TRACK_TIMEOUT_S). stop() destroys the ReplaySource.
+// after cues.track_timeout_s). stop() destroys the ReplaySource.
 class ReplayObservationSource : public ObservationSource {
 public:
     // Throws as ReplaySource's constructor does.

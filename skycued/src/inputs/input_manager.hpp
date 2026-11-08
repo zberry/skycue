@@ -64,11 +64,11 @@ struct InputManagerConfig {
     bool record_raw = false;
     uint64_t record_max_bytes = 0;
     bool replaying = false;
-    // TRACK_DECODER=skycued: raw inputs are decoded here. Starts the
+    // inputs.decoder=skycued: raw inputs are decoded here. Starts the
     // skycued-only WARNs (decoderWarnings) and gives the raw inputs a
     // reference position (inputReference).
     bool decode_raw = false;
-    std::optional<std::pair<double, double>> receiver_ref;  // {RECEIVER_LAT, RECEIVER_LON}
+    std::optional<std::pair<double, double>> receiver_ref;  // {receiver.lat, receiver.lon}
     // How often the inputs are ticked and the file is polled (tests shorten it).
     std::chrono::milliseconds poll_interval{1000};
     // Ports the daemon itself serves (the cue stream, the web server): an
@@ -81,10 +81,10 @@ struct InputManagerConfig {
 std::optional<std::pair<double, double>> inputReference(const InputDef& def, const InputManagerConfig& config);
 
 struct Config;
-// The built-in readsb: the JSON input as ever, or under TRACK_DECODER=skycued
-// the same id as a beast_raw input to 127.0.0.1:READSB_BEAST_PORT (the host
+// The built-in readsb: the JSON input as ever, or under inputs.decoder=skycued
+// the same id as a beast_raw input to 127.0.0.1:inputs.readsb.beast_port (the host
 // stays 127.0.0.1: a remote readsb is the JSON path's setting). `host` is
-// READSB_HOST.
+// inputs.readsb.host.
 InputDef builtinReadsbDef(const Config& config, const std::string& host);
 
 struct InputEntry {

@@ -142,7 +142,7 @@ InputManager::InputManager(boost::asio::io_context& io, InputManagerConfig confi
     if (!config_.inputs_file.empty())
         watch_ = std::make_unique<SettledFile>(config_.inputs_file);
     if (config_.record_raw && config_.record_dir.empty() && !config_.replaying)
-        LOG_WARN("RECORD_RAW=yes without RECORD_DIR: pingStation raw frames are not written");
+        LOG_WARN("recording.raw=yes without recording.dir: pingStation raw frames are not written");
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
@@ -577,7 +577,7 @@ void InputManager::removeOutput(const std::string& id)
 void InputManager::checkCapture(const InputDef& d) const
 {
     if (d.capture && config_.record_dir.empty())
-        throw InputDefError("capture needs RECORD_DIR");
+        throw InputDefError("capture needs recording.dir");
 }
 
 void InputManager::warnRepaired(const std::vector<std::string>& ids) const
@@ -594,7 +594,7 @@ void InputManager::warnCapture(const std::vector<InputDef>& user) const
         return;
     for (const auto& d : user)
         if (d.capture) {
-            LOG_WARN(config_.inputs_file << ": capture needs RECORD_DIR: not capturing");
+            LOG_WARN(config_.inputs_file << ": capture needs recording.dir: not capturing");
             return;
         }
 }

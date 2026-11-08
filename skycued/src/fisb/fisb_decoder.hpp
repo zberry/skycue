@@ -60,7 +60,7 @@ struct FisbDecoderCounters : FisbCounters {
 class FisbDecoder {
 public:
     // experimental: decode APDU time options 1/3 and global blocks at >= 60 N
-    // (FISB_EXPERIMENTAL; spec §10.6).
+    // (fisb.experimental; spec §10.6).
     explicit FisbDecoder(bool experimental = false);
 
     // One uplink line: bare hex, "+hex;..." (dump978) or "<epoch_ms> +hex;"

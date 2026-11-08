@@ -7,13 +7,13 @@
 // Per observation: received->writeObservation, table.apply, then
 //   filters.evaluate when shouldSend gives a reason, or the track has a
 //   position and is forwarded (so leaving the area drops it at once), or is
-//   not forwarded (at most once per MIN_INTERVAL_S since its last send);
+//   not forwarded (at most once per cues.min_interval_s since its last send);
 //   - a send decision (with a reason, or for a track not forwarded):
 //     Forwarder::sendUpdate(toTrack(state, false,
 //     result.alt_is_geom)), markSent, sent->writeTrack("update"), forwarded;
 //   - otherwise, if it was forwarded: sendDrop(filtered), writeDrop, no
 //     longer forwarded (it is sent afresh once it is eligible again).
-// Every second: table.expire(TRACK_TIMEOUT_S) on the data clock (the newest
+// Every second: table.expire(cues.track_timeout_s) on the data clock (the newest
 // observation or uplink receive time seen, plus the steady time since; it
 // never goes back; so a replay of old data ages like live data); forwarded tracks among the expired get
 // sendDrop(timeout), or sendDrop(source_lost) while the inputs are lost; both
@@ -22,7 +22,7 @@
 // Connection (spec §4.4): the inputs are lost when no enabled track input
 // (any type but dump978) is connected, connected meaning the transport is up
 // (a bound UDP socket is connected even when nothing arrives: its tracks just
-// time out). When they have been lost for TRACK_TIMEOUT_S, every forwarded
+// time out). When they have been lost for cues.track_timeout_s, every forwarded
 // track is dropped as source_lost; any track input connecting again cancels
 // it. One input going while another stays leaves its tracks to time out.
 // The keyframe provider returns every forwarded track (periodic keyframes
@@ -34,7 +34,7 @@
 // table is re-evaluated at once, in one pass: a forwarded track that is no
 // longer eligible gets sendDrop(filtered); one not forwarded that has a
 // position and is now eligible is sent at once (not waiting for
-// MIN_INTERVAL_S), through markSent like every send. So the record precedes
+// cues.min_interval_s), through markSent like every send. So the record precedes
 // the drops and updates it causes. The received stream never depends on the
 // filters: every observation is recorded before any of this.
 //
@@ -54,7 +54,7 @@
 // (UplinkDedupe) is counted in fisb_uplink_duplicates and dropped: neither
 // recorded nor decoded.
 //
-// FIS-B (FISB_ENABLE=yes, the default): every other uplink, from any input
+// FIS-B (fisb.enable=yes, the default): every other uplink, from any input
 // (dump978's raw port, a pingStation, a replay's "uat_uplink" records), is
 // recorded in the received stream, moves the data clock forward when it is newer, and is fed to a
 // FisbDecoder with its own receive time as the reference time; the products
@@ -83,7 +83,7 @@
 // the data clock has started. Every time is the data clock. loadStats names
 // the file: it is saved (atomicWrite, on the io thread: toJson of a full
 // store takes a noticeable fraction of a second, accepted at one save per
-// STATS_SAVE_S) on the tick when it changed and the save interval has passed
+// stats.save_s) on the tick when it changed and the save interval has passed
 // since the last attempt, by resetStats at once, and by stop(); a failed save
 // logs one WARN per run of failures and is retried.
 //
@@ -167,7 +167,7 @@ public:
     // Every track in the table with its filter decision now, the filters and
     // the stats. Changes nothing.
     Snapshot snapshot() const;
-    // The current FIS-B products (empty with FISB_ENABLE=no): a copy of
+    // The current FIS-B products (empty with fisb.enable=no): a copy of
     // everything, every mosaic's blocks included.
     fisb::FisbSnapshot fisbSnapshot() const;
     // fisbSnapshot() without the mosaics (FisbStore::records()).
@@ -311,13 +311,13 @@ private:
     Recorder* received_;
     Recorder* sent_;
     Recorder* fisb_rec_;
-    std::unique_ptr<fisb::FisbDecoder> fisb_decoder_;  // null with FISB_ENABLE=no
+    std::unique_ptr<fisb::FisbDecoder> fisb_decoder_;  // null with fisb.enable=no
     fisb::FisbStore fisb_store_;
     std::optional<std::chrono::system_clock::time_point> last_uplink_;
     fisb::LocationIndex locations_;
     fisb::LocationAnnouncer announced_;  // what the fisb_location items said
     std::string locations_path_;  // fisb-locations.json; "" until loadLocations
-    std::string operator_locations_path_;  // LOCATIONS_FILE resolved; "" for none
+    std::string operator_locations_path_;  // paths.locations_file resolved; "" for none
     std::chrono::steady_clock::time_point last_locations_save_{};  // the last save attempt (or start())
     bool locations_save_failing_ = false;                           // the last save attempt failed
     std::chrono::seconds locations_save_interval_ = kLocationsSaveInterval;

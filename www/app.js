@@ -1494,7 +1494,7 @@
     tableDirty = true;
   }
 
-  // Safety net: drop what has not been observed for 2 x TRAIL_SECONDS, and
+  // Safety net: drop what has not been observed for 2 x web.trail_seconds, and
   // let trails age out between observations.
   function prune() {
     var limit = 2 * cfg.trailSeconds * 1000, now = Date.now();

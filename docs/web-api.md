@@ -415,7 +415,7 @@ transport, defaults included (as the inputs file stores it):
 | `edition`, `sac`, `sic` | `pingstation_cat021` | the CAT021 edition (`"2.5"`), and the SAC/SIC to expect (counted, never used to drop; `null` for none) |
 | `status_url`, `status_interval_s` | pingStation types | the device's `http://` status endpoint (`null` for none) and how often it is polled. Use the device's IP address, not a hostname: a lookup that hangs cannot be cut short, and while one is outstanding each poll is skipped and counted in `status_fail` (`last_error` "resolve still pending") |
 | `time_mode` | pingStation types | `utc` or `gps`: the clock of the device's timestamps |
-| `capture` | pingStation types, `beast_raw`, `uat_raw` | write every datagram or block received (pingStation) or every frame or line (`beast_raw`, `uat_raw`: `raw-<id>-*.bin` / `.txt`) to `recording.dir`; without `recording.dir` a write is a 400 "capture needs RECORD_DIR" (in the inputs file the entry is kept, with a WARN, and nothing is captured) |
+| `capture` | pingStation types, `beast_raw`, `uat_raw` | write every datagram or block received (pingStation) or every frame or line (`beast_raw`, `uat_raw`: `raw-<id>-*.bin` / `.txt`) to `recording.dir`; without `recording.dir` a write is a 400 "capture needs recording.dir" (in the inputs file the entry is kept, with a WARN, and nothing is captured) |
 
 `builtin` (`true` for a built-in) and `state` are output only: a body
 with either is a `400`. `state`:
@@ -537,7 +537,7 @@ Routes:
   file order. There is no `GET` of a single output.
 - `POST /api/outputs`: creates an output from a definition naming its `id`. `201` with the output. `400` for a bad
   definition (the message names the key), a reserved id, or a port clash (`port 30105/tcp is already used by input lab`,
-  `... by output beast-out`, `... by the cue stream (CUE_TCP_PORT)`, `... by the web server (WEB_PORT)`) or a loop to a
+  `... by output beast-out`, `... by the cue stream (cues.tcp_port)`, `... by the web server (web.port)`) or a loop to a
   multicast group an input joins; `409` for an id that is taken.
 - `PUT /api/outputs/{id}`: replaces the definition (the output restarts; the same definition changes nothing). An `id`
   in the body must be `{id}`. A built-in takes only `{"enabled": bool}`: any other key is `403`. `404` for an unknown id.

@@ -73,8 +73,11 @@ unfold "$here/debian/control" | grep -q 'then run "systemctl enable --now skycue
 for p in /var/lib/skycue/maps /var/lib/skycue/recordings allow.list block.list; do
   grep -qF "$p" "$here/debian/skycue.postinst" || fail "postinst does not create $p"
 done
-grep -qx 'etc/skycue/skycue.toml' "$here/debian/skycue.install" || fail "skycue.install: skycue.toml"
-grep -q 'skycue\.conf' "$here/debian/skycue.install" && fail "skycue.install still names skycue.conf"
+grep -q 'etc/skycue' "$here/debian/skycue.install" && fail "skycue.install ships something under etc/skycue (skycue.toml is not a conffile; postinst creates it)"
+grep -qF -- '-DSKYCUE_PACKAGE_CONFIG_IN_ETC=OFF' "$here/debian/rules" || fail "rules: the packaged skycue.toml must go to share/skycue only"
+pm=$here/debian/skycue.postrm
+[ -x "$pm" ] && sh -n "$pm" && grep -qx '#DEBHELPER#' "$pm" || fail "debian/skycue.postrm missing, not executable, or not valid sh"
+grep -q 'purge' "$pm" || fail "postrm: no purge case"
 grep -qF 'skycued --convert-conf' "$here/debian/skycue.postinst" || fail "postinst does not convert an old skycue.conf"
 grep -qF 'skycued --convert-conf' "$here/packaging/rpm/skycue.spec" || fail "spec %post does not convert an old skycue.conf"
 for l in Apache-2.0 BSD-2-Clause BSD-3-Clause; do grep -qx "License: $l" "$here/debian/copyright" || fail "copyright lacks $l"; done

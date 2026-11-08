@@ -138,6 +138,8 @@ option(SKYCUE_INSTALL_SYSTEM_FILES
   "Install the config, the skycued systemd unit and the map helper scripts (a parent build may turn this off)" ON)
 option(SKYCUE_PACKAGE_CONFIG
   "Install the packaged skycue.toml (paths.state_dir = /var/lib/skycue …) instead of skycue.toml.example" OFF)
+option(SKYCUE_PACKAGE_CONFIG_IN_ETC
+  "With SKYCUE_PACKAGE_CONFIG: also install skycue.toml to sysconfdir (OFF for Debian, whose postinst creates it from the copy in share/skycue)" ON)
 set(SKYCUE_SYSTEMD_UNITDIR "lib/systemd/system" CACHE PATH
   "Where skycued.service is installed: relative to CMAKE_INSTALL_PREFIX, or absolute (packages: /usr/lib/systemd/system)")
 set(_skycue_repo_dir "${PROJECT_SOURCE_DIR}")
@@ -161,7 +163,12 @@ if(SKYCUE_INSTALL_SYSTEM_FILES)
       DEPENDS "${_skycue_conf_example}" "${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake"
       COMMENT "Writing the packaged skycue.toml" VERBATIM)
     add_custom_target(skycue_package_conf ALL DEPENDS "${_skycue_package_conf}")
-    install(FILES "${_skycue_package_conf}" DESTINATION "${_skycue_sysconfdir}/skycue")
+    if(SKYCUE_PACKAGE_CONFIG_IN_ETC)
+      install(FILES "${_skycue_package_conf}" DESTINATION "${_skycue_sysconfdir}/skycue")
+    endif()
+    # The unedited packaged file: what the post-install scripts compare against.
+    install(FILES "${_skycue_package_conf}" DESTINATION ${CMAKE_INSTALL_DATADIR}/skycue
+      RENAME skycue.toml.example)
   elseif(EXISTS "${_skycue_conf_example}")
     install(FILES "${_skycue_conf_example}" DESTINATION "${_skycue_sysconfdir}/skycue")
   endif()

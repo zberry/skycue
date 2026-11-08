@@ -22,6 +22,7 @@ BuildRequires:  systemd-rpm-macros
 BuildRequires:  systemd
 %endif
 Requires(pre):  shadow-utils
+Requires(post): diffutils
 # skycue-make-maps uses curl and unzip to fetch, tiles-merge.py needs python3
 # and Pillow (python3-pillow; skipped by dnf where no repository has it).
 Recommends:     python3 python3-pillow curl unzip
@@ -100,26 +101,13 @@ exit 0
 for f in /var/lib/skycue/allow.list /var/lib/skycue/block.list; do
     [ -e "$f" ] || install -o skycue -g skycue -m 0644 /dev/null "$f"
 done
-# BEGIN convert-conf (the same text is in debian/skycue.postinst and the spec's post-install script; tests/scripts/test_package_postinst.sh runs both)
-# skycue_convert_one OLD NEW: an old skycue.conf (or skycue.overrides.conf)
-# becomes NEW once; OLD is kept as OLD.converted. A failed conversion leaves
-# both files, prints why and never fails the install. SKYCUE_ROOT and SKYCUED
-# are for the tests.
+# BEGIN convert-conf-shared (identical in debian/skycue.postinst and the spec's post-install script; tests/scripts/test_package_postinst.sh runs both)
+# skycue_convert_one OLD NEW: write NEW from the old-style file OLD with
+# skycued --convert-conf (NEW takes OLD's owner and mode), then keep OLD as
+# OLD.converted. Returns 1, with OLD and NEW untouched and the reason printed,
+# when the conversion fails. SKYCUE_ROOT and SKYCUED are for the tests.
 skycue_convert_one() {
     old=$1 new=$2
-    [ -f "$old" ] || return 0
-    if [ -e "$new" ]; then
-        # The package unpacks its own skycue.toml before this runs; replace it
-        # only while it is still the unedited packaged file (receiver position unset).
-        if [ "$3" = replace-packaged ] \
-           && [ "$(head -n 1 "$new")" = "# skycue configuration (packaged). Set receiver lat and lon, then: systemctl enable --now skycued" ] \
-           && grep -Eq '^lat = 0\.0( |$)' "$new" && grep -Eq '^lon = 0\.0( |$)' "$new"; then
-            :
-        else
-            echo "skycue: $old left as it is: $new exists; convert it with skycued --convert-conf" >&2
-            return 0
-        fi
-    fi
     tmp=$new.tmp.$$
     if "${SKYCUED:-/usr/bin/skycued}" --convert-conf "$old" > "$tmp" 2> "$tmp.err"; then
         chown --reference="$old" "$tmp" 2>/dev/null || true
@@ -128,15 +116,34 @@ skycue_convert_one() {
         rm -f "$tmp.err"
         mv -f "$old" "$old.converted"
         echo "skycue: converted $old to $new (the old file is now $old.converted)"
-    else
-        echo "skycue: could not convert $old (left as it is): $(cat "$tmp.err" 2>/dev/null)" >&2
-        rm -f "$tmp" "$tmp.err"
+        return 0
+    fi
+    echo "skycue: could not convert $old: $(cat "$tmp.err" 2>/dev/null); convert it by hand with skycued --convert-conf" >&2
+    rm -f "$tmp" "$tmp.err"
+    return 1
+}
+# The overrides file skycued wrote in the state directory.
+skycue_convert_overrides() {
+    o=${SKYCUE_ROOT:-}/var/lib/skycue/skycue.overrides
+    if [ -f "$o.conf" ] && [ ! -e "$o.toml" ]; then
+        skycue_convert_one "$o.conf" "$o.toml" || true
     fi
     return 0
 }
-skycue_convert_one "${SKYCUE_ROOT:-}/etc/skycue/skycue.conf" "${SKYCUE_ROOT:-}/etc/skycue/skycue.toml" replace-packaged || true
-skycue_convert_one "${SKYCUE_ROOT:-}/var/lib/skycue/skycue.overrides.conf" "${SKYCUE_ROOT:-}/var/lib/skycue/skycue.overrides.toml" || true
-# END convert-conf
+# END convert-conf-shared
+# BEGIN convert-conf-rpm (skycue.toml is %config(noreplace): the package has just installed it, or kept the operator's)
+skycue_toml=${SKYCUE_ROOT:-}/etc/skycue/skycue.toml
+skycue_conf=${SKYCUE_ROOT:-}/etc/skycue/skycue.conf
+skycue_pristine=${SKYCUE_ROOT:-}/usr/share/skycue/skycue.toml.example
+if [ -f "$skycue_conf" ]; then
+    if [ ! -e "$skycue_toml" ] || { [ -f "$skycue_pristine" ] && cmp -s "$skycue_toml" "$skycue_pristine"; }; then
+        skycue_convert_one "$skycue_conf" "$skycue_toml" || true
+    else
+        echo "skycue: $skycue_conf left as it is: $skycue_toml exists; convert it with skycued --convert-conf" >&2
+    fi
+fi
+skycue_convert_overrides
+# END convert-conf-rpm
 exit 0
 
 %preun

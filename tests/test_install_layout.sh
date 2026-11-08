@@ -71,6 +71,7 @@ if is_on "$system_files"; then
   grep -Eq '^lat = 0\.0( |$)' "$root$conf" || fail "$conf has no lat = 0.0"
   if is_on "$package_config"; then
     grep -qx 'state_dir = "/var/lib/skycue"' "$root$conf" || fail "$conf is not the packaged config"
+    cmp -s "$root$conf" "$p/share/skycue/skycue.toml.example" || fail "share/skycue/skycue.toml.example is not the packaged $conf"
   else
     cmp -s "$root$conf" "$(dirname "$0")/../packaging/skycue.toml.example" \
       || fail "$conf is not the example as it is in etc/"

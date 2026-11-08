@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        # /etc/skycue/skycue.toml is not a conffile: postinst created it and
+        # recorded its checksum. Remove it only while it is still as created;
+        # an edited configuration is the operator's and stays.
+        toml=${SKYCUE_ROOT:-}/etc/skycue/skycue.toml
+        sum=${SKYCUE_ROOT:-}/var/lib/skycue/skycue.toml.generated-sha256
+        if [ -f "$toml" ] && [ -f "$sum" ] \
+           && [ "$(sha256sum "$toml" | cut -d ' ' -f 1)" = "$(cat "$sum")" ]; then
+            rm -f "$toml"
+            rmdir "${toml%/*}" 2>/dev/null || true
+        fi
+        rm -f "$sum"
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,4 +1,3 @@
 usr/bin/*
 usr/share/skycue
-etc/skycue/skycue.toml
 usr/lib/systemd/system/skycued.service

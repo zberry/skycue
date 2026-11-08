@@ -25,7 +25,7 @@ override_dh_auto_configure:
 		-DSKYCUE_SYSTEMD_UNITDIR=$(SKYCUE_DEB_UNITDIR) \
 		-DSKYCUE_TEST_SLOW_FACTOR=$(or $(SKYCUE_TEST_SLOW_FACTOR),1)
 
-# Serially: some tests listen on fixed local ports. install_layout checks this package shape.
+# Serially: some tests listen on fixed local ports.
 override_dh_auto_test:
 	dh_auto_test --no-parallel
 

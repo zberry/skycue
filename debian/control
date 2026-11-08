@@ -17,7 +17,7 @@ Standards-Version: 4.6.2
 
 Package: skycue
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, adduser
+Depends: ${shlibs:Depends}, ${misc:Depends}, adduser, diffutils
 Recommends: python3, python3-pil, curl, unzip
 Suggests: readsb, dump978-fa, gdal-bin, python3-gdal
 Description: ADS-B and UAT operator console and forwarding bridge

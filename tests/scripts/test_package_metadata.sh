@@ -73,7 +73,10 @@ unfold "$here/debian/control" | grep -q 'then run "systemctl enable --now skycue
 for p in /var/lib/skycue/maps /var/lib/skycue/recordings allow.list block.list; do
   grep -qF "$p" "$here/debian/skycue.postinst" || fail "postinst does not create $p"
 done
-grep -qx 'etc/skycue/skycue.conf' "$here/debian/skycue.install" || fail "skycue.install: conf"
+grep -qx 'etc/skycue/skycue.toml' "$here/debian/skycue.install" || fail "skycue.install: skycue.toml"
+grep -q 'skycue\.conf' "$here/debian/skycue.install" && fail "skycue.install still names skycue.conf"
+grep -qF 'skycued --convert-conf' "$here/debian/skycue.postinst" || fail "postinst does not convert an old skycue.conf"
+grep -qF 'skycued --convert-conf' "$here/packaging/rpm/skycue.spec" || fail "spec %post does not convert an old skycue.conf"
 for l in Apache-2.0 BSD-2-Clause BSD-3-Clause; do grep -qx "License: $l" "$here/debian/copyright" || fail "copyright lacks $l"; done
 # Nothing private: the only e-mail address in the packaging is the project's.
 others=$(grep -rhoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' "$here/debian" "$here/packaging" 2>/dev/null | sort -u | grep -vx 'skycue@users.noreply.github.com')
@@ -86,7 +89,8 @@ grep -qx 'Version: *%{skycue_version}' "$s" || fail "spec Version must come from
 grep -qx 'License: *Apache-2.0' "$s" || fail "spec License"
 grep -qx 'URL:            https://github.com/zberry/skycue' "$s" || fail "rpm URL"
 sed -n '/^%changelog/,$p' "$s" | sed -n '2p' | grep -qF "$id - $v-1" || fail "rpm %changelog is not $v-1 by $id"
-grep -q '%config(noreplace) %{_sysconfdir}/skycue/skycue.conf' "$s" || fail "conf not %config(noreplace)"
+grep -qx '%config(noreplace) %{_sysconfdir}/skycue/skycue.toml' "$s" || fail "skycue.toml not %config(noreplace)"
+grep -q '^%config.*skycue\.conf' "$s" && fail "spec still owns skycue.conf"
 grep -Eq '^Requires:.*(readsb|dump978|dump1090)' "$s" && fail "requires a decoder"
 grep -Eq '^BuildRequires:.*(^|[ ,:])curl([ ,]|$)' "$s" || fail "spec BuildRequires lacks curl (a ctest uses it)"
 # EL8's cmake-rpm-macros define __cmake_in_source_build: %cmake then passes no

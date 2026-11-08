@@ -57,7 +57,9 @@ grep -qE '^(state_dir|map_dir) = ""' "$out" && fail "$out: state_dir or map_dir 
 rc=$?
 [ "$rc" = 2 ] || { cat "$work/check.err"; fail "unset receiver.lat: exit $rc, want 2"; }
 [ "$(wc -l <"$work/check.err")" = 1 ] || { cat "$work/check.err"; fail "want one line on stderr"; }
-grep -qxF "skycued: $out:19: receiver.lat and receiver.lon are both 0.0: set the receiver's position" "$work/check.err" \
+latline=$(grep -n '^lat = ' "$out" | head -n 1 | cut -d: -f1)
+[ -n "$latline" ] || fail "$out has no lat = line"
+grep -qxF "skycued: $out:$latline: receiver.lat and receiver.lon are both 0.0: set the receiver's position" "$work/check.err" \
   || { cat "$work/check.err"; fail "stderr is not the missing-position line naming $out"; }
 
 # Position set, state under the work dir, both decoder ports closed: the file

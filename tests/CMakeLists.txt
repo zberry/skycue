@@ -191,6 +191,15 @@ add_test(NAME package_conf
     $<TARGET_FILE:skycued> ${CMAKE_CURRENT_BINARY_DIR}/package-conf-work "${SKYCUE_PYTHON3}")
 set_tests_properties(package_conf PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
+# package_postinst: the upgrade step in debian/skycue.postinst and the spec
+# (skycue.conf -> skycue.toml), run against a fake root with the built skycued.
+add_test(NAME package_postinst
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_package_postinst.sh ${CMAKE_COMMAND}
+    ${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake ${_skycue_example_conf}
+    $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skycue_example_old.conf
+    ${CMAKE_CURRENT_BINARY_DIR}/package-postinst-work)
+set_tests_properties(package_postinst PROPERTIES TIMEOUT 60)
+
 # SKYCUE_TEST_SLOW_FACTOR outside sanitizer and fuzz builds: two configures
 # of this tree (no build), their registered timeouts and environments compared.
 if(NOT SKYCUE_PYTHON3)
@@ -630,11 +639,12 @@ else()
 endif()
 
 # Script tests: every tests/scripts/test_*.sh runs as ctest "script_<name>" (exit
-# 77 is a skip). The seven today:
+# 77 is a skip). The eight today:
 #   script_test_make_locations   script_test_make_maps   script_test_make_tiles
-#   script_test_package_metadata script_test_package_scripts
+#   script_test_package_metadata script_test_package_scripts (package_postinst runs test_package_postinst.sh itself)
 #   script_test_skycue_web_tarballs   script_test_source_tarball
 file(GLOB _script_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_*.sh")
+list(FILTER _script_tests EXCLUDE REGEX "/test_package_postinst\\.sh$")  # registered above (takes arguments)
 foreach(f IN LISTS _script_tests)
   get_filename_component(name "${f}" NAME_WE)
   add_test(NAME script_${name} COMMAND bash ${f})

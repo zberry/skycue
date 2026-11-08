@@ -31,7 +31,7 @@ Description: ADS-B and UAT operator console and forwarding bridge
  table and alerts, and sends cues to cue clients. Map tiles and
  overlays are made on the machine with skycue-make-maps (needs GDAL or a
  container runtime). The service is enabled but not started on install:
- set RECEIVER_LAT and RECEIVER_LON in /etc/skycue/skycue.conf first, then
+ set receiver lat and lon in /etc/skycue/skycue.toml first, then
  run "systemctl enable --now skycued".
 
 Package: libskycue-dev

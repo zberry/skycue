@@ -13,6 +13,44 @@ case "$1" in
                 install -o skycue -g skycue -m 0644 /dev/null "/var/lib/skycue/$f"
             fi
         done
+        # The daemon is unpacked by now: an old skycue.conf becomes skycue.toml.
+        # BEGIN convert-conf (the same text is in debian/skycue.postinst and the spec's post-install script; tests/scripts/test_package_postinst.sh runs both)
+        # skycue_convert_one OLD NEW: an old skycue.conf (or skycue.overrides.conf)
+        # becomes NEW once; OLD is kept as OLD.converted. A failed conversion leaves
+        # both files, prints why and never fails the install. SKYCUE_ROOT and SKYCUED
+        # are for the tests.
+        skycue_convert_one() {
+            old=$1 new=$2
+            [ -f "$old" ] || return 0
+            if [ -e "$new" ]; then
+                # The package unpacks its own skycue.toml before this runs; replace it
+                # only while it is still the unedited packaged file (receiver position unset).
+                if [ "$3" = replace-packaged ] \
+                   && [ "$(head -n 1 "$new")" = "# skycue configuration (packaged). Set receiver lat and lon, then: systemctl enable --now skycued" ] \
+                   && grep -Eq '^lat = 0\.0( |$)' "$new" && grep -Eq '^lon = 0\.0( |$)' "$new"; then
+                    :
+                else
+                    echo "skycue: $old left as it is: $new exists; convert it with skycued --convert-conf" >&2
+                    return 0
+                fi
+            fi
+            tmp=$new.tmp.$$
+            if "${SKYCUED:-/usr/bin/skycued}" --convert-conf "$old" > "$tmp" 2> "$tmp.err"; then
+                chown --reference="$old" "$tmp" 2>/dev/null || true
+                chmod --reference="$old" "$tmp" 2>/dev/null || true
+                mv -f "$tmp" "$new"
+                rm -f "$tmp.err"
+                mv -f "$old" "$old.converted"
+                echo "skycue: converted $old to $new (the old file is now $old.converted)"
+            else
+                echo "skycue: could not convert $old (left as it is): $(cat "$tmp.err" 2>/dev/null)" >&2
+                rm -f "$tmp" "$tmp.err"
+            fi
+            return 0
+        }
+        skycue_convert_one "${SKYCUE_ROOT:-}/etc/skycue/skycue.conf" "${SKYCUE_ROOT:-}/etc/skycue/skycue.toml" replace-packaged || true
+        skycue_convert_one "${SKYCUE_ROOT:-}/var/lib/skycue/skycue.overrides.conf" "${SKYCUE_ROOT:-}/var/lib/skycue/skycue.overrides.toml" || true
+        # END convert-conf
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
         ;;

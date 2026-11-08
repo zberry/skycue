@@ -38,8 +38,8 @@ The skycued daemon serves an offline web console with a map, a traffic
 table and alerts, and sends cues to cue clients. Map tiles and
 overlays are made on the machine with skycue-make-maps (GDAL through a
 container, or baked on another machine and copied). The service is
-neither enabled nor started on install: set RECEIVER_LAT and RECEIVER_LON
-in /etc/skycue/skycue.conf first, then run "systemctl enable --now skycued".
+neither enabled nor started on install: set receiver lat and lon
+in /etc/skycue/skycue.toml first, then run "systemctl enable --now skycued".
 
 %package devel
 Summary:        skycue client library (static) and CMake package
@@ -100,6 +100,43 @@ exit 0
 for f in /var/lib/skycue/allow.list /var/lib/skycue/block.list; do
     [ -e "$f" ] || install -o skycue -g skycue -m 0644 /dev/null "$f"
 done
+# BEGIN convert-conf (the same text is in debian/skycue.postinst and the spec's post-install script; tests/scripts/test_package_postinst.sh runs both)
+# skycue_convert_one OLD NEW: an old skycue.conf (or skycue.overrides.conf)
+# becomes NEW once; OLD is kept as OLD.converted. A failed conversion leaves
+# both files, prints why and never fails the install. SKYCUE_ROOT and SKYCUED
+# are for the tests.
+skycue_convert_one() {
+    old=$1 new=$2
+    [ -f "$old" ] || return 0
+    if [ -e "$new" ]; then
+        # The package unpacks its own skycue.toml before this runs; replace it
+        # only while it is still the unedited packaged file (receiver position unset).
+        if [ "$3" = replace-packaged ] \
+           && [ "$(head -n 1 "$new")" = "# skycue configuration (packaged). Set receiver lat and lon, then: systemctl enable --now skycued" ] \
+           && grep -Eq '^lat = 0\.0( |$)' "$new" && grep -Eq '^lon = 0\.0( |$)' "$new"; then
+            :
+        else
+            echo "skycue: $old left as it is: $new exists; convert it with skycued --convert-conf" >&2
+            return 0
+        fi
+    fi
+    tmp=$new.tmp.$$
+    if "${SKYCUED:-/usr/bin/skycued}" --convert-conf "$old" > "$tmp" 2> "$tmp.err"; then
+        chown --reference="$old" "$tmp" 2>/dev/null || true
+        chmod --reference="$old" "$tmp" 2>/dev/null || true
+        mv -f "$tmp" "$new"
+        rm -f "$tmp.err"
+        mv -f "$old" "$old.converted"
+        echo "skycue: converted $old to $new (the old file is now $old.converted)"
+    else
+        echo "skycue: could not convert $old (left as it is): $(cat "$tmp.err" 2>/dev/null)" >&2
+        rm -f "$tmp" "$tmp.err"
+    fi
+    return 0
+}
+skycue_convert_one "${SKYCUE_ROOT:-}/etc/skycue/skycue.conf" "${SKYCUE_ROOT:-}/etc/skycue/skycue.toml" replace-packaged || true
+skycue_convert_one "${SKYCUE_ROOT:-}/var/lib/skycue/skycue.overrides.conf" "${SKYCUE_ROOT:-}/var/lib/skycue/skycue.overrides.toml" || true
+# END convert-conf
 exit 0
 
 %preun
@@ -115,7 +152,7 @@ exit 0
 %{_datadir}/skycue/
 %{_unitdir}/skycued.service
 %dir %{_sysconfdir}/skycue
-%config(noreplace) %{_sysconfdir}/skycue/skycue.conf
+%config(noreplace) %{_sysconfdir}/skycue/skycue.toml
 %dir %attr(0755,skycue,skycue) %{_sharedstatedir}/skycue
 %dir %attr(0755,skycue,skycue) %{_sharedstatedir}/skycue/maps
 %dir %attr(0755,skycue,skycue) %{_sharedstatedir}/skycue/recordings

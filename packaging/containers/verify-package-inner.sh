@@ -17,7 +17,7 @@ T=${VERIFY_TARGET:-?}
 V=${VERIFY_VERSION:?VERIFY_VERSION not set}
 KIND=${VERIFY_KIND:?VERIFY_KIND not set}
 DEV=${VERIFY_DEV:-0}
-conf=/etc/skycue/skycue.conf
+conf=/etc/skycue/skycue.toml
 unit=/usr/lib/systemd/system/skycued.service
 state=/var/lib/skycue
 stats=$state/skycue.stats.json
@@ -71,11 +71,15 @@ wait_api() {
 http_get() {
   curl -fsS -m 5 -o "$2" -w '%{http_code}' "$base$1" 2>/dev/null || echo "curl exit $?"
 }
-# set_key FILE KEY VALUE: replace the one KEY= line of FILE.
+# set_key FILE KEY VALUE: replace the value of the one `KEY = ...` line of
+# FILE (a trailing comment goes). A key that two tables share (json_port) is
+# passed as `KEY = OLDVALUE` in the second argument, to pick the line.
 set_key() {
-  [ "$(grep -c "^$2=" "$1")" = 1 ] || fail "$1 has not exactly one $2= line"
-  sed -i "s|^$2=.*|$2=$3|" "$1"
-  grep -qx "$2=$3" "$1" || fail "could not set $2 in $1"
+  local pat=$2
+  case $pat in *' = '*) ;; *) pat="$pat = " ;; esac
+  [ "$(grep -c "^$pat" "$1")" = 1 ] || fail "$1 has not exactly one $pat line"
+  sed -i "s|^\($pat\).*|${pat%% = *} = $3|" "$1"
+  grep -qx "${pat%% = *} = $3" "$1" || fail "could not set $2 in $1"
 }
 owner_is_skycue() { [ "$(stat -c %U:%G "$1")" = skycue:skycue ]; }
 state_check='import json,sys; n=len(json.load(open(sys.argv[1]))["tracks"])
@@ -104,7 +108,7 @@ checks() {
   [ -f "$unit" ] || fail "2 no $unit"
   out=$(systemd-analyze verify "$unit" 2>&1) || { echo "$out" >&2; fail "2 systemd-analyze verify $unit"; }
   [ -z "$out" ] || echo "$out"
-  grep -qx 'ExecStart=/usr/bin/skycued --config /etc/skycue/skycue.conf' "$unit" || fail "2 unit ExecStart"
+  grep -qx 'ExecStart=/usr/bin/skycued --config /etc/skycue/skycue.toml' "$unit" || fail "2 unit ExecStart"
   grep -qx 'User=skycue' "$unit" || fail "2 unit User"
   grep -qx 'RestartPreventExitStatus=2' "$unit" || fail "2 unit has no RestartPreventExitStatus=2"
   grep -qx 'StateDirectory=skycue' "$unit" || fail "2 unit has no StateDirectory=skycue"
@@ -126,7 +130,7 @@ checks() {
   # 4. The config as shipped: one line naming the file and the key, exit 2.
   rc=0; out=$(runuser -u skycue -- skycued --config "$conf" 2>&1) || rc=$?
   [ "$rc" = 2 ] || { echo "$out" >&2; fail "4 shipped config: exit $rc, want 2"; }
-  [ "$out" = "skycued: $conf: missing required key RECEIVER_LAT" ] ||
+  [ "$out" = "skycued: $conf:$(grep -n '^lat = ' "$conf" | cut -d: -f1): receiver.lat and receiver.lon are both 0.0: set the receiver's position" ] ||
     { echo "$out" >&2; fail "4 shipped config: not the one missing-key line"; }
   say "4 $out"
 
@@ -135,10 +139,10 @@ checks() {
   # skycue, so a file written next to the config would show.
   work=$(mktemp -d /work/run.XXXXXX)
   chown skycue:skycue "$work"
-  copy=$work/skycue.conf
+  copy=$work/skycue.toml
   cp "$conf" "$copy"
-  set_key "$copy" RECEIVER_LAT 38.9
-  set_key "$copy" RECEIVER_LON -77.0
+  set_key "$copy" lat 38.9
+  set_key "$copy" lon -77.0
   chown skycue:skycue "$copy"
   log=/work/skycued.log
   marker=/work/run.marker
@@ -169,7 +173,7 @@ checks() {
   kill_bg   # SIGTERM: the daemon saves its stats file on the way out
   [ -f "$stats" ] || { tail -n 20 "$log" >&2; fail "5 no $stats after the run"; }
   owner_is_skycue "$stats" || fail "5 $stats is not owned by skycue"
-  [ "$(ls -A "$work")" = skycue.conf ] || { ls -la "$work" >&2; fail "5 the daemon wrote files next to the config"; }
+  [ "$(ls -A "$work")" = skycue.toml ] || { ls -la "$work" >&2; fail "5 the daemon wrote files next to the config"; }
   stray=$(find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path "$state" \) -prune -o \
             -user skycue -newer "$marker" ! -path "$work" -print 2>/dev/null || true)
   [ -z "$stray" ] || { echo "$stray" >&2; fail "5 the daemon wrote outside $state"; }
@@ -181,8 +185,8 @@ checks() {
 
   # 7. --check-inputs against a closed port: one line per input, exit 1.
   closed=$(python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
-  set_key "$copy" READSB_JSON_PORT "$closed"
-  set_key "$copy" DUMP978_RAW_PORT "$closed"
+  set_key "$copy" 'json_port = 30047' "$closed"
+  set_key "$copy" raw_port "$closed"
   rc=0
   runuser -u skycue -- skycued --config "$copy" --check-inputs > /work/check.out 2> /work/check.err || rc=$?
   [ "$rc" = 1 ] || { cat /work/check.out /work/check.err >&2; fail "7 --check-inputs: exit $rc, want 1"; }
@@ -256,8 +260,8 @@ systemd_checks() {
     say "systemd: journald had failed (credentials unavailable in this container); restarted without ImportCredential"
   fi
 
-  set_key "$conf" RECEIVER_LAT 38.9
-  set_key "$conf" RECEIVER_LON -77.0
+  set_key "$conf" lat 38.9
+  set_key "$conf" lon -77.0
   exec=$(sed -n 's/^ExecStart=//p' "$unit")
   [ -n "$exec" ] || fail "systemd: no ExecStart in $unit"
   dropin=/etc/systemd/system/skycued.service.d
@@ -279,8 +283,8 @@ systemd_checks() {
   say "systemd: skycued active (NRestarts=0), /api/state ${api_out#ok } tracks, $stats written"
 
   # No receiver position: the start fails once and is not retried.
-  set_key "$conf" RECEIVER_LAT ''
-  set_key "$conf" RECEIVER_LON ''
+  set_key "$conf" lat 0.0
+  set_key "$conf" lon 0.0
   systemctl start skycued || true
   for (( i=0; i<30; i++ )); do
     s=$(systemctl is-active skycued || true)
@@ -294,9 +298,9 @@ systemd_checks() {
   [ "$n" = 0 ] || fail "systemd: without a position NRestarts=$n (restart loop), want 0"
   s=$(systemctl show -p ExecMainStatus --value skycued)
   [ "$s" = 2 ] || unit_fail "without a position the exit status is $s, want 2"
-  journalctl -u skycued --no-pager | grep -qF "skycued: $conf: missing required key RECEIVER_LAT" ||
+  journalctl -u skycued --no-pager | grep -qF "skycued: $conf:" ||
     { journalctl -u skycued --no-pager | tail -n 20 >&2; fail "systemd: journal has no missing-key line"; }
-  say "systemd: without a position skycued failed (exit 2, not restarted), journal names RECEIVER_LAT"
+  say "systemd: without a position skycued failed (exit 2, not restarted), journal names receiver.lat"
 }
 
 case ${1:-} in

@@ -314,4 +314,28 @@ run "$GDAL" --config "$conf" --preset conus --dry-run
 unset STUB_RC
 [ $rc -eq 1 ] && [ "$(grep -c . "$tmp/calls")" = 1 ] || fail "failing helper: exit $rc, want 1 after one call"
 
+# 11. With skycued on PATH the values come from `skycued --config FILE --dump-env`
+# (the effective ones: here a map dir and position the file does not hold), and a
+# failing skycued stops the run with status 2 and no helper call.
+mkdir "$tmp/sk"
+cat > "$tmp/sk/skycued" <<STUB
+#!/bin/sh
+echo "\$*" >> "$tmp/skycued.args"
+[ -n "\${STUB_SK_FAIL:-}" ] && { echo "skycued: boom" >&2; exit 2; }
+printf "SKYCUE_PATHS_MAP_DIR='%s'\nSKYCUE_RECEIVER_LAT='%s'\nSKYCUE_RECEIVER_LON='%s'\n" "$tmp/dumped maps" 51.5 -0.12
+STUB
+chmod +x "$tmp/sk/skycued"
+: > "$tmp/skycued.args"
+run "$GDAL:$tmp/sk" --config "$conf" --around 100 --dry-run
+[ $rc -eq 0 ] || fail "skycued on PATH: exit $rc"
+[ "$(cat "$tmp/skycued.args")" = "--config $conf --dump-env" ] || fail "skycued called as '$(cat "$tmp/skycued.args")'"
+[ "$(call make-tiles.sh 1)" = "make-tiles.sh -180,-85,180,85 0 5 --name global --out $tmp/dumped maps/tiles --cache $cache --dry-run" ] ||
+  fail "skycued on PATH: the map dir is not the dumped one: $(call make-tiles.sh 1)"
+read -r _ bbox _ <<<"$(call make-tiles.sh 2)"
+inside "$bbox" 51.5 -0.12 && ! inside "$bbox" 38.9 -77.0 || fail "skycued on PATH: bbox $bbox is not around the dumped position"
+export STUB_SK_FAIL=1
+run "$GDAL:$tmp/sk" --config "$conf" --around 100 --dry-run
+unset STUB_SK_FAIL
+[ $rc -eq 2 ] && grep -q 'boom' "$tmp/err" && [ "$(grep -c . "$tmp/calls")" = 0 ] || fail "failing skycued: exit $rc"
+
 echo "PASS test_make_maps"

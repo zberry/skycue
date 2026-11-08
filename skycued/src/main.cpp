@@ -4,9 +4,11 @@
 //
 // Exit status: 0 after SIGINT/SIGTERM (or --help/--version), 1 on a runtime
 // failure (a port that cannot be bound, a recording directory that cannot be
-// created), 2 on a usage or configuration error.
+// created), 2 on a usage or configuration error (also an unreadable or
+// invalid file given to --convert-conf).
 
 #include "check_inputs.hpp"
+#include "conf_convert.hpp"
 #include "config.hpp"
 #include "engine.hpp"
 #include "forwarder.hpp"
@@ -88,6 +90,56 @@ std::string defaultWwwDir()
     const std::string www = dir + "/../share/skycue/www";
     char real[PATH_MAX];
     return ::realpath(www.c_str(), real) ? std::string(real) : www;
+}
+
+// `value` as one shell word: single-quoted, a quote inside as '\''.
+std::string shellQuote(const std::string& value)
+{
+    std::string out = "'";
+    for (char c : value) {
+        if (c == '\'')
+            out += "'\\''";
+        else
+            out += c;
+    }
+    return out + "'";
+}
+
+// --dump-env: every key's effective value as a plain shell assignment
+// (SKYCUE_INPUTS_READSB_HOST='127.0.0.1'), never exported: skycued reads
+// SKYCUE_* from its environment, so exporting would pin each key to itself.
+// An array is its entries in one string, separated by spaces.
+std::string dumpEnv(const Config& config)
+{
+    std::string out;
+    for (const auto& key : knownConfigKeys())
+        out += envNameOf(key) + "=" + shellQuote(configValueText(config, key)) + "\n";
+    return out;
+}
+
+// --convert-conf FILE: the equivalent skycue.toml on stdout.
+int runConvertConf(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "skycued: --convert-conf: cannot open " << path << "\n";
+        return 2;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    try {
+        int dropped = 0;
+        const std::string toml = convertOldConf(ss.str(), path, &dropped);
+        std::cout << toml;
+        std::cout.flush();
+        if (dropped > 0)
+            std::cerr << "skycued: --convert-conf: " << dropped << " comment line" << (dropped == 1 ? "" : "s")
+                      << " of " << path << " not carried over (the example's comments are used)\n";
+        return std::cout ? 0 : 1;
+    } catch (const ConfigError& e) {
+        std::cerr << "skycued: " << e.what() << "\n";
+        return 2;
+    }
 }
 
 // --check-inputs: one connection attempt per input, one line each on stdout.
@@ -182,28 +234,38 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
 int run(int argc, char** argv)
 {
     const auto started = std::chrono::system_clock::now();
-    std::string config_path, replay_path, readsb_host, dump978_host, log_level, www_dir, web_bind, inputs_file;
+    std::string config_path, convert_path, replay_path, readsb_host, dump978_host, log_level, www_dir, web_bind,
+        inputs_file;
+    std::vector<std::string> set_args;
     double replay_speed = 1.0;
     unsigned cue_tcp_port = 0, web_port = 0;
     po::options_description desc(
         "usage: skycued --config PATH [--replay FILE [--replay-speed N] [--replay-loop]] [options]\n"
         "Forwards readsb's aircraft tracks to skycue clients");
     desc.add_options()("help,h", "show this help")("version", "print the version")(
-        "config,c", po::value(&config_path), "skycue.conf (required)")(
+        "config,c", po::value(&config_path), "skycue.toml (required)")(
+        "set", po::value(&set_args)->composing()->value_name("KEY=VALUE"),
+        "override a config key for this run, e.g. --set inputs.readsb.host=10.0.0.2 (repeatable, a later one wins; "
+        "above the SKYCUE_* environment)")(
+        "dump-env", "print the effective configuration (all layers and flags applied) as shell assignments "
+                    "SKYCUE_INPUTS_READSB_HOST='...', one per key, and exit; nothing is printed on an error (status 2)")(
+        "convert-conf", po::value(&convert_path)->value_name("FILE"),
+        "print the skycue.toml equivalent of an old skycue.conf (or skycue.overrides.conf) and exit")(
         "replay", po::value(&replay_path), "play back a received-stream JSONL recording (or a readsb JSON capture) "
                                            "instead of connecting to readsb; no UAT")(
         "replay-speed", po::value(&replay_speed)->default_value(1.0), "replay pacing: 1 = real time, 0 = unpaced")(
         "replay-loop", "restart the replay at the end of the file")(
-        "readsb-host", po::value(&readsb_host), "host of readsb's JSON port (default: READSB_HOST, 127.0.0.1)")(
-        "dump978-host", po::value(&dump978_host), "host of dump978's raw port (default: DUMP978_HOST, 127.0.0.1)")(
-        "no-uat", "do not connect to dump978 (overrides DUMP978_ENABLE)")("no-readsb", "do not connect to readsb")(
+        "readsb-host", po::value(&readsb_host), "host of readsb's JSON port (overrides inputs.readsb.host)")(
+        "dump978-host", po::value(&dump978_host), "host of dump978's raw port (overrides inputs.dump978.host)")(
+        "no-uat", "do not connect to dump978 (overrides inputs.dump978.enable)")(
+        "no-readsb", "do not connect to readsb (overrides inputs.readsb.enable)")(
         "inputs-file", po::value(&inputs_file),
-        "override INPUTS_FILE (default: skycue.inputs.json in STATE_DIR, else next to the config; "
+        "override inputs.file (default: skycue.inputs.json in paths.state_dir, else next to the config; "
         "empty: not persisted)")(
-        "cue-tcp-port", po::value(&cue_tcp_port), "override CUE_TCP_PORT (0: no listener)")(
+        "cue-tcp-port", po::value(&cue_tcp_port), "override cues.tcp_port (0: no listener)")(
         "www-dir", po::value(&www_dir), "the web UI's files (default: <bin>/../share/skycue/www)")(
-        "web-bind", po::value(&web_bind), "override WEB_BIND (numeric address)")(
-        "web-port", po::value(&web_port), "override WEB_PORT (0: no web UI)")(
+        "web-bind", po::value(&web_bind), "override web.bind (numeric address)")(
+        "web-port", po::value(&web_port), "override web.port (0: no web UI)")(
         "check-inputs",
         "connect once to each configured TCP input (readsb, dump978, tcp_connect inputs of the inputs file), "
         "print one line per input, exit 0 when all connected, 1 when one is not, 2 on a usage or configuration error; starts nothing else. Each check "
@@ -226,14 +288,16 @@ int run(int argc, char** argv)
         std::cout << kVersion << "\n";
         return 0;
     }
+    if (vm.count("convert-conf"))
+        return runConvertConf(convert_path);
     const auto level = parseLogLevel(log_level);
     if (!level) {
         std::cerr << "skycued: --log-level must be debug, info, warn or error, got '" << log_level << "'\n";
         return 2;
     }
     setLogLevel(*level);
-    // --check-inputs prints its own lines; the library's log would add noise.
-    if (vm.count("check-inputs") == 0)
+    // --check-inputs and --dump-env print their own lines; the library's log would add noise.
+    if (vm.count("check-inputs") == 0 && vm.count("dump-env") == 0)
         installNetLogSink();
     if (config_path.empty()) {
         std::cerr << "skycued: --config is required\n";
@@ -251,7 +315,7 @@ int run(int argc, char** argv)
         std::cerr << "skycued: --web-bind must not be empty\n";
         return 2;
     }
-    // As for the READSB_HOST and DUMP978_HOST keys: an empty host is an error, not "use the key".
+    // As for the inputs.readsb.host and inputs.dump978.host keys: an empty host is an error, not "use the key".
     for (const auto& [flag, value] : {std::pair<const char*, const std::string*>{"readsb-host", &readsb_host},
                                       {"dump978-host", &dump978_host}}) {
         if (vm.count(flag) && value->empty()) {
@@ -270,38 +334,54 @@ int run(int argc, char** argv)
         return 2;
     }
 
+    // The layers: defaults, the file, its overrides file, the SKYCUE_* environment, --set.
+    const auto env = environmentOverrides();
     Config config;
     try {
-        config = parseConfigFile(config_path);
+        config = loadConfig(config_path, set_args, env);
     } catch (const ConfigError& e) {
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
     }
-    if (!config.state_dir.empty()) {
-        struct stat st{};
-        if (::stat(config.state_dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
-            std::cerr << "skycued: STATE_DIR " << config.state_dir << " is not a directory\n";
-            return 2;
-        }
-    }
-    // A flag given on the command line overrides its key; an absent one defers to it.
-    if (!vm.count("readsb-host"))
-        readsb_host = config.readsb_host;
-    if (!vm.count("dump978-host"))
-        dump978_host = config.dump978_host;
-    const bool use_dump978 = !vm.count("no-uat") && config.dump978_enable;
+    // The command-line flags apply last. A flag given overrides its key; an absent one defers to it.
+    if (vm.count("readsb-host"))
+        config.readsb_host = readsb_host;
+    if (vm.count("dump978-host"))
+        config.dump978_host = dump978_host;
+    if (vm.count("no-uat"))
+        config.dump978_enable = false;
+    if (vm.count("no-readsb"))
+        config.inputs_readsb_enable = false;
     if (vm.count("cue-tcp-port"))
         config.cue_tcp_port = static_cast<uint16_t>(cue_tcp_port);
     if (vm.count("web-port"))
         config.web_port = static_cast<uint16_t>(web_port);
     if (vm.count("web-bind"))
         config.web_bind = web_bind;
+    if (vm.count("dump-env")) {
+        if (!inputs_file.empty())
+            config.inputs_file = inputs_file;
+        std::cout << dumpEnv(config);
+        std::cout.flush();
+        return std::cout ? 0 : 1;
+    }
+    if (!config.state_dir.empty()) {
+        struct stat st{};
+        if (::stat(config.state_dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
+            std::cerr << "skycued: paths.state_dir " << config.state_dir << " is not a directory\n";
+            return 2;
+        }
+    }
+    readsb_host = config.readsb_host;
+    dump978_host = config.dump978_host;
+    const bool use_dump978 = config.dump978_enable;
+    const bool use_readsb = config.inputs_readsb_enable;
     if (!vm.count("www-dir"))
         www_dir = defaultWwwDir();
 
     if (check_only)
         return runCheckInputs(config, vm.count("inputs-file") ? inputs_file : resolveInputsFile(config, config_path),
-                              vm.count("no-readsb") == 0, readsb_host, use_dump978, dump978_host);
+                              use_readsb, readsb_host, use_dump978, dump978_host);
 
     boost::asio::io_context io;
     // Registered before anything is logged or started: a SIGINT/SIGTERM that arrives during startup (a
@@ -387,7 +467,7 @@ int run(int argc, char** argv)
                 builtin("replay", InputType::replay, "", 0),
                 std::make_unique<ReplayObservationSource>(io, replay_path, replay_speed, vm.count("replay-loop") > 0)));
         } else {
-            if (!vm.count("no-readsb")) {
+            if (use_readsb) {
                 if (mc.decode_raw) {
                     RawDecodeOptions decode;
                     decode.enabled = true;
@@ -452,6 +532,7 @@ int run(int argc, char** argv)
     std::unique_ptr<RuntimeConfig> runtime;
     try {
         runtime = std::make_unique<RuntimeConfig>(io, config_path, *engine);
+        runtime->setLayers(set_args, env);
         runtime->load();
     } catch (const std::exception& e) {
         std::cerr << "skycued: " << e.what() << "\n";
@@ -482,13 +563,19 @@ int run(int argc, char** argv)
         daemon.cli_overrides["inputs.dump978.enable"] = "false";
     if (vm.count("no-readsb"))
         daemon.cli_overrides["inputs.readsb.enable"] = "false";
+    // One line per key whose value is not the main file's or the default's, with where it came from.
+    for (const auto& src : config.sources)
+        if (!daemon.cli_overrides.count(src.key))
+            LOG_INFO("config: " << src.key << " = " << configValueText(config, src.key) << " (" << src.source << ")");
+    for (const auto& [key, value] : daemon.cli_overrides)
+        LOG_INFO("config: " << key << " = " << value << " (flag)");
     daemon.recorders = {{"received", received.get()}, {"sent", sent.get()}, {"fisb", fisb.get()}};
     if (replaying) {
         daemon.replay_file = replay_path;
         daemon.replay_speed = replay_speed;
         daemon.replay_loop = vm.count("replay-loop") > 0;
     }
-    daemon.readsb = !replaying && !vm.count("no-readsb");
+    daemon.readsb = !replaying && use_readsb;
     daemon.dump978 = !replaying && use_dump978;
     // The web UI (WEB_BIND:WEB_PORT); WEB_PORT=0: none.
     std::unique_ptr<WebServer> web;

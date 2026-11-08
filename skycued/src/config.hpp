@@ -102,6 +102,11 @@ Config parseConfigFile(const std::string& path, const std::string& overrides_pat
 // The file at `path`, the overrides file overridesPathOf() names, the real
 // environment (environmentOverrides()), no --set.
 Config parseConfigFile(const std::string& path);
+// The file at `path` with its overrides file (found as overridesPathOf() does,
+// and again if the layers move paths.state_dir), `set_args` and `env`. For the
+// command-line tools. Throws ConfigError.
+Config loadConfig(const std::string& path, const std::vector<std::string>& set_args,
+                  const std::map<std::string, std::string>& env, bool position_required = true);
 // The main file's text alone, named `name_for_errors` (for tests).
 Config parseConfigText(const std::string& text, const std::string& name_for_errors,
                        bool position_required = true);

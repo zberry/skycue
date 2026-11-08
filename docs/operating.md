@@ -161,6 +161,37 @@ The three forwarding modes (`CUE_TCP_PORT`, `CUE_TCP_CONNECT`,
 `CUE_UDP_TARGETS`) can be used together; with all three off skycued runs but
 warns that it forwards to nobody.
 
+### Overriding a key for one run
+
+Any key of `skycue.toml` can be changed for one run without editing the file:
+`skycued --config skycue.toml --set inputs.readsb.host=10.0.0.2 --set web.port=0`
+(repeatable, a later one wins), or `SKYCUE_INPUTS_READSB_HOST=10.0.0.2` in the
+environment (the key upper-cased, `.` as `_`). The value is read as a TOML
+value, except that a bare word is a string; an array needs its brackets,
+`--set 'cues.udp_targets=["10.0.0.5:30500"]'`. Precedence, lowest first: the
+built-in defaults, `skycue.toml`, `skycue.overrides.toml`, the environment,
+`--set`, then the flags `--readsb-host`, `--dump978-host`, `--no-uat` and
+`--no-readsb`. The startup log lists each key that does not come from the file
+or the defaults with its source (`overrides`, `env`, `--set`, `flag`).
+
+`skycued --config skycue.toml --dump-env` prints the effective value of every
+key, all layers and flags applied, as shell assignments
+(`SKYCUE_INPUTS_READSB_HOST='127.0.0.1'`; an array is its entries separated by
+spaces). It is what the scripts read: `eval "$(skycued --config "$CONF"
+--dump-env)"`. Do not export the variables: skycued reads `SKYCUE_*` from its
+environment, so exporting them would pin every key to itself. On an error
+nothing is printed on stdout and the exit status is 2.
+
+### Converting an old skycue.conf
+
+`skycued --convert-conf skycue.conf > skycue.toml` writes the TOML equivalent
+of an old `skycue.conf` (the old `KEY=value` grammar, all its keys) on stdout.
+The output is `packaging/skycue.toml.example` with your values filled in, so
+its comments are the example's; the comments you wrote are not carried over,
+and stderr says how many lines that was. A `skycue.overrides.conf` converts to
+a `skycue.overrides.toml`. An unknown key or a malformed line exits with
+status 2 and names the line. `--convert-conf` is a one-time aid and goes in a later release.
+
 ### Where the files are
 
 A `skycue.conf` copied from the example (the build-tree run) leaves

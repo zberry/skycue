@@ -29,6 +29,12 @@ target_compile_definitions(test_config PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_config)
 add_test(NAME config COMMAND test_config)
 
+add_executable(test_conf_convert test_conf_convert.cpp)
+target_link_libraries(test_conf_convert PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_conf_convert PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_conf_convert)
+add_test(NAME conf_convert COMMAND test_conf_convert)
+
 add_executable(test_readsb_json test_readsb_json.cpp)
 target_link_libraries(test_readsb_json PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_readsb_json PRIVATE BOOST_TEST_DYN_LINK
@@ -759,5 +765,12 @@ target_compile_definitions(test_log PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_log)
 add_test(NAME log COMMAND test_log)
 set_tests_properties(log PROPERTIES TIMEOUT 60)
+
+# skycued's configuration command line: --dump-env, --set, --convert-conf, the legacy flags.
+add_test(NAME config_cli
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_config_cli.sh
+    $<TARGET_FILE:skycued> ${_skycue_example_conf}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skycue_example_old.conf ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(config_cli PROPERTIES TIMEOUT 60)
 
 skycue_scale_test_timeouts()

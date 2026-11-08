@@ -797,4 +797,17 @@ Config parseConfigFile(const std::string& path)
     return parseConfigLayers(text, path, overrides_text, overrides_path, {}, env);
 }
 
+Config loadConfig(const std::string& path, const std::vector<std::string>& set_args,
+                  const std::map<std::string, std::string>& env, bool position_required)
+{
+    std::string overrides = overridesPathOf(path, set_args, env);
+    for (;;) {
+        Config c = parseConfigFile(path, overrides, set_args, env, position_required);
+        const std::string actual = overridesPath(c);
+        if (actual == overrides)
+            return c;
+        overrides = actual;  // paths.state_dir moved it (the overrides may not assign it, so this settles)
+    }
+}
+
 }  // namespace skycued

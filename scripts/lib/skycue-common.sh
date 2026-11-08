@@ -8,10 +8,12 @@
 # --container); each takes another image as --container IMAGE.
 SKYCUE_GDAL_IMAGE=ghcr.io/osgeo/gdal:ubuntu-small-3.9.3
 
-# Fallback reader for the few keys these scripts need, used only when `skycued`
-# is not on PATH; when it is, values come from `skycued --config FILE
-# --dump-env` (Task 5), which is the only full parser. Accepts the example's
-# grammar subset only.
+# Fallback reader for the few keys these scripts need, for machines without
+# `skycued` on PATH (a map machine that only builds tiles). Where skycued is
+# installed the scripts take the values from `eval "$(skycued --config FILE
+# --dump-env)"` instead, which is the only full parser (it also applies the
+# overrides file and the SKYCUE_* environment); this reader sees the one file
+# and accepts the example's grammar subset only.
 # load_config FILE VAR=table.key...: read FILE (skycue.toml: a strict subset of
 # TOML, see packaging/skycue.toml.example) for the keys asked for, each
 # assigned to its shell variable: load_config "$f" MAP_DIR=paths.map_dir.

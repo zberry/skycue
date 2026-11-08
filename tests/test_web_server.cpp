@@ -1682,7 +1682,6 @@ BOOST_AUTO_TEST_CASE(state_dir_holds_state_files)
     BOOST_TEST(!exists(etc + "/skycue.stats.json"));
 }
 
-// breaks in Task 4/5: asserts the product message "skycued: STATE_DIR ... is not a directory" (old key name)
 BOOST_AUTO_TEST_CASE(state_dir_missing_exits_2)
 {
     TempDir tmp;
@@ -1690,13 +1689,13 @@ BOOST_AUTO_TEST_CASE(state_dir_missing_exits_2)
     writeFile(conf, headConf({{"web.port", "0"}, {"cues.tcp_port", "0"}, {"paths.state_dir", str(tmp.path + "/nope")}}));
     const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture}, log);
     BOOST_TEST(waitExit(pid, 5s) == 2);
-    BOOST_TEST(has(readAll(log), "skycued: STATE_DIR " + tmp.path + "/nope is not a directory"));
+    BOOST_TEST(has(readAll(log), "skycued: paths.state_dir " + tmp.path + "/nope is not a directory"));
     // A file is not a directory either.
     writeFile(tmp.path + "/file", "x\n");
     writeFile(conf, headConf({{"web.port", "0"}, {"cues.tcp_port", "0"}, {"paths.state_dir", str(tmp.path + "/file")}}));
     const pid_t pid2 = spawnSkycued({"--config", conf, "--replay", kFixture}, log);
     BOOST_TEST(waitExit(pid2, 5s) == 2);
-    BOOST_TEST(has(readAll(log), "skycued: STATE_DIR " + tmp.path + "/file is not a directory"));
+    BOOST_TEST(has(readAll(log), "skycued: paths.state_dir " + tmp.path + "/file is not a directory"));
 }
 
 BOOST_AUTO_TEST_CASE(readsb_host_from_config_cli_wins)

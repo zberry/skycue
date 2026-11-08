@@ -1,7 +1,7 @@
 // skycue-stats: summarises recordings for checking receiver coverage and the
 // filter / rate-limit chain.
 //
-//   skycue-stats [--lat L --lon L | --config skycue.conf] [--json] [--top N]
+//   skycue-stats [--lat L --lon L | --config skycue.toml] [--json] [--top N]
 //                [--range-bin NM] [--alt-bin FT] [--gap-s S] FILE...
 //
 // FILE: a received-stream or sent-stream JSONL recording, or a capture of
@@ -108,7 +108,7 @@ int main(int argc, char** argv)
         ("help,h", "show this help")
         ("lat", po::value(&lat), "receiver latitude, degrees (with --lon; overrides --config)")
         ("lon", po::value(&lon), "receiver longitude, degrees (with --lat)")
-        ("config", po::value(&config_path), "skycue.conf to take the receiver position (and altitude) from")
+        ("config", po::value(&config_path), "skycue.toml to take the receiver position (and altitude) from (the SKYCUE_* environment applies; the position may be unset)")
         ("json", "write one JSON object instead of text")
         ("top", po::value(&top)->default_value(15), "rows in the per-aircraft tables")
         ("range-bin", po::value(&range_bin)->default_value(10), "range histogram bin, nm")
@@ -158,9 +158,11 @@ int main(int argc, char** argv)
     options.gap_s = gap_s;
     if (!config_path.empty()) {
         try {
-            const Config config = parseConfigFile(config_path);
+            const Config config = loadConfig(config_path, {}, environmentOverrides(), false);
             options.rx_alt_m = config.receiver_alt_m + config.antenna_height_m;
-            if (std::isfinite(config.receiver_lat) && std::isfinite(config.receiver_lon)) {
+            // Unset (NAN) or the example's 0.0 / 0.0: no position.
+            if (std::isfinite(config.receiver_lat) && std::isfinite(config.receiver_lon) &&
+                !(config.receiver_lat == 0.0 && config.receiver_lon == 0.0)) {
                 options.rx_lat = config.receiver_lat;
                 options.rx_lon = config.receiver_lon;
                 options.receiver_from = "--config";

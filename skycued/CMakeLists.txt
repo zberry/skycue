@@ -14,6 +14,12 @@ target_include_directories(skycued_asterix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sr
 target_link_libraries(skycued_asterix PUBLIC Boost::boost)
 skycue_set_warnings(skycued_asterix)
 
+# --convert-conf fills in the text of the example config: embed it.
+set(_skycue_toml_example "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/skycue.toml.example")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_skycue_toml_example}")
+file(READ "${_skycue_toml_example}" SKYCUE_TOML_EXAMPLE_TEXT)
+configure_file(src/skycue_example_toml.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/skycue_example_toml.hpp" @ONLY)
+
 add_library(skycued_core STATIC
   src/altitude_fit.cpp
   src/change_detector.cpp
@@ -28,6 +34,7 @@ add_library(skycued_core STATIC
   src/decode/modes_decoder.cpp
   src/check_inputs.cpp
   src/config.cpp
+  src/conf_convert.cpp
   src/conf_legacy.cpp
   src/engine.cpp
   src/fisb/apdu.cpp
@@ -94,7 +101,7 @@ add_library(skycued_core STATIC
   src/web_outputs.cpp
   src/web_stats.cpp
   src/web_server.cpp)
-target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(skycued_core PUBLIC skycued_asterix skycue::skycue skycue::net Boost::boost Boost::program_options)
 skycue_set_warnings(skycued_core)
 

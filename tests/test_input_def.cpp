@@ -766,13 +766,13 @@ BOOST_AUTO_TEST_CASE(format_only_on_beast_raw)
 
 BOOST_AUTO_TEST_CASE(source_defaults_device_and_roundtrips)
 {
-    BOOST_TEST(def(kPsJson).source == PingSource::device);
-    BOOST_TEST(def(std::string(kPsJson) + R"(,"source":"device")").source == PingSource::device);
+    BOOST_CHECK(def(kPsJson).source == PingSource::device);
+    BOOST_CHECK(def(std::string(kPsJson) + R"(,"source":"device")").source == PingSource::device);
     const InputDef d = def(std::string(kPsJson) + R"(,"source":"decode")");
-    BOOST_TEST(d.source == PingSource::decode);
+    BOOST_CHECK(d.source == PingSource::decode);
     BOOST_TEST(inputDefJson(d).find(R"("source":"decode")") != std::string::npos);
     BOOST_TEST(inputDefJson(def(kPsJson)).find(R"("source":"device")") != std::string::npos);
-    BOOST_TEST(def(inputDefJson(d).substr(1, inputDefJson(d).size() - 2)) == d);
+    BOOST_CHECK(def(inputDefJson(d).substr(1, inputDefJson(d).size() - 2)) == d);
 }
 
 BOOST_AUTO_TEST_CASE(source_rejects_other_value)

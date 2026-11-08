@@ -72,6 +72,7 @@ struct CueUdpTarget {
 // counted by tcpClientCount). A failed dial, or the connection closing for
 // any reason, dials again after a delay that starts at 0.5 s and doubles to
 // at most 10 s, back to 0.5 s after every successful connect.
+// At most 1024 clients can be connected to a listening destination at once.
 // A TCP peer that is slower than max_client_queue_bytes allows is closed and
 // may connect again (and is greeted again). Keepalive and TCP_NODELAY are on
 // for every TCP session.

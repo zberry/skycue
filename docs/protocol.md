@@ -171,9 +171,10 @@ earlier releases in two ways. Every TCP connection skycued serves or dials
 has keepalive (probes after 30 s idle, every 10 s, three probes) and
 `TCP_NODELAY` switched on; a receiver that vanished without closing is now
 noticed by skycued as well. UDP is best effort: a datagram the kernel cannot
-take at once is dropped and counted, not queued, and a host name that
+take at once is dropped and counted, not queued; a host name that
 resolves to several addresses is sent to at one only (the first IPv4
-address). Frames, Hello timing, keyframe bursts and shutdown drops are
+address, or the first address when none is IPv4); and a UDP target may now
+be an IPv6 address (earlier releases skipped those). Frames, Hello timing, keyframe bursts and shutdown drops are
 unchanged. A TCP consumer that falls more than 1 MiB behind is disconnected,
 as before, and is greeted afresh (Hello, keyframe) when it reconnects.
 

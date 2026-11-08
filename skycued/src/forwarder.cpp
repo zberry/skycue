@@ -4,10 +4,12 @@
 // This file keeps the protocol (Hello, keyframe bursts, heartbeats, shutdown
 // drops) and the session list the Cues tab reads.
 //
-// Peer events: a Listener is attached to the Fanout (so it is published to),
-// and then the Forwarder installs its own Listener::onPeer, replacing the one
-// the Fanout installs. The Fanout's onPeerUp hook carries neither the peer's
-// address nor its stream id, and the session list needs both.
+//
+// Peer events come from the Fanout (onPeerUp/onPeerDown/peerInfo); the Forwarder
+// never touches a Listener's or Dialer's own handlers. Log lines about
+// connection failures (a dial that is refused, a bind that fails and is
+// retried) now come from the library through the net log sink, once per
+// outage, not from this file.
 
 #include "forwarder.hpp"
 
@@ -62,6 +64,9 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         : io(io_), cfg(std::move(c)), keyframe_interval(clampInterval(cfg.keyframe_interval)),
           heartbeat_interval(clampInterval(cfg.heartbeat_interval))
     {
+        fanout.onPeerUp([this](uint64_t peer, const boost::asio::ip::tcp::endpoint& who,
+                               const std::function<void(const Buf&)>& send) { peerUp(peer, who, send); });
+        fanout.onPeerDown([this](uint64_t peer) { peerDown(peer); });
         if (cfg.tcp_listen_ephemeral || cfg.tcp_port != 0) {
             skycue::net::Endpoint e;
             e.transport = Transport::tcp_listen;
@@ -94,9 +99,6 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         std::shared_ptr<skycue::net::Listener> lis;
         std::shared_ptr<skycue::net::Dialer> dial;
         std::shared_ptr<skycue::net::UdpSender> udp;
-        std::map<uint64_t, uint64_t> streams; // listener stream -> session id
-        uint64_t dial_session = 0;            // 0: not connected
-        uint64_t handed = 0;                  // bytes handed to this destination's peers (drain estimate)
         uint64_t dropped_seen = 0;
 
         std::string name() const
@@ -106,7 +108,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
                 return e.bind + ":" + std::to_string(e.port);
             return (e.host.empty() ? e.group : e.host) + ":" + std::to_string(e.port);
         }
-        bool tcp() const { return lis || dial; }
+        const void* source() const { return lis ? static_cast<const void*>(lis.get()) : static_cast<const void*>(dial.get()); }
         const skycue::net::Counters& counters() const { return lis ? lis->counters() : dial->counters(); }
     };
 
@@ -115,8 +117,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         std::string peer;
         bool dialled = false;
         std::chrono::system_clock::time_point connected_since{};
-        uint64_t bytes_sent = 0; // bytes handed to the connection (all of them reach the peer unless it is cut off)
-        Dest* dest = nullptr;
+        const void* source = nullptr; // the library object (Fanout::PeerInfo::source) it belongs to
     };
 
     asio::io_context& io;
@@ -201,17 +202,6 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
             lo.fail_fast = d.d.builtin;
             d.lis = skycue::net::Listener::create(io, e.bind, e.port, lo);
             fanout.attach(d.lis);
-            Dest* dp = &d;
-            std::weak_ptr<Impl> w = shared_from_this();
-            // Replaces the handler attach() installed; see the file comment.
-            d.lis->onPeer([w, dp](uint64_t stream, bool up, const boost::asio::ip::tcp::endpoint& who) {
-                if (auto self = w.lock()) {
-                    if (up)
-                        self->listenerPeerUp(*dp, stream, who);
-                    else
-                        self->listenerPeerDown(*dp, stream);
-                }
-            });
             try {
                 d.lis->start();
             } catch (...) {
@@ -224,16 +214,9 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
                 LOG_INFO("forwarder: TCP listener " << d.name());
         } else if (e.transport == Transport::tcp_connect) {
             d.dial = skycue::net::Dialer::create(io, e.host, e.port, tcpOptions());
-            Dest* dp = &d;
-            std::weak_ptr<Impl> w = shared_from_this();
-            d.dial->onConnection([w, dp](bool up) {
-                if (auto self = w.lock()) {
-                    if (up)
-                        self->dialerUp(*dp);
-                    else
-                        self->dialerDown(*dp);
-                }
-            });
+            // Attached before start(): the Fanout's peer-up runs inside the
+            // connect handler, so the Hello is queued before anything published later.
+            fanout.attach(d.dial);
             LOG_INFO("forwarder: TCP target " << d.name());
             d.dial->start();
         } else {
@@ -257,6 +240,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
 
     void deactivate(Dest& d)
     {
+        const void* src = d.source();
         if (d.lis) {
             fanout.detach(d.lis);
             d.lis->stop();
@@ -272,10 +256,8 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
             d.udp->stop();
             d.udp.reset();
         }
-        d.streams.clear();
-        d.dial_session = 0;
         for (auto it = sessions.begin(); it != sessions.end();) {
-            if (it->second.dest == &d)
+            if (src != nullptr && it->second.source == src)
                 it = sessions.erase(it);
             else
                 ++it;
@@ -290,102 +272,69 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
 
     // ---- TCP sessions ------------------------------------------------------
 
-    void listenerPeerUp(Dest& d, uint64_t stream, const boost::asio::ip::tcp::endpoint& who)
+    Dest* destOf(const void* source) const
     {
-        if (dead || stopping || !d.lis)
+        for (const auto& d : dests)
+            if (source != nullptr && d->source() == source)
+                return d.get();
+        return nullptr;
+    }
+
+    void peerUp(uint64_t peer, const boost::asio::ip::tcp::endpoint& who, const std::function<void(const Buf&)>& send)
+    {
+        if (dead || stopping)
             return;
-        const uint64_t sid = next_session_id++;
+        const auto info = fanout.peerInfo(peer);
+        if (!info)
+            return;
+        Dest* d = destOf(info->source);
         Session s;
-        s.peer = endpointText(skycue::net::unmapV4(who.address()).to_string(), who.port());
+        s.dialled = info->dialled;
+        s.peer = info->dialled && d ? d->name()
+                                    : endpointText(skycue::net::unmapV4(who.address()).to_string(), who.port());
         s.connected_since = std::chrono::system_clock::now();
-        s.dest = &d;
-        d.streams[stream] = sid;
-        const auto& stored = sessions.emplace(sid, std::move(s)).first->second;
-        LOG_INFO("forwarder: TCP client " << stored.peer << " connected (" << sessions.size() << " total)");
-        const auto lis = d.lis;
-        greet(sid, [lis, stream](const Buf& b) { lis->send(stream, b); });
+        s.source = info->source;
+        const auto& stored = sessions.emplace(peer, std::move(s)).first->second;
+        LOG_INFO("forwarder: " << (stored.dialled ? "TCP target " : "TCP client ") << stored.peer << " connected ("
+                               << sessions.size() << " total)");
+        greet(peer, send);
     }
 
-    void listenerPeerDown(Dest& d, uint64_t stream)
+    void peerDown(uint64_t peer)
     {
-        const auto it = d.streams.find(stream);
-        if (it == d.streams.end())
-            return;
-        const uint64_t sid = it->second;
-        d.streams.erase(it);
-        sessionGone(d, sid, "disconnected");
-    }
-
-    void dialerUp(Dest& d)
-    {
-        if (dead || stopping || !d.dial || !d.dial->connected())
-            return; // a later down notification follows if it is already gone
-        const uint64_t sid = next_session_id++;
-        Session s;
-        s.peer = d.name();
-        s.dialled = true;
-        s.connected_since = std::chrono::system_clock::now();
-        s.dest = &d;
-        d.dial_session = sid;
-        sessions.emplace(sid, std::move(s));
-        LOG_INFO("forwarder: TCP target " << d.name() << " connected (" << sessions.size() << " total)");
-        const auto dial = d.dial;
-        greet(sid, [dial](const Buf& b) { dial->send(b); });
-        fanout.attach(d.dial); // only now: nothing may reach the target before its Hello
-    }
-
-    void dialerDown(Dest& d)
-    {
-        if (!d.dial)
-            return;
-        fanout.detach(d.dial);
-        const uint64_t sid = d.dial_session;
-        d.dial_session = 0;
-        if (sid != 0)
-            sessionGone(d, sid, "disconnected");
-    }
-
-    void sessionGone(Dest& d, uint64_t sid, const char* why)
-    {
-        const auto it = sessions.find(sid);
+        const auto it = sessions.find(peer);
         if (it == sessions.end())
             return;
-        const std::string peer = it->second.peer;
+        const std::string name = it->second.peer;
         const bool target = it->second.dialled;
+        Dest* d = destOf(it->second.source);
         sessions.erase(it);
-        const bool over_cap = d.counters().dropped > d.dropped_seen;
-        d.dropped_seen = d.counters().dropped;
+        bool over_cap = false;
+        if (d) {
+            const uint64_t dropped = d->lis ? d->lis->counters().dropped : d->dial->counters().dropped;
+            over_cap = dropped > d->dropped_seen;
+            d->dropped_seen = dropped;
+        }
         const char* kind = target ? "TCP target " : "TCP client ";
         if (over_cap)
-            LOG_WARN("forwarder: " << kind << peer
-                                   << " closed: outbound queue exceeded " << cfg.max_client_queue_bytes << " bytes");
+            LOG_WARN("forwarder: " << kind << name << " closed: outbound queue exceeded " << cfg.max_client_queue_bytes
+                                   << " bytes");
         else
-            LOG_INFO("forwarder: " << kind << peer << " " << why << " (" << sessions.size() << " left)");
-        if (std::none_of(sessions.begin(), sessions.end(), [&](const auto& kv) { return kv.second.dest == &d; }))
-            d.handed = d.counters().bytes_out; // nothing owed to a peer that is gone
+            LOG_INFO("forwarder: " << kind << name << " disconnected (" << sessions.size() << " left)");
         drainCheck();
     }
 
     // Hello, then one keyframe per provider track, to that peer only.
-    template <class Send> void greet(uint64_t sid, Send send)
+    void greet(uint64_t peer, const std::function<void(const Buf&)>& send)
     {
-        handTo(sid, helloFrame(), send);
-        for (const Buf& b : keyframeFrames()) {
-            if (sessions.find(sid) == sessions.end())
-                break;
-            handTo(sid, b, send);
-        }
-    }
-
-    template <class Send> void handTo(uint64_t sid, const Buf& b, Send& send)
-    {
-        const auto it = sessions.find(sid);
-        if (it == sessions.end())
-            return;
-        it->second.bytes_sent += b->size();
-        it->second.dest->handed += b->size();
         ++frames_sent;
-        send(b);
+        send(helloFrame());
+        for (const Buf& b : keyframeFrames()) {
+            if (!fanout.peerInfo(peer))
+                break; // cut off (queue cap) while greeting
+            ++frames_sent;
+            send(b);
+        }
     }
 
     // ---- broadcast ---------------------------------------------------------
@@ -393,11 +342,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
     void broadcast(const Buf& b)
     {
         last_broadcast = steady::now();
-        for (auto& kv : sessions) {
-            kv.second.bytes_sent += b->size();
-            kv.second.dest->handed += b->size();
-            ++frames_sent;
-        }
+        frames_sent += sessions.size();
         if (b->size() <= skycue::kHeaderSize + skycue::kMaxUdpPayload)
             frames_sent += udpTargetCount();
         fanout.publish(b);
@@ -554,13 +499,15 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         drainCheck();
     }
 
-    // True when every byte handed to a TCP destination has been written (as
-    // far as can be told from the library's counters).
+    // True when no live TCP peer has bytes left in its queue. A peer that was
+    // cut off is gone from the Fanout and counts as drained.
     bool drained() const
     {
-        for (const auto& d : dests)
-            if (d->tcp() && d->counters().bytes_out < d->handed)
+        for (const auto& kv : sessions) {
+            const auto info = fanout.peerInfo(kv.first);
+            if (info && info->stats.queued_bytes != 0)
                 return false;
+        }
         return true;
     }
 
@@ -648,7 +595,8 @@ std::vector<CueTcpClient> Forwarder::tcpClients() const
     out.reserve(impl_->sessions.size());
     for (const auto& kv : impl_->sessions) {
         const Impl::Session& s = kv.second;
-        out.push_back(CueTcpClient{s.peer, s.dialled, s.connected_since, s.bytes_sent});
+        const auto info = impl_->fanout.peerInfo(kv.first);
+        out.push_back(CueTcpClient{s.peer, s.dialled, s.connected_since, info ? info->stats.bytes_written : 0});
     }
     return out;
 }

@@ -1028,3 +1028,39 @@ BOOST_AUTO_TEST_CASE(forwarder_add_and_remove_destination_at_runtime)
     fx.update(mkTrack(9, false));
     BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 3; }));
 }
+
+BOOST_AUTO_TEST_CASE(forwarder_shutdown_not_held_up_by_a_cut_off_client)
+{
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    Fx fx(cfg, [] { return mkTracks(3); });
+
+    RawTcp stalled(fx.port(), 4096); // never read: cut off once its queue passes the cap
+    Events ev;
+    Client good(tcpConfig(fx.port()));
+    ev.attach(good);
+    good.start();
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 2; }));
+
+    size_t sent = 0;
+    while (sent < (64u << 20) / 100 && fx.clients() == 2) {
+        fx.t.call([&] {
+            for (uint32_t i = 0; i < 1000; ++i)
+                fx.fwd->sendUpdate(mkTrack(1 + i % 3, false));
+        });
+        sent += 1000;
+        std::this_thread::sleep_for(5ms);
+    }
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() >= sent; }));
+
+    const auto t0 = steady::now();
+    fx.stop();
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.drops.size() == 3; }));
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - t0);
+    BOOST_TEST_MESSAGE("shutdown drops delivered in " << took.count() << " ms");
+    BOOST_TEST((took < slow(1000ms)));
+    std::lock_guard<std::mutex> lk(ev.m);
+    for (const auto& d : ev.drops)
+        BOOST_TEST(static_cast<int>(d.second) == static_cast<int>(DropReason::shutdown));
+}

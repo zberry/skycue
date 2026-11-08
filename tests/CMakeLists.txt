@@ -698,5 +698,13 @@ skycue_set_warnings(test_geom_eval)
 add_test(NAME geom_eval COMMAND test_geom_eval)
 set_tests_properties(geom_eval PROPERTIES TIMEOUT 120)
 
+# skycued's own decoder against readsb, live: the 120 s capture replayed at speed 1
+# through a beast_raw input under TRACK_DECODER=skycued, compared with the committed
+# golden and, with SKYCUE_READSB set, a fresh readsb run. Skips without fixtures/raw.
+add_test(NAME decode_differential
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential.sh
+    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(decode_differential PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
+
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

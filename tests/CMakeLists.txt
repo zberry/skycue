@@ -671,4 +671,10 @@ add_test(NAME decode_opensky COMMAND test_decode_opensky)
 set_tests_properties(decode_opensky PROPERTIES TIMEOUT 120)
 
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
+
+# AltitudeFit: rolling GNSS-minus-baro fit over all aircraft.
+add_executable(test_altitude_fit test_altitude_fit.cpp)
+target_link_libraries(test_altitude_fit PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_altitude_fit PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_altitude_fit)
 skycue_scale_test_timeouts()

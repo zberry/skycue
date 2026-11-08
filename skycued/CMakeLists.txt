@@ -15,6 +15,7 @@ target_link_libraries(skycued_asterix PUBLIC Boost::boost)
 skycue_set_warnings(skycued_asterix)
 
 add_library(skycued_core STATIC
+  src/altitude_fit.cpp
   src/change_detector.cpp
   src/coding/bits.cpp
   src/coding/modes_crc.cpp

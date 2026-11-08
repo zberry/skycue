@@ -64,7 +64,7 @@ ground station, 40.04 N 86.26 W, inside both mosaics) as
 `SKYCUE_FISB_SCREENSHOTS`).
 
 For the Receiver tab cases it starts one more skycued, `--no-readsb
---no-uat` with a temporary `RECORD_DIR` and an inputs file holding one
+--no-uat` with a temporary `recording.dir` and an inputs file holding one
 `pingstation_json` input, `ps-sim`, on a free UDP port, and
 `skycue-pingsim` sending the readsb fixture to it as pingStation JSON
 (`--loop --speed 5`, a device status every 2 s at 38.9 N 77.0 W), as
@@ -85,7 +85,7 @@ For the Receiver tab cases it starts one more skycued, `--no-readsb
    (an invalid value is marked); Enter on 20 sends one `PUT /api/filters`,
    shrinks the range ring, and the marker colours agree with `/api/state`.
 6. `save_baseline_confirms_and_clears_overlay`: Save as baseline asks for
-   confirmation, clears the overlay and writes `filters.max_range_nm` to the conf.
+   confirmation, clears the overlay and writes `filters.max_range_nm` to `skycue.overrides.toml`.
 7. `reconnect_after_restart_converges`: kill and restart skycued; the
    banner appears and clears, the markers come back from the new snapshot
    and a marker skycued does not know is gone.

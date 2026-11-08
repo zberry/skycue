@@ -427,7 +427,7 @@ request built with `makeApiRequest` as `WebServer` does. An `/api` path goes
 to `handleApi` on the stub of `tests/fuzz/api_stub.hpp` (an Engine with no
 recorders, never started, an InputManager in replay mode so every
 `/api/inputs` write is a 409 and no listener opens, a Forwarder never
-started, a RuntimeConfig on its own `skycue.conf` under
+started, a RuntimeConfig on its own `skycue.toml` under
 `$SKYCUE_FUZZ_WORK/web/`, a DaemonInfo; the io_context never runs); after
 any method but GET/HEAD the stub's files are removed and it is built again,
 so state does not build up across inputs. Invariants: `handleApi` does not
@@ -666,7 +666,7 @@ checkout's stage. At the default `--growth 0.05` a run shorter than about
 40 minutes fails on instance A: its FIS-B store is still filling during the
 first replays (about 10 minutes), which then falls inside the window.
 
-Two `skycued` instances run, each with its own conf (the test receiver
+Two `skycued` instances run, each with its own config file (the test receiver
 position, ephemeral web and cue ports, never the demo's) and log:
 
 - **A** replays `fixtures/fisb/received-tg30.jsonl` with `--replay-loop` at
@@ -704,7 +704,7 @@ Beast source that does not end: `skycue-rawplay --1090-listen PORT --loop
 
 1. An inputs file (version 2) with a `beast_raw` input dialling that port, a
    `beast` output on `tcp_listen`, a `uat` output on `tcp_listen`, and
-   `"capture": true` with `RECORD_DIR` set; skycued started on it with
+   `"capture": true` with `recording.dir` set; skycued started on it with
    `--no-readsb --no-uat`.
 2. Three consumers on the `beast` output: A and B read to a file, C connects
    and never reads. A fourth connects to the `uat` output and reads (the
@@ -713,7 +713,7 @@ Beast source that does not end: `skycue-rawplay --1090-listen PORT --loop
 
 It passes when C is cut within seconds of connecting (`dropped` 1 or more,
 `peers` back to the live consumers), A's and B's files are byte-identical at
-the end and equal to the capture file in `RECORD_DIR`, the `beast` output's
+the end and equal to the capture file in `recording.dir`, the `beast` output's
 `bytes` is twice the size of A's file, the `uat` output is `up` with 0 bytes,
 and skycued's RSS and fd count pass the rule below for the run's window. The
 same shape runs in under a minute as the ctest `hub` (`tests/test_hub.sh`).
@@ -728,9 +728,9 @@ way `soak.sh` samples an instance. The source is the 120 s capture from
 1. `skycue-rawplay --1090-listen PORT --loop --speed 5` on the capture, and
    a second one with `--uat-listen UATPORT --loop --speed 5` on
    `tests/fixtures/raw/uat-sample.txt.gz`, so one instance decodes both bands.
-2. A skycued with `TRACK_DECODER=skycued`, `READSB_BEAST_PORT=PORT`, a
+2. A skycued with `inputs.decoder = "skycued"`, `inputs.readsb.beast_port = PORT`, a
    `uat_raw` input on `UATPORT` (the built-in `dump978` input would do
-   as well, with `DUMP978_RAW_PORT=UATPORT`), `--no-uat` (it only stops the
+   as well, with `inputs.dump978.raw_port = UATPORT`), `--no-uat` (it only stops the
    built-in dump978 connection to the default port; the `uat_raw` input is
    unaffected), a web port and the test
    receiver position (not the capture's region; give each input the

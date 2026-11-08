@@ -162,15 +162,15 @@ differs.
 
 | End        | Mode                | Setting                                      | Notes |
 |------------|---------------------|----------------------------------------------|-------|
-| skycued    | TCP listen          | `CUE_TCP_PORT` (`0`: no listener)            | any number of consumers connect |
-| skycued    | TCP connect         | `CUE_TCP_CONNECT` (`host:port ...`)          | dials each target, redials with backoff 0.5 s to 10 s |
-| skycued    | UDP send            | `CUE_UDP_TARGETS` (`host:port ...`)          | one frame per datagram; Hello before each keyframe |
+| skycued    | TCP listen          | `cues.tcp_port` (`0`: no listener)            | any number of consumers connect |
+| skycued    | TCP connect         | `cues.tcp_connect` (`host:port ...`)          | dials each target, redials with backoff 0.5 s to 10 s |
+| skycued    | UDP send            | `cues.udp_targets` (`host:port ...`)          | one frame per datagram; Hello before each keyframe |
 | libskycue  | TCP connect         | `Transport::tcp`, `host:port` of skycued     | reconnects every `reconnect_interval` |
 | libskycue  | TCP listen          | `Transport::tcp_listen`, bind `host:port`    | any number of skycued connect; one track table |
 | libskycue  | UDP bind            | `Transport::udp`, bind `host:port`           | connection is inferred from traffic (heartbeat timeout) |
 
-skycued's modes are the **cue outputs** of its hub: `CUE_TCP_PORT`,
-`CUE_TCP_CONNECT` and `CUE_UDP_TARGETS` define the built-in ones (`cue-tcp`,
+skycued's modes are the **cue outputs** of its hub: `cues.tcp_port`,
+`cues.tcp_connect` and `cues.udp_targets` define the built-in ones (`cue-tcp`,
 `cue-connect-N`, `cue-udp-N`), and an output of kind `cue` that you add in the
 inputs file, the page or the API ([operating.md](operating.md#outputs)) is one
 more listener, dialled target or UDP target of the same kind, with its own

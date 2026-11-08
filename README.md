@@ -27,41 +27,32 @@ Download the `.deb`, the `.rpm` or the source tarball from the
 
 ## What it does
 
-**Inputs.** skycued takes aircraft from:
+**Inputs.** skycued takes aircraft from any number of inputs, of six kinds:
 
-- **readsb**, through its JSON position output (`--net-json-port 30047`, with
-  aircraft that have no position included). This is the readsb you already
-  run, as a service or inside ultrafeeder. UAT aircraft reach skycue through
-  readsb too, once readsb has a `uat_in` connector to dump978-fa.
-- **Any other 1090 MHz decoder that serves Beast output**, such as
-  dump1090-fa under PiAware, dump1090-mutability, or a readsb on another
-  machine: a small network-only readsb converts the Beast stream to the JSON
-  output skycue reads. The installing guide has a ready unit file for it
-  ([PiAware](docs/installing.md#piaware-dump1090-fa)).
-- **readsb's Beast port and dump978-fa's raw UAT port, decoded by skycued
-  itself** (`TRACK_DECODER=skycued`, optional): skycued decodes the Mode S
-  frames and the 978 MHz UAT downlinks, and estimates the geometric altitude
-  that many aircraft never report. The UAT decoder was compared with
-  dump978-fa on three public captures and a synthetic matrix. See
-  [Decoding in skycued](docs/operating.md#decoding-in-skycued).
-- **dump978-fa**, through its raw UAT port (30978): the 978 MHz frames and
-  the FIS-B weather uplinks (USA).
-- **pingStation 3** receivers (uAvionix's small networked ADS-B/UAT
-  receiver), as JSON or ASTERIX CAT021 over UDP or TCP. Each one is a named
-  input you add in the web page or in the inputs file; several can run at
-  once. A JSON input can also have skycued decode the device's raw frames
-  itself (`"source":"decode"`, 1090 and UAT;
-  [pingStation decode mode](docs/operating.md#pingstation-decode-mode)).
-- **Raw decoder output** as `beast_raw` (Beast frames) and `uat_raw`
-  (dump978 lines) inputs, over TCP or UDP and multicast, for a decoder that
-  skycue should only relay and record.
-- **Recordings**, for running without hardware: a JSONL recording skycued
-  made earlier (`--replay`), or the decoders' raw output captured with
-  `skycue-rawrec`.
+- **readsb**: readsb's JSON position output (`--net-json-port`). This is the
+  readsb you already run, as a service or inside ultrafeeder.
+- **beast_raw**: Mode S / ADS-B frames in Beast format, decoded by skycued
+  itself, which also estimates the geometric altitude that many aircraft never
+  report. The source can be readsb or dump1090 (`--net-bo-port 30005`, as under
+  PiAware), a Beast splitter, a Radarcape, or another machine's readsb.
+- **uat_raw**: 978 MHz UAT lines as dump978-fa prints them, decoded by skycued
+  (USA).
+- **dump978**: the same lines, taken as dump978-fa decodes them.
+- **pingstation**: a uAvionix pingStation 3 (a small networked ADS-B/UAT
+  receiver), as JSON texts or ASTERIX CAT021. A JSON input can also have
+  skycued decode the device's raw frames itself.
+- **replay**: a skycue recording played back, or the decoders' raw output
+  captured with `skycue-rawrec`, for running without hardware.
 
-Everything merges into one track table, and the page's Receiver tab shows
-the health of every input. Details:
-[docs/operating.md](docs/operating.md#the-inputs-file).
+Each input is TCP (client or server), UDP unicast or multicast. Two inputs are
+built in and configured in `skycue.toml`: a readsb on this machine and a
+dump978-fa on this machine; disable either if you do not have it. Any other
+input is added in the web page (Receiver tab), through the API, or in the
+inputs file, and several of a kind can run at once. Everything merges into one
+track table, and the Receiver tab shows the health of every input. See the
+`[inputs]` comments in `packaging/skycue.toml.example`; details in
+[docs/operating.md](docs/operating.md#the-inputs-file) and
+[Decoding in skycued](docs/operating.md#decoding-in-skycued).
 
 **Outputs.** The same inputs can be served on again, as a hub: add outputs in
 the web page, through the API or in the inputs file, and skycued serves the
@@ -69,11 +60,9 @@ raw Beast frames, the dump978 lines, readsb's JSON, the pingStation texts or
 CAT021 blocks it receives to your own programs over a TCP listener, a TCP
 target or UDP (multicast included), each output with its own consumers and
 counters. A consumer that stops reading is dropped without delaying the
-others. The cue streams are outputs too (`CUE_TCP_PORT`, `CUE_TCP_CONNECT`
-and `CUE_UDP_TARGETS` define the built-in ones). Two new input types,
-`beast_raw` and `uat_raw`, read a decoder's Beast port or raw UAT lines
-directly over TCP or UDP (and `capture: true` records them for
-`skycue-rawplay`). Details: [docs/operating.md](docs/operating.md#outputs).
+others. The cue streams are outputs too (`cues.tcp_port`, `cues.tcp_connect`
+and `cues.udp_targets` define the built-in ones). `capture: true` on a
+`beast_raw` or `uat_raw` input records it for `skycue-rawplay`. Details: [docs/operating.md](docs/operating.md#outputs).
 
 **Decisions and cues.** For each aircraft skycued decides whether to
 forward it, by range, elevation angle and allow and block lists that you can
@@ -174,14 +163,14 @@ For contributors:
 | `cmake/` | CMake modules |
 | `examples/` | a client demo and a parent-project example |
 | `docs/` | the documentation |
-| `packaging/` | the config example, systemd unit, RPM spec, container build and verify scripts, source tarball script |
+| `packaging/` | the `skycue.toml` example, systemd unit, RPM spec, container build and verify scripts, source tarball script |
 | `debian/` | Debian packaging |
 | `scripts/` | `maps/` (map tiles and overlays), `dev/` (sanitizers, fuzzing, static analysis), `fixtures/` (test captures and generated tables), `lib/` |
 | `tests/` | unit and script tests; `tests/fuzz/` holds the libFuzzer harnesses, seeds and findings |
 
 ## Status
 
-Version 0.1.0, the first public release. The configuration file and the
+Version 0.1.0, the first public release. The configuration file (`skycue.toml`) and the
 cue protocol may still change between minor versions; each release says
 what changed.
 

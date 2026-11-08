@@ -104,7 +104,7 @@ the staging directory are all in the cache. The download, the merge and
 compositing as above). With `--dry-run` no engine is needed; without one, a
 real run exits 3.
 
-Pick a bbox a little larger than `MAX_RANGE_NM` around the receiver
+Pick a bbox a little larger than `filters.max_range_nm` around the receiver
 (1° of latitude is 60 nm). Running the script again with the same output
 directory adds to the tiles already there and to `meta.json`; delete the
 directory first for a clean set (or to re-cut a region: existing pixels
@@ -131,7 +131,7 @@ receiver the build does not install tiles; after building, copy them next to
 the installed UI:
 
 ```sh
-cp -r www/tiles <prefix>/share/skycue/www/     # or MAP_DIR, or ./www/ for a build-tree run
+cp -r www/tiles <prefix>/share/skycue/www/     # or paths.map_dir, or ./www/ for a build-tree run
 ```
 
 skycued reads the directory on each `/api/tiles-available` request, so a
@@ -145,11 +145,11 @@ tiles. They install this script, `make-overlays.sh` and `tiles-merge.py` in
 which runs them with the map directory and cache given explicitly (the
 scripts' own defaults point into the source tree). It works the regions the
 same additive way as the runs above: the whole world at zoom 0–5 as region
-`global` (only when `<MAP_DIR>/tiles/meta.json` lacks it), then the region
+`global` (only when `<paths.map_dir>/tiles/meta.json` lacks it), then the region
 asked for, merged in, then the overlays:
 
 ```sh
-sudo skycue-make-maps --around 150         # global + 150 nm around RECEIVER_LAT/LON, zoom 6-9
+sudo skycue-make-maps --around 150         # global + 150 nm around receiver.lat/LON, zoom 6-9
 sudo skycue-make-maps --preset conus       # adds -125,24,-66,50 at zoom 6-8
 sudo skycue-make-maps --preset europe      # adds -11,35,31,61 at zoom 6-8
 sudo skycue-make-maps --bbox -5,50,2,55 --zoom 6-10   # any box (region "bbox")
@@ -157,9 +157,9 @@ skycue-make-maps --list                    # the regions in meta.json
 ```
 
 Each preset is about 1,300 tiles at zoom 6–8, roughly as many as the base,
-so about 200 MB with it (see "Size and zoom" above). It reads `MAP_DIR` (and,
+so about 200 MB with it (see "Size and zoom" above). It reads `paths.map_dir` (and,
 for `--around RADIUS_NM`, the receiver position) from
-`/etc/skycue/skycue.conf` or `--config FILE`, or takes `--map-dir DIR`; uses
+`/etc/skycue/skycue.toml` or `--config FILE`, or takes `--map-dir DIR`; uses
 the GDAL on PATH, or `--container [IMAGE]`; and as root gives the map
 directory to the `skycue` user. See "Map tiles" in
 [docs/operating.md](operating.md) for every option.

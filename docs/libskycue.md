@@ -85,13 +85,13 @@ every test run.
 
 Pick the mode that matches how skycued is configured. `Config::host` and
 `Config::port` default to `127.0.0.1` and `30500` (skycued's default
-`CUE_TCP_PORT`).
+`cues.tcp_port`).
 
 | `Config::transport` | skycued setting | `host` / `port` mean | Use when |
 |---|---|---|---|
-| `Transport::tcp` (default) | `CUE_TCP_PORT` | skycued's address and listening port; `host` may be a name | the consumer can reach skycued; the usual choice |
-| `Transport::tcp_listen` | `CUE_TCP_CONNECT=yourhost:port` | local bind address and port; `port = 0` picks one (read it with `localPort()`) | skycued must open the connection (firewall direction), or several skycued instances feed one consumer |
-| `Transport::udp` | `CUE_UDP_TARGETS=yourhost:port` | local bind address and port | one-way links, or where connection set-up is unwanted; tolerates loss, but see the FAQ |
+| `Transport::tcp` (default) | `cues.tcp_port` | skycued's address and listening port; `host` may be a name | the consumer can reach skycued; the usual choice |
+| `Transport::tcp_listen` | `cues.tcp_connect = ["yourhost:port"]` | local bind address and port; `port = 0` picks one (read it with `localPort()`) | skycued must open the connection (firewall direction), or several skycued instances feed one consumer |
+| `Transport::udp` | `cues.udp_targets = ["yourhost:port"]` | local bind address and port | one-way links, or where connection set-up is unwanted; tolerates loss, but see the FAQ |
 
 TCP gives you the full table at once (a keyframe burst on every connection)
 and detects loss of the link quickly. UDP has no handshake: you learn the
@@ -107,9 +107,9 @@ project) so it keeps compiling:
 // minimal_consumer: the smallest useful libskycue program. Prints one line per
 // connection change, track update and track drop until SIGINT or SIGTERM.
 //
-//   minimal_consumer tcp HOST:PORT     connect to skycued (its CUE_TCP_PORT)
-//   minimal_consumer listen BIND:PORT  let skycued connect (its CUE_TCP_CONNECT)
-//   minimal_consumer udp BIND:PORT     receive datagrams (its CUE_UDP_TARGETS)
+//   minimal_consumer tcp HOST:PORT     connect to skycued (its cues.tcp_port)
+//   minimal_consumer listen BIND:PORT  let skycued connect (its cues.tcp_connect)
+//   minimal_consumer udp BIND:PORT     receive datagrams (its cues.udp_targets)
 #include <skycue/client.hpp>
 
 #include <chrono>
@@ -249,9 +249,9 @@ On a **TCP** connection (either direction), in order:
 4. Then **deltas**: an update for a track only when skycued's change
    detector fires. With skycued's defaults that is at once for a callsign,
    squawk, emergency or on-ground change; otherwise at most once per
-   `MIN_INTERVAL_S` (1 s) when the aircraft moved or its altitude, speed or
-   track changed enough; and at least once per `MAX_INTERVAL_S` (10 s).
-5. Every `KEYFRAME_INTERVAL_S` (10 s) a **periodic keyframe**: every
+   `cues.min_interval_s` (1 s) when the aircraft moved or its altitude, speed or
+   track changed enough; and at least once per `cues.max_interval_s` (10 s).
+5. Every `cues.keyframe_interval_s` (10 s) a **periodic keyframe**: every
    forwarded track again, `keyframe == true`.
 6. Heartbeats (`onFrame` only) whenever nothing else was sent for the
    heartbeat interval (skycued: 1 s).
@@ -278,7 +278,7 @@ remove it from yours. If the aircraft comes back it arrives as a new update.
 
 | `DropReason` | Sent by | Meaning | What to do |
 |---|---|---|---|
-| `timeout` | skycued | it stopped hearing the aircraft (`TRACK_TIMEOUT_S`, 60 s) | forget it |
+| `timeout` | skycued | it stopped hearing the aircraft (`cues.track_timeout_s`, 60 s) | forget it |
 | `filtered` | skycued | still heard, but range, elevation or block list now exclude it | forget it; it may return if it re-enters the filters |
 | `source_lost` | skycued or the library | skycued lost its own radio decoder and the track aged out; **or** the library lost skycued (connection closed, liveness timeout, UDP silence) | forget it; data resumes when the source returns |
 | `shutdown` | skycued | skycued is exiting cleanly | forget it; expect the connection to close next |
@@ -354,7 +354,7 @@ yourself), or `tcp_listen`.
 | `host` | `"127.0.0.1"` | tcp: skycued's address (name or IP). udp, tcp_listen: local bind address (`0.0.0.0` for all IPv4 interfaces) |
 | `port` | `30500` | tcp: skycued's port. udp, tcp_listen: local port; `0` picks a free one (`localPort()` reports it for tcp_listen) |
 | `reconnect_interval` | 2000 ms | tcp: delay before every redial after a failure or disconnect. udp, tcp_listen: delay before retrying a failed bind, accept or receive |
-| `default_keyframe_interval` | 10000 ms | keyframe interval assumed for the stale rule until a Hello gives one; clamped to at least 10 ms. Match it to the sender's `KEYFRAME_INTERVAL_S` if that differs |
+| `default_keyframe_interval` | 10000 ms | keyframe interval assumed for the stale rule until a Hello gives one; clamped to at least 10 ms. Match it to the sender's `cues.keyframe_interval_s` if that differs |
 | `heartbeat_timeout` | 3000 ms | udp: silence that means the source is gone. tcp, tcp_listen: lower bound of each connection's watchdog. Raising it tolerates longer stalls; on TCP, once a Hello has arrived, values below 3 × the sender's heartbeat interval have no effect |
 | `run_io_thread` | `true` | `true`: thread mode. `false`: poll mode, everything happens inside `poll()` |
 
@@ -432,7 +432,7 @@ the first one is rethrown from `poll()`.
 
 **UDP takes a long time to show all aircraft, or keeps ghosts.** A UDP
 receiver gets the full table only at the next periodic keyframe, so with a
-long `KEYFRAME_INTERVAL_S` a fresh receiver starts with only the aircraft
+long `cues.keyframe_interval_s` a fresh receiver starts with only the aircraft
 that happen to change. A lost `TrackDrop` datagram leaves a ghost until the
 stale rule removes it, 2 to 3.5 keyframe intervals later; and until the
 first Hello (sent just before each keyframe) no stale drops happen at all.
@@ -442,8 +442,8 @@ TCP if this matters.
 **`tcp` never connects and nothing tells me why.** The client redials every
 `reconnect_interval` forever and reports only success (`onConnectionChange(true)`).
 Check the address with `skycue-dump --tcp HOST:PORT --timeout 5`. Note that
-`CUE_TCP_PORT=0` in skycued's config means skycued has **no listener**: use
-`tcp_listen` with `CUE_TCP_CONNECT`, or UDP, instead. `Config::port = 0` is
+`cues.tcp_port = 0` in skycued's config means skycued has **no listener**: use
+`tcp_listen` with `cues.tcp_connect`, or UDP, instead. `Config::port = 0` is
 meaningful only for `tcp_listen` and `udp` (pick a free port); for `tcp` it
 connects nowhere.
 

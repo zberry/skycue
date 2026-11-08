@@ -289,7 +289,7 @@ downloads. If the zip is missing, it says so and exits 1.
 codes: 0 done, 1 failure, 2 usage error.
 
 To replay the capture, set the receiver position near Porto
-(`RECEIVER_LAT=41.15` / `RECEIVER_LON=-8.61`, and readsb's `--lat` / `--lon`)
+(`receiver.lat = 41.15` / `receiver.lon = -8.61`, and readsb's `--lat` / `--lon`)
 and run readsb on `build/iq-samples/porto-awec2026.1090.cu8` as in the
 introduction, with skycued reading its JSON port as in a live run
 ([operating.md](operating.md#iq-files)).

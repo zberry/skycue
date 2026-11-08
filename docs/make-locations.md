@@ -37,7 +37,7 @@ decimals, sorted by id, no header). A summary goes to stderr:
 - There is no region filter: every country in the input is kept. FIS-B
   only names US, Canadian and nearby ids, but a world-wide file still fits
   (see the cap below), and the extra rows cost only memory.
-- Size cap: skycued reads at most 250,000 `LOCATIONS_FILE` ids; past that
+- Size cap: skycued reads at most 250,000 `paths.locations_file` ids; past that
   it ignores the rest (the end of the sorted file) and logs one WARN with
   the count. Full OurAirports data gives well under that (in the order of
   100,000 ids). When the output has more rows than the cap the script still
@@ -51,7 +51,7 @@ decimals, sorted by id, no header). A summary goes to stderr:
 
 ## 3. Use
 
-Set `LOCATIONS_FILE=/path/locations.csv` in `skycue.conf` and restart
+Set `paths.locations_file = "/path/locations.csv"` in `skycue.toml` and restart
 skycued. Positions skycued learns from the air win over the file for the
 same id.
 

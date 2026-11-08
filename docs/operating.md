@@ -2,10 +2,10 @@
 
 How to run skycued beside the decoders you already have, replay recordings,
 and watch the cue stream. The Debian and RHEL packages and the plain CMake
-install run it as the systemd unit `skycued`, with `/etc/skycue/skycue.conf`
+install run it as the systemd unit `skycued`, with `/etc/skycue/skycue.toml`
 and its files under `/var/lib/skycue` ([installing.md](installing.md)); from a
 source tree it runs straight from the build tree with
-`skycued --config ./skycue.conf --www-dir www` ([Run it from the build
+`skycued --config ./skycue.toml --www-dir www` ([Run it from the build
 tree](installing.md#run-it-from-the-build-tree)). Where the two shapes keep
 their files differently, [Where the files are](#where-the-files-are) says so.
 
@@ -14,10 +14,10 @@ their files differently, [Where the files are](#where-the-files-are) says so.
 ```
 RTL-SDR 978 MHz -> dump978-fa --raw--> readsb <- RTL-SDR 1090 MHz
                        |                 |
-                       | raw UAT         | JSON (READSB_JSON_PORT)
+                       | raw UAT         | JSON (inputs.readsb.json_port)
                        v                 v
                        +---------> skycued ---> cue clients (TCP / UDP)
-                                         \---> RECORD_DIR (received, sent)
+                                         \---> recording.dir (received, sent)
 ```
 
 `dump978-fa` decodes 978 MHz UAT and serves raw frames; `readsb` decodes
@@ -37,7 +37,7 @@ and reconnects when they restart.
 Installed from a package (see [installing.md](installing.md)):
 
 ```sh
-sudoedit /etc/skycue/skycue.conf    # at least RECEIVER_LAT, RECEIVER_LON
+sudoedit /etc/skycue/skycue.toml    # at least receiver.lat, receiver.lon
 sudo systemctl enable --now skycued
 systemctl status skycued            # running or not, pid, last log lines
 journalctl -u skycued -f            # the log
@@ -47,19 +47,19 @@ sudo systemctl stop skycued
 From a source tree, run it from the build tree and stop it with Ctrl-C:
 
 ```sh
-build/skycued/skycued --config ./skycue.conf --www-dir www
+build/skycued/skycued --config ./skycue.toml --www-dir www
 ```
 
 A config with an unknown key or a malformed line stops skycued with exit
 status 2 and the reason on stderr (or in the journal). Nothing else is
 started on your behalf: bring up readsb and dump978-fa first, or let
 skycued retry until they are there. The web UI is at
-`http://<WEB_BIND>:<WEB_PORT>/` (none with `WEB_PORT=0`).
+`http://<web.bind>:<web.port>/` (none with `web.port = 0`).
 
 ### Testing the decoder connections: skycued --check-inputs
 
 ```sh
-skycued --config skycue.conf --check-inputs
+skycued --config skycue.toml --check-inputs
 ```
 
 connects once to each TCP input and prints one line per input, so decoder
@@ -73,9 +73,9 @@ pu: not checked (listens on 0.0.0.0:30999)
 ```
 
 It checks readsb (unless `--no-readsb` or it is disabled in the inputs
-file), dump978 (when `DUMP978_ENABLE` is on and not `--no-uat`) and every
-enabled `tcp_connect` input of the inputs file, using `READSB_HOST`,
-`DUMP978_HOST` and the ports from the config (`--readsb-host` and
+file), dump978 (when `inputs.dump978.enable` is on and not `--no-uat`) and every
+enabled `tcp_connect` input of the inputs file, using `inputs.readsb.host`,
+`inputs.dump978.host` and the ports from the config (`--readsb-host` and
 `--dump978-host` win). Enabled `udp` and `tcp_listen` inputs wait for data
 and are listed as not checked. The exit status is 0 when everything checked
 connected, 1 when any failed, 2 for a usage or config error (including
@@ -92,13 +92,13 @@ after skycued has exited.
 ### Running without a 1090 or 978 MHz receiver
 
 skycued needs neither decoder. `--no-readsb` (no connection to readsb) and
-`--no-uat` (none to dump978-fa; `DUMP978_ENABLE=no` does the same) leave out
+`--no-uat` (none to dump978-fa; `inputs.dump978.enable = false` does the same) leave out
 the one you do not have:
 
 | Receivers you have | skycued's inputs |
 |--------------------|------------------|
 | 1090 and 978 | readsb (1090 and UAT aircraft), dump978 (uplinks), plus the inputs file |
-| 1090 only | `--no-uat` (or `DUMP978_ENABLE=no`): readsb (1090 aircraft), plus the inputs file |
+| 1090 only | `--no-uat` (or `inputs.dump978.enable = false`): readsb (1090 aircraft), plus the inputs file |
 | 978 only | `--no-readsb`: dump978 (uplinks and FIS-B only), plus the inputs file |
 | neither | `--no-readsb --no-uat`: the inputs file only |
 
@@ -110,56 +110,117 @@ in [the inputs file](#the-inputs-file); the web UI or the API add and change
 inputs while it runs. A built-in input that is left out is absent from the
 inputs list.
 
-With `RECORD_RAW=yes` skycued writes the raw frames of its pingStation
-inputs to `RECORD_DIR`; raw capture of a decoder's own output is
+With `recording.raw = true` skycued writes the raw frames of its pingStation
+inputs to `recording.dir`; raw capture of a decoder's own output is
 `skycue-rawrec`'s job ([Raw capture and replay](#raw-capture-and-replay)).
 
 ## Config keys that matter
 
 The full list, with comments and the file grammar, is
-`packaging/skycue.conf.example` (installed as `/etc/skycue/skycue.conf` by the packages). An unknown key or a malformed line stops
-skycued with exit status 2. An unexpected error
+`packaging/skycue.toml.example` (the packages install it as
+`/etc/skycue/skycue.toml`; the Debian package generates that file from
+`/usr/share/skycue/skycue.toml.example` when it is installed). The file is a
+strict subset of TOML: tables such as `[receiver]` and `[inputs.readsb]`, and
+keys of strings in quotes, numbers, `true`/`false` and arrays of strings. An
+unknown table or key, a value of the wrong type or out of range, or a key
+given twice stops skycued with exit status 2 and names the line. A key you
+leave out keeps its default. An unexpected error
 that escapes `skycued`, `skycue-rawrec` or `skycue-pingsim` ends it with
 exit status 1 and one line, `fatal: <what>` at ERROR in skycued's log or
-`skycue-rawrec: <what>` / `skycue-pingsim: <what>` on stderr. The key names
-`SDR_1090_SERIAL`, `SDR_978_SERIAL`, `GAIN_1090`, `GAIN_978` and
-`DUMP978_JSON_PORT` are accepted and ignored for compatibility with configs
-shared with other tooling.
+`skycue-rawrec: <what>` / `skycue-pingsim: <what>` on stderr.
 
-| Key | Used by | Meaning |
-|-----|---------|---------|
-| `RECEIVER_LAT`, `RECEIVER_LON` | all | receiver position (required) |
-| `RECEIVER_ALT_M`, `ANTENNA_HEIGHT_M` | skycued | antenna altitude for elevation angles |
-| `READSB_JSON_PORT`, `DUMP978_RAW_PORT` | skycued | where skycued reads from |
-| `READSB_HOST` | skycued | host of the readsb JSON port (default `127.0.0.1`, not empty) (`--readsb-host` overrides it) |
-| `TRACK_DECODER` | skycued | `readsb` (default) or `skycued`: who decodes the 1090 MHz frames, see [Decoding in skycued](#decoding-in-skycued); a change needs a restart |
-| `READSB_BEAST_PORT` | skycued | the Beast port of the 1090 MHz decoder on this machine, 1 to 65535 (default 30005); read only under `TRACK_DECODER=skycued`; a change needs a restart |
-| `DUMP978_HOST` | skycued | host of the dump978-fa raw port (default `127.0.0.1`, not empty) (`--dump978-host` overrides it) |
-| `DUMP978_ENABLE` | skycued | `no`: there is no 978 MHz decoder, skycued neither connects to one nor expects UAT input (as `--no-uat`, which overrides it); default `yes` |
-| `STATE_DIR` | skycued | absolute directory for skycued's files; a relative `INPUTS_FILE`, `LOCATIONS_FILE`, `STATS_FILE`, `ALLOW_LIST_FILE` or `BLOCK_LIST_FILE` is taken from it, and it holds the runtime overlay `skycue.runtime.json` and the `skycue.overrides.conf` that save as baseline writes instead of rewriting `skycue.conf` (see [web-api.md](web-api.md#save-as-baseline)); empty (default): the places next to the config (next to `skycue.conf`; the list files from the working directory) |
-| `MAP_DIR` | skycued | absolute directory the web map's `tiles/` and `overlays/` are served from, and nowhere else; empty (default): the web directory's |
-| `CUE_TCP_PORT` | skycued | cue clients connect here; `0`: no listener |
-| `CUE_TCP_CONNECT` | skycued | `host:port ...` of clients that listen; skycued dials them |
-| `CUE_UDP_TARGETS` | skycued | `host:port ...` to send UDP cues to |
-| `MAX_RANGE_NM`, `MIN_ELEVATION_DEG` | skycued | aircraft farther or lower are not sent |
-| `ALLOW_LIST_FILE`, `BLOCK_LIST_FILE` | skycued | curated lists (below) |
-| `MIN_INTERVAL_S`, `MAX_INTERVAL_S` | skycued | per-aircraft cue rate: at most one per min, at least one per max |
-| `TRACK_TIMEOUT_S` | skycued | silence before a track is dropped |
-| `KEYFRAME_INTERVAL_S` | skycued | full-state keyframes on the stream |
-| `RECORD_DIR`, `RECORD_FORMATS` | skycued | where and how to record (below) |
-| `RECORD_RAW` | skycued | write the pingStation JSON `rawData` frames to `RECORD_DIR` (the decoders' raw streams are recorded by `skycue-rawrec`) |
-| `RECORD_MAX_GB` | skycued | disk budget for the recordings (pass it to `skycue-rawrec --max-gb` too); `0`: unlimited |
-| `WEB_PORT`, `WEB_BIND` | skycued | the web UI (below); `WEB_PORT=0`: off |
-| `TRAIL_SECONDS` | skycued | trail length on the web map |
-| `FISB_ENABLE`, `FISB_EXPERIMENTAL` | skycued | decode FIS-B weather from the 978 MHz uplinks (default yes); also decode the unverified layouts (default no). See [FIS-B weather](#fis-b-weather) |
-| `LOCATIONS_FILE` | skycued | optional CSV `id,lat,lon` of report locations, merged under the learned ones; a relative path is taken from `skycue.conf`'s directory, or from `STATE_DIR` when it is set; read at startup (a change needs a restart). See [Report locations](#report-locations-fisb-locationsjson) |
-| `STATS_FILE` | skycued | where the statistics history is kept (default `skycue.stats.json` in `STATE_DIR`, or next to `skycue.conf` when that is empty); a relative path is taken from `skycue.conf`'s directory, or from `STATE_DIR` when it is set; empty: kept in memory only; a file that cannot be read back is renamed `<file>.bad`; read at startup (a change needs a restart). See [Statistics file](#statistics-file) |
-| `STATS_AIRCRAFT_MAX` | skycued | aircraft kept in the statistics ledger, a whole number 100..100000 (default 20000); past it the 5 % heard longest ago are forgotten; a change needs a restart |
-| `STATS_SAVE_S` | skycued | seconds between saves of `STATS_FILE` while it changed, a whole number 10..86400 (default 300); also saved at a clean shutdown and at once on a reset; a change needs a restart |
+Keys are written below as `table.key`. Every key except the four `filters`
+keys is read once at startup: a change needs a restart (the filters apply at
+once, see [Config tab](#config-tab)).
 
-The three forwarding modes (`CUE_TCP_PORT`, `CUE_TCP_CONNECT`,
-`CUE_UDP_TARGETS`) can be used together; with all three off skycued runs but
+**`[receiver]`**
+
+| Key | Meaning |
+|-----|---------|
+| `receiver.lat`, `receiver.lon` | receiver position in decimal degrees (required: skycued refuses to start while both are missing or both 0.0; `skycue-stats` does not need them) |
+| `receiver.alt_m`, `receiver.antenna_height_m` | ground altitude above mean sea level and antenna height above the ground, in metres; their sum sets the elevation angles |
+
+**`[inputs]`, `[inputs.readsb]`, `[inputs.dump978]`**
+
+| Key | Meaning |
+|-----|---------|
+| `inputs.file` | the inputs file; empty (default): `skycue.inputs.json` beside the config, or in `paths.state_dir` when that is set |
+| `inputs.decoder` | `"readsb"` (default) or `"skycued"`: who decodes the 1090 and 978 MHz frames of the built-in inputs, see [Decoding in skycued](#decoding-in-skycued); a change needs a restart |
+| `inputs.readsb.enable` | `false`: there is no readsb on this machine, skycued does not connect to one (as `--no-readsb`, which applies last); default `true` |
+| `inputs.readsb.host` | host of readsb (default `"127.0.0.1"`, not empty) (`--readsb-host` overrides it) |
+| `inputs.readsb.json_port` | readsb's JSON port, `--net-json-port` (default 30047); read when `inputs.decoder = "readsb"` |
+| `inputs.readsb.beast_port` | readsb's Beast port, `--net-bo-port`, 1 to 65535 (default 30005); read only under `inputs.decoder = "skycued"`; a change needs a restart |
+| `inputs.dump978.enable` | `false`: there is no 978 MHz decoder, skycued neither connects to one nor expects UAT input (as `--no-uat`, which applies last); default `true` |
+| `inputs.dump978.host` | host of dump978-fa (default `"127.0.0.1"`, not empty) (`--dump978-host` overrides it) |
+| `inputs.dump978.raw_port` | dump978-fa's raw port, `--raw-port` (default 30978); where skycued reads UAT lines |
+| `inputs.dump978.json_port` | dump978-fa's JSON port, `--json-port` (default 30979); skycued does not read it, the launcher passes it to dump978-fa |
+
+**`[sdr]`**: read by the launcher that starts readsb and dump978-fa, not by
+skycued, which only checks the values.
+
+| Key | Meaning |
+|-----|---------|
+| `sdr.serial_1090`, `sdr.serial_978` | serial numbers as `rtl_test` prints them; empty: the only dongle, or let the program choose; the two must differ when both are set |
+| `sdr.gain_1090`, `sdr.gain_978` | dB as a decimal in a string (`"49.6"`), or `"auto"`; the 1090 gain also takes `"auto-verbose"` (default `"auto"`) |
+
+**`[cues]`**
+
+| Key | Meaning |
+|-----|---------|
+| `cues.tcp_port` | cue clients connect here; `0`: no listener |
+| `cues.tcp_connect` | `["host:port", ...]` of clients that listen; skycued dials them |
+| `cues.udp_targets` | `["host:port", ...]` to send UDP cues to |
+| `cues.min_interval_s`, `cues.max_interval_s` | per-aircraft cue rate: at most one per min (at least 0.1), at least one per max (not below min) |
+| `cues.track_timeout_s` | silence before a track is dropped (at least 1) |
+| `cues.keyframe_interval_s` | full-state keyframes on the stream (at least 1) |
+
+The three forwarding modes (`cues.tcp_port`, `cues.tcp_connect`,
+`cues.udp_targets`) can be used together; with all three off skycued runs but
 warns that it forwards to nobody.
+
+**`[filters]`**
+
+| Key | Meaning |
+|-----|---------|
+| `filters.max_range_nm`, `filters.min_elevation_deg` | aircraft farther or lower are not sent |
+| `filters.allow_list_file`, `filters.block_list_file` | curated lists, read at startup ([Curated lists](#curated-lists)); a relative path is taken from `paths.state_dir` |
+
+**`[web]`**
+
+| Key | Meaning |
+|-----|---------|
+| `web.port`, `web.bind` | the web UI ([The web UI](#the-web-ui)); `web.port = 0`: off; `web.bind = "0.0.0.0"` listens on every interface |
+| `web.trail_seconds` | trail length on the web map, 0 to 3600 |
+
+**`[recording]`**
+
+| Key | Meaning |
+|-----|---------|
+| `recording.dir`, `recording.formats` | where and how to record (`["jsonl", "csv"]`, at least one while `dir` is set; see [Recordings](#recordings)) |
+| `recording.raw` | write the pingStation JSON `rawData` frames to `recording.dir` (the decoders' raw streams are recorded by `skycue-rawrec`) |
+| `recording.max_gb` | disk budget for the recordings (pass it to `skycue-rawrec --max-gb` too); `0`: unlimited |
+
+**`[fisb]`**
+
+| Key | Meaning |
+|-----|---------|
+| `fisb.enable`, `fisb.experimental` | decode FIS-B weather from the 978 MHz uplinks (default `true`); also decode the unverified layouts (default `false`). See [FIS-B weather](#fis-b-weather) |
+
+**`[paths]`**
+
+| Key | Meaning |
+|-----|---------|
+| `paths.state_dir` | absolute directory for skycued's files; a relative `inputs.file`, `paths.locations_file`, `stats.file`, `filters.allow_list_file` or `filters.block_list_file` is taken from it, and it holds the runtime overlay `skycue.runtime.json` and the `skycue.overrides.toml` that save as baseline writes (see [web-api.md](web-api.md#save-as-baseline)); empty (default): the places next to the config (next to `skycue.toml`; the list files from the working directory) |
+| `paths.map_dir` | absolute directory the web map's `tiles/` and `overlays/` are served from, and nowhere else; empty (default): the web directory's |
+| `paths.locations_file` | optional CSV `id,lat,lon` of report locations, merged under the learned ones; a relative path is taken from `skycue.toml`'s directory, or from `paths.state_dir` when it is set; read at startup (a change needs a restart). See [Report locations](#report-locations-fisb-locationsjson) |
+
+**`[stats]`**
+
+| Key | Meaning |
+|-----|---------|
+| `stats.file` | where the statistics history is kept (default `"skycue.stats.json"` in `paths.state_dir`, or next to `skycue.toml` when that is empty); a relative path is taken from `skycue.toml`'s directory, or from `paths.state_dir` when it is set; `""`: kept in memory only; a file that cannot be read back is renamed `<file>.bad`; read at startup (a change needs a restart). See [Statistics file](#statistics-file) |
+| `stats.aircraft_max` | aircraft kept in the statistics ledger, a whole number 100..100000 (default 20000); past it the 5 % heard longest ago are forgotten; a change needs a restart |
+| `stats.save_s` | seconds between saves of `stats.file` while it changed, a whole number 10..86400 (default 300); also saved at a clean shutdown and at once on a reset; a change needs a restart |
 
 ### Overriding a key for one run
 
@@ -195,30 +256,32 @@ later release.
 
 ### Where the files are
 
-A `skycue.conf` copied from the example (the build-tree run) leaves
-`STATE_DIR` and `MAP_DIR` empty, so skycued keeps its files next to
-`skycue.conf`. The packaged config sets them, and an install from source sets
+A `skycue.toml` copied from the example (the build-tree run) leaves
+`paths.state_dir` and `paths.map_dir` empty, so skycued keeps its files next to
+`skycue.toml`. The packaged config sets them, and an install from source sets
 them by hand ([installing.md](installing.md#from-source)):
 
-| File | Build tree (`STATE_DIR`, `MAP_DIR` empty) | Package (`STATE_DIR=/var/lib/skycue`, `MAP_DIR=/var/lib/skycue/maps`) |
+| File | Build tree (`paths.state_dir`, `paths.map_dir` empty) | Package (`paths.state_dir = "/var/lib/skycue"`, `paths.map_dir = "/var/lib/skycue/maps"`) |
 |------|------|------|
-| config | wherever `--config` points | `/etc/skycue/skycue.conf` (`/usr/local/etc/skycue/skycue.conf` from source); skycued never writes it |
-| inputs, statistics, learned locations (`skycue.inputs.json`, `skycue.stats.json`, `fisb-locations.json`) | next to `skycue.conf` | in `STATE_DIR` |
-| runtime overlay (`skycue.runtime.json`) | next to `skycue.conf` | in `STATE_DIR` |
-| what **Save as baseline** writes | `MAX_RANGE_NM`/`MIN_ELEVATION_DEG` in `skycue.conf`, and the list files | `STATE_DIR/skycue.overrides.conf`, and the list files |
-| allow and block lists | as `ALLOW_LIST_FILE`/`BLOCK_LIST_FILE` say (relative: skycued's working directory) | `allow.list`, `block.list` in `STATE_DIR` |
-| map tiles and overlays | `tiles`, `overlays` in the `--www-dir` directory | `MAP_DIR/tiles`, `MAP_DIR/overlays` |
-| recordings | `RECORD_DIR` | `RECORD_DIR` (commented out; `/var/lib/skycue/recordings` is ready for it) |
+| config | wherever `--config` points | `/etc/skycue/skycue.toml` (`/usr/local/etc/skycue/skycue.toml` from source); skycued never writes it |
+| inputs, statistics, learned locations (`skycue.inputs.json`, `skycue.stats.json`, `fisb-locations.json`) | next to `skycue.toml` | in `paths.state_dir` |
+| runtime overlay (`skycue.runtime.json`) | next to `skycue.toml` | in `paths.state_dir` |
+| what **Save as baseline** writes | `skycue.overrides.toml` next to `skycue.toml`, and the list files | `skycue.overrides.toml` in `paths.state_dir`, and the list files |
+| allow and block lists | as `filters.allow_list_file` / `filters.block_list_file` say (relative: skycued's working directory) | `allow.list`, `block.list` in `paths.state_dir` |
+| map tiles and overlays | `tiles`, `overlays` in the `--www-dir` directory | `paths.map_dir/tiles`, `paths.map_dir/overlays` |
+| recordings | `recording.dir` | `recording.dir` (commented out; `/var/lib/skycue/recordings` is ready for it) |
 | log | standard error of the terminal it runs in | the journal (`journalctl -u skycued`) |
 
-`skycue.overrides.conf` is in the `skycue.conf` grammar and holds only
-the keys the page may save (`MAX_RANGE_NM`, `MIN_ELEVATION_DEG`,
-`ALLOW_LIST_FILE`, `BLOCK_LIST_FILE`); skycued reads it after
-`skycue.conf`, so its values win. It exists only when `STATE_DIR` is set:
-the packaged config is a file the package manager owns, so the daemon,
-which runs as the `skycue` user with only `/var/lib/skycue` writable,
-never rewrites it. To make a saved value part of `skycue.conf` again, copy
-it there and delete the line from `skycue.overrides.conf`.
+`skycue.overrides.toml` is in the same TOML grammar and holds only
+the keys the page may save (`filters.max_range_nm`, `filters.min_elevation_deg`,
+`filters.allow_list_file`, `filters.block_list_file`); skycued reads it after
+`skycue.toml`, so its values win. skycued owns the file: it writes it whole,
+with a header line saying so, so comments you add are lost the next time the
+page saves. Hand edits are picked up while skycued runs. The packaged
+`skycue.toml` is a file the package manager owns, so the daemon, which runs as
+the `skycue` user with only `/var/lib/skycue` writable, never writes it. To
+make a saved value part of `skycue.toml` again, copy it there and delete the
+line from `skycue.overrides.toml`.
 
 ### Connection logging
 
@@ -261,16 +324,16 @@ logs about a connection:
 ## Decoding in skycued
 
 By default readsb decodes the 1090 MHz frames and skycued reads its JSON
-(`TRACK_DECODER=readsb`). With
+(`inputs.decoder = "readsb"`). With
 
 ```ini
-TRACK_DECODER=skycued
-READSB_BEAST_PORT=30005
+inputs.decoder = "skycued"
+inputs.readsb.beast_port = 30005
 ```
 
 skycued decodes the Mode S frames itself. The built-in `readsb` input stops
 reading the JSON port and becomes a `beast_raw` input that dials
-`127.0.0.1:READSB_BEAST_PORT` (`READSB_HOST` and `READSB_JSON_PORT` are not
+`127.0.0.1:inputs.readsb.beast_port` (`inputs.readsb.host` and `inputs.readsb.json_port` are not
 used for it), so the decoder you run must serve Beast output on that port;
 the track table, filters, cues, recordings and web page work as before. The
 decoder also runs on any other `beast_raw` input you add, and with it on
@@ -278,8 +341,8 @@ every such input produces observations. What changes:
 
 - **Position reference.** A `beast_raw` input may carry `ref_lat` and
   `ref_lon` (both or neither; a `beast_raw` or `uat_raw` input only) for its
-  decoder's range check; without them it uses `RECEIVER_LAT` and
-  `RECEIVER_LON`. Setting them makes the inputs file version 2.
+  decoder's range check; without them it uses `receiver.lat` and
+  `receiver.lon`. Setting them makes the inputs file version 2.
 - **UAT is decoded too.** The built-in `dump978` input and every `uat_raw`
   input decode the 978 MHz downlinks (see [UAT (978 MHz)](#uat-978-mhz-in-skycued));
   FIS-B uplinks and their counts are unchanged. The `uat_in` connector in
@@ -298,16 +361,16 @@ every such input produces observations. What changes:
   ```
 
   Disable one of the two inputs. Under `skycued`, `--check-inputs` probes
-  `127.0.0.1:READSB_BEAST_PORT` and prints it as the `readsb` line.
+  `127.0.0.1:inputs.readsb.beast_port` and prints it as the `readsb` line.
   Under `readsb` nothing changes.
 - **Counters.** A decoding input shows the decoder's counters in
   [`GET /api/inputs`](web-api.md#inputs), and `GET /api/stats` gets a
   `decoder` object ([the stats object](web-api.md#the-state-object)).
 - **Replay.** Play a capture to the decoder with
-  `skycue-rawplay --1090-listen PORT` and point `READSB_BEAST_PORT` (or a
+  `skycue-rawplay --1090-listen PORT` and point `inputs.readsb.beast_port` (or a
   `beast_raw` input) at it; for UAT, `skycue-rawplay --uat-listen PORT` and a
   `uat_raw` input pointed at that port; the simpler route is to set
-  `DUMP978_RAW_PORT` to it, so the built-in `dump978` input reads the replay. See [Raw capture and replay](#raw-capture-and-replay).
+  `inputs.dump978.raw_port` to it, so the built-in `dump978` input reads the replay. See [Raw capture and replay](#raw-capture-and-replay).
 
 The default keeps readsb's own decoding and its JSON. The decoder follows the
 public Mode S layouts and was compared with readsb on the same capture;
@@ -318,9 +381,9 @@ about 97 % on the 120 s capture).
 
 ### UAT (978 MHz) in skycued
 
-Under `TRACK_DECODER=skycued` the built-in `dump978` input (dump978-fa's raw
-port, `DUMP978_HOST` and `DUMP978_RAW_PORT`) and every `uat_raw` input decode the downlink lines
-(`-HEX;...`) themselves; no setting beyond `TRACK_DECODER` is needed.
+Under `inputs.decoder = "skycued"` the built-in `dump978` input (dump978-fa's raw
+port, `inputs.dump978.host` and `inputs.dump978.raw_port`) and every `uat_raw` input decode the downlink lines
+(`-HEX;...`) themselves; no setting beyond `inputs.decoder` is needed.
 Uplink lines (`+HEX;...`) go to the FIS-B decoder as before. A downlink of
 18 bytes (payload type 0) or 34 bytes (types 1 to 10) is decoded; anything
 else that is hex counts in `rejected`. What you get:
@@ -340,8 +403,8 @@ else that is hex counts in `rejected`. What you get:
   `E0` to `E7`, the way dump978-fa prints them. Emergency code 3 is shown as
   `minimum_fuel` (the public table); dump978-fa prints `invalid` for it.
 - **Position range.** A position more than 300 NM from the input's
-  reference (`ref_lat` and `ref_lon`, else `RECEIVER_LAT` and
-  `RECEIVER_LON`) is rejected and counted in `cpr_rejected`. There is no
+  reference (`ref_lat` and `ref_lon`, else `receiver.lat` and
+  `receiver.lon`) is rejected and counted in `cpr_rejected`. There is no
   speed check against the previous fix (UAT positions are whole fixes, and the
   error correction makes a corrupt one very rare). A change without a position (an altitude, say)
   is reported only after 10 s without an accepted position, and at most once a
@@ -404,9 +467,9 @@ dump978-fa.
 A `pingstation_json` input normally trusts the fields the device decoded.
 With `"source":"decode"` skycued ignores those fields and decodes the
 `rawData` frame of each aircraft itself, 1090 or UAT by length (7 or 14
-bytes: Mode S; 18 or 34 bytes: UAT), whatever `TRACK_DECODER` is. The
+bytes: Mode S; 18 or 34 bytes: UAT), whatever `inputs.decoder` is. The
 position reference is the device's own status position when it has polled
-one (`status_url`), else `RECEIVER_LAT` and `RECEIVER_LON`.
+one (`status_url`), else `receiver.lat` and `receiver.lon`.
 
 ```json
 {"id":"ps-north","type":"pingstation_json","port":4000,"source":"decode"}
@@ -431,7 +494,7 @@ one (`status_url`), else `RECEIVER_LAT` and `RECEIVER_LON`.
 Receivers differ in what they send: many aircraft report a barometric
 altitude all the time and a geometric (GNSS) altitude rarely or never. For
 the elevation filter, the cues and the page, skycued fills the gap with an
-estimate, under every `TRACK_DECODER`.
+estimate, under every `inputs.decoder`.
 
 - **Reported.** A geometric altitude the aircraft sent less than 60 s ago, and
   no newer barometric altitude by more than 2 s since. The track carries
@@ -483,16 +546,16 @@ estimate, under every `TRACK_DECODER`.
 ## Replaying a JSONL recording
 
 ```sh
-skycued --config skycue.conf --replay received-20261101-120000.jsonl                      # real time
-skycued --config skycue.conf --replay received-20261101-120000.jsonl --replay-speed 10    # 10x
-skycued --config skycue.conf --replay FILE --replay-speed 0 --replay-loop                 # unpaced, over and over
+skycued --config skycue.toml --replay received-20261101-120000.jsonl                      # real time
+skycued --config skycue.toml --replay received-20261101-120000.jsonl --replay-speed 10    # 10x
+skycued --config skycue.toml --replay FILE --replay-speed 0 --replay-loop                 # unpaced, over and over
 ```
 
 `--replay FILE` runs skycued with the recording as its only input: no
 readsb, no dump978-fa, no SDRs. FILE is a received-stream recording written
 by skycued, or a capture of readsb's JSON port (one JSON object per line).
 Everything downstream is as in a live run: the same filters, the same
-forwarding, and recording too if `RECORD_DIR` is set. `--replay-speed 1`
+forwarding, and recording too if `recording.dir` is set. `--replay-speed 1`
 (the default) keeps the recorded timing; `--replay-speed 0` sends as fast as
 skycued can; `--replay-loop` starts the file again at its end. Only the
 receiver position is needed from the config.
@@ -500,8 +563,8 @@ receiver position is needed from the config.
 A replay opens the same ports as a live skycued, so it cannot run beside one
 that is using them. Stop the service first (`sudo systemctl stop skycued`),
 or give the replay its own ports: `--web-port 8081 --cue-tcp-port 0` (or
-`WEB_PORT` / `CUE_TCP_PORT` in a copy of the config), and point `STATE_DIR`
-and `RECORD_DIR` of that copy elsewhere so the replay does not mix into the
+`web.port` / `cues.tcp_port` in a copy of the config), and point `paths.state_dir`
+and `recording.dir` of that copy elsewhere so the replay does not mix into the
 live files. From a source tree, add `--www-dir www`.
 
 ## Raw capture and replay
@@ -519,8 +582,8 @@ skycue-rawrec --beast 127.0.0.1:30005 --uat 127.0.0.1:30978 --dir /var/lib/skycu
 
 `--max-gb N` keeps the recordings within N GB by deleting the oldest (with
 `--retention-dir` naming the directory that holds `raw/` when `--dir` is not
-`<RECORD_DIR>/raw`). Leave out `--beast` or `--uat` for a receiver you do not
-have. `RECORD_DIR/raw` is where [Recordings](#recordings) expects them.
+`<recording.dir>/raw`). Leave out `--beast` or `--uat` for a receiver you do not
+have. `recording.dir/raw` is where [Recordings](#recordings) expects them.
 
 Each of `--beast` and `--uat` takes `HOST:PORT` (or the same as
 `tcp://HOST:PORT`), which connects and reconnects with a backoff from 0.5 s to
@@ -535,7 +598,7 @@ interprets them again:
 ```sh
 readsb --net-only --net-ri-port 30001 --net-bi-port 30004 --net-json-port 30047 \
        --lat 52.0 --lon 4.5 --net-connector 127.0.0.1,30978,uat_in
-skycued --config skycue.conf          # reads readsb's JSON port as it would live
+skycued --config skycue.toml          # reads readsb's JSON port as it would live
 skycue-rawplay --beast-in 127.0.0.1:30004 --raw-in 127.0.0.1:30001 --uat-listen 30978 \
        --speed 1 beast-20261101-120000.bin uat-20261101-120000.txt
 ```
@@ -547,9 +610,9 @@ with the `uat_in` connector above). `--speed N` (0: as fast as possible) and
 `--loop` work as for a JSONL replay. Since rawplay serves the UAT lines to
 readsb only, skycued does not see the UAT port and uplinks are not counted.
 To track the UAT lines in skycued instead, serve them to a `uat_raw` input
-(`TRACK_DECODER=skycued`; no readsb is needed for them):
+(`inputs.decoder = "skycued"`; no readsb is needed for them):
 `skycue-rawplay --uat-listen 30978 uat-20261101-120000.txt`.
-The receiver position given to readsb (and in `skycue.conf`) must match the
+The receiver position given to readsb (and in `skycue.toml`) must match the
 capture's region, or readsb cannot decode positions and the range filter
 drops everything: the sample capture in `tests/fixtures/raw/` is European,
 so use `52.0` / `4.5` for it.
@@ -591,8 +654,8 @@ skycued's inputs are the two built-ins, `readsb` and `dump978` (the decoders
 skycued connects to; a built-in you run without is
 absent, see [Running without a 1090 or 978 MHz receiver](#running-without-a-1090-or-978-mhz-receiver)), plus any inputs you add, such as a pingStation 3.
 The added inputs and the enabled state of the built-ins are kept in
-`skycue.inputs.json` in `STATE_DIR` when that is set (`/var/lib/skycue` in
-the packages), else next to `skycue.conf`. It is the only place they are
+`skycue.inputs.json` in `paths.state_dir` when that is set (`/var/lib/skycue` in
+the packages), else next to `skycue.toml`. It is the only place they are
 stored: a change made in the web UI or the API is written there at once
 (with an atomic rename), and there is nothing to "save" separately. Until the
 first change there is no file, and skycued runs the built-ins only. The
@@ -623,13 +686,13 @@ definition rules of the API (an unknown key, a key that does not apply to
 the type, or a value out of range is an error), and two enabled listeners,
 inputs or outputs, may not use the same port and protocol, except that
 several multicast receivers may share a port. A listener may not take the
-port of the cue stream (`CUE_TCP_PORT`) or of the web server (`WEB_PORT`). `"capture":true` needs `RECORD_DIR`:
+port of the cue stream (`cues.tcp_port`) or of the web server (`web.port`). `"capture":true` needs `recording.dir`:
 it writes every datagram (or TCP block) the input receives to
-`RECORD_DIR/capture-<id>-*.jsonl`, one JSON line each. Without `RECORD_DIR`
+`recording.dir/capture-<id>-*.jsonl`, one JSON line each. Without `recording.dir`
 the web UI and the API refuse it (400 "capture needs RECORD_DIR"); in the
 file, at startup or in a hand edit, the entry is kept and runs, skycued logs
-one WARN ("capture needs RECORD_DIR: not capturing") and nothing is captured. With `RECORD_RAW=yes` a `pingstation_json` input also writes the raw 1090 and
-UAT frames the device includes (`rawData`) to `RECORD_DIR/raw-<id>-*.csv` and
+one WARN ("capture needs RECORD_DIR: not capturing") and nothing is captured. With `recording.raw = true` a `pingstation_json` input also writes the raw 1090 and
+UAT frames the device includes (`rawData`) to `recording.dir/raw-<id>-*.csv` and
 `.txt`, which `skycue-rawplay` accepts like skycue-rawrec's
 files. A `pingstation_json` input may also decode those frames itself ([pingStation decode mode](#pingstation-decode-mode)). Both formats are in [recording-format.md](recording-format.md#pingstation-capture-and-raw-frames).
 
@@ -641,7 +704,7 @@ that input (its counters carry on), and inputs you did not touch keep
 running undisturbed.
 
 **A file that is not valid** (bad JSON, a bad entry, a port clash; not a
-`"capture":true` without `RECORD_DIR`, which is only warned about) is
+`"capture":true` without `recording.dir`, which is only warned about) is
 renamed `skycue.inputs.json.rejected` and the reason is logged at ERROR. At
 startup skycued then runs the built-ins only; while running it keeps the
 inputs it had. Fix the file and put it back under its own name: skycued keeps
@@ -674,7 +737,7 @@ Every input type takes the endpoint keys of its transport:
 | `group`, `interface` | `udp` only: join the multicast group `group` (224.0.0.0 to 239.255.255.255), on the local interface address `interface` (the system's choice when left out); `bind` does not apply with a group |
 
 Which transports a type takes: `readsb` and `dump978` any (the built-ins stay
-`tcp_connect` to `READSB_HOST` and `DUMP978_HOST`; a second `readsb` or
+`tcp_connect` to `inputs.readsb.host` and `inputs.dump978.host`; a second `readsb` or
 `dump978` input in the file may listen or receive instead), `pingstation_json`
 any (`udp` by default, as before), `pingstation_cat021` any (required),
 `beast_raw` and `uat_raw` any (`tcp_connect` by default). A UDP datagram of a
@@ -697,11 +760,11 @@ Two types read the decoders' raw output directly:
   built-in `dump978`: downlinks are counted and uplinks reach the FIS-B
   decoder exactly as the built-in's do, a second copy of an uplink another
   input already delivered is dropped as a duplicate, and the lines go to the
-  `uat` outputs. Under `TRACK_DECODER=skycued` the downlinks are decoded to
+  `uat` outputs. Under `inputs.decoder = "skycued"` the downlinks are decoded to
   aircraft too ([UAT in skycued](#uat-978-mhz-in-skycued)). The built-in keeps its id `dump978`, and `dump978` stays a
   valid `type` for an input you add (it is the same input class).
 
-`"capture":true` on a `beast_raw` or `uat_raw` input needs `RECORD_DIR` like
+`"capture":true` on a `beast_raw` or `uat_raw` input needs `recording.dir` like
 the pingStation capture (the same warning, the same 400 from the API). It
 writes what the input published, in the raw tools' formats, so
 `skycue-rawplay` plays it back: `raw-<id>-YYYYMMDD-HHMMSS.bin` for Beast
@@ -753,7 +816,7 @@ a `group`.
 | `json` | a readsb JSON line | lines | one line; a line over 65507 bytes is dropped and counted |
 | `pingstation_json` | a pingStation JSON text | one line each; a text that itself contains a newline is dropped and counted | one text, as received |
 | `cat021` | a CAT021 block as received | the stream (blocks delimit themselves) | one block |
-| `cue` | the skycue protocol frames ([protocol.md](protocol.md)) | as `CUE_TCP_PORT` | as `CUE_UDP_TARGETS` |
+| `cue` | the skycue protocol frames ([protocol.md](protocol.md)) | as `cues.tcp_port` | as `cues.udp_targets` |
 
 An output carries the messages of every enabled input of its kind, merged in
 arrival order: a `beast` output serves the frames of all `beast_raw` inputs.
@@ -761,7 +824,7 @@ Where an input's data arrives from a decoder skycued already reads for
 another purpose, nothing is lost: the `json` output serves what the built-in
 `readsb` input reads, the `uat` output what `dump978` reads, and so on. An
 output with no input of its kind is valid; a listener that has nothing to
-serve yet. (When the 1090 decoder moves into skycued, `TRACK_DECODER=skycued`,
+serve yet. (When the 1090 decoder moves into skycued, `inputs.decoder = "skycued"`,
 there is no readsb JSON to republish and the `json` output carries nothing.)
 
 An output is started and stopped like an input: `enabled` turns it off and
@@ -780,8 +843,8 @@ Each output keeps counters for its lifetime, across edits: `peers`
 three consumers counts three times), `dropped`, and `last_error`. The page
 and `GET /api/outputs` show them.
 
-**The cue outputs.** What `CUE_TCP_PORT`, `CUE_TCP_CONNECT` and
-`CUE_UDP_TARGETS` configure shows up as built-in outputs of kind `cue` with the
+**The cue outputs.** What `cues.tcp_port`, `cues.tcp_connect` and
+`cues.udp_targets` configure shows up as built-in outputs of kind `cue` with the
 ids `cue-tcp`, `cue-connect-N` and `cue-udp-N` (N counts from 1 in the order
 of the config value), flagged `"builtin":true`. They cannot be edited or
 removed, but can be disabled and enabled, like the built-in inputs; the
@@ -866,7 +929,7 @@ simulated inputs in an inputs file, `sim.inputs.json`:
 then run skycued on it and one pingsim per input:
 
 ```sh
-skycued --no-readsb --no-uat --inputs-file sim.inputs.json --config skycue.conf &
+skycued --no-readsb --no-uat --inputs-file sim.inputs.json --config skycue.toml &
 
 # JSON with a device status every 10 s: the card shows the device line
 # (GPS 3D fix, receiver normal, firmware 1.0.0) and a device marker there.
@@ -878,16 +941,16 @@ skycue-pingsim --udp 127.0.0.1:4001 --as cat021 --speed 5 --loop \
     tests/fixtures/readsb-sample.jsonl
 ```
 
-The fixture's aircraft are around 38.9 N, 77.0 W, so `RECEIVER_LAT` and
-`RECEIVER_LON` must be near there or the range filter drops them. The status
+The fixture's aircraft are around 38.9 N, 77.0 W, so `receiver.lat` and
+`receiver.lon` must be near there or the range filter drops them. The status
 message carries guid `0000000000000001`, version 1.0.0, `gpsStatus` 3,
 `receiverStatus` 0, the send time and the given position; `--status-interval`
 needs `--as json` and both `--status-lat` and `--status-lon`.
 
 **Replaying a capture.** Add `"capture":true` to the `sim-cat` entry above
-(or a real device's input) and set `RECORD_DIR` in skycue.conf (the example
+(or a real device's input) and set `recording.dir` in skycue.toml (the example
 config leaves it empty, and capture needs it): the input then writes
-`RECORD_DIR/capture-sim-cat-*.jsonl`. Play it back into the same kind of
+`recording.dir/capture-sim-cat-*.jsonl`. Play it back into the same kind of
 input, and look inside it with `skycue-dump --capture`
 ([below](#watching-the-stream-skycue-dump)):
 
@@ -903,38 +966,38 @@ Synthesised records (`--as`) carry the send time and are accepted.
 
 ## Recordings
 
-With `RECORD_DIR` set, skycued writes these streams there. The first two are
-in the formats listed in `RECORD_FORMATS` (`jsonl`, `csv`, or both):
+With `recording.dir` set, skycued writes these streams there. The first two are
+in the formats listed in `recording.formats` (`jsonl`, `csv`, or both):
 
 - `received-YYYYMMDD-HHMMSS.{jsonl,csv}`: every observation from readsb and
   the pingStation inputs, and every UAT uplink, before filtering. The JSONL file is what `skycued --replay FILE` plays back.
 - `sent-YYYYMMDD-HHMMSS.{jsonl,csv}`: every update and drop skycued
   forwarded, and the active filters at startup.
-- `fisb-YYYYMMDD-HHMMSS.jsonl` (JSONL only, with `FISB_ENABLE=yes`): the
+- `fisb-YYYYMMDD-HHMMSS.jsonl` (JSONL only, with `fisb.enable = true`): the
   decoded FIS-B weather.
-- Per pingStation input, also directly under `RECORD_DIR`:
+- Per pingStation input, also directly under `recording.dir`:
   `capture-<id>-*.jsonl` for an input with `"capture":true`, and, with
-  `RECORD_RAW=yes`, `raw-<id>-*.csv` (1090) and `raw-<id>-*.txt` (UAT) for a
+  `recording.raw = true`, `raw-<id>-*.csv` (1090) and `raw-<id>-*.txt` (UAT) for a
   `pingstation_json` input ([the inputs file](#the-inputs-file)). Each of
   these is a stream of its own.
 
 skycue-rawrec's raw captures (readsb's Beast output and dump978's raw lines)
-belong under `RECORD_DIR/raw`: run it with `--dir RECORD_DIR/raw
---max-gb RECORD_MAX_GB --retention-dir RECORD_DIR` ([above](#raw-capture-and-replay)).
+belong under `recording.dir/raw`: run it with `--dir recording.dir/raw
+--max-gb recording.max_gb --retention-dir recording.dir` ([above](#raw-capture-and-replay)).
 Every file rotates at 256 MiB or after an hour; the stamp is the UTC time a
 file was opened. The record layouts are in
 [recording-format.md](recording-format.md).
 
 ### Disk planning
 
-Set `RECORD_MAX_GB` to the disk space the recordings may use (say 80% of
+Set `recording.max_gb` to the disk space the recordings may use (say 80% of
 the file system's free space): skycued, and skycue-rawrec when given
 `--max-gb`, then delete the
-oldest recordings under `RECORD_DIR` and `RECORD_DIR/raw` whenever they start
+oldest recordings under `recording.dir` and `recording.dir/raw` whenever they start
 a new file, keeping the total within the budget (details in
 [recording-format.md](recording-format.md#retention-record_max_gb)). Only
 files with skycue's own names are counted or deleted, so a copy you want to
-keep is safe once renamed or moved elsewhere. With `RECORD_MAX_GB=0` (the
+keep is safe once renamed or moved elsewhere. With `recording.max_gb = 0` (the
 default) nothing is deleted and recordings grow without bound, so prune them
 yourself (a cron job removing files older than N days, say). Allow for the
 current files on top of the budget: up to 256 MiB per stream until the next
@@ -945,12 +1008,12 @@ files. Rough growth:
 - **Received stream:** about 450 bytes per observation for JSONL and CSV
   together. readsb emits roughly one observation per aircraft per second, so
   100 aircraft in view is about 45 kB/s, 160 MB/hour, 4 GB/day.
-- **Sent stream:** smaller, bounded by `MIN_INTERVAL_S` per aircraft (at most
-  one update per aircraft per `MIN_INTERVAL_S`, plus keyframes every
-  `KEYFRAME_INTERVAL_S`).
+- **Sent stream:** smaller, bounded by `cues.min_interval_s` per aircraft (at most
+  one update per aircraft per `cues.min_interval_s`, plus keyframes every
+  `cues.keyframe_interval_s`).
 - **pingStation capture** (`"capture":true`): one line per datagram or TCP
   block, about twice the bytes received plus some 80 bytes. The raw frames of
-  a `pingstation_json` input (`RECORD_RAW=yes`) are about 30 to 90 bytes per
+  a `pingstation_json` input (`recording.raw = true`) are about 30 to 90 bytes per
   frame.
 - **Raw Beast capture** (skycue-rawrec): about 15-25 bytes per Mode S
   message. A busy site decodes on the order of 1,500 messages a second
@@ -964,7 +1027,7 @@ lasts; cues keep being forwarded.
 
 ## Curated lists
 
-`ALLOW_LIST_FILE` and `BLOCK_LIST_FILE` name plain-text files, read when
+`filters.allow_list_file` and `filters.block_list_file` name plain-text files, read when
 skycued starts and again within about 2 s of an edit:
 
 ```
@@ -976,20 +1039,20 @@ G-ABCD
 
 A blocked aircraft is never sent. An allow-listed one is sent whatever its
 range or elevation. An aircraft that is on neither list is sent if it is
-within `MAX_RANGE_NM` and above `MIN_ELEVATION_DEG`. An aircraft without a
+within `filters.max_range_nm` and above `filters.min_elevation_deg`. An aircraft without a
 position is never sent. A bad entry stops skycued with exit status 2, naming
 the file and line.
 
 ## The web UI
 
-skycued serves a live map on `WEB_PORT` (default 8080). Open
-`http://<WEB_BIND>:<WEB_PORT>/` in a browser: with the defaults that is
-`http://127.0.0.1:8080/` on the receiver itself. `WEB_BIND=127.0.0.1` (the
-default) only accepts connections from that machine; set `WEB_BIND=0.0.0.0`
-in `skycue.conf` (and restart skycued) to reach the page from another
+skycued serves a live map on `web.port` (default 8080). Open
+`http://<web.bind>:<web.port>/` in a browser: with the defaults that is
+`http://127.0.0.1:8080/` on the receiver itself. `web.bind = 127.0.0.1` (the
+default) only accepts connections from that machine; set `web.bind = 0.0.0.0`
+in `skycue.toml` (and restart skycued) to reach the page from another
 machine, as `http://<receiver address>:8080/`. There is no login: anyone who
 can reach the port can change the filters and lists, so open it only to a
-network you trust. `WEB_PORT=0` turns the page off. The page loads nothing
+network you trust. `web.port = 0` turns the page off. The page loads nothing
 from the internet; the API behind it is in [web-api.md](web-api.md).
 The page's files are in `<prefix>/share/skycue/www` (`www/` in the source
 tree; Leaflet under `vendor/leaflet/`, ECharts under `vendor/echarts/`).
@@ -1083,7 +1146,7 @@ trails are drawn. Its settings are remembered per browser with the rest of
 Display filters (localStorage `skycue.view`), are part of the saved views
 (and so of the number keys 1 to 9), and Clear (or the 0 key) puts them back
 to their defaults; they do not count in the Display filters heading's number
-of active settings. The trail length is `TRAIL_SECONDS` in every setting.
+of active settings. The trail length is `web.trail_seconds` in every setting.
 
 **Show**: `all` (the default) draws a trail for every aircraft on the map;
 `selected` only for the selected aircraft; `off` none. The positions are
@@ -1139,7 +1202,7 @@ line at once.
 
 Each aircraft is a plane symbol pointing along its track, labelled with its
 callsign (or registration, or hex), with a trail of the last
-`TRAIL_SECONDS` of positions. A position the aircraft could not have flown
+`web.trail_seconds` of positions. A position the aircraft could not have flown
 to (over 1500 kt from the trail's last point, taken over at least a second,
 or more than 5 s earlier than it: a looped replay starting again, a bad
 position, a reused hex) starts the trail afresh there instead of joining it;
@@ -1150,15 +1213,15 @@ out of the trail. The colour is skycued's decision for it:
 |--------|----------|---------|
 | green | `sent` | within range and elevation: cues are sent |
 | blue | `allow_listed` | on the allow list: sent whatever its range or elevation |
-| grey | `out_of_range` | farther than `MAX_RANGE_NM`: not sent |
-| orange | `below_elevation` | lower than `MIN_ELEVATION_DEG`: not sent |
+| grey | `out_of_range` | farther than `filters.max_range_nm`: not sent |
+| orange | `below_elevation` | lower than `filters.min_elevation_deg`: not sent |
 | red | `blocked` | on the block list: never sent |
 | purple | anything else | a decision this page does not know (a newer skycued) |
 
 A marker glows briefly each time a cue is sent for it. The blue dashed
-circle is `MAX_RANGE_NM` around the receiver (the white symbol); the orange
+circle is `filters.max_range_nm` around the receiver (the white symbol); the orange
 dotted circle is where an aircraft at the altitude chosen under "Elevation-
-mask ring for aircraft at" sits exactly at `MIN_ELEVATION_DEG`: inside it,
+mask ring for aircraft at" sits exactly at `filters.min_elevation_deg`: inside it,
 an aircraft at that altitude is above the mask. Aircraft without a position
 are only in the table.
 
@@ -1193,26 +1256,29 @@ On the left, under **Output filters**:
   Enter (or leave the field) to apply it, to every aircraft at once. While
   you type nothing is sent; a value out of range is marked in red with a
   message under the inputs and is not applied. The ↺ button goes back to
-  the `skycue.conf` value.
+  the `skycue.toml` value.
 - **Allow list** and **Block list**: the entries in force, each with a ×
   to remove it; type a hex address or registration and press Add (or
   Enter) to add one.
 
-These changes do not touch `skycue.conf` or the list files: they go to
-`skycue.runtime.json` (the "overlay"), in `STATE_DIR` when that is set, else
-next to `skycue.conf`, which skycued also reads at startup, so they survive
+These changes do not touch `skycue.toml` or the list files: they go to
+`skycue.runtime.json` (the "overlay"), in `paths.state_dir` when that is set, else
+next to `skycue.toml`, which skycued also reads at startup, so they survive
 a restart. While the overlay holds
-anything, "Unsaved changes: the running filters differ from skycue.conf and
+anything, "Unsaved changes: the running filters differ from the baseline and
 the list files" is shown and **Save as baseline** is enabled. Save as
-baseline (after a confirmation) writes the running values into
-`MAX_RANGE_NM` / `MIN_ELEVATION_DEG` and into the list files, and clears
-the overlay. With `STATE_DIR` empty (the build-tree run) the two values are
-rewritten in `skycue.conf` itself; with `STATE_DIR` set (the packages)
-`skycue.conf` is left untouched and they go to
-`STATE_DIR/skycue.overrides.conf`, which skycued reads after `skycue.conf`
-(see [Where the files are](#where-the-files-are)). What could not be saved
+baseline (after a confirmation) writes the running values into the list files
+and into `skycue.overrides.toml`, and clears the overlay. skycued never
+writes `skycue.toml`: the overrides file is its own, written whole, in
+`paths.state_dir` when that is set, else beside `skycue.toml`, and skycued
+reads it after `skycue.toml`, so its values win
+(see [Where the files are](#where-the-files-are)). Where that directory is
+not writable (the packages' `/etc/skycue`, for a hand install that left
+`paths.state_dir` empty) the save fails with a message that names the path and
+says to set `paths.state_dir`. A filter key that the environment or `--set`
+pins is skipped. What could not be saved
 (for instance a list
-whose `*_LIST_FILE` key is empty) is listed under the button and stays in the
+whose `filters.allow_list_file` or `filters.block_list_file` key is empty) is listed under the button and stays in the
 overlay. The details, and what happens on a hand edit of these files while
 skycued runs, are in [web-api.md](web-api.md#runtime-overlay-skycueruntimejson).
 
@@ -1359,7 +1425,7 @@ Below it, the sections:
   altitude band (a click on a bar opens the aircraft that made it in the
   table below); histograms of range and elevation; and a map of where
   positions were heard, in 0.05° cells. Range, elevation and the sectors
-  need `RECEIVER_LAT`/`RECEIVER_LON`.
+  need `receiver.lat`/`receiver.lon`.
 - **Fleet**: histograms of altitude and ground speed; the observations by
   emitter category, source and address type; the aircraft by estimated
   class and by country of registration. A click on a category slice, a
@@ -1388,7 +1454,7 @@ are estimates, by the Display filters' rules (from the ICAO address, the
 callsign, the registration and the category; an address that is not an
 ICAO address gets no country).
 
-The ledger holds at most `STATS_AIRCRAFT_MAX` aircraft (default 20000).
+The ledger holds at most `stats.aircraft_max` aircraft (default 20000).
 Past it the 5 % heard longest ago are forgotten, and the table says how
 many under it: "and N older aircraft (dropped from the ledger when it was
 full)". A forgotten aircraft heard again gets a new entry and counts as new
@@ -1411,7 +1477,7 @@ Three cards have a **CSV** button that downloads what they show as a file:
 - **Range by bearing and altitude** (Coverage): one row per 5° sector and
   altitude band, 72 × 8 rows (`sector_start_deg`, `band`, `max_range_nm`,
   `holder`, `time`, `n`; an empty cell has `n` 0), as
-  `skycue-coverage-<date>.csv`. It needs `RECEIVER_LAT`/`RECEIVER_LON`.
+  `skycue-coverage-<date>.csv`. It needs `receiver.lat`/`receiver.lon`.
 
 `<date>` is the UTC date of the data clock. The files are RFC 4180 CSV
 (a header row, quotes where a cell needs them, CRLF line ends) in UTF-8
@@ -1425,15 +1491,15 @@ numbers offline, from the files alone.
 
 ### Statistics file
 
-skycued keeps the statistics in `STATS_FILE`, by default
+skycued keeps the statistics in `stats.file`, by default
 `skycue.stats.json` beside the overlay, `skycue.runtime.json`: in
-`STATE_DIR` when that is set, else next to `skycue.conf`. A relative path
-is taken from `STATE_DIR` when it is set, else from `skycue.conf`'s
+`paths.state_dir` when that is set, else next to `skycue.toml`. A relative path
+is taken from `paths.state_dir` when it is set, else from `skycue.toml`'s
 directory. It reads the file at startup and logs `<file>: statistics of N
-aircraft since <time>`. It writes the file every `STATS_SAVE_S` seconds
+aircraft since <time>`. It writes the file every `stats.save_s` seconds
 (default 300) when anything changed, at a clean stop, and at once on a
 reset, so a crash loses at most the last interval. A failed save logs one
-WARN and is retried every interval. `STATS_FILE=` (empty) keeps the
+WARN and is retried every interval. `stats.file = ""` keeps the
 statistics in memory only: they start empty at every start. All three keys
 are read at startup: a change needs a restart.
 
@@ -1442,12 +1508,12 @@ minutes and 30 days of hours) is about 6 MB, and reading it at startup
 takes about 150 MB of memory for a moment. A file that cannot be read back
 (malformed, a version this skycued does not know, or over 32 MiB) is
 renamed `<file>.bad`, replacing an older one, with one ERROR line, and the
-statistics start empty; the next save writes a new file. A `STATS_FILE`
+statistics start empty; the next save writes a new file. A `stats.file`
 that is not a regular file (a directory, `/dev/null`) is left alone: one
 ERROR line, and the statistics are kept in memory only for that run. A save
 that writes more than 24 MiB logs a WARN (at the 100,000-aircraft maximum
 the file is roughly 27 MB, close to the 32 MiB a load accepts). A file with more
-aircraft than `STATS_AIRCRAFT_MAX` (after lowering it) loses the oldest at
+aircraft than `stats.aircraft_max` (after lowering it) loses the oldest at
 load, counted as evicted.
 
 Every time is skycued's data clock (the newest observation's time), so a
@@ -1606,8 +1672,8 @@ changed, e.g. `14:10:41Z ui: max range 150 → 20 nm`. The oldest entry is
 the state skycued started with. List changes are not in it.
 
 **Cue clients**: every open cue TCP connection, with its endpoint,
-`accepted` (it connected to `CUE_TCP_PORT`) or `dialled` (one of
-`CUE_TCP_CONNECT`), when it connected and the bytes written to it, then
+`accepted` (it connected to `cues.tcp_port`) or `dialled` (one of
+`cues.tcp_connect`), when it connected and the bytes written to it, then
 every UDP target with the datagrams sent to it. The filter changes and the
 clients are refreshed every 5 s while the tab is open.
 
@@ -1615,17 +1681,20 @@ clients are refreshed every 5 s while the tab is open.
 
 The side panel's fifth tab (**Config** in the header opens and closes it).
 Shows the configuration skycued is running with (`GET /api/config`, see
-docs/web-api.md); nothing on it can be changed. Each `skycue.conf` key has
-its running value and its **source**: `conf` (set in `skycue.conf`),
-`default` (not set there, so the built-in default applies), `overrides`
-(set in `skycue.overrides.conf` in `STATE_DIR`, which save as baseline
-writes when `STATE_DIR` is set, and whose values replace `skycue.conf`'s),
-`cli` (a command-line option such as `--web-port` overrides it) or
-`overlay` (a range or elevation filter changed in the UI and not yet saved
-as baseline). Keys marked restart take effect only when skycued restarts;
-the four filter keys (`MAX_RANGE_NM`, `MIN_ELEVATION_DEG`,
-`ALLOW_LIST_FILE`, `BLOCK_LIST_FILE`) apply at once. Above the keys are the
-daemon's version, uptime, the config, inputs and overlay files (and
+docs/web-api.md); nothing on it can be changed. Each `skycue.toml` key, by its
+dotted name, has its running value and its **source**: `conf` (set in
+`skycue.toml`), `default` (not set there, so the built-in default applies),
+`overrides` (set in `skycue.overrides.toml`, which save as baseline writes,
+and whose values replace `skycue.toml`'s), `env` (a `SKYCUE_*` environment
+variable), `--set` (a `--set key=value` argument), `flag` (a command-line
+option such as `--web-port`) or `runtime` (a range or elevation filter
+changed in the UI and not yet saved as baseline). A key set by `env` or
+`--set` is pinned: the page shows it read-only, and a filter key that is
+pinned cannot be changed from the page. Keys marked restart take effect only
+when skycued restarts; the four filter keys (`filters.max_range_nm`,
+`filters.min_elevation_deg`, `filters.allow_list_file`,
+`filters.block_list_file`) apply at once. Above the keys are the
+daemon's version, uptime, the config, inputs, overrides and overlay files (and
 whether the overlay holds unsaved changes), the www and recording
 directories with the files being recorded, the log level, how it runs
 (**Runs**: a replay of a named file with its speed and looping, or live and
@@ -1634,23 +1703,22 @@ whether it connects to readsb and dump978, so a replay or `--no-readsb` /
 and the report locations it holds: **Learned locations** (how many and the
 `fisb-locations.json` they are kept in, or "not saved this run") and
 **Operator locations** (how many were read from the resolved
-`LOCATIONS_FILE`, with any rejected lines and ids over the cap).
+`paths.locations_file`, with any rejected lines and ids over the cap).
 
 The keys are grouped as Receiver site, Decoders, Cue outputs, Recording,
-Filters, Web and FIS-B (a key skycued has that none of these names is
-under Other). The tab asks skycued again each time it is opened and on
-**Refresh**. **Copy as text** puts the whole configuration on the
-clipboard in `skycue.conf` form: a `# <group>` line before each group, and
-before each `KEY=value` line a comment naming its source (and `, restart`),
-e.g. `# MAX_RANGE_NM: overlay` then `MAX_RANGE_NM=20`. Values with spaces
-or other characters the file needs quoted are quoted (`"..."`, or `'...'`
-when the value holds `"`, `$`, `` ` `` or `\`), so the text can go into a
-`skycue.conf` as it is and skycued accepts it. A
-value the file cannot hold at all (one with both `'` and one of `"`, `$`,
-`` ` ``, `\`) is left as a comment saying so, with the value, to set by
-hand. Where the browser does not allow the clipboard (a page served over
-plain HTTP from another machine, for one), the tab says "Copy failed" and
-shows the text selected in a box to copy by hand.
+Filters, Web, Statistics, FIS-B and Paths (a key skycued has that none of
+these names is under Other). The tab asks skycued again each time it is opened
+and on **Refresh**. **Copy as text** puts the whole configuration on the
+clipboard in `skycue.toml` form: a `# <group>` line before each group, a
+`[table]` line where the table changes, and before each `key = value` line a
+comment naming its source (and `, restart`), e.g. `# filters.max_range_nm:
+runtime` then `max_range_nm = 20`. Strings are quoted, booleans are
+`true`/`false`, lists are arrays, so the text can go into a `skycue.toml` as it
+is and skycued accepts it. A value the file cannot hold is left as a comment
+saying so, with the value, to set by hand. Where the browser does not allow
+the clipboard (a page served over plain HTTP from another machine, for one),
+the tab says "Copy failed" and shows the text selected in a box to copy by
+hand.
 
 ### Map tiles (optional)
 
@@ -1658,17 +1726,17 @@ Without tiles the map is a dark background with a 1°/5° latitude/longitude
 grid and a scale bar, which is all the page needs. For coastlines and
 terrain underneath, make tiles on a connected machine with
 `scripts/maps/make-tiles.sh` and put them in `tiles/` under the map directory:
-`MAP_DIR` when it is set in `skycue.conf` (`/var/lib/skycue/maps` in the
+`paths.map_dir` when it is set in `skycue.toml` (`/var/lib/skycue/maps` in the
 packages), else `<prefix>/share/skycue/www/` (the `--www-dir` directory in a build-tree run). The overlays
-(`overlays/`, below) go in the same directory. With `MAP_DIR` set,
+(`overlays/`, below) go in the same directory. With `paths.map_dir` set,
 `/tiles/`, `/overlays/` and `/api/tiles-available` are read from it only,
-never from the www directory, and a `MAP_DIR` that does not exist is
+never from the www directory, and a `paths.map_dir` that does not exist is
 logged as a WARN at start and the map has no tiles or overlays. See
 [make-tiles.md](make-tiles.md) for the sizes. The page picks them up on its next load.
 
 With the packages, or a source install of `skycue/`, `skycue-make-maps`
-makes both the tiles and the overlays straight into `MAP_DIR` (read from
-`/etc/skycue/skycue.conf`, or `--config FILE`, or given as `--map-dir DIR`):
+makes both the tiles and the overlays straight into `paths.map_dir` (read from
+`/etc/skycue/skycue.toml`, or `--config FILE`, or given as `--map-dir DIR`):
 
 ```sh
 sudo skycue-make-maps --around 150                   # the world coarse, 150 nm around the receiver fine
@@ -1680,7 +1748,7 @@ skycue-make-maps --list                              # the regions already there
 
 `skycue-make-maps [--config FILE] [--map-dir DIR] [--cache DIR] [--container [IMAGE]] [--owner USER] [--dry-run]`
 with one of `--preset conus|europe|world`, `--around RADIUS_NM` (the
-receiver's `RECEIVER_LAT`/`RECEIVER_LON` from the config), `--around LAT LON
+receiver's `receiver.lat`/`receiver.lon` from the config), `--around LAT LON
 RADIUS_NM` or `--bbox W,S,E,N --zoom MINZ-MAXZ`; or `--list`. Runs add up:
 each first bakes the whole world at zoom 0–5 (region `global`) unless
 `tiles/meta.json` already has it, then the region asked for (`--around`:
@@ -1747,7 +1815,7 @@ page draws.
   moving.
 
 Borders and Cities are offered only when `overlays/meta.json` exists in the
-map directory (`MAP_DIR`, else `<prefix>/share/skycue/www/`) (the page asks for it once when it loads; without it the browser's
+map directory (`paths.map_dir`, else `<prefix>/share/skycue/www/`) (the page asks for it once when it loads; without it the browser's
 console shows that one request as a 404 and the two checkboxes are left out).
 Make the overlays on a connected machine, or on any machine whose cache
 already holds the three Natural Earth downloads:
@@ -1756,7 +1824,7 @@ already holds the three Natural Earth downloads:
 scripts/maps/make-overlays.sh                                   # needs ogr2ogr (GDAL) on PATH
 scripts/maps/make-overlays.sh --container ghcr.io/osgeo/gdal:ubuntu-small-3.9.3   # ogr2ogr in podman/docker
 scripts/maps/make-overlays.sh --dry-run                         # print the commands only
-cp -r www/overlays <prefix>/share/skycue/www/    # or MAP_DIR, or ./www/ for a build-tree run
+cp -r www/overlays <prefix>/share/skycue/www/    # or paths.map_dir, or ./www/ for a build-tree run
 ```
 
 `make-overlays.sh [--cache DIR] [--out DIR] [--container IMAGE] [--dry-run]`
@@ -1779,10 +1847,10 @@ up without a restart.
 (`CONN up|down`, `LOCAL-DROP` for a drop the client inferred itself):
 
 ```sh
-skycue-dump                              # connect to 127.0.0.1:30500 (CUE_TCP_PORT)
+skycue-dump                              # connect to 127.0.0.1:30500 (cues.tcp_port)
 skycue-dump --tcp radar-pc:30500 --json  # one JSON object per line
-skycue-dump --udp 0.0.0.0:40000          # receive what CUE_UDP_TARGETS sends here
-skycue-dump --tcp-listen 0.0.0.0:40001   # wait for skycued to dial in (CUE_TCP_CONNECT)
+skycue-dump --udp 0.0.0.0:40000          # receive what cues.udp_targets sends here
+skycue-dump --tcp-listen 0.0.0.0:40001   # wait for skycued to dial in (cues.tcp_connect)
 skycue-dump --count 20 --timeout 30      # stop after 20 frames or 30 s
 ```
 
@@ -1816,15 +1884,15 @@ recordings and captures of readsb's JSON port, plain or `.gz`, recognising
 each line on its own; several files are merged in time order.
 
 ```sh
-skycue-stats --config skycue.conf /data/rec/received-20261101-120000.jsonl
+skycue-stats --config skycue.toml /data/rec/received-20261101-120000.jsonl
 skycue-stats --lat 38.9 --lon -77.0 capture.jsonl.gz
-skycue-stats --config skycue.conf --json received-*.jsonl sent-*.jsonl > stats.json
+skycue-stats --config skycue.toml --json received-*.jsonl sent-*.jsonl > stats.json
 ```
 
 | option | default | meaning |
 | --- | --- | --- |
 | `--lat L --lon L` | | receiver position (overrides `--config`) |
-| `--config FILE` | | take `RECEIVER_LAT`/`RECEIVER_LON` (and `RECEIVER_ALT_M` + `ANTENNA_HEIGHT_M` for elevation) from a skycue.conf |
+| `--config FILE` | | take `receiver.lat`/`receiver.lon` (and `receiver.alt_m` + `receiver.antenna_height_m` for elevation) from a skycue.toml |
 | `--json` | | one JSON object (same sections, keys below) instead of text |
 | `--top N` | 15 | rows in the per-aircraft tables |
 | `--range-bin NM` | 10 | range histogram bin |
@@ -1849,7 +1917,7 @@ The sections (JSON keys in brackets):
    receiver; observations and distinct aircraft per bin, maximum and median.
 4. **Altitude histogram** (`altitude_histogram`): barometric, else geometric.
 5. **Elevation histogram** (`elevation_histogram`): 5° bins, as skycued's
-   `MIN_ELEVATION_DEG` filter computes it, plus the count below 0°.
+   `filters.min_elevation_deg` filter computes it, plus the count below 0°.
 6. **Coverage by azimuth** (`azimuth`): twelve 30° sectors by bearing from the
    receiver (0° = north): observations, aircraft and maximum range, as a table
    and as a bar chart of the maximum range.
@@ -1980,12 +2048,12 @@ Decoder counters:
 
 ## FIS-B weather
 
-With `FISB_ENABLE=yes` (the default) skycued decodes the FIS-B ground
+With `fisb.enable = true` (the default) skycued decodes the FIS-B ground
 uplinks that dump978-fa passes it (or that a replayed recording holds):
 NEXRAD radar and the other weather rasters, METAR/TAF/PIREP/winds text,
 and NOTAM/TFR, AIRMET, SIGMET and SUA reports with their shapes. It keeps
 the current products until they expire, records them as `fisb-*.jsonl`
-when `RECORD_FORMATS` includes `jsonl`, serves them under `/api/fisb/`, and
+when `recording.formats` includes `jsonl`, serves them under `/api/fisb/`, and
 draws them on the web map (radar on by default; NOTAM / TFR, SIGMET,
 AIRMET, CWA, SUA and the other rasters in the Layers box) and in the
 **Weather** tab of the side panel. `skycue-fisb` decodes an uplink file
@@ -1998,8 +2066,8 @@ never for flight decisions.
 METARs, TAFs, winds and PIREPs name a location id (`KPRG`) but carry no
 coordinates. skycued learns positions from the NOTAM and TFR shapes it
 decodes (airport-style ids only: `K???`, `C???`, `PA??`, `PH??`) and keeps
-them in `fisb-locations.json` in `STATE_DIR` when that is set, else next
-to `skycue.conf`: written with an atomic
+them in `fisb-locations.json` in `paths.state_dir` when that is set, else next
+to `skycue.toml`: written with an atomic
 rename at most once a minute when something new was learned, and at
 shutdown; read at startup, so coverage builds up across restarts. A
 failed write is logged once at WARN and retried. A file that does not parse
@@ -2012,14 +2080,14 @@ saved until the next start. Each of these logs one ERROR line. Deleting the
 file (with skycued stopped) forgets them. At most 20,000 learned ids are
 kept; new ones past that are ignored with one WARN (a file holding more is
 rejected as above). As with `skycue.runtime.json`, every skycued whose
-`skycue.conf` is in the same directory (or that has the same `STATE_DIR`)
+`skycue.toml` is in the same directory (or that has the same `paths.state_dir`)
 shares this one file, so a replay
 run with the live configuration adds the positions it learns to the live
 file (they are real positions, so this is harmless; give a replay its own
-configuration directory, or its own `STATE_DIR`, to keep them apart).
+configuration directory, or its own `paths.state_dir`, to keep them apart).
 
-`LOCATIONS_FILE` optionally names a CSV of your own (a relative path is
-taken from `skycue.conf`'s directory; `id,lat,lon` per line;
+`paths.locations_file` optionally names a CSV of your own (a relative path is
+taken from `skycue.toml`'s directory; `id,lat,lon` per line;
 `#` comments, blank lines and an `id,lat,lon` header are skipped), merged
 under the learned positions: a learned position wins for the same id, and
 the CSV rows are never written to `fisb-locations.json`. Lines that do not

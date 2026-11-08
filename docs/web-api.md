@@ -1,8 +1,8 @@
 # skycued web API
 
 skycued serves the web UI and its API itself: HTTP/1.1 and WebSocket on
-`WEB_BIND:WEB_PORT` (default `127.0.0.1:8080`; `--web-bind` and
-`--web-port` override them). `WEB_PORT=0` turns the server off (logged at
+`web.bind:web.port` (default `127.0.0.1:8080`; `--web-bind` and
+`--web-port` override them). `web.port = 0` turns the server off (logged at
 INFO). A port that cannot be bound is fatal at startup: skycued logs
 `cannot start: web: cannot listen on <bind>:<port>: <reason>` and exits
 with status 1, as for the cue port.
@@ -14,7 +14,7 @@ There is no authentication; see [Security](#security).
 - **No authentication.** Anyone who can reach the port can read the
   tracks and change the filters, the lists and the inputs. The UI is meant for a trusted
   network only.
-- `WEB_BIND` defaults to `127.0.0.1`: only programs on the same machine
+- `web.bind` defaults to `127.0.0.1`: only programs on the same machine
   can connect. Set it to another address (or `0.0.0.0` for every
   interface) only when every host that can reach the port may change the
   filters; otherwise reach the UI through an SSH tunnel
@@ -170,8 +170,8 @@ it. Other methods: 405 with `Allow: GET`.
  "udp": [{"endpoint": "10.0.0.9:30501", "datagrams_sent": 1270, "output": "cue-udp-1"}]}
 ```
 
-`tcp` has one entry per open connection: `direction` is `accepted` for a client that connected to `CUE_TCP_PORT`
-and `dialled` for one of `CUE_TCP_CONNECT`; `endpoint` is the peer
+`tcp` has one entry per open connection: `direction` is `accepted` for a client that connected to `cues.tcp_port`
+and `dialled` for one of `cues.tcp_connect`; `endpoint` is the peer
 (`addr:port`, an IPv6 address in brackets, or the configured `host:port` when dialled);
 `connected_since` is the wall-clock time the connection was made; and
 `bytes_sent` counts the bytes actually written to it (not those still
@@ -309,13 +309,13 @@ transparent part is not blank. URLs that 404 are remembered for 60 s. See
 - `now`: skycued's data clock (the newest observation's receive time plus
   the time since; the wall clock before any). Compare `first_seen` and
   `last_seen` with it, not with the browser's clock.
-- `receiver.alt_m` is `RECEIVER_ALT_M`, `antenna_m` is `ANTENNA_HEIGHT_M`.
+- `receiver.alt_m` is `receiver.alt_m`, `antenna_m` is `receiver.antenna_height_m`.
 - The filters object: the effective values, and `overlay_active`: the
   runtime overlay is not empty (the running configuration differs from
   the baseline files; "save as baseline" would change them).
 - The lists object: the effective allow and block lists (entries as
   written), and `overlay_active` as above.
-- `trail_seconds` is `TRAIL_SECONDS`.
+- `trail_seconds` is `web.trail_seconds`.
 - `fisb`: the [FIS-B status object](#get-apifisbstatus), the same as
   `GET /api/fisb/status` (counts and mosaic heads, never a mosaic's
   blocks). With `fisb.enable = false` it has `"enabled": false` and zeros.
@@ -343,7 +343,7 @@ The stats object:
 | `tcp_clients`, `udp_targets` | forwarder destinations now |
 | `recorder_dropped_received`, `recorder_dropped_sent` | records the recorders had to drop |
 | `web_clients` | WebSocket clients connected now |
-| `decoder` | only when some input decodes (1090, UAT or a pingStation in decode mode) ([`TRACK_DECODER=skycued`](operating.md#decoding-in-skycued)): `{"frames","crc_fail","crc_fixed","decoded","observations","evicted","keys","rebroadcast_suppressed"}`, summed over the decoding inputs; `keys` is the aircraft the decoders hold now (a gauge), `rebroadcast_suppressed` is the engine's counter above |
+| `decoder` | only when some input decodes (1090, UAT or a pingStation in decode mode) ([`inputs.decoder = "skycued"`](operating.md#decoding-in-skycued)): `{"frames","crc_fail","crc_fixed","decoded","observations","evicted","keys","rebroadcast_suppressed"}`, summed over the decoding inputs; `keys` is the aircraft the decoders hold now (a gauge), `rebroadcast_suppressed` is the engine's counter above |
 | `altitude_fit` | the fit behind estimated geometric altitudes ([Geometric altitude](operating.md#geometric-altitude)): `{"valid":false}` when there is none, else `{"valid":true,"linear":true,"a":120.5,"b":0.0125,"samples":42,"aircraft":7,"p90_ft":88.5,"age_s":3.5}`: the difference in feet is `a + b` times the barometric altitude, `linear` false (and `b` 0) for the median fallback, `samples` and `aircraft` the data in the 120 s window, `p90_ft` the 90th percentile of the residuals, `age_s` the age of the newest sample. Recomputed at most every 5 s |
 | `inputs` | `[{"id", "connected", "messages", "observations", "uplinks", "rejected"}]`: every input's live counters; an item of a decoding input also has `decoding: true`, `frames`, `crc_fail`, `crc_fixed`, `cpr_pending`, `cpr_rejected` and `unknown_type` (the full state is in [Inputs](#inputs)), in the order of `GET /api/inputs` |
 
@@ -415,7 +415,7 @@ transport, defaults included (as the inputs file stores it):
 | `edition`, `sac`, `sic` | `pingstation_cat021` | the CAT021 edition (`"2.5"`), and the SAC/SIC to expect (counted, never used to drop; `null` for none) |
 | `status_url`, `status_interval_s` | pingStation types | the device's `http://` status endpoint (`null` for none) and how often it is polled. Use the device's IP address, not a hostname: a lookup that hangs cannot be cut short, and while one is outstanding each poll is skipped and counted in `status_fail` (`last_error` "resolve still pending") |
 | `time_mode` | pingStation types | `utc` or `gps`: the clock of the device's timestamps |
-| `capture` | pingStation types, `beast_raw`, `uat_raw` | write every datagram or block received (pingStation) or every frame or line (`beast_raw`, `uat_raw`: `raw-<id>-*.bin` / `.txt`) to `RECORD_DIR`; without `RECORD_DIR` a write is a 400 "capture needs RECORD_DIR" (in the inputs file the entry is kept, with a WARN, and nothing is captured) |
+| `capture` | pingStation types, `beast_raw`, `uat_raw` | write every datagram or block received (pingStation) or every frame or line (`beast_raw`, `uat_raw`: `raw-<id>-*.bin` / `.txt`) to `recording.dir`; without `recording.dir` a write is a 400 "capture needs RECORD_DIR" (in the inputs file the entry is kept, with a WARN, and nothing is captured) |
 
 `builtin` (`true` for a built-in) and `state` are output only: a body
 with either is a `400`. `state`:
@@ -429,9 +429,9 @@ with either is a `400`. `state`:
 | `clock_offset_s` | the newest device timestamp (after the `gps` correction) minus its arrival time; absent when unknown |
 | `status_fail_streak` | status polls failed in a row |
 | `last_error` | the latest transport, parse or status error, `""` when none |
-| `frames`, `crc_fail`, `crc_fixed`, `ap_unconfirmed`, `no_position`, `cpr_pending`, `cpr_rejected`, `decoded`, `unmapped`, `unknown_type`, `evicted`, `decoder_observations`, `rs_errors` | the decoder's counters of a `beast_raw` (1090) or `uat_raw`/`dump978` (978) input under [`TRACK_DECODER=skycued`](operating.md#decoding-in-skycued): frames fed to it, failed the CRC, repaired by the CRC, address-parity frames (DF 0, 4, 16, 20) not confirmed within 60 s (not used), position messages with no position information, messages waiting for the other half of a CPR pair, CPR positions rejected, frames decoded, messages decoded but carrying no field we use, frames of a type that is not decoded, aircraft forgotten after 300 s idle (or the oldest when the table is full), observations produced (the same as `observations`), Reed-Solomon symbol errors corrected in UAT frames (the `rs=` values, summed). Present for every input, 0 when it does not decode. Also kept by a `pingstation_json` input with `source: decode` (both bands). For UAT `crc_fail` and `crc_fixed` stay 0, `unknown_type` also counts a reserved address qualifier or a length that does not fit the payload type, and `unmapped` counts a frame of payload type 7 to 10 that carries a position (its state vector is decoded and reported, the rest of its content is not; without a position it counts in `no_position`). Target State content of types 3, 4 and 6 is not decoded either, but those frames count in `decoded` |
+| `frames`, `crc_fail`, `crc_fixed`, `ap_unconfirmed`, `no_position`, `cpr_pending`, `cpr_rejected`, `decoded`, `unmapped`, `unknown_type`, `evicted`, `decoder_observations`, `rs_errors` | the decoder's counters of a `beast_raw` (1090) or `uat_raw`/`dump978` (978) input under [`inputs.decoder = "skycued"`](operating.md#decoding-in-skycued): frames fed to it, failed the CRC, repaired by the CRC, address-parity frames (DF 0, 4, 16, 20) not confirmed within 60 s (not used), position messages with no position information, messages waiting for the other half of a CPR pair, CPR positions rejected, frames decoded, messages decoded but carrying no field we use, frames of a type that is not decoded, aircraft forgotten after 300 s idle (or the oldest when the table is full), observations produced (the same as `observations`), Reed-Solomon symbol errors corrected in UAT frames (the `rs=` values, summed). Present for every input, 0 when it does not decode. Also kept by a `pingstation_json` input with `source: decode` (both bands). For UAT `crc_fail` and `crc_fixed` stay 0, `unknown_type` also counts a reserved address qualifier or a length that does not fit the payload type, and `unmapped` counts a frame of payload type 7 to 10 that carries a position (its state vector is decoded and reported, the rest of its content is not; without a position it counts in `no_position`). Target State content of types 3, 4 and 6 is not decoded either, but those frames count in `decoded` |
 | `no_raw`, `raw_duplicates` | `source: decode` pingStation inputs only: aircraft in a datagram without `rawData` (nothing to decode, not tracked), and `rawData` skipped as a byte-equal repeat of a frame decoded less than 1 s earlier (0 for every other input) |
-| `decoding` | `true` on an input that decodes (a `beast_raw`, `uat_raw` or `dump978` input under `TRACK_DECODER=skycued`, a `pingstation_json` input with `source: decode`) |
+| `decoding` | `true` on an input that decodes (a `beast_raw`, `uat_raw` or `dump978` input under `inputs.decoder = "skycued"`, a `pingstation_json` input with `source: decode`) |
 | `mlat_skipped`, `modeac_skipped`, `other_skipped` | Beast frames that are not Mode S: MLAT-timestamped frames, Mode A/C frames, anything else; they are counted, not decoded |
 | `connects`, `bytes`, `messages`, `observations`, `uplinks`, `rejected` | connections made, bytes received, messages decoded (a readsb or dump978 line, a JSON datagram, a CAT021 record), track observations and FIS-B uplinks passed on, data that could not be used |
 | `records_skipped`, `sac_sic_mismatch`, `nogo_records` | CAT021 records skipped (simulated, test or RAB records, records without an address, blocks cut short by a length error), with another SAC/SIC than configured, with the NOGO bit set |
@@ -517,8 +517,8 @@ a multicast group (`interface` only when set).
 | `host`, `port` | `tcp_connect` and unicast `udp`: the target (a name or an IPv4 address) |
 | `group`, `interface`, `ttl`, `loopback` | `udp` to a multicast group (224.0.0.0 to 239.255.255.255) instead of `host`: the local interface address, the TTL (1 to 255, default 1) and whether the sending machine's own listeners hear it (default `true`) |
 
-`builtin` (`true` for the cue outputs that `CUE_TCP_PORT`, `CUE_TCP_CONNECT`
-and `CUE_UDP_TARGETS` define) and `state` are output only. `state`:
+`builtin` (`true` for the cue outputs that `cues.tcp_port`, `cues.tcp_connect`
+and `cues.udp_targets` define) and `state` are output only. `state`:
 
 | Key | Meaning |
 |-----|---------|
@@ -599,7 +599,7 @@ The UI's live feed. Every message is one JSON text frame.
      next state arrives with the next snapshot or update.
    - `expired`: a track that was not being forwarded (so no `drop` is
      sent for it: blocked, out of range, no position...) has not been heard
-     for `TRACK_TIMEOUT_S` and left skycued's table. Remove it from the map.
+     for `cues.track_timeout_s` and left skycued's table. Remove it from the map.
    - `stats`: once a second, so a client can tell a dead connection
      (skycued stopped or the network gone without a close) by their
      absence: the page treats 5 s without one as disconnected, closes the
@@ -1028,9 +1028,9 @@ merged:
   circle and prism centres averaged; a small polygon's centroid while the
   id has no point), for airport-style ids only (4 characters `[A-Z0-9]`:
   `K???`, `C???`, `PA??`, `PH??`). Kept in `fisb-locations.json` next to
-  `skycue.conf` (saved at most once a minute when it changed, and at
+  `skycue.toml` (or in `paths.state_dir`) (saved at most once a minute when it changed, and at
   shutdown), so coverage accumulates across restarts.
-- **Operator** rows from `LOCATIONS_FILE` (a CSV `id,lat,lon`), read at
+- **Operator** rows from `paths.locations_file` (a CSV `id,lat,lon`), read at
   startup. A learned position wins over an operator row for the same id;
   operator rows are never written to `fisb-locations.json`.
 
@@ -1156,9 +1156,9 @@ data clock minus the newest NEXRAD product time.
 skycued keeps a statistics history (the stats view design, §4):
 per-minute (last 24 h) and per-hour (last 30 days) series, histograms,
 range coverage, a position grid, a signal-versus-range matrix, categorical
-counts and a ledger of every aircraft heard (at most `STATS_AIRCRAFT_MAX`,
+counts and a ledger of every aircraft heard (at most `stats.aircraft_max`,
 the 5 % heard longest ago forgotten past it, counted in `evicted`). It is
-kept in `STATS_FILE` ([operating.md](operating.md)). The routes below read
+kept in `stats.file` ([operating.md](operating.md)). The routes below read
 it; the WebSocket carries nothing of it (the Stats view polls). Every route
 but `reset` is `GET` only (any other method: `405` with `Allow: GET`); an
 unknown `/api/stats/...` path is `404`; a bad query value is `400` with the
@@ -1184,7 +1184,7 @@ table's own `last_seen` follow `from`/`to`. The histograms (`hist`),
 `counts`, `coverage`, the grid and `rssi` are whole-history since `since`.
 
 **Cost.** Loading a full file at startup takes about 150 MB of memory for
-a moment (PropertyTree); the file is written at every `STATS_SAVE_S` while
+a moment (PropertyTree); the file is written at every `stats.save_s` while
 changed, at a clean stop and at once on a reset, on the io thread (about
 half a second at the defaults in a Debug build). The responses at the
 defaults with a full store (20,000 aircraft, 40,000 grid cells, both rings
@@ -1226,7 +1226,7 @@ second is in [`from`, `to`].
 | `now` | the data clock |
 | `receiver` | `{lat, lon}` of the receiver; absent without receiver coordinates (then range, elevation, coverage and the signal matrix stay empty) |
 | `aircraft_total` | ledger entries now (all time) |
-| `evicted` | ledger entries forgotten to keep the ledger at `STATS_AIRCRAFT_MAX` |
+| `evicted` | ledger entries forgotten to keep the ledger at `stats.aircraft_max` |
 | `uat_seen` | a UAT observation, frame or FIS-B product has ever been counted (the page shows the UAT charts only then) |
 | `range.from`, `range.to` | the range used, defaults filled in |
 | `range.res` | the series the totals come from: `minute` when `to` − `from` <= 24 h, else `hour` |
@@ -1366,7 +1366,7 @@ Body `{}` (any other body `400`), with the same guard as every change
 ([Security](#security): `415` without the JSON `Content-Type`, `403` from
 another origin). Empties the whole history (series, histograms, coverage,
 grid, counts, ledger, `evicted`) and sets `since` and `series_since` to the
-data clock; `STATS_FILE` is rewritten at once, and skycued logs
+data clock; `stats.file` is rewritten at once, and skycued logs
 `stats: reset by ui <client address:port>` at INFO. Answers
 `{"ok":true}` once done. Another reset within 5 s is `429`
 `{"error":"the statistics were reset less than 5 s ago"}` and changes

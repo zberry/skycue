@@ -3,7 +3,7 @@
 FIS-B (Flight Information Service - Broadcast) is the weather and
 aeronautical information that FAA ground stations broadcast on 978 MHz as
 UAT ground uplinks. dump978-fa already hands skycued every uplink frame;
-with `FISB_ENABLE=yes` (the default) skycued decodes them into products,
+with `fisb.enable = true` (the default) skycued decodes them into products,
 keeps the current picture with its expiry rules, records it, serves it over
 the web API and draws it on the web map. This guide is for the operator
 (what you will and will not see) and for the developer (where the rules
@@ -20,10 +20,10 @@ Products can be missing, late or wrong. Never use it for a flight decision.
 
 ## Turning it on and off
 
-| Key (skycue.conf) | Default | Meaning |
+| Key (`[fisb]` in skycue.toml) | Default | Meaning |
 | --- | --- | --- |
-| `FISB_ENABLE` | `yes` | decode uplinks (live, from dump978-fa's raw port, or the `uat_uplink` records of a replayed recording). `no`: uplinks are still recorded in the received stream, but nothing is decoded; `/api/fisb/status` says `"enabled": false` |
-| `FISB_EXPERIMENTAL` | `no` | `yes`: also decode the layouts marked **[U]** below (APDU time options 1 and 3, raster blocks at or above 60° N). For testing only |
+| `fisb.enable` | `true` | decode uplinks (live, from dump978-fa's raw port, or the `uat_uplink` records of a replayed recording). `false`: uplinks are still recorded in the received stream, but nothing is decoded; `/api/fisb/status` says `"enabled": false` |
+| `fisb.experimental` | `false` | `true`: also decode the layouts marked **[U]** below (APDU time options 1 and 3, raster blocks at or above 60° N). For testing only |
 
 Both are read at start; change them and restart skycued.
 
@@ -67,10 +67,10 @@ These are **[U]** in the reference: no fixture contains them and the open
 decoders disagree, so skycued counts and drops them rather than guess.
 
 - **APDU time options 1 and 3** (seconds-resolution times). Counted in
-  `skipped_experimental`; decoded with `FISB_EXPERIMENTAL=yes`. Both
+  `skipped_experimental`; decoded with `fisb.experimental = true`. Both
   fixtures use options 0 and 2 only.
 - **Raster blocks at or above 60° N** (the doubled block lattice). Counted in
-  `blocks.high_lat_skipped`; decoded with `FISB_EXPERIMENTAL=yes`. Neither
+  `blocks.high_lat_skipped`; decoded with `fisb.experimental = true`. Neither
   fixture has data there.
 - **Overlay operator 1 (TRA/TMOA, products 16/17)**: two graphic records
   meant to be combined into one shape. skycue shows each record as its own
@@ -179,7 +179,7 @@ times, so a replay reproduces what the live run showed.
 
 ## Recordings
 
-With `FISB_ENABLE=yes` and `jsonl` in `RECORD_FORMATS`, skycued writes a
+With `fisb.enable = true` and `jsonl` in `recording.formats`, skycued writes a
 third stream, `fisb-YYYYMMDD-HHMMSS.jsonl`, next to `received-*` and
 `sent-*`, rotated with them. Each record is `"time"` (the data clock) and
 `"type"`:
@@ -193,7 +193,7 @@ third stream, `fisb-YYYYMMDD-HHMMSS.jsonl`, next to `received-*` and
 | `fisb_expired` | an item left the store (`reason` `expired` or `cancelled`) |
 
 The raw uplinks themselves stay in the received stream as `uat_uplink`
-records whatever `FISB_ENABLE` says, so a recording can always be decoded
+records whatever `fisb.enable` says, so a recording can always be decoded
 later. Field-by-field: [recording-format.md](recording-format.md#fis-b-stream).
 
 ## Web API and WebSocket
@@ -307,5 +307,5 @@ for any recording with `uat_uplink` records
   `tests/ui/` (replaying `received-with-uplinks.jsonl` and
   `received-tg30.jsonl`).
 - A layout marked **[U]** in the reference stays behind
-  `FISB_EXPERIMENTAL` until a capture confirms it; add the capture as a
+  `fisb.experimental` until a capture confirms it; add the capture as a
   fixture, then move the tag to **[V]**.

@@ -8,7 +8,7 @@
 - **sent**: every track update the forwarder sent, every drop, and every filter change.
   `skycued` does not record its periodic keyframe bursts (they repeat what was already
   sent); the `keyframe` event exists in the format for other writers.
-- **fisb** (JSONL only; with `FISB_ENABLE=yes` and `jsonl` in `RECORD_FORMATS`): the
+- **fisb** (JSONL only; with `fisb.enable = true` and `jsonl` in `recording.formats`): the
   FIS-B weather decoded from the uplinks, one record per change of the current picture
   (see [FIS-B stream](#fis-b-stream)).
 
@@ -47,9 +47,9 @@ escaped 0x1a does the cut frame swallow the start of the next one, coming out as
 malformed frame whose CRC readsb rejects. In a `.txt` the cut line runs into the next
 one, which leaves that one merged line unusable.
 
-## Retention (`RECORD_MAX_GB`)
+## Retention (`recording.max_gb`)
 
-With `RECORD_MAX_GB` above 0, the recordings under `RECORD_DIR` and `RECORD_DIR/raw`
+With `recording.max_gb` above 0, the recordings under `recording.dir` and `recording.dir/raw`
 together are kept within that many gigabytes (10^9 bytes): each time skycued or
 skycue-rawrec starts a new file (at startup and on every rotation), it deletes the
 oldest files until the total is within the budget. Only files named as above count
@@ -63,15 +63,15 @@ file of each stream (the whole prefix, so `raw-ps-north` and `raw-ps-south` coun
 apart) and extension in each of the two directories, by name and by modification time; and any file modified in the last 10 minutes (the
 other process may be writing it, and a clock step or a restart can give a live file an
 older name). So the total can stay above the budget by those files; skycued then logs
-a WARN ("still N bytes over the cap; only open/recent files remain"). `RECORD_DIR/raw`
+a WARN ("still N bytes over the cap; only open/recent files remain"). `recording.dir/raw`
 is not followed when it is a symlink. Each deletion is logged at INFO. A recording that
 is being replayed when retention deletes it stays readable to the replay until it
-closes the file (POSIX unlink). `RECORD_MAX_GB=0` (the default) deletes nothing.
+closes the file (POSIX unlink). `recording.max_gb = 0` (the default) deletes nothing.
 
 ## pingStation capture and raw frames
 
 These files are written by skycued's pingStation inputs (see
-[operating.md](operating.md#the-inputs-file)) directly under `RECORD_DIR`, with the
+[operating.md](operating.md#the-inputs-file)) directly under `recording.dir`, with the
 rotation (256 MiB / 1 h), write-failure handling and retention above. They are
 flushed about once a second and when the input stops.
 
@@ -97,7 +97,7 @@ synthesises pingStation traffic from a received-stream recording or a readsb
 JSON capture instead. See
 [operating.md](operating.md#a-pingstation-without-hardware-skycue-pingsim).
 
-**Raw frames** (`RECORD_RAW=yes`, `pingstation_json` inputs): the `detail.rawData`
+**Raw frames** (`recording.raw = true`, `pingstation_json` inputs): the `detail.rawData`
 frames of each datagram, written in skycue-rawrec's line formats so that
 `skycue-rawplay` replays them through readsb and
 dump978 like any raw capture:
@@ -113,7 +113,7 @@ dump978 like any raw capture:
 A frame's time is the device's `timeOfReceptionS`/`NS` when `utcSync` is 1 and that
 time passes the clock check, else skycued's receive time. `rawData` of any other
 length is not written and is counted in the input's `raw_unknown_len`. With
-`RECORD_RAW=yes` but no `RECORD_DIR`, skycued logs one WARN at startup and writes
+`recording.raw = true` but no `recording.dir`, skycued logs one WARN at startup and writes
 nothing.
 
 ```sh
@@ -123,10 +123,10 @@ skycue-rawplay --raw-in 127.0.0.1:30001 --uat-listen 30978 \
 
 ## Raw capture of `beast_raw` and `uat_raw` inputs
 
-An input of type `beast_raw` or `uat_raw` with `"capture": true` (needs `RECORD_DIR`, see
+An input of type `beast_raw` or `uat_raw` with `"capture": true` (needs `recording.dir`, see
 [operating.md](operating.md#raw-inputs-and-endpoint-keys)) writes the messages it received,
 after framing and before anything else, in the raw tools' formats, directly under
-`RECORD_DIR`, with the rotation (256 MiB / 1 h), write-failure handling and retention above:
+`recording.dir`, with the rotation (256 MiB / 1 h), write-failure handling and retention above:
 
 - `beast_raw`: `raw-<id>-YYYYMMDD-HHMMSS[-N].bin`, the Beast frames in arrival order, escaped as
   on the wire, exactly the bytes a `beast` output serves (so a capture and a consumer of the same

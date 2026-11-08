@@ -41,7 +41,8 @@ sudo apt install ./skycue_${v}-1~deb${d}u1_$(dpkg --print-architecture).deb
 ```
 
 This installs `skycued`, the `skycue-*` tools, the web page, the config
-`/etc/skycue/skycue.conf` and the systemd unit `skycued.service` (in
+`/etc/skycue/skycue.toml` (created from the example the package ships in
+`/usr/share/skycue/skycue.toml.example`, with the package paths set) and the systemd unit `skycued.service` (in
 `/lib/systemd/system` on Debian 12, `/usr/lib/systemd/system` on Debian 13;
 on a merged-/usr system both name the same directory). It creates the
 system user `skycue` and the state directory `/var/lib/skycue` (with `maps/`
@@ -51,32 +52,71 @@ needs your receiver's position first. It installs no decoder and changes nothing
 ### 2. Edit the config
 
 ```sh
-sudoedit /etc/skycue/skycue.conf
+sudoedit /etc/skycue/skycue.toml
 ```
 
 Set at least these lines (the values here are examples):
 
-```ini
+```toml
+[receiver]
 # Your antenna, in decimal degrees (required).
-RECEIVER_LAT=51.4700
-RECEIVER_LON=-0.4543
-# The machine readsb runs on: 127.0.0.1 when it is this one.
-READSB_HOST=127.0.0.1
-# no when there is no 978 MHz (UAT) receiver, which is everyone outside the USA.
-DUMP978_ENABLE=no
+lat = 51.4700
+lon = -0.4543
+
+[inputs.readsb]
+# The machine readsb runs on: "127.0.0.1" when it is this one.
+host = "127.0.0.1"
+
+[inputs.dump978]
+# false when there is no 978 MHz (UAT) receiver, which is everyone outside the USA.
+enable = false
 ```
 
+The keys already exist in the file, grouped in these tables: change their
+values rather than adding a second copy (a key given twice stops skycued).
+
 To let skycued decode the 1090 MHz frames itself instead of reading readsb's
-JSON, add `TRACK_DECODER=skycued` and, when readsb's Beast output is not on
-port 30005, `READSB_BEAST_PORT`. Both are optional (defaults `readsb` and
+JSON, set `inputs.decoder = "skycued"` and, when readsb's Beast output is not on
+port 30005, `inputs.readsb.beast_port`. Both are optional (defaults `"readsb"` and
 30005) and take effect at a restart; see
 [Decoding in skycued](operating.md#decoding-in-skycued).
 
-`RECEIVER_ALT_M` and `ANTENNA_HEIGHT_M` sharpen the elevation angles;
-`MAX_RANGE_NM` and `MIN_ELEVATION_DEG` set what is forwarded. Every key is
+`receiver.alt_m` and `receiver.antenna_height_m` sharpen the elevation angles;
+`filters.max_range_nm` and `filters.min_elevation_deg` set what is forwarded. Every key is
 described in the file and in [operating.md](operating.md#config-keys-that-matter).
 skycued keeps its own files (inputs, statistics, the filters you change in
-the page) in `/var/lib/skycue` and never writes to `/etc/skycue/skycue.conf`.
+the page) in `/var/lib/skycue` and never writes to `/etc/skycue/skycue.toml`: the filters you save from the
+page go to `skycue.overrides.toml` there.
+
+#### Overriding a key for one run
+
+Any key can be changed for one run without editing the file, with
+`--set table.key=value` on skycued's command line or a `SKYCUE_TABLE_KEY`
+environment variable (for example `skycued --config /etc/skycue/skycue.toml
+--set web.port=8081`); see [Overriding a key for one run](operating.md#overriding-a-key-for-one-run).
+A key set that way is read-only in the page.
+
+#### Converting an old skycue.conf
+
+Earlier builds read `skycue.conf`, a file of `KEY=value` lines. `skycued
+--convert-conf skycue.conf > skycue.toml` prints the TOML equivalent of one
+(the example with your values filled in; the comments you wrote are not
+carried over, and stderr says how many were dropped). An unknown key or a
+malformed line exits with status 2 and names the line. Check the result with
+`skycued --config skycue.toml --check-inputs`. The Debian and RHEL packages do
+this once on upgrade, as the next section says; `--convert-conf` is a
+one-time aid and goes in a later release.
+
+#### Upgrading a package from the `skycue.conf` releases
+
+When the package finds an `/etc/skycue/skycue.conf` and no edited
+`skycue.toml`, it converts the old file into `/etc/skycue/skycue.toml`,
+renames the old one `skycue.conf.converted`, and prints one line about it (a
+`skycue.overrides.conf` in `/var/lib/skycue` is converted to
+`skycue.overrides.toml` the same way). A `skycue.toml` you have already edited
+is left alone, with a notice; the old file stays and you can convert it by
+hand as above. If the conversion fails, the upgrade still succeeds and the
+message says what to fix.
 
 ### 3. Turn on the decoder output skycue reads
 
@@ -116,13 +156,13 @@ sudo sed -i '/^NET_OPTIONS=.*uat_in/!s/^NET_OPTIONS="\(.*\)"$/NET_OPTIONS="\1 --
 sudo systemctl restart readsb
 ```
 
-and keep `DUMP978_ENABLE=yes`. Without a 978 MHz receiver set
-`DUMP978_ENABLE=no` in `/etc/skycue/skycue.conf`.
+and keep `inputs.dump978.enable = true`. Without a 978 MHz receiver set
+`inputs.dump978.enable = false` in `/etc/skycue/skycue.toml`.
 
 Check:
 
 ```sh
-skycued --config /etc/skycue/skycue.conf --check-inputs
+skycued --config /etc/skycue/skycue.toml --check-inputs
 ```
 
 #### readsb inside ultrafeeder (Docker)
@@ -146,7 +186,7 @@ services:
 docker compose up -d
 ```
 
-Set `READSB_HOST` to the machine Docker runs on: `127.0.0.1` when skycue
+Set `inputs.readsb.host` to the machine Docker runs on: `127.0.0.1` when skycue
 runs there too (and then `127.0.0.1:30047:30047` in `ports:` keeps the port
 off the network), else that machine's address.
 
@@ -154,8 +194,8 @@ With a dump978 container feeding ultrafeeder (`adsb,dump978,30978,uat_in`
 in `ULTRAFEEDER_CONFIG`, or `dump978,30978,uat_in` in
 `READSB_NET_CONNECTOR`), UAT aircraft already reach skycue through
 ultrafeeder's readsb. Publish the dump978 container's raw port as well, so
-skycue can count and decode the uplinks, and set `DUMP978_HOST` to the
-Docker machine like `READSB_HOST`:
+skycue can count and decode the uplinks, and set `inputs.dump978.host` to the
+Docker machine like `inputs.readsb.host`:
 
 ```yaml
 services:
@@ -168,12 +208,12 @@ services:
 docker compose up -d
 ```
 
-Without a dump978 container set `DUMP978_ENABLE=no`.
+Without a dump978 container set `inputs.dump978.enable = false`.
 
 Check:
 
 ```sh
-skycued --config /etc/skycue/skycue.conf --check-inputs
+skycued --config /etc/skycue/skycue.toml --check-inputs
 ```
 
 #### PiAware (dump1090-fa)
@@ -219,14 +259,14 @@ SkyAware978 reads) already serves the raw port 30978, which skycue reads
 directly for the uplinks. To see the UAT aircraft on skycue's map as well,
 add `--net-connector 127.0.0.1,30978,uat_in` to the `ExecStart=` line of
 `readsb-skycue` above (then `sudo systemctl daemon-reload` and
-`sudo systemctl restart readsb-skycue`) and keep `DUMP978_ENABLE=yes`.
-Without one set `DUMP978_ENABLE=no`. Do not edit `/etc/default/dump978-fa`
+`sudo systemctl restart readsb-skycue`) and keep `inputs.dump978.enable = true`.
+Without one set `inputs.dump978.enable = false`. Do not edit `/etc/default/dump978-fa`
 on a PiAware image: PiAware rewrites it at boot from its own settings.
 
 Check:
 
 ```sh
-skycued --config /etc/skycue/skycue.conf --check-inputs
+skycued --config /etc/skycue/skycue.toml --check-inputs
 ```
 
 #### What the check prints
@@ -245,9 +285,9 @@ dump978 127.0.0.1:30978: connected
 
 A line with an error instead of `connected` (`Connection refused`, a name
 that does not resolve, a timeout) names the host and port skycue tried: fix
-the decoder block or `READSB_HOST` / `DUMP978_HOST`, or set
-`DUMP978_ENABLE=no` when there is no UAT receiver, and run the check again.
-With `DUMP978_ENABLE=no` there is no `dump978` line.
+the decoder block or `inputs.readsb.host` / `inputs.dump978.host`, or set
+`inputs.dump978.enable = false` when there is no UAT receiver, and run the check again.
+With `inputs.dump978.enable = false` there is no `dump978` line.
 
 ### 4. Start skycue
 
@@ -259,8 +299,8 @@ sudo systemctl start skycued
 systemctl status skycued
 ```
 
-`journalctl -u skycued` shows its log. A config error (an empty
-`RECEIVER_LAT`, say) stops it at once with one line naming the file and the
+`journalctl -u skycued` shows its log. A config error (a
+`receiver.lat` left at 0.0, say) stops it at once with one line naming the file and the
 key; fix the file and `sudo systemctl restart skycued`.
 
 ### 5. Bake the map
@@ -361,7 +401,7 @@ sudo dnf install ./skycue-${v}-1.el$(rpm -E %rhel).x86_64.rpm
 ```
 
 It installs the same files in the same places as the Debian package
-(`/etc/skycue/skycue.conf`, `/var/lib/skycue`, the `skycue` user, the unit)
+(`/etc/skycue/skycue.toml`, `/var/lib/skycue`, the `skycue` user, the unit)
 but leaves the unit disabled, as the distribution's preset does for new
 services. Follow the Debian steps
 [2. Edit the config](#2-edit-the-config) and
@@ -408,13 +448,13 @@ they are GDAL 3.1 or newer (`gdalinfo --version`); EPEL is not required.
 No container either? Bake on another machine (any Linux with GDAL or
 podman, using the source tarball's `scripts/maps/skycue-make-maps`, no install
 needed) and copy the result into `/var/lib/skycue/maps`. On the other
-machine, with this machine's `skycue.conf` copied next to the unpacked
+machine, with this machine's `skycue.toml` copied next to the unpacked
 source tarball:
 
 ```sh
 v=0.1.0
 tar -xzf skycue-${v}.tar.gz
-skycue-${v}/scripts/maps/skycue-make-maps --config skycue.conf --map-dir maps --owner "$(id -un)" --around 250
+skycue-${v}/scripts/maps/skycue-make-maps --config skycue.toml --map-dir maps --owner "$(id -un)" --around 250
 tar -C maps -czf skycue-maps.tar.gz .
 ```
 
@@ -531,42 +571,42 @@ examples; the keys are the ones described in
 [2. Edit the config](#2-edit-the-config)):
 
 ```sh
-cp packaging/skycue.conf.example skycue.conf
-sed -i -e 's|^RECEIVER_LAT=$|RECEIVER_LAT=51.4700|' -e 's|^RECEIVER_LON=$|RECEIVER_LON=-0.4543|' skycue.conf
-sed -i -e "s|^MAP_DIR=\$|MAP_DIR=$PWD/maps|" skycue.conf
+cp packaging/skycue.toml.example skycue.toml
+sed -i -e 's|^lat = 0\.0|lat = 51.4700|' -e 's|^lon = 0\.0|lon = -0.4543|' skycue.toml
+sed -i -e "s|^map_dir = \"\"|map_dir = \"$PWD/maps\"|" skycue.toml
 ```
 
-Also set `READSB_HOST` if readsb runs on another machine, and
-`DUMP978_ENABLE=no` if you have no 978 MHz (UAT) receiver, which is
-everyone outside the USA. `MAP_DIR` must be an absolute directory: the
+Also set `inputs.readsb.host` if readsb runs on another machine, and
+`inputs.dump978.enable = false` if you have no 978 MHz (UAT) receiver, which is
+everyone outside the USA. `paths.map_dir` must be an absolute directory: the
 third command points it at `maps` here, which the map step below fills.
 Check that skycued can reach the decoders, then run it:
 
 ```sh
-build/skycued/skycued --config ./skycue.conf --check-inputs
-build/skycued/skycued --config ./skycue.conf --www-dir www
+build/skycued/skycued --config ./skycue.toml --check-inputs
+build/skycued/skycued --config ./skycue.toml --www-dir www
 ```
 
 Open <http://127.0.0.1:8080/>. Stop it with Ctrl-C. To see the page
 before any decoder is set up, replay the sample capture the tests use by
 adding `--replay tests/fixtures/readsb-sample.jsonl --replay-loop` to the
 second command. If port 8080 or the cue port (30500) is taken, add
-`--web-port 8081` or `--cue-tcp-port 0` (or set `WEB_PORT` / `CUE_TCP_PORT`
-in the config).
+`--web-port 8081` or `--cue-tcp-port 0` (or set `web.port` / `cues.tcp_port`
+in the config, or pass `--set web.port=8081`).
 
 The map script runs from the source tree too, against the same config. It
 needs GDAL, or `--container` and podman (see [5. Bake the map](#5-bake-the-map)
 and [RHEL](#rhel)); `--dry-run` shows what it would do without either:
 
 ```sh
-scripts/maps/skycue-make-maps --config ./skycue.conf --around 250
+scripts/maps/skycue-make-maps --config ./skycue.toml --around 250
 ```
 
 The page picks the maps up on its next load, without a restart.
 
 What this leaves out: no system user, no systemd unit, nothing in
 `/usr/local` or `/etc`. The state skycued keeps (its inputs file,
-statistics, learned report locations) goes next to `skycue.conf`, and the
+statistics, learned report locations) goes next to `skycue.toml`, and the
 allow and block list files, if you use them, are taken from the current
 directory, so start it from the same place each time. It stops
 when you close the terminal. And skycue only reads what the decoders
@@ -585,9 +625,9 @@ sudo cmake --install build
 
 This installs the programs in `/usr/local/bin`, the page in
 `/usr/local/share/skycue/www`, the example config
-`/usr/local/etc/skycue/skycue.conf.example`, and the unit in
+`/usr/local/etc/skycue/skycue.toml.example`, and the unit in
 `/usr/local/lib/systemd/system` (which systemd also searches), running
-`/usr/local/bin/skycued --config /usr/local/etc/skycue/skycue.conf`.
+`/usr/local/bin/skycued --config /usr/local/etc/skycue/skycue.toml`.
 
 A package would create the user and the state directory; here they are
 made by hand, and the config gets the same four paths the packaged one has:
@@ -597,29 +637,29 @@ sudo useradd --system --user-group --home-dir /var/lib/skycue --no-create-home -
 sudo install -d -o skycue -g skycue -m 0755 /var/lib/skycue /var/lib/skycue/maps /var/lib/skycue/recordings
 sudo install -o skycue -g skycue -m 0644 /dev/null /var/lib/skycue/allow.list
 sudo install -o skycue -g skycue -m 0644 /dev/null /var/lib/skycue/block.list
-sudo cp /usr/local/etc/skycue/skycue.conf.example /usr/local/etc/skycue/skycue.conf
-sudo sed -i -e 's|^STATE_DIR=$|STATE_DIR=/var/lib/skycue|' -e 's|^MAP_DIR=$|MAP_DIR=/var/lib/skycue/maps|' -e 's|^ALLOW_LIST_FILE=$|ALLOW_LIST_FILE=allow.list|' -e 's|^BLOCK_LIST_FILE=$|BLOCK_LIST_FILE=block.list|' /usr/local/etc/skycue/skycue.conf
-grep -E '^(STATE_DIR|MAP_DIR|ALLOW_LIST_FILE|BLOCK_LIST_FILE)=' /usr/local/etc/skycue/skycue.conf
+sudo cp /usr/local/etc/skycue/skycue.toml.example /usr/local/etc/skycue/skycue.toml
+sudo sed -i -e 's|^state_dir = ""|state_dir = "/var/lib/skycue"|' -e 's|^map_dir = ""|map_dir = "/var/lib/skycue/maps"|' -e 's|^allow_list_file = ""|allow_list_file = "allow.list"|' -e 's|^block_list_file = ""|block_list_file = "block.list"|' /usr/local/etc/skycue/skycue.toml
+grep -E '^(state_dir|map_dir|allow_list_file|block_list_file) =' /usr/local/etc/skycue/skycue.toml
 sudo systemctl daemon-reload
 ```
 
 Then the same steps as for a package, with the config at
-`/usr/local/etc/skycue/skycue.conf`: set the receiver and the decoder keys
+`/usr/local/etc/skycue/skycue.toml`: set the receiver and the decoder keys
 as in [2. Edit the config](#2-edit-the-config) (`sudoedit
-/usr/local/etc/skycue/skycue.conf`), turn on the decoder output
+/usr/local/etc/skycue/skycue.toml`), turn on the decoder output
 ([3.](#3-turn-on-the-decoder-output-skycue-reads)), then:
 
 ```sh
-skycued --config /usr/local/etc/skycue/skycue.conf --check-inputs
+skycued --config /usr/local/etc/skycue/skycue.toml --check-inputs
 sudo systemctl enable --now skycued
-sudo skycue-make-maps --config /usr/local/etc/skycue/skycue.conf --around 250
+sudo skycue-make-maps --config /usr/local/etc/skycue/skycue.toml --around 250
 ```
 
 On RHEL, sudo's `secure_path` leaves out `/usr/local/bin`, so name the
 script in full and add `--container`, as in [RHEL](#rhel):
 
 ```sh
-sudo /usr/local/bin/skycue-make-maps --config /usr/local/etc/skycue/skycue.conf --container --around 250
+sudo /usr/local/bin/skycue-make-maps --config /usr/local/etc/skycue/skycue.toml --container --around 250
 ```
 
 Then open <http://127.0.0.1:8080/>.
@@ -631,23 +671,23 @@ receiver itself can open it. To open it from other machines, listen on
 every interface and restart skycued:
 
 ```sh
-sudo sed -i 's/^WEB_BIND=.*/WEB_BIND=0.0.0.0/' /etc/skycue/skycue.conf
+sudo sed -i 's/^bind = .*/bind = "0.0.0.0"/' /etc/skycue/skycue.toml
 sudo systemctl restart skycued
 ```
 
 To serve it on another port, for example because 8080 is taken, set
-`WEB_PORT` the same way (the two can be changed together):
+`web.port` the same way (the two can be changed together):
 
 ```sh
-sudo sed -i 's/^WEB_PORT=.*/WEB_PORT=8081/' /etc/skycue/skycue.conf
+sudo sed -i 's/^port = 8080/port = 8081/' /etc/skycue/skycue.toml
 sudo systemctl restart skycued
 ```
 
-(from source: `/usr/local/etc/skycue/skycue.conf`; run from the build tree,
-`skycue.conf` in the directory you started it from, then stop and start it
+(from source: `/usr/local/etc/skycue/skycue.toml`; run from the build tree,
+`skycue.toml` in the directory you started it from, then stop and start it
 again). Then open `http://<receiver address>:<port>/`, `:8080` unless you
 changed it. With firewalld (the RHEL default), also open the port, the
-one in `WEB_PORT` (8081 here):
+one in `web.port` (8081 here):
 
 ```sh
 sudo firewall-cmd --permanent --add-port=8081/tcp
@@ -657,4 +697,4 @@ sudo firewall-cmd --reload
 There is no login: anyone who can reach the port can see the traffic and
 change the filters and the allow and block lists, which change what is
 forwarded to your cue clients. Open it only to a network you trust.
-`WEB_PORT=0` turns the page off.
+`web.port = 0` turns the page off.

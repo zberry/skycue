@@ -260,8 +260,9 @@ int main(int argc, char** argv)
             }
             changed.clear();
         }
-        if (second)
-        printSummary(states);
+        if (second) {
+            printSummary(states);
+        }
 
         std::this_thread::sleep_until(next);
         next += tick;

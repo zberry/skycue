@@ -390,8 +390,8 @@ complete examples in `examples/`:
 
 `examples/ecef_consumer.cpp` keeps its callbacks thin (store, mark changed),
 ticks at 10 Hz, picks the highest-elevation target every tick, and once a second calls
-`expire()`, prints the pointing line (the target propagated to now) (with
-`--sensor LAT,LON,H_M`) and a summary line. A `~` in front of a value marks
+`expire()`, prints a summary line and, with `--sensor LAT,LON,H_M`, the pointing
+line for the target propagated to now. A `~` in front of a value marks
 it as derived rather than reported. Against a running skycued, with the sensor
 at the receiver's position:
 

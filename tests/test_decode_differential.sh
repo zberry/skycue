@@ -99,7 +99,7 @@ kill "$sk" 2>/dev/null; wait "$sk" 2>/dev/null
 keep=()
 for p in "${bg_pids[@]}"; do [ "$p" != "$sk" ] && keep+=("$p"); done
 bg_pids=("${keep[@]}")
-[ -n "$(rcv)" ] || fail "no received-*.jsonl under RECORD_DIR"
+[ -n "$(rcv)" ] || fail "no received-*.jsonl under recording.dir"
 python3 -I "$fixtures/reduce_received.py" "$(rcv)" "$tmp/ours.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
   || fail "reduce_received.py failed"
 echo "ours: $(cat "$tmp/reduce.log") (received lines $(wc -l < "$(rcv)"))"

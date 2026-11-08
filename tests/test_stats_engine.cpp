@@ -428,7 +428,7 @@ BOOST_AUTO_TEST_CASE(source_lost_expiry_counted)
 
 BOOST_AUTO_TEST_CASE(source_lost_drop_all_counted)
 {
-    // Connected, then lost for TRACK_TIMEOUT_S while the track stays fresh:
+    // Connected, then lost for cues.track_timeout_s while the track stays fresh:
     // dropAllForwarded(source_lost) drops it, and the store counts it so.
     FakeSource* src = nullptr;
     Config cfg = baseConfig();

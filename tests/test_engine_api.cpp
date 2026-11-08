@@ -462,7 +462,7 @@ BOOST_AUTO_TEST_CASE(expired_event_for_unforwarded_track)
     fx.t.call([&] {
         sink.attach(*fx.engine);
         fake->connection(true);
-        // Both heard 10 s ago (TRACK_TIMEOUT_S is 5): they expire on the next tick.
+        // Both heard 10 s ago (cues.track_timeout_s is 5): they expire on the next tick.
         TrackObservation f = nearbyObservation(far.address, 0.6);  // 39 nm: out of range, never sent
         f.received_time -= 10s;
         f.position_time = f.received_time;

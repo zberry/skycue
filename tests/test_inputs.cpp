@@ -702,7 +702,7 @@ BOOST_AUTO_TEST_CASE(create_invalid_400_message_verbatim)
         m.on([&](InputManager& im) { return im.create(capture); });
         BOOST_FAIL("capture without a record dir accepted");
     } catch (const InputDefError& e) {
-        BOOST_TEST(std::string(e.what()) == "capture needs RECORD_DIR");
+        BOOST_TEST(std::string(e.what()) == "capture needs recording.dir");
     }
     InputDef reserved = psJson("ps", freeUdpPort());
     reserved.id = "readsb";
@@ -1011,7 +1011,7 @@ BOOST_AUTO_TEST_CASE(capture_without_record_dir_in_file_keeps_inputs)
         log = cap.text();
     }
     std::size_t warns = 0;
-    const std::string warn = "capture needs RECORD_DIR: not capturing";
+    const std::string warn = "capture needs recording.dir: not capturing";
     for (auto at = log.find(warn); at != std::string::npos; at = log.find(warn, at + 1))
         ++warns;
     BOOST_TEST(warns == 2u, log);  // the load, the hand edit
@@ -1555,14 +1555,14 @@ BOOST_AUTO_TEST_CASE(output_on_cue_port_rejected)
     TempDir tmp;
     auto cfg = fileConfig(tmp);
     const uint16_t cue = freeTcpPort(), web = freeTcpPort();
-    cfg.reserved_ports = {{"tcp", cue, "the cue stream (CUE_TCP_PORT)"}, {"tcp", web, "the web server (WEB_PORT)"}};
+    cfg.reserved_ports = {{"tcp", cue, "the cue stream (cues.tcp_port)"}, {"tcp", web, "the web server (web.port)"}};
     Mgr m(t, cfg);
     try {
         m.on([&](InputManager& im) { return im.createOutput(beastOut("bo", cue)); });
         BOOST_FAIL("output on the cue port");
     } catch (const InputDefError& e) {
         BOOST_TEST(std::string(e.what()) ==
-                   "port " + std::to_string(cue) + "/tcp is already used by the cue stream (CUE_TCP_PORT)");
+                   "port " + std::to_string(cue) + "/tcp is already used by the cue stream (cues.tcp_port)");
     }
     BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.createOutput(beastOut("bw", web)); }), InputDefError);
     BOOST_TEST(!exists(cfg.inputs_file));
@@ -1759,7 +1759,7 @@ BOOST_AUTO_TEST_CASE(builtin_dump978_stays_enabled_when_the_file_does_not_disabl
     }
 }
 
-// TRACK_DECODER: the built-in readsb.
+// inputs.decoder: the built-in readsb.
 BOOST_AUTO_TEST_CASE(builtin_readsb_becomes_beast_raw)
 {
     skycued::Config c;
@@ -1843,7 +1843,7 @@ BOOST_AUTO_TEST_CASE(skycued_with_readsb_input_warns)
     BOOST_TEST(contains(w[0], "'rs2'"));
     BOOST_TEST(contains(w[0], "'readsb'"));
 
-    // Under TRACK_DECODER=readsb the manager adds none of this.
+    // Under inputs.decoder=readsb the manager adds none of this.
     IoThread t2;
     TempDir tmp2, logs2;
     auto cfg2 = fileConfig(tmp2);
@@ -1855,7 +1855,7 @@ BOOST_AUTO_TEST_CASE(skycued_with_readsb_input_warns)
         Mgr m(t2, cfg2, [&](InputManager& im) { im.addBuiltin(fakeReadsb(hub)); });
         log2 = cap.text();
     }
-    BOOST_TEST(!contains(log2, "TRACK_DECODER"), log2);
+    BOOST_TEST(!contains(log2, "inputs.decoder"), log2);
 }
 
 BOOST_AUTO_TEST_CASE(json_output_idle_under_skycued_warns)

@@ -177,7 +177,7 @@ struct WsClient {
 };
 
 struct FisbWebOptions {
-    bool fisb = true;         // FISB_ENABLE
+    bool fisb = true;         // fisb.enable
     bool replay = true;       // replay the fixture unpaced, else a FakeSource
     bool start_engine = true; // else startEngine() later (to connect a client first)
     std::string recording = kReceivedWithUplinks;  // what replay replays
@@ -955,7 +955,7 @@ BOOST_AUTO_TEST_CASE(locations_persisted_and_reloaded, *skycue_test::needs_fixtu
     }
 }
 
-// LOCATIONS_FILE rows fill in what was not learned; learned positions win; the operator rows are not saved.
+// paths.locations_file rows fill in what was not learned; learned positions win; the operator rows are not saved.
 BOOST_AUTO_TEST_CASE(operator_file_merged_under_learned, *skycue_test::needs_fixture("fisb/tg30.978"))
 {
     TempDir dir;
@@ -1057,7 +1057,7 @@ BOOST_AUTO_TEST_CASE(locations_save_failure_warned_once, *skycue_test::needs_fix
     BOOST_TEST(linesWith(err.text(), "fisb locations not saved") == 1u, err.text());
 }
 
-// A directory where a locations file should be: LOCATIONS_FILE throws; the learned path is left alone.
+// A directory where a locations file should be: paths.locations_file throws; the learned path is left alone.
 BOOST_AUTO_TEST_CASE(locations_paths_that_are_directories)
 {
     TempDir dir;
@@ -1122,7 +1122,7 @@ BOOST_AUTO_TEST_CASE(unreadable_locations_file_set_aside, *skycue_test::needs_fi
     BOOST_TEST(savedIds(file).count("KZZZ") == 0u);
 }
 
-// LOCATIONS_FILE that cannot be read stops the start.
+// paths.locations_file that cannot be read stops the start.
 BOOST_AUTO_TEST_CASE(unreadable_operator_file_throws)
 {
     TempDir dir;

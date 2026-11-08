@@ -82,14 +82,19 @@ print(statistics.median(a for a, _ in p), statistics.median(b for _, b in p))' "
   # run (a): skycued decodes the sample
   local uat_port cue_port api_port
   uat_port=$(free_port); cue_port=$(free_port); api_port=$(free_port)
-  cat > "$d/skycue.conf" <<EOF
-RECEIVER_LAT=$ref_lat
-RECEIVER_LON=$ref_lon
-TRACK_DECODER=skycued
-CUE_TCP_PORT=$cue_port
-WEB_PORT=$api_port
-RECORD_DIR=$d/rec
-RECORD_FORMATS=jsonl
+  cat > "$d/skycue.toml" <<EOF
+[receiver]
+lat = $ref_lat
+lon = $ref_lon
+[inputs]
+decoder = "skycued"
+[cues]
+tcp_port = $cue_port
+[web]
+port = $api_port
+[recording]
+dir = "$d/rec"
+formats = ["jsonl"]
 EOF
   cat > "$d/diff.inputs.json" <<EOF
 {"version":2,
@@ -101,7 +106,7 @@ EOF
 EOF
   "$rawplay" --uat-listen "$uat_port" --wait-clients 1 --speed "$speed" "$sample" >"$tmp/play.log" 2>&1 &
   local play=$!; bg_pids+=("$play")
-  "$skycued" --no-readsb --no-uat --config "$d/skycue.conf" --inputs-file "$d/diff.inputs.json" \
+  "$skycued" --no-readsb --no-uat --config "$d/skycue.toml" --inputs-file "$d/diff.inputs.json" \
     >"$tmp/skycued.log" 2>&1 &
   local sk=$!; bg_pids+=("$sk")
   api_up() { curl -fs -o /dev/null "http://127.0.0.1:$api_port/api/outputs"; }
@@ -127,7 +132,7 @@ EOF
   local keep=() p
   for p in "${bg_pids[@]}"; do [ "$p" != "$sk" ] && keep+=("$p"); done
   bg_pids=("${keep[@]}")
-  [ -n "$(rcv)" ] || fail "$name: no received-*.jsonl under RECORD_DIR"
+  [ -n "$(rcv)" ] || fail "$name: no received-*.jsonl under recording.dir"
   python3 -I "$fixtures/reduce_received.py" --uat "$(rcv)" "$d/ours.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
     || fail "$name: reduce_received.py --uat failed"
   echo "ours: $(cat "$tmp/reduce.log") (received lines $(wc -l < "$(rcv)"))"

@@ -10,7 +10,7 @@
 //      parses comes back equal through overlayJson
 //   3  fisb::LocationIndex::loadLearned (fisb-locations.json); after a load
 //      that succeeds, loading learnedJson() again leaves it unchanged
-//   4  fisb::LocationIndex::loadOperatorCsv (the LOCATIONS_FILE CSV); the
+//   4  fisb::LocationIndex::loadOperatorCsv (the paths.locations_file CSV); the
 //      count it returns is at most the number of lines
 //   5  IdList::parse (allow and block lists, filters.hpp)
 // Each mode catches only the exception type its parser documents; anything

@@ -388,7 +388,7 @@ BOOST_AUTO_TEST_CASE(capture_tcp_writes_framed_blocks_only)
     BOOST_TEST((l2->bytes == b2));
 }
 
-// ---------------------------------------------------------------- RECORD_RAW
+// ---------------------------------------------------------------- recording.raw
 
 BOOST_AUTO_TEST_CASE(raw_frames_written_in_rawplay_formats)
 {
@@ -479,7 +479,7 @@ BOOST_AUTO_TEST_CASE(record_raw_without_record_dir_warns_once)
     BOOST_REQUIRE(::chdir(cwd) == 0);
     std::size_t warns = 0;
     for (const auto& l : lines(log))
-        if (contains(l, "RECORD_RAW"))
+        if (contains(l, "recording.raw"))
             ++warns;
     BOOST_TEST(warns == 1u, log);
     BOOST_TEST(dirEntries(tmp.path).empty());

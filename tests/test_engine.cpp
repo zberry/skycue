@@ -648,7 +648,7 @@ BOOST_AUTO_TEST_CASE(dedupe_same_input_not_duplicate)
 BOOST_AUTO_TEST_CASE(two_inputs_same_aircraft_send_rate_bounded)
 {
     // a asserts on_ground, squawk and callsign; b carries positions only. b
-    // must not make those fields flap and so bypass MIN_INTERVAL_S.
+    // must not make those fields flap and so bypass cues.min_interval_s.
     Config cfg = baseConfig();
     cfg.min_interval_s = 1;
     std::map<std::string, FakeInput*> in;
@@ -697,7 +697,7 @@ BOOST_AUTO_TEST_CASE(two_inputs_same_aircraft_send_rate_bounded)
 BOOST_AUTO_TEST_CASE(lagging_observation_times_still_resend_at_max_interval)
 {
     // Observations stamped 0.5 s behind the data clock do not move it, but
-    // MAX_INTERVAL_S resends must still happen. Timing-tolerant (no clock
+    // cues.max_interval_s resends must still happen. Timing-tolerant (no clock
     // can be injected into the engine cheaply): it waits up to 8 s for two
     // resends, which the stalled clock never sends at all, and checks they
     // are max-interval resends, not at the 100 ms observation rate.
@@ -1110,7 +1110,7 @@ BOOST_AUTO_TEST_CASE(estimate_after_reported_expires)
         src->connection(true);
         src->emit(geomObs(id.address, t0, 30000, true, 0));  // reported, diff truthDiff(30000)
     });
-    std::this_thread::sleep_for(100ms);  // past MIN_INTERVAL_S
+    std::this_thread::sleep_for(100ms);  // past cues.min_interval_s
     fx.t.call([&] {
         // 61 s later, baro only, moved: the reported value is too old to stand
         src->emit(geomObs(id.address, t0 + 61s, 30000, false, 0.01));

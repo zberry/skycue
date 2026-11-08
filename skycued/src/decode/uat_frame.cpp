@@ -1,5 +1,6 @@
 #include "decode/uat_frame.hpp"
 
+#include <cerrno>
 #include <cmath>
 #include <cstdlib>
 
@@ -31,6 +32,9 @@ constexpr unsigned kNsSignBit = 98;               // DO-282B SV airborne velocit
 constexpr unsigned kNsBit = 99, kEwSignBit = 109, kEwBit = 110, kVelLen = 10;
 constexpr unsigned kVrSrcBit = 120, kVrSignBit = 121, kVrBit = 122, kVrLen = 9;
 constexpr unsigned kGndSpeedBit = 98, kGndSpeedLen = 11;  // DO-282B SV surface
+// Track/heading type: 0 n/a, 1 true track, 2 magnetic heading, 3 true heading;
+// only 1 is a track. golden-arbitrated (Task 5a)
+constexpr uint32_t kGndTypeTrack = 1;
 constexpr unsigned kGndTypeBit = 109, kGndTrackBit = 111, kGndTrackLen = 9;
 constexpr unsigned kMsBit = 136;                  // DO-282B MS: byte 17
 constexpr unsigned kEmergencyBit = 184;           // golden-arbitrated (Task 5a)
@@ -88,10 +92,15 @@ std::optional<QualifierMap> mapQualifier(AddressQualifier q)
     return std::nullopt;
 }
 
-uint8_t UatFrame::payload_type() const { return static_cast<uint8_t>(bytes[0] >> 3); }
-AddressQualifier UatFrame::qualifier() const { return static_cast<AddressQualifier>(bytes[0] & 7u); }
+uint8_t UatFrame::payload_type() const { return bytes.empty() ? 0 : static_cast<uint8_t>(bytes[0] >> 3); }
+AddressQualifier UatFrame::qualifier() const
+{
+    return bytes.empty() ? AddressQualifier::reserved : static_cast<AddressQualifier>(bytes[0] & 7u);
+}
 uint32_t UatFrame::address() const
 {
+    if (bytes.size() < 4)
+        return 0;
     return (static_cast<uint32_t>(bytes[1]) << 16) | (static_cast<uint32_t>(bytes[2]) << 8) | bytes[3];
 }
 
@@ -145,13 +154,16 @@ std::optional<UatFrame> parseDownlinkLine(std::string_view line)
         if ((key != "rssi" && key != "rs") || val.empty())
             continue;
         char* e = nullptr;
-        const double d = std::strtod(val.c_str(), &e);
-        if (e != val.c_str() + val.size() || !std::isfinite(d))
-            continue;
-        if (key == "rssi")
-            f.rssi_dbfs = d;
-        else
-            f.rs_errors = static_cast<int>(d);
+        if (key == "rssi") {
+            const double d = std::strtod(val.c_str(), &e);
+            if (e == val.c_str() + val.size() && std::isfinite(d))
+                f.rssi_dbfs = d;
+        } else {
+            errno = 0;
+            const long n = std::strtol(val.c_str(), &e, 10);
+            if (e == val.c_str() + val.size() && errno == 0 && n >= 0 && n <= 1000)
+                f.rs_errors = static_cast<int>(n);
+        }
     }
     return f;
 }
@@ -160,6 +172,8 @@ StateVector decodeStateVector(const UatFrame& f)
 {
     const auto& b = f.bytes;
     StateVector sv;
+    if (b.size() < 18)  // a UatFrame from parseDownlinkLine always has 18 or 34 bytes
+        return sv;
     const uint32_t latRaw = bitsAt(b, kLatBit, kLatLen), lonRaw = bitsAt(b, kLonBit, kLonLen);
     sv.nic = static_cast<uint8_t>(bitsAt(b, kNicBit, kNicLen));
     if (!(latRaw == 0 && lonRaw == 0 && sv.nic == 0)) {
@@ -201,7 +215,7 @@ StateVector decodeStateVector(const UatFrame& f)
         const uint32_t sp = bitsAt(b, kGndSpeedBit, kGndSpeedLen);
         if (sp != 0)
             sv.gs_kt = static_cast<float>(sp - 1);
-        if (bitsAt(b, kGndTypeBit, 2) == 0)  // track type 0 = true track angle
+        if (bitsAt(b, kGndTypeBit, 2) == kGndTypeTrack)
             sv.track_deg = static_cast<float>(bitsAt(b, kGndTrackBit, kGndTrackLen) * 360.0 / 512.0);
     }
     return sv;

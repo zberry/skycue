@@ -243,7 +243,7 @@ BOOST_AUTO_TEST_CASE(ag2_uses_ground_layout)
     UatSpec s;
     s.ag = 2;
     s.ground_speed_kt = 25;
-    s.track_type = 0;
+    s.track_type = 1;
     s.track_deg = 90.0;
     // bytes that would be airborne velocity must not leak into the ground reading
     const auto sv = decodeStateVector(frameOf(s));
@@ -275,7 +275,7 @@ BOOST_AUTO_TEST_CASE(ground_track_type_not_track_gives_no_track)
     s.ag = 2;
     s.ground_speed_kt = 12;
     s.track_deg = 200.0;
-    for (unsigned t : {1u, 2u, 3u}) {
+    for (unsigned t : {0u, 2u, 3u}) {
         s.track_type = t;
         const auto sv = decodeStateVector(frameOf(s));
         BOOST_TEST(*sv.gs_kt == 12.0f);
@@ -426,4 +426,28 @@ BOOST_AUTO_TEST_CASE(ms_absent_for_types_0_2_4_5_6)
     UatSpec s;
     s.type = 3;
     BOOST_TEST(frameOf(s).hasMs());
+}
+
+BOOST_AUTO_TEST_CASE(short_byte_vector_does_not_read_out_of_bounds)
+{
+    for (std::size_t n : {0u, 1u, 3u, 4u, 17u}) {
+        UatFrame f;
+        f.bytes.assign(n, 0xFF);
+        (void)f.payload_type();
+        (void)f.qualifier();
+        BOOST_TEST(f.address() == (n >= 4 ? 0xFFFFFFu : 0u));
+        BOOST_TEST(!f.lengthMatchesType());
+        const auto sv = decodeStateVector(f);
+        BOOST_TEST(!sv.lat);
+        BOOST_TEST(!sv.altitude_ft);
+        BOOST_TEST(!decodeModeStatus(f));
+        BOOST_TEST(!decodeAuxSv(f));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(parse_line_rs_not_integer_ignored)
+{
+    const auto f = parseDownlinkLine(toHex(encodeUat(UatSpec{})) + ";rs=1e30");
+    BOOST_REQUIRE(f);
+    BOOST_TEST(!f->rs_errors);
 }

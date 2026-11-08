@@ -15,7 +15,8 @@
 //     airborne: 98 N/S sign (1 = south), 99-108 N/S (10 bits), 109 E/W sign
 //       (1 = west), 110-119 E/W (10 bits), 120 vertical-rate source (1 =
 //       geometric), 121 sign (1 = down), 122-130 vertical rate (9 bits)
-//     ground:   98-108 speed (11 bits), 109-110 track type (0 = true track),
+//     ground:   98-108 speed (11 bits), 109-110 track type (1 = true track; 0 n/a, 2 magnetic heading, 3 true
+//       heading give no track; golden-arbitrated (Task 5a)),
 //       111-119 track/heading (9 bits, x 360/512)
 //   mode status   bytes 17-28 (types 1 and 3): emitter category + eight base-40
 //     characters in three 16-bit groups (bits 136-183), emergency (3 bits at
@@ -53,7 +54,9 @@ struct QualifierMap {
 std::optional<QualifierMap> mapQualifier(AddressQualifier q);  // nullopt for reserved; decoder spec §6
 
 struct UatFrame {
-    std::vector<uint8_t> bytes;          // 18 or 34
+    // 18 or 34 bytes when made by parseDownlinkLine (the intended constructor path);
+    // accessors and decoders return defaults, never read out of bounds, on shorter ones.
+    std::vector<uint8_t> bytes;
     std::optional<double> rssi_dbfs;     // from ";rssi="
     std::optional<int> rs_errors;        // from ";rs="
     uint8_t payload_type() const;        // bits 0-4

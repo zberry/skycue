@@ -12,8 +12,10 @@ namespace {
 constexpr std::chrono::seconds kDiffPairWindow{2};
 constexpr double kReportedMaxS = 60.0;
 constexpr double kBaroMaxS = 10.0;
+constexpr std::chrono::seconds kBaroNewerBy{2};
 constexpr double kOwnDiffMaxS = 300.0;
 constexpr double kDefaultSlope = 0.027;
+constexpr int32_t kUncertaintyFresh = 75;
 constexpr int32_t kUncertaintyAt60 = 125;
 constexpr int32_t kUncertaintyAt300 = 325;
 constexpr int32_t kFitUncertaintyFloor = 100;
@@ -26,8 +28,8 @@ double secondsBetween(Clock::time_point later, Clock::time_point earlier)
 
 int32_t ownDiffUncertainty(double age_s)
 {
-    if (age_s <= kReportedMaxS)
-        return kUncertaintyAt60;
+    if (age_s < kReportedMaxS)
+        return kUncertaintyFresh;
     const double f = (age_s - kReportedMaxS) / (kOwnDiffMaxS - kReportedMaxS);
     return static_cast<int32_t>(std::lround(kUncertaintyAt60 + f * (kUncertaintyAt300 - kUncertaintyAt60)));
 }
@@ -51,9 +53,14 @@ std::optional<int32_t> learnGeomDiff(GeomHistory& history, const TrackObservatio
     }
     if (history.diff_ft && geom_t < history.diff_time)
         return std::nullopt;
+    // A baro measured within 2 s of the difference pairs with it; only then is it
+    // remembered with the difference and is the difference a sample for the fit.
+    const bool paired = obs.alt_baro_ft && (geom_t > baro_t ? geom_t - baro_t : baro_t - geom_t) <= kDiffPairWindow;
     history.diff_ft = diff;
-    history.baro_at_diff_ft = obs.alt_baro_ft;
+    history.baro_at_diff_ft = paired ? obs.alt_baro_ft : std::nullopt;
     history.diff_time = geom_t;
+    if (!paired)
+        return std::nullopt;
     return diff;
 }
 
@@ -66,7 +73,8 @@ GeomResult resolveGeomAltitude(const TrackState& track, Clock::time_point now,
 
     if (l.alt_geom_ft) {
         const double age = secondsBetween(now, track.alt_geom_at);
-        if (age <= kReportedMaxS) {
+        const bool newer_baro = l.alt_baro_ft && track.alt_baro_at - track.alt_geom_at > kBaroNewerBy;
+        if (age <= kReportedMaxS && !newer_baro) {
             r.source = GeomSource::reported;
             r.alt_geom_ft = l.alt_geom_ft;
             r.age_s = age;

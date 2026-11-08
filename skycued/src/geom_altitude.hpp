@@ -31,12 +31,14 @@ struct GeomResult {
 };
 
 // Learns a difference from the observation: obs.geom_minus_baro_ft, else geom - baro when
-// both measurement times (alt_*_time, absent = received_time) are within 2 s. Updates the
-// history and returns the difference as a sample for the fit; nullopt when the observation
-// has none (or it is older than the one held).
+// both measurement times (alt_*_time, absent = received_time) are within 2 s. Always
+// records the difference in the history (unless older than the one held); returns it as a
+// sample for the fit only when the observation also carries a baro measured within 2 s of
+// the difference, nullopt otherwise.
 std::optional<int32_t> learnGeomDiff(GeomHistory& history, const TrackObservation& obs);
 
-// A reported alt_geom_ft measured <= 60 s ago is `reported`. Otherwise, with a baro <= 10 s
+// A reported alt_geom_ft measured <= 60 s ago, with no baro measured more than 2 s after it,
+// is `reported`. Otherwise, with a baro <= 10 s
 // old and the track not on the ground: own difference <= 300 s old, else the fit, else none.
 GeomResult resolveGeomAltitude(const TrackState& track, Clock::time_point now,
                                const std::optional<FitResult>& fit);

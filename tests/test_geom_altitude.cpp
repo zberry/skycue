@@ -103,22 +103,55 @@ BOOST_AUTO_TEST_CASE(no_learning_with_baro_3s_apart)
     BOOST_CHECK(!f.st().geom.diff_ft);
 }
 
-BOOST_AUTO_TEST_CASE(reported_within_60s)
+BOOST_AUTO_TEST_CASE(diff_without_paired_baro_is_learned_but_not_a_sample)
+{
+    Fixture f;
+    TrackObservation o = obsAt(kT0);
+    o.geom_minus_baro_ft = 500;  // no baro at all
+    BOOST_CHECK(!f.feed(o));
+    BOOST_CHECK_EQUAL(*f.st().geom.diff_ft, 500);
+    BOOST_CHECK(!f.st().geom.baro_at_diff_ft);
+    TrackObservation p = obsAt(kT0 + seconds(10));
+    p.geom_minus_baro_ft = 510;
+    p.alt_baro_ft = 30000;
+    p.alt_baro_time = kT0 + seconds(5);  // 5 s apart
+    BOOST_CHECK(!f.feed(p));
+    BOOST_CHECK_EQUAL(*f.st().geom.diff_ft, 510);
+    BOOST_CHECK(!f.st().geom.baro_at_diff_ft);
+}
+
+BOOST_AUTO_TEST_CASE(reported_while_no_newer_baro)
 {
     Fixture f;
     TrackObservation o = obsAt(kT0);
     o.alt_geom_ft = 31000;
     f.feed(o);
-    // Later observations merge in other fields; the geom time stays the report's.
-    f.feed(baroObs(kT0 + seconds(30), 30500));
-    const auto r = f.at(kT0 + seconds(45));
+    // No baro at all, no fit: still reported, up to and including 60 s.
+    auto r = f.at(kT0 + seconds(45));
     BOOST_CHECK(r.source == GeomSource::reported);
     BOOST_CHECK_EQUAL(*r.alt_geom_ft, 31000);
     BOOST_CHECK(!r.uncertainty_ft);
     BOOST_REQUIRE(r.age_s);
     BOOST_CHECK_CLOSE(*r.age_s, 45.0, 1e-9);
-    // Reported needs neither a baro nor a fit, and holds on the ground too.
     BOOST_CHECK(f.at(kT0 + seconds(60)).source == GeomSource::reported);
+    BOOST_CHECK(f.at(kT0 + milliseconds(60001)).source == GeomSource::none);
+    // A baro 2 s newer than the report does not displace it.
+    f.feed(baroObs(kT0 + seconds(2), 30500));
+    BOOST_CHECK(f.at(kT0 + seconds(2)).source == GeomSource::reported);
+}
+
+BOOST_AUTO_TEST_CASE(newer_baro_switches_to_own_diff_estimate)
+{
+    Fixture f;
+    TrackObservation o = obsAt(kT0);
+    o.alt_baro_ft = 30000;
+    o.alt_geom_ft = 30480;
+    f.feed(o);  // learns 480
+    f.feed(baroObs(kT0 + seconds(5), 30050));
+    const auto r = f.at(kT0 + seconds(5));
+    BOOST_CHECK(r.source == GeomSource::estimated);
+    BOOST_CHECK_EQUAL(*r.alt_geom_ft, 30050 + 480 + 1);  // no fit: b = 0.027, round(0.027*50) = 1
+    BOOST_CHECK_EQUAL(*r.uncertainty_ft, 75);
 }
 
 BOOST_AUTO_TEST_CASE(own_diff_after_60s)
@@ -261,58 +294,52 @@ BOOST_AUTO_TEST_CASE(no_baro_gives_none)
 
 BOOST_AUTO_TEST_CASE(no_jump_at_report_expiry)
 {
+    // Baro constant and refreshed each second across 60 s: the value never moves by more
+    // than 25 ft and the source flips exactly once (reported -> estimated).
     Fixture f;
     TrackObservation o = obsAt(kT0);
     o.alt_baro_ft = 30000;
     o.alt_geom_ft = 30480;
     f.feed(o);  // learns diff 480
     const auto fit = makeFit(100, 0.027);
-    // Keep the baro fresh and unchanged.
-    f.feed(baroObs(kT0 + seconds(59), 30000));
-    f.feed(baroObs(kT0 + milliseconds(59900), 30000));
-    const auto before = f.at(kT0 + milliseconds(59900), fit);
-    f.feed(baroObs(kT0 + milliseconds(60100), 30000));
-    const auto after = f.at(kT0 + milliseconds(60100), fit);
-    BOOST_CHECK(before.source == GeomSource::reported);
-    BOOST_CHECK(after.source == GeomSource::estimated);
-    BOOST_CHECK_LE(std::abs(*after.alt_geom_ft - *before.alt_geom_ft), 25);
+    std::optional<int32_t> prev;
+    int flips = 0;
+    GeomSource src = GeomSource::reported;
+    for (int ms = 0; ms <= 61000; ms += 100) {
+        const auto t = kT0 + milliseconds(ms);
+        if (ms % 1000 == 0 && ms > 0)
+            f.feed(baroObs(t, 30000));
+        const auto r = f.at(t, fit);
+        BOOST_REQUIRE(r.alt_geom_ft);
+        if (prev)
+            BOOST_CHECK_LE(std::abs(*r.alt_geom_ft - *prev), 25);
+        prev = r.alt_geom_ft;
+        if (r.source != src)
+            ++flips;
+        src = r.source;
+    }
+    BOOST_CHECK_EQUAL(flips, 1);
 }
 
 BOOST_AUTO_TEST_CASE(alternating_source_is_continuous)
 {
-    // A report every 90 s for 10 minutes, baro ramping 10 ft/s, sampled every second.
-    // A reported value is held (spec), so it lags the ramp; the one place that must jump is
-    // the flip to `estimated`, by the lag accumulated since the report (times 1 + b). Every
-    // other step stays within the baro change plus 25 ft.
+    // A report every 90 s for 10 minutes, baro ramping 10 ft/s, sampled every second:
+    // every step, flips included, stays within the baro change plus 25 ft.
     Fixture f;
     const auto fit = makeFit(100, 0.027);
     std::optional<int32_t> prev_geom;
-    std::optional<GeomSource> prev_src;
-    int32_t baro_at_report = 0;
-    int to_estimated = 0, to_reported = 0, reports = 0;
     for (int t = 0; t <= 600; ++t) {
         const int32_t baro = 20000 + 10 * t;
         TrackObservation o = baroObs(kT0 + seconds(t), baro);
-        if (t % 90 == 0) {
+        if (t % 90 == 0)
             o.alt_geom_ft = baro + 480;
-            baro_at_report = baro;
-            ++reports;
-        }
         f.feed(o);
         const auto r = f.at(kT0 + seconds(t), fit);
         BOOST_REQUIRE(r.alt_geom_ft);
-        const bool flip_to_est = prev_src && *prev_src == GeomSource::reported && r.source == GeomSource::estimated;
-        if (prev_geom) {
-            const int32_t allowed = flip_to_est ? static_cast<int32_t>((baro - baro_at_report) * 1.027) + 25 : 10 + 25;
-            BOOST_CHECK_LE(std::abs(*r.alt_geom_ft - *prev_geom), allowed);
-        }
-        if (prev_src && *prev_src != r.source)
-            (r.source == GeomSource::estimated ? to_estimated : to_reported)++;
+        if (prev_geom)
+            BOOST_CHECK_LE(std::abs(*r.alt_geom_ft - *prev_geom), 10 + 25);
         prev_geom = r.alt_geom_ft;
-        prev_src = r.source;
     }
-    BOOST_CHECK_LE(to_estimated, reports);
-    BOOST_CHECK_LE(to_reported, reports);
 }
 
 BOOST_AUTO_TEST_CASE(source_flips_once_per_report)
@@ -333,8 +360,8 @@ BOOST_AUTO_TEST_CASE(source_flips_once_per_report)
             ++flips;
         prev = r.source;
     }
-    // none->reported, then reported->estimated and estimated->reported per later report.
-    BOOST_CHECK_EQUAL(flips, 1 + 2 * (reports - 1));
+    // none->reported once; each report then flips to estimated (first newer baro) and the next report back.
+    BOOST_CHECK_EQUAL(flips, 2 * reports);
 }
 
 BOOST_AUTO_TEST_CASE(tisb_target_gets_fit_estimate)

@@ -488,14 +488,22 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
     o.on_ground = frame_ground_;
     if (!ground.value_or(false)) o.alt_baro_ft = ks.alt_baro.fresh(now_, kFieldFresh);  // ground suppresses it
     if (o.alt_baro_ft) o.alt_baro_time = ks.alt_baro.at;
+    // Rule: when the difference and alt_geom_ft are both present, alt_geom_time is the
+    // difference's time.
     o.alt_geom_ft = ks.alt_gnss.fresh(now_, kFieldFresh);
     if (o.alt_geom_ft) {
         o.alt_geom_time = ks.alt_gnss.at;
+        // A TC20-22 height pairs only with a recent difference; the baro is not its basis.
+        o.geom_minus_baro_ft = ks.gnss_diff.fresh(now_, kDerivedBaroAge);
+        if (o.geom_minus_baro_ft) o.alt_geom_time = ks.gnss_diff.at;
     } else {
         o.alt_geom_ft = ks.alt_derived.fresh(now_, kFieldFresh);
-        if (o.alt_geom_ft) o.alt_geom_time = ks.alt_derived.at;
+        o.geom_minus_baro_ft = ks.gnss_diff.fresh(now_, kFieldFresh);  // also when the baro was too old to derive a geom
+        if (o.alt_geom_ft) {
+            // A newer TC19 seen with a stale baro replaces the derived value's time with its own.
+            o.alt_geom_time = o.geom_minus_baro_ft ? ks.gnss_diff.at : ks.alt_derived.at;
+        }
     }
-    o.geom_minus_baro_ft = ks.gnss_diff.fresh(now_, kFieldFresh);  // set even when the baro was too old to derive a geom
     o.gs_kt = ks.gs.fresh(now_, kFieldFresh);
     o.track_deg = ks.track.fresh(now_, kFieldFresh);
     o.baro_rate_fpm = ks.baro_rate.fresh(now_, kFieldFresh);

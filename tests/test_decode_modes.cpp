@@ -471,6 +471,31 @@ BOOST_AUTO_TEST_CASE(tc2022_sets_alt_geom_time_no_diff) {
     BOOST_CHECK(!o.geom_minus_baro_ft);
 }
 
+BOOST_AUTO_TEST_CASE(tc19_then_tc20_15s_later_emits_no_stale_diff) {
+    Rig r;
+    r.feed(air(kP0, false, 10000), 0.0);
+    r.feed(air(kP0, true, 10000), 0.5);
+    r.feed(df17(kAddr, velocity(100, 0, 0, true, 300)), 1.0);
+    r.feed(air(kP0, true, 10600, kAddr, 20), 4.0);
+    r.feed(air(kP0, false, 10000), 16.0);  // 15 s after the TC19
+    const auto& o = r.obs.back();
+    BOOST_CHECK_EQUAL(*o.alt_geom_ft, 10600);
+    BOOST_CHECK(!o.geom_minus_baro_ft);
+}
+
+BOOST_AUTO_TEST_CASE(newer_tc19_with_stale_baro_keeps_times_consistent) {
+    Rig r;
+    r.feed(air(kP0, false, 10000), 0.0);
+    r.feed(air(kP0, true, 10000), 0.5);
+    r.feed(df17(kAddr, velocity(100, 0, 0, true, 300)), 1.0);   // derived at 1.0
+    r.feed(df17(kAddr, velocity(100, 0, 0, true, 350)), 12.0);  // baro 11.5 s old: no re-derive
+    r.feed(air(kP0, false, 10000), 12.5);
+    const auto& o = r.obs.back();
+    BOOST_REQUIRE(o.geom_minus_baro_ft && o.alt_geom_ft && o.alt_geom_time);
+    BOOST_CHECK_EQUAL(*o.geom_minus_baro_ft, 350);
+    BOOST_CHECK(*o.alt_geom_time == at(12.0));  // the newer difference's time
+}
+
 BOOST_AUTO_TEST_CASE(carried_value_keeps_its_own_time) {
     Rig r;
     r.feed(air(kP0, false, 10000), 0.0);

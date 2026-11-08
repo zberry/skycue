@@ -733,4 +733,16 @@ add_test(NAME decode_uat_golden COMMAND test_decode_uat_golden)
 set_tests_properties(decode_uat_golden PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
+# UatRawInput with the 978 decoder on (TRACK_DECODER=skycued): the dump978 sample and the
+# Stratux log through a real input, the counters and the double-feed warning.
+add_executable(test_uat_raw_decode test_uat_raw_decode.cpp)
+target_link_libraries(test_uat_raw_decode PRIVATE skycued_core Boost::unit_test_framework Threads::Threads ZLIB::ZLIB)
+target_compile_definitions(test_uat_raw_decode PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_uat_raw_decode)
+target_include_directories(test_uat_raw_decode PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
+add_test(NAME uat_raw_decode COMMAND test_uat_raw_decode)
+set_tests_properties(uat_raw_decode PROPERTIES TIMEOUT 120)
+
+
 skycue_scale_test_timeouts()

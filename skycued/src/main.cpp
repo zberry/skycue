@@ -151,6 +151,13 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
         std::vector<InputDef> all;
         if (readsb_on)
             all.push_back(readsb_def);
+        if (dump978_on) {
+            InputDef d978;
+            d978.id = "dump978";
+            d978.type = InputType::dump978;
+            d978.builtin = true;
+            all.push_back(d978);
+        }
         all.insert(all.end(), user.begin(), user.end());
         for (auto& warning : decoderWarnings(all, outputs))
             warnings.push_back(std::move(warning));
@@ -398,9 +405,15 @@ int run(int argc, char** argv)
                         })));
                 }
             }
-            if (use_dump978)
+            if (use_dump978) {
+                // Decoding only under TRACK_DECODER=skycued; under readsb the line is counted and published alone.
+                RawDecodeOptions decode;
+                decode.enabled = mc.decode_raw;
+                decode.reference = mc.receiver_ref;
                 inputs->addBuiltin(std::make_unique<UatRawInput>(
-                    io, builtin("dump978", InputType::dump978, dump978_host, config.dump978_raw_port)));
+                    io, builtin("dump978", InputType::dump978, dump978_host, config.dump978_raw_port),
+                    RecordOptions{}, std::move(decode)));
+            }
         }
         inputs->load();
     } catch (const std::exception& e) {

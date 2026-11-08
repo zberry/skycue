@@ -281,11 +281,20 @@ std::vector<std::string> decoderWarnings(const std::vector<InputDef>& inputs, co
     for (const InputDef& d : inputs)
         if (d.enabled && d.type == InputType::beast_raw && (!beast || (d.builtin && !beast->builtin)))
             beast = &d;
+    const InputDef* uat = nullptr;
+    for (const InputDef& d : inputs)
+        if (d.enabled && (d.type == InputType::uat_raw || d.type == InputType::dump978) &&
+            (!uat || (d.builtin && !uat->builtin)))
+            uat = &d;
     bool json_input = false;
     for (const InputDef& d : inputs) {
         if (!d.enabled || d.type != InputType::readsb)
             continue;
         json_input = true;
+        if (uat)
+            warnings.push_back("TRACK_DECODER=skycued: input '" + d.id + "' (readsb JSON) and input '" + uat->id +
+                               "' (" + inputTypeName(uat->type) +
+                               ") both feed the track table, so 978 MHz aircraft are counted twice; disable one");
         if (beast)
             warnings.push_back("TRACK_DECODER=skycued: input '" + d.id + "' (readsb JSON) and input '" + beast->id +
                                "' (beast_raw) both feed the track table, so aircraft are counted twice; disable one");

@@ -135,7 +135,7 @@ BOOST_AUTO_TEST_CASE(check_inputs_error_wording)
 namespace {
 
 // Runs skycued --check-inputs on `conf` and `inputs`; returns stdout and the exit status.
-std::string runCheck(const std::string& conf, const std::string& inputs, int& status)
+std::string runCheck(const std::string& conf, const std::string& inputs, int& status, const std::string& flags = "--no-uat")
 {
     char dir[] = "/tmp/skycue-check-XXXXXX";
     BOOST_REQUIRE(mkdtemp(dir) != nullptr);
@@ -143,7 +143,7 @@ std::string runCheck(const std::string& conf, const std::string& inputs, int& st
     std::ofstream(d + "/c.conf") << conf;
     std::ofstream(d + "/i.json") << inputs;
     const std::string cmd = std::string(SKYCUED_EXE) + " --config " + d + "/c.conf --inputs-file " + d +
-                            "/i.json --no-uat --check-inputs 2>&1";
+                            "/i.json " + flags + " --check-inputs 2>&1";
     std::string out;
     FILE* p = popen(cmd.c_str(), "r");
     BOOST_REQUIRE(p != nullptr);
@@ -184,4 +184,28 @@ BOOST_AUTO_TEST_CASE(check_inputs_skycued_probes_beast_port_and_warns)
     const std::string def = runCheck(common, inputs, status);
     BOOST_TEST(def.find("TRACK_DECODER") == std::string::npos, def);
     BOOST_TEST(def.find("readsb 127.0.0.1:30047: ") != std::string::npos, def);
+}
+
+BOOST_AUTO_TEST_CASE(check_inputs_skycued_warns_for_readsb_json_with_uat_raw)
+{
+    const std::string common = "RECEIVER_LAT=51.5\nRECEIVER_LON=-0.12\nTRACK_DECODER=skycued\nREADSB_BEAST_PORT=" +
+                               std::to_string(closedPort()) + "\n";
+    const std::string rs = R"({"id":"rs2","type":"readsb","host":"127.0.0.1","port":)" + std::to_string(closedPort()) + "}";
+    const std::string uat = R"({"id":"u1","type":"uat_raw","transport":"udp","bind":"127.0.0.1","port":)" +
+                            std::to_string(closedPort()) + "}";
+    int with = 0, without = 0, builtin = 0;
+    const std::string a = runCheck(common, R"({"version":2,"inputs":[)" + rs + "," + uat + "]}", with);
+    const std::string needle = "WARN: TRACK_DECODER=skycued: input 'rs2' (readsb JSON) and input 'u1' (uat_raw)";
+    BOOST_TEST(countLines(a, needle) == 1u, a);
+    // The same inputs without the uat_raw: no such line, and the exit status is the connection rule's alone.
+    const std::string b = runCheck(common, R"({"version":2,"inputs":[)" + rs + "]}", without);
+    BOOST_TEST(b.find("(uat_raw)") == std::string::npos, b);
+    BOOST_TEST((WIFEXITED(with) && WEXITSTATUS(with) == WEXITSTATUS(without)));
+    // The built-in dump978 (UAT not disabled) counts as a UAT feed too.
+    const std::string c = runCheck(common, R"({"version":2,"inputs":[)" + rs + "]}", builtin, "");
+    BOOST_TEST(countLines(c, "input 'rs2' (readsb JSON) and input 'dump978' (dump978)") == 1u, c);
+    // Under the default decoder there is no WARN at all.
+    int def = 0;
+    const std::string d = runCheck("RECEIVER_LAT=51.5\nRECEIVER_LON=-0.12\n", R"({"version":2,"inputs":[)" + rs + "," + uat + "]}", def);
+    BOOST_TEST(d.find("TRACK_DECODER") == std::string::npos, d);
 }

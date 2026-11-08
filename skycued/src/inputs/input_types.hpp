@@ -33,6 +33,8 @@ struct InputCounters {
     // The 1090 decoder of a beast_raw input with decode_raw (frame decoder spec 8.2); all 0 otherwise.
     // `decoder_observations` is DecodeCounters::observations; the three *_skipped are frames the
     // frame source dropped before the decoder.
+    // pingStation `source: decode`: datagrams without rawData, and byte-equal rawData skipped within 1 s.
+    uint64_t no_raw = 0, raw_duplicates = 0;
     uint64_t frames = 0, crc_fail = 0, crc_fixed = 0, ap_unconfirmed = 0, no_position = 0, cpr_pending = 0,
              cpr_rejected = 0, decoded = 0, unmapped = 0, unknown_type = 0, evicted = 0, decoder_observations = 0,
              mlat_skipped = 0, modeac_skipped = 0, other_skipped = 0;
@@ -54,6 +56,8 @@ struct InputCounters {
         status_ok += o.status_ok;
         status_fail += o.status_fail;
         capture_dropped += o.capture_dropped;
+        no_raw += o.no_raw;
+        raw_duplicates += o.raw_duplicates;
         frames += o.frames;
         crc_fail += o.crc_fail;
         crc_fixed += o.crc_fixed;

@@ -86,8 +86,12 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
             }));
     }
     case InputType::dump978:
-    case InputType::uat_raw:
-        return std::make_unique<UatRawInput>(io, def, record);
+    case InputType::uat_raw: {
+        RawDecodeOptions decode;
+        decode.enabled = config.decode_raw;
+        decode.reference = inputReference(def, config);
+        return std::make_unique<UatRawInput>(io, def, record, std::move(decode));
+    }
     case InputType::beast_raw: {
         RawDecodeOptions decode;
         decode.enabled = config.decode_raw;

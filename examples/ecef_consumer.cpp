@@ -207,57 +207,61 @@ int main(int argc, char** argv)
     while (!g_stop) {
         client.poll();
 
-        if (++ticks % 10 == 0) {
-            // expire() lives in the loop because only the loop knows how often
-            // it wants stale tracks removed; the tracker has no timer of its own.
+        const bool second = ++ticks % 10 == 0; // the target is picked every tick, printed once a second
+        // expire() lives in the loop because only the loop knows how often
+        // it wants stale tracks removed; the tracker has no timer of its own.
+        if (second)
             tracker.expire();
 
-            const auto now = std::chrono::system_clock::now();
-            if (sensor) {
-                // The target rule is the application's: here, highest elevation.
-                // States are exact at their position_time, so each is moved to
-                // "now" with propagate() first. The library never extrapolates
-                // unless you ask; replace this block with your own rule.
-                const EcefState* best = nullptr;
-                LookAngles bestLook{};
-                for (const auto& kv : states) {
-                    const auto look = lookFrom(*sensor, propagate(kv.second, now));
-                    if (!best || look.elevation_deg > bestLook.elevation_deg) {
-                        best = &kv.second;
-                        bestLook = look;
-                    }
+        const auto now = std::chrono::system_clock::now();
+        if (sensor) {
+            // The target rule is the application's: here, highest elevation.
+            // States are exact at their position_time, so each is moved to
+            // "now" with propagate() first. The library never extrapolates
+            // unless you ask; replace this block with your own rule.
+            const EcefState* best = nullptr;
+            LookAngles bestLook{};
+            for (const auto& kv : states) {
+                const auto look = lookFrom(*sensor, propagate(kv.second, now));
+                if (!best || look.elevation_deg > bestLook.elevation_deg) {
+                    best = &kv.second;
+                    bestLook = look;
                 }
-                if (best) {
-                    const double age = std::chrono::duration<double>(now - best->time).count();
-                    std::printf("POINT %06x az=%.1f el=%.1f range=%.1fkm age=%.1fs alt=%s%s vel=%s%s err=%s\n",
-                                best->id.address, bestLook.azimuth_deg, bestLook.elevation_deg,
-                                bestLook.range_m / 1000.0, age,
-                                mark(best->altitude_source == AltitudeSource::baro ||
-                                     best->altitude_source == AltitudeSource::caller_default),
-                                altName(best->altitude_source),
-                                mark(best->velocity_source == VelocitySource::derived),
-                                velName(best->velocity_source), errName(best->error_source));
-                }
-            } else {
-                // No sensor: report what changed since the last print, so the
-                // output follows the data instead of repeating the whole table.
-                for (const TrackId& id : changed) {
-                    const EcefState& s = states[id];
-                    std::printf("STATE %06x pos=%.3f,%.3f,%.3fkm ", id.address, s.position.x / 1000.0,
-                                s.position.y / 1000.0, s.position.z / 1000.0);
-                    if (s.velocity)
-                        std::printf("vel=%s%.1f,%.1f,%.1fm/s ", mark(s.velocity_source == VelocitySource::derived),
-                                    s.velocity->x, s.velocity->y, s.velocity->z);
-                    else
-                        std::printf("v: - ");
-                    std::printf("sigma=%.0f,%.0fm alt=%s vert=%s err=%s\n", s.horizontal_sigma_m,
-                                s.vertical_sigma_m, altName(s.altitude_source), vertName(s.vertical_source),
-                                errName(s.error_source));
-                }
-                changed.clear();
             }
-            printSummary(states);
+            if (best && second) {
+                const double age = std::chrono::duration<double>(now - best->time).count();
+                std::printf("POINT %06x az=%.1f el=%.1f range=%.1fkm age=%.1fs alt=%s%s vel=%s%s err=%s\n",
+                            best->id.address, bestLook.azimuth_deg, bestLook.elevation_deg,
+                            bestLook.range_m / 1000.0, age,
+                            mark(best->altitude_source == AltitudeSource::baro ||
+                                 best->altitude_source == AltitudeSource::caller_default),
+                            altName(best->altitude_source),
+                            mark(best->velocity_source == VelocitySource::derived),
+                            velName(best->velocity_source), errName(best->error_source));
+            }
+        } else if (second) {
+            // No sensor: report what changed since the last print, so the
+            // output follows the data instead of repeating the whole table.
+            for (const TrackId& id : changed) {
+                const auto found = states.find(id);
+                if (found == states.end())
+                    continue;
+                const EcefState& s = found->second;
+                std::printf("STATE %06x pos=%.3f,%.3f,%.3fkm ", id.address, s.position.x / 1000.0,
+                            s.position.y / 1000.0, s.position.z / 1000.0);
+                if (s.velocity)
+                    std::printf("vel=%s%.1f,%.1f,%.1fm/s ", mark(s.velocity_source == VelocitySource::derived),
+                                s.velocity->x, s.velocity->y, s.velocity->z);
+                else
+                    std::printf("v: - ");
+                std::printf("sigma=%.0f,%.0fm alt=%s vert=%s err=%s\n", s.horizontal_sigma_m,
+                            s.vertical_sigma_m, altName(s.altitude_source), vertName(s.vertical_source),
+                            errName(s.error_source));
+            }
+            changed.clear();
         }
+        if (second)
+        printSummary(states);
 
         std::this_thread::sleep_until(next);
         next += tick;

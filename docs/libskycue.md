@@ -364,9 +364,11 @@ rung that applies wins:
 | Ladder | Rungs, best first | Source enum |
 |---|---|---|
 | Height above the ellipsoid (sigma) | `alt_geom_ft` reported (15 m); `alt_geom_ft` with `alt_geom_uncertainty_ft` (that value); `alt_baro_ft` (`baro_sigma_m`, 300 m); `Options::default_height_m` (30 m); otherwise no state | `AltitudeSource`: `geom_reported`, `geom_estimated`, `baro`, `caller_default` |
-| Horizontal velocity | `ground_speed_kt` and `track_deg`; derived from the previous fix (needs `derive_velocity` and `EcefTracker`); none | `VelocitySource`: `reported`, `derived`, `none` |
-| Vertical velocity (only with a horizontal one) | `vertical_rate_fpm`; derived from the previous state on the same altitude rung; zero | `VerticalSource`: `reported`, `derived`, `assumed_zero` |
+| Horizontal velocity | `ground_speed_kt` and `track_deg`; derived from the anchor fix (needs `derive_velocity` and `EcefTracker`); none | `VelocitySource`: `reported`, `derived`, `none` |
+| Vertical velocity (only with a horizontal one) | `vertical_rate_fpm`; derived from the anchor fix when both altitudes are the same kind (geometric with geometric, or barometric with barometric); zero | `VerticalSource`: `reported`, `derived`, `assumed_zero` |
 | Horizontal error (sigma) | `nac_p`; `nic`; `default_horizontal_sigma_m` (1852 m) | `ErrorSource`: `nac_p`, `nic`, `default_` |
+
+The anchor moves only when a derivation succeeds, so slow targets still get one after a few updates.
 
 The library never invents a height: with no altitude rung, `toEcef()` and
 `EcefTracker::update()` return `nullopt`. `toEcef()` is a pure function and
@@ -381,15 +383,15 @@ complete examples in `examples/`:
 | | Push | Pull |
 |---|---|---|
 | Client mode | poll mode (`run_io_thread = false`) | thread mode (the default) |
-| How states reach you | `EcefTracker::onState` / `onDropped` callbacks, inside `poll()` on your thread | `Options::collect_changes`, then `takeChanges()` from your loop |
+| How states reach you | `EcefTracker::onState` / `onDropped` callbacks, inside `poll()` on your thread | `Options::collect_changes`, then `takeChanges()` from your loop (apply `dropped` before `updated`) |
 | Locking in your code | none, everything is on one thread | none, the tracker holds the lock |
 | Pick it when | you want to react to each update with the lowest latency and no second thread | your loop already exists, runs on its own clock and wants batches |
 | Example | `examples/ecef_consumer.cpp` | `examples/ecef_batch_consumer.cpp` |
 
 `examples/ecef_consumer.cpp` keeps its callbacks thin (store, mark changed),
-ticks at 10 Hz, and once a second calls `expire()`, picks the highest-elevation
-target, propagates it to now and prints a pointing line (with
-`--sensor LAT,LON,H_M`), then a summary line. A `~` in front of a value marks
+ticks at 10 Hz, picks the highest-elevation target every tick, and once a second calls
+`expire()`, prints the pointing line (the target propagated to now) (with
+`--sensor LAT,LON,H_M`) and a summary line. A `~` in front of a value marks
 it as derived rather than reported. Against a running skycued, with the sensor
 at the receiver's position:
 

@@ -18,6 +18,7 @@
 #include <skycue/client.hpp>
 #include <skycue/ecef.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -31,8 +32,8 @@ namespace {
 using skycue::TrackId;
 using namespace skycue::geo;
 
-volatile std::sig_atomic_t g_stop = 0;
-extern "C" void onSignal(int) { g_stop = 1; }
+std::atomic<bool> g_stop{false};
+extern "C" void onSignal(int) { g_stop = true; }
 
 const char* dropName(TrackerDrop r)
 {
@@ -152,6 +153,10 @@ int main(int argc, char** argv)
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
         const auto changes = tracker.takeChanges();
+        // Apply drops before updates: a track dropped and re-created within
+        // one batch is in both lists, and the update is the live one.
+        for (const auto& d : changes.dropped)
+            std::printf("drop %06x %s\n", d.first.address, dropName(d.second));
         for (const auto& c : changes.updated) {
             const EcefState& s = c.state;
             std::printf("%s %06x pos=%.3f,%.3f,%.3fkm ", c.is_new ? "new" : "upd", s.id.address,
@@ -172,8 +177,6 @@ int main(int argc, char** argv)
             }
             std::printf("\n");
         }
-        for (const auto& d : changes.dropped)
-            std::printf("drop %06x %s\n", d.first.address, dropName(d.second));
 
         // expire() is also ours to call; stale tracks then show up in the
         // next takeChanges() as drops.

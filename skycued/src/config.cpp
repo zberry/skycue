@@ -625,7 +625,7 @@ std::string envNameOf(const std::string& dotted_key)
     return name;
 }
 
-std::map<std::string, std::string> environmentOverrides()
+std::map<std::string, std::string> environmentOverrides(std::vector<std::string>* unknown)
 {
     static const std::set<std::string> known = [] {
         std::set<std::string> n;
@@ -633,8 +633,13 @@ std::map<std::string, std::string> environmentOverrides()
             n.insert(envNameOf(s.key));
         return n;
     }();
+    static const std::set<std::string> table_prefixes = [] {  // "SKYCUE_WEB_" for web.*
+        std::set<std::string> n;
+        for (const auto& s : keySpecs())
+            n.insert(envNameOf(std::string(s.key).substr(0, std::string(s.key).find('.'))) + "_");
+        return n;
+    }();
     std::map<std::string, std::string> env;
-    std::string unknown_names;
     for (char** e = environ; e && *e; ++e) {
         const char* eq = std::strchr(*e, '=');
         if (!eq)
@@ -643,17 +648,12 @@ std::map<std::string, std::string> environmentOverrides()
         if (name.compare(0, 7, "SKYCUE_") != 0)
             continue;
         if (!known.count(name)) {
-            unknown_names += (unknown_names.empty() ? "" : ", ") + name;
+            const auto us = name.find('_', 7);
+            if (unknown && us != std::string::npos && table_prefixes.count(name.substr(0, us + 1)))
+                unknown->push_back(name);
             continue;
         }
         env[name] = eq + 1;
-    }
-    // One line, once per distinct list: a mistyped variable must show at the
-    // default log level (startup reads the environment more than once).
-    static std::string last_warned;
-    if (!unknown_names.empty() && unknown_names != last_warned) {
-        last_warned = unknown_names;
-        LOG_WARN("config: ignoring the environment variable(s) " << unknown_names << " (no such key)");
     }
     return env;
 }

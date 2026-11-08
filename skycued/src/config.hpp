@@ -115,8 +115,13 @@ Config parseConfigText(const std::string& text, const std::string& name_for_erro
 // The dotted keys of packaging/skycue.toml.example, in its order.
 const std::vector<std::string>& knownConfigKeys();
 
-// The SKYCUE_* variables of the process environment.
-std::map<std::string, std::string> environmentOverrides();
+// The SKYCUE_* variables of the process environment that name a key. Pure: a
+// variable whose first segment (SKYCUE_WEB_..., the part before the next
+// underscore) is a config table but which matches no key is a typo; its name
+// is appended to `*unknown` when given, for the caller to log once. Variables
+// whose first segment is not a table are not skycued's (SKYCUE_READSB,
+// SKYCUE_TESTS_OFFLINE, ...) and are ignored silently.
+std::map<std::string, std::string> environmentOverrides(std::vector<std::string>* unknown = nullptr);
 // `inputs.readsb.host` -> `SKYCUE_INPUTS_READSB_HOST`.
 std::string envNameOf(const std::string& dotted_key);
 

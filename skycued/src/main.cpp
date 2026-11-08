@@ -339,7 +339,8 @@ int run(int argc, char** argv)
     }
 
     // The layers: defaults, the file, its overrides file, the SKYCUE_* environment, --set.
-    const auto env = environmentOverrides();
+    std::vector<std::string> unknown_env;
+    const auto env = environmentOverrides(&unknown_env);
     Config config;
     try {
         // --dump-env also serves tools that need no receiver position (the map scripts).
@@ -347,6 +348,12 @@ int run(int argc, char** argv)
     } catch (const ConfigError& e) {
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
+    }
+    if (!unknown_env.empty()) {  // once, after the load; a typo must show at the default log level
+        std::string names;
+        for (const auto& n : unknown_env)
+            names += (names.empty() ? "" : ", ") + n;
+        LOG_WARN("config: ignoring the environment variable(s) " << names << " (no such key)");
     }
     // The command-line flags apply last. A flag given overrides its key; an absent one defers to it.
     if (vm.count("readsb-host"))

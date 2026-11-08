@@ -234,6 +234,9 @@ built-in defaults, `skycue.toml`, `skycue.overrides.toml`, the environment,
 `--set`, then the flags `--readsb-host`, `--dump978-host`, `--no-uat` and
 `--no-readsb`. The startup log lists each key that does not come from the file
 or the defaults with its source (`overrides`, `env`, `--set`, `flag`).
+A variable whose first segment is a table (`SKYCUE_WEB_PROT`) but which matches
+no key is logged once as a WARN at startup and ignored; variables whose first
+segment is not a table are not skycued's and are ignored silently.
 
 `skycued --config skycue.toml --dump-env` prints the effective value of every
 key, all layers and flags applied, as shell assignments

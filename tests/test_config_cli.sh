@@ -217,10 +217,15 @@ string_keys_take_raw_text_from_set_and_env() {
 
 unknown_environment_variables_warn_once() {
   base >"$tmp/w.toml"
-  SKYCUE_WEB_PROT=1 SKYCUE_NOPE=2 "$skycued" --config "$tmp/w.toml" --dump-env >"$tmp/out" 2>"$tmp/err" || fail "exit $?"
+  SKYCUE_WEB_PROT=1 SKYCUE_WEB_NOPE=2 "$skycued" --config "$tmp/w.toml" --dump-env >"$tmp/out" 2>"$tmp/err" || fail "exit $?"
   [ "$(grep -c ' WARN ' "$tmp/err")" = 1 ] || { cat "$tmp/err"; fail "want exactly one WARN line"; }
-  grep -q 'SKYCUE_WEB_PROT' "$tmp/err" && grep -q 'SKYCUE_NOPE' "$tmp/err" || { cat "$tmp/err"; fail "the WARN line does not list both"; }
-  SKYCUE_NOPE=2 "$skycued" --config "$tmp/w.toml" --dump-env >/dev/null 2>"$tmp/err" --log-level error || fail "exit $?"
+  grep -q 'SKYCUE_WEB_PROT' "$tmp/err" && grep -q SKYCUE_WEB_NOPE "$tmp/err" || { cat "$tmp/err"; fail "the WARN line does not list both"; }
+  SKYCUE_INPUTS_READSB_HSOT=x SKYCUE_WEB_PROT=1 "$skycued" --config "$tmp/w.toml" --dump-env >/dev/null 2>"$tmp/err" || fail "exit $?"
+  [ "$(grep -c ' WARN ' "$tmp/err")" = 1 ] && grep -q SKYCUE_INPUTS_READSB_HSOT "$tmp/err" || { cat "$tmp/err"; fail "typos not warned once"; }
+  # Tooling variables of the project (first segment is no table) are not skycued's: silent.
+  SKYCUE_READSB=/x SKYCUE_TESTS_OFFLINE=1 SKYCUE_DUMP978=/y "$skycued" --config "$tmp/w.toml" --dump-env >/dev/null 2>"$tmp/err" || fail "exit $?"
+  [ ! -s "$tmp/err" ] || { cat "$tmp/err"; fail "a WARN for tooling variables"; }
+  SKYCUE_WEB_PROT=2 "$skycued" --config "$tmp/w.toml" --dump-env >/dev/null 2>"$tmp/err" --log-level error || fail "exit $?"
   [ ! -s "$tmp/err" ] || fail "WARN shown at log level error"
   "$skycued" --config "$tmp/w.toml" --dump-env >/dev/null 2>"$tmp/err" || fail "exit $?"
   [ ! -s "$tmp/err" ] || fail "a warning without unknown variables"

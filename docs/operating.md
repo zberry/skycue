@@ -82,7 +82,9 @@ connected, 1 when any failed, 2 for a usage or config error (including
 `--replay` together with `--check-inputs`). Nothing else starts: no
 listeners, no recordings, no state files.
 
-Each check gives up after 3 s, and all run at once. A host name lookup
+Each check is one connection attempt through the same network library the
+daemon uses (no retry), so a listener that accepts and closes at once still
+counts as connected. It gives up after 3 s, and all run at once. A host name lookup
 cannot be cancelled, so one that is still running at that point is reported
 as `timed out` and abandoned; it ends on the system resolver's own timeout,
 after skycued has exited.

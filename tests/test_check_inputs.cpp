@@ -8,7 +8,9 @@
 #include <boost/asio/ip/tcp.hpp>
 
 #include <chrono>
+#include <functional>
 #include <string>
+#include <thread>
 
 using namespace skycued;
 using namespace std::chrono_literals;
@@ -85,4 +87,43 @@ BOOST_AUTO_TEST_CASE(unroutable_address_bounded)
     BOOST_REQUIRE(r.size() == 1u);
     BOOST_TEST(!r[0].connected);
     BOOST_TEST(!r[0].error.empty());
+}
+
+// A listener that accepts and closes at once is reachable: the probe asks
+// whether the connect succeeds, not whether the peer keeps talking.
+BOOST_AUTO_TEST_CASE(check_inputs_connect_only)
+{
+    asio::io_context io;
+    tcp::acceptor acc(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const uint16_t port = acc.local_endpoint().port();
+    std::function<void()> again = [&] {
+        acc.async_accept([&](const boost::system::error_code& ec, tcp::socket s) {
+            if (ec)
+                return;
+            boost::system::error_code ignored;
+            s.close(ignored);
+            again();
+        });
+    };
+    again();
+    std::thread t([&] { io.run(); });
+    const auto r = checkInputs({{"readsb", "127.0.0.1", port}}, 3s);
+    io.stop();
+    t.join();
+    BOOST_REQUIRE(r.size() == 1u);
+    BOOST_TEST(r[0].connected);
+    BOOST_TEST(inputCheckLine(r[0]) == "readsb 127.0.0.1:" + std::to_string(port) + ": connected");
+}
+
+// The old wording survives the move to the library: a refusal says just
+// "Connection refused", a failed lookup "cannot resolve host: ...".
+BOOST_AUTO_TEST_CASE(check_inputs_error_wording)
+{
+    const uint16_t p = closedPort();
+    const auto r = checkInputs({{"a", "127.0.0.1", p}, {"b", "no-such-host.invalid", 30047}}, 3s);
+    BOOST_REQUIRE(r.size() == 2u);
+    BOOST_TEST(r[0].error == "Connection refused");
+    // A resolver that is slow to answer ends in the deadline instead.
+    BOOST_TEST((r[1].error.rfind("cannot resolve host: ", 0) == 0u || r[1].error == "timed out"),
+               "got: " << r[1].error);
 }

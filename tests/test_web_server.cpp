@@ -885,6 +885,81 @@ BOOST_AUTO_TEST_CASE(track_json_input_present_when_known)
     BOOST_TEST(parseJson(skycued::webapi::trackJson(ts)).count("input") == 0u);
 }
 
+namespace {
+skycued::TrackSnapshot geomSnapshot()
+{
+    skycued::TrackSnapshot ts;
+    ts.track.id = skycue::TrackId{0xa1b2c3, skycue::AddressType::icao};
+    ts.track.source = skycue::Source::adsb_1090;
+    ts.track.alt_baro_ft = 35000;
+    return ts;
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(track_json_reported_keys)
+{
+    auto ts = geomSnapshot();
+    ts.track.alt_geom_ft = 35250;
+    ts.geom.source = skycued::GeomSource::reported;
+    ts.geom.alt_geom_ft = 35250;
+    ts.geom.age_s = 12.34;
+    ts.geom.geom_minus_baro_ft = 250;
+    const std::string body = skycued::webapi::trackJson(ts);
+    BOOST_TEST(body.find("\"alt_geom_ft\":35250,\"alt_geom_source\":\"reported\",\"alt_geom_age_s\":12.3,"
+                         "\"geom_minus_baro_ft\":250,\"on_ground\"") != std::string::npos);
+    BOOST_TEST(body.find("alt_geom_uncertainty_ft") == std::string::npos);
+    ts.geom.age_s = 5.0;
+    BOOST_TEST(skycued::webapi::trackJson(ts).find("\"alt_geom_age_s\":5.0,") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(track_json_estimated_keys)
+{
+    auto ts = geomSnapshot();
+    ts.track.alt_geom_ft = 35250;
+    ts.track.alt_geom_uncertainty_ft = 150;
+    ts.geom.source = skycued::GeomSource::estimated;
+    ts.geom.alt_geom_ft = 35250;
+    ts.geom.uncertainty_ft = 150;
+    ts.geom.age_s = 42.0;
+    ts.geom.geom_minus_baro_ft = 250;
+    const std::string body = skycued::webapi::trackJson(ts);
+    BOOST_TEST(body.find("\"alt_geom_ft\":35250,\"alt_geom_source\":\"estimated\",\"alt_geom_uncertainty_ft\":150,"
+                         "\"alt_geom_age_s\":42.0,\"geom_minus_baro_ft\":250,\"on_ground\"") != std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(track_json_no_geom_has_no_new_keys)
+{
+    auto ts = geomSnapshot();  // a v1 consumer's fixture: no geometric altitude at all
+    BOOST_TEST(skycued::webapi::trackJson(ts) ==
+               "{\"hex\":\"a1b2c3\",\"addr_type\":\"icao\",\"source\":\"adsb_1090\",\"alt_baro_ft\":35000,"
+               "\"on_ground\":false,\"alt_is_geom\":false,\"range_nm\":0,\"elevation_deg\":0,"
+               "\"decision\":\"no_position\",\"forwarded\":false,\"first_seen\":\"1970-01-01T00:00:00.000Z\","
+               "\"last_seen\":\"1970-01-01T00:00:00.000Z\",\"rssi\":0}");
+    ts.track.alt_geom_ft = 35250;  // a value with no GeomResult (source none) adds no key either
+    const std::string body = skycued::webapi::trackJson(ts);
+    for (const char* k : {"alt_geom_source", "alt_geom_uncertainty_ft", "alt_geom_age_s", "geom_minus_baro_ft"})
+        BOOST_TEST(body.find(k) == std::string::npos, k);
+}
+
+BOOST_AUTO_TEST_CASE(stats_altitude_fit_valid_and_absent)
+{
+    skycued::EngineStats st;
+    auto j = parseJson(skycued::webapi::statsJson(st));
+    BOOST_TEST(j.get<bool>("altitude_fit.valid") == false);
+    BOOST_TEST(j.get_child("altitude_fit").size() == 1u);
+    st.altitude_fit.valid = true;
+    st.altitude_fit.linear = true;
+    st.altitude_fit.a = 120.5;
+    st.altitude_fit.b = 0.0125;
+    st.altitude_fit.samples = 42;
+    st.altitude_fit.aircraft = 7;
+    st.altitude_fit.p90_ft = 88.5;
+    st.altitude_fit.age_s = 3.5;
+    const std::string body = skycued::webapi::statsJson(st);
+    BOOST_TEST(body.find("\"altitude_fit\":{\"valid\":true,\"linear\":true,\"a\":120.5,\"b\":0.0125,"
+                         "\"samples\":42,\"aircraft\":7,\"p90_ft\":88.5,\"age_s\":3.5}") != std::string::npos);
+}
+
 // Review Focus 1, end to end: a PUT from the UI drops the tracks it excludes
 // at once, after the filter_change record.
 BOOST_AUTO_TEST_CASE(put_filters_applies_and_drops)

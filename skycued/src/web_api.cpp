@@ -110,6 +110,21 @@ void putStats(JsonWriter& w, const EngineStats& s)
                                 .add("keys", n(keys))
                                 .add("rebroadcast_suppressed", n(s.rebroadcast_suppressed))
                                 .str());
+    // The population fit of GNSS-minus-baro; {valid:false} alone when there is none.
+    const AltitudeFitStats& f = s.altitude_fit;
+    if (!f.valid)
+        w.addRaw("altitude_fit", JsonWriter().add("valid", false).str());
+    else
+        w.addRaw("altitude_fit", JsonWriter()
+                                     .add("valid", true)
+                                     .add("linear", f.linear)
+                                     .add("a", f.a)
+                                     .add("b", f.b)
+                                     .add("samples", n(f.samples))
+                                     .add("aircraft", n(f.aircraft))
+                                     .add("p90_ft", f.p90_ft)
+                                     .add("age_s", f.age_s)
+                                     .str());
 }
 
 void putFilters(JsonWriter& w, const RuntimeConfig& rc)
@@ -155,6 +170,27 @@ void addOpt(JsonWriter& w, const char* key, const std::optional<std::string>& v)
         w.add(key, *v);
 }
 
+// One decimal, no locale: 12.34 -> 12.3, 5 -> 5.0.
+std::string oneDecimal(double v)
+{
+    const long long tenths = std::llround(std::max(v, 0.0) * 10.0);
+    return std::to_string(tenths / 10) + "." + std::to_string(tenths % 10);
+}
+
+// After alt_geom_ft: where the value came from, its uncertainty (estimates only), its age and the last
+// reported GNSS-minus-baro difference. A track with no geometric altitude gains no key.
+void putGeom(JsonWriter& w, const GeomResult& g)
+{
+    if (g.source == GeomSource::reported || g.source == GeomSource::estimated) {
+        w.add("alt_geom_source", g.source == GeomSource::reported ? "reported" : "estimated");
+        if (g.source == GeomSource::estimated)
+            addOpt(w, "alt_geom_uncertainty_ft", g.uncertainty_ft);
+        if (g.age_s && std::isfinite(*g.age_s))
+            w.addRaw("alt_geom_age_s", oneDecimal(*g.age_s));
+    }
+    addOpt(w, "geom_minus_baro_ft", g.geom_minus_baro_ft);
+}
+
 void putTrack(JsonWriter& w, const TrackSnapshot& ts)
 {
     const skycue::Track& t = ts.track;
@@ -167,6 +203,7 @@ void putTrack(JsonWriter& w, const TrackSnapshot& ts)
     }
     addOpt(w, "alt_baro_ft", t.alt_baro_ft);
     addOpt(w, "alt_geom_ft", t.alt_geom_ft);
+    putGeom(w, ts.geom);
     addOpt(w, "gs_kt", t.ground_speed_kt);
     addOpt(w, "track_deg", t.track_deg);
     addOpt(w, "vr_fpm", t.vertical_rate_fpm);

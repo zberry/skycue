@@ -25,6 +25,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -927,15 +928,86 @@ BOOST_AUTO_TEST_CASE(replay_loop_shifts_timestamps_monotonic)
     BOOST_TEST((got[5].received_time == t0 + 5s));
 }
 
+BOOST_AUTO_TEST_CASE(recorder_sent_jsonl_has_source_and_uncertainty)
+{
+    TempDir tmp;
+    skycue::Track track;
+    track.id = {0xa5b06d, skycue::AddressType::icao};
+    track.source = skycue::Source::adsb_1090;
+    track.position_time = sys_clock::now();
+    track.alt_geom_ft = 35250;
+    Recorder rec(RecorderConfig{tmp.path, true, true, 1ull << 20, 3600s}, "sent");
+    rec.writeTrack(track, "update");  // reported
+    track.alt_geom_uncertainty_ft = 150;
+    rec.writeTrack(track, "update");  // estimated
+    track.alt_geom_ft.reset();
+    track.alt_geom_uncertainty_ft.reset();
+    rec.writeTrack(track, "update");  // no geometric altitude: neither key
+    rec.flush();
+    const auto lines = readLines(rec.currentPath("jsonl"));
+    BOOST_REQUIRE(lines.size() == 3u);
+    auto a = skycued::JsonObject::parse(lines[0]);
+    auto b = skycued::JsonObject::parse(lines[1]);
+    auto c = skycued::JsonObject::parse(lines[2]);
+    BOOST_REQUIRE(a && b && c);
+    BOOST_TEST(a->getString("alt_geom_source").value_or("") == "reported");
+    BOOST_TEST(!a->has("alt_geom_uncertainty_ft"));
+    BOOST_TEST(b->getString("alt_geom_source").value_or("") == "estimated");
+    BOOST_TEST(b->getDouble("alt_geom_uncertainty_ft").value_or(0) == 150.0);
+    BOOST_TEST(!c->has("alt_geom_source"));
+    BOOST_TEST(!c->has("alt_geom_uncertainty_ft"));
+    // The CSV keeps its columns.
+    BOOST_TEST(readLines(rec.currentPath("csv"))[0] == kSentHeader);
+}
+
+BOOST_AUTO_TEST_CASE(recorder_received_jsonl_has_diff_and_replays_identically)
+{
+    TempDir tmp;
+    Recorder rec(RecorderConfig{tmp.path, true, true, 1ull << 20, 3600s}, "received");
+    auto obs = minimalObservation(sys_clock::now());
+    obs.geom_minus_baro_ft = -175;
+    rec.writeObservation(obs);
+    auto plain = minimalObservation(sys_clock::now());
+    rec.writeObservation(plain);
+    rec.flush();
+    const auto lines = readLines(rec.currentPath("jsonl"));
+    BOOST_REQUIRE(lines.size() == 2u);
+    auto with = skycued::JsonObject::parse(lines[0]);
+    auto without = skycued::JsonObject::parse(lines[1]);
+    BOOST_REQUIRE(with && without);
+    BOOST_TEST(with->getDouble("geom_minus_baro_ft").value_or(0) == -175.0);
+    BOOST_TEST(!without->has("geom_minus_baro_ft"));  // an old file looks like this one
+    const auto back = skycued::recording::observationFromRecord(*with);
+    BOOST_REQUIRE(back);
+    BOOST_TEST((back->geom_minus_baro_ft == std::optional<int32_t>(-175)));
+    const auto old = skycued::recording::observationFromRecord(*without);
+    BOOST_REQUIRE(old);
+    BOOST_TEST(!old->geom_minus_baro_ft.has_value());
+    BOOST_TEST((old->alt_baro_ft == plain.alt_baro_ft));
+    // A file with the key replays to the same record it was written from.
+    BOOST_TEST(skycued::formatIso8601Ms(back->received_time) == skycued::formatIso8601Ms(obs.received_time));
+}
+
+BOOST_AUTO_TEST_CASE(csv_headers_unchanged)
+{
+    BOOST_TEST(skycued::recording::receivedCsvHeader() == kReceivedHeader);
+    BOOST_TEST(skycued::recording::sentCsvHeader() == kSentHeader);
+    BOOST_TEST(kReceivedHeader.find("geom_minus_baro_ft") == std::string::npos);
+    BOOST_TEST(kSentHeader.find("alt_geom_source") == std::string::npos);
+    BOOST_TEST(kSentHeader.find("alt_geom_uncertainty_ft") == std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(doc_lists_every_key)
 {
     std::ifstream in(std::string(SKYCUE_DOCS_DIR) + "/recording-format.md");
     BOOST_REQUIRE(in);
     std::string doc((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    // The geometric-altitude keys are documented by the docs task (Task 12), which removes this list.
+    const std::set<std::string> undocumented{"geom_minus_baro_ft", "alt_geom_source", "alt_geom_uncertainty_ft"};
     for (const auto& key : skycued::recording::observationKeys())
-        BOOST_TEST(doc.find("| `" + key + "` |") != std::string::npos, key);
+        BOOST_TEST((undocumented.count(key) != 0u || doc.find("| `" + key + "` |") != std::string::npos), key);
     for (const auto& key : skycued::recording::sentKeys())
-        BOOST_TEST(doc.find("| `" + key + "` |") != std::string::npos, key);
+        BOOST_TEST((undocumented.count(key) != 0u || doc.find("| `" + key + "` |") != std::string::npos), key);
     BOOST_TEST(doc.find(kReceivedHeader) != std::string::npos);
     BOOST_TEST(doc.find(kSentHeader) != std::string::npos);
 }

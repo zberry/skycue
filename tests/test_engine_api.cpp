@@ -1038,3 +1038,30 @@ BOOST_AUTO_TEST_CASE(snapshot_geom_and_fit_stats_for_a_reported_track)
     BOOST_TEST(s.stats.altitude_fit.aircraft == 1u);
     BOOST_TEST(s.stats.altitude_fit.b == 0.0);
 }
+
+BOOST_AUTO_TEST_CASE(api_stats_altitude_fit_reaches_the_endpoint)
+{
+    {
+        ApiFx quiet;  // No geometric observation yet: {valid:false} alone.
+        auto none = parsed(quiet.get("/api/stats").body).getObject("altitude_fit");
+        BOOST_REQUIRE(none);
+        BOOST_TEST(none->getString("valid").value_or("") == "false");
+        BOOST_TEST(!none->has("samples"));
+    }
+    ApiFx a;
+    TrackObservation o = nearbyObservation(0xABC002, 0);
+    o.alt_geom_ft = (o.alt_baro_ft ? *o.alt_baro_ft : 0) + 200;
+    // The fit is cached for 5 s of the data clock, and start-up may have asked once already.
+    o.received_time += std::chrono::seconds(6);
+    o.position_time = o.received_time;
+    a.fx->t.call([&] {
+        a.src->connection(true);
+        a.src->emit(o);
+    });
+    auto fit = parsed(a.get("/api/stats").body).getObject("altitude_fit");
+    BOOST_REQUIRE(fit);
+    BOOST_TEST(fit->getString("valid").value_or("") == "true");
+    BOOST_TEST(fit->has("linear"));
+    BOOST_TEST(fit->getDouble("aircraft").value_or(0) == 1.0);
+    BOOST_TEST(fit->getDouble("a").value_or(0) == 200.0);
+}

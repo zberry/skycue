@@ -382,6 +382,8 @@ const ObsKey kObsKeys[] = {
     {"nic", true, putInt<uint8_t, &Obs::nic>, getInt<uint8_t, &Obs::nic>},
     {"nac_p", true, putInt<uint8_t, &Obs::nac_p>, getInt<uint8_t, &Obs::nac_p>},
     {"rssi", true, putReal<&Obs::rssi>, getReal<&Obs::rssi>},
+    {"geom_minus_baro_ft", false, putInt<int32_t, &Obs::geom_minus_baro_ft>,
+     getInt<int32_t, &Obs::geom_minus_baro_ft>},  // JSONL only; absent in older recordings
     {"raw", false, putRaw, getRaw},
     {"rebroadcast", false, putRebroadcast, getRebroadcast},  // JSONL only; absent means false
     {"input", false, putInput, getInput},  // the received CSV's last column (receivedColumns)
@@ -393,7 +395,10 @@ const char* const kSentKeys[] = {"hex",          "addr_type",   "source",      "
                                  "lon",          "on_ground",   "alt_is_geom", "alt_baro_ft", "alt_geom_ft",
                                  "gs_kt",        "track_deg",   "vrate_fpm",   "callsign",  "squawk",
                                  "registration", "nic",         "nac_p",       "keyframe",  "drop_reason",
-                                 "note"};
+                                 "note",
+                                 // JSONL only, after the columns of the CSV (kSentCsvKeys).
+                                 "alt_geom_source", "alt_geom_uncertainty_ft"};
+constexpr std::size_t kSentCsvKeys = 21;  // the CSV columns are the first kSentCsvKeys of kSentKeys
 
 // Sent-stream key by name, so a typo here fails loudly (at first use) rather
 // than writing a key the table does not list.
@@ -420,6 +425,11 @@ Record trackRecord(const skycue::Track& t)
         r.push_back(intField(sentKey("alt_baro_ft"), *t.alt_baro_ft));
     if (t.alt_geom_ft)
         r.push_back(intField(sentKey("alt_geom_ft"), *t.alt_geom_ft));
+    if (t.alt_geom_ft) {
+        r.push_back(textField(sentKey("alt_geom_source"), t.alt_geom_uncertainty_ft ? "estimated" : "reported"));
+        if (t.alt_geom_uncertainty_ft)
+            r.push_back(intField(sentKey("alt_geom_uncertainty_ft"), *t.alt_geom_uncertainty_ft));
+    }
     if (t.ground_speed_kt)
         r.push_back(floatField(sentKey("gs_kt"), *t.ground_speed_kt));
     if (t.track_deg)
@@ -460,8 +470,8 @@ const std::vector<const char*>& sentColumns()
 {
     static const std::vector<const char*> cols = [] {
         std::vector<const char*> c{"time", "event"};
-        for (const char* k : kSentKeys)
-            c.push_back(k);
+        for (std::size_t i = 0; i < kSentCsvKeys; ++i)
+            c.push_back(kSentKeys[i]);
         return c;
     }();
     return cols;

@@ -32,3 +32,11 @@ wait_for() {
 _file_nonempty() { [ -s "$1" ]; }
 # wait_file FILE SECONDS: until FILE is non-empty.
 wait_file() { wait_for "$2" _file_nonempty "$1"; }
+
+# free_port [tcp|udp]: a port on 127.0.0.1 that was free a moment ago (tcp
+# when no protocol is given).
+free_port() {
+  python3 -I -c 'import socket,sys
+t = socket.SOCK_DGRAM if sys.argv[1] == "udp" else socket.SOCK_STREAM
+s = socket.socket(socket.AF_INET, t); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' "${1:-tcp}"
+}

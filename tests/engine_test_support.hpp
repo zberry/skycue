@@ -9,6 +9,7 @@
 #include "inputs/input.hpp"
 #include "inputs/input_manager.hpp"
 #include "inputs/source_input.hpp"
+#include "net_test_support.hpp"
 #include "observation.hpp"
 #include "recorder.hpp"
 #include "replay_source.hpp"
@@ -128,39 +129,11 @@ inline std::string streamText(const std::string& dir, const std::string& stream)
     return text;
 }
 
-// Runs an io_context on its own thread; call() runs a function there and
-// waits for its result, so the engine is only ever touched on that thread.
-struct IoThread {
-    asio::io_context io;
-    std::optional<asio::executor_work_guard<asio::io_context::executor_type>> guard;
-    std::thread thread;
-
-    IoThread()
-    {
-        guard.emplace(asio::make_work_guard(io));
-        thread = std::thread([this] { io.run(); });
-    }
-    ~IoThread() { join(); }
-
-    void join()
-    {
-        guard.reset();
-        io.stop();
-        if (thread.joinable())
-            thread.join();
-    }
-
-    template <class F> auto call(F f) -> decltype(f())
-    {
-        using R = decltype(f());
-        auto task = std::make_shared<std::packaged_task<R()>>(std::move(f));
-        auto fut = task->get_future();
-        asio::post(io, [task] { (*task)(); });
-        if (fut.wait_for(kWait) != std::future_status::ready)
-            throw std::runtime_error("io thread call timed out");
-        return fut.get();
-    }
-};
+// IoThread runs an io_context on its own thread; call() runs a function there
+// and waits for its result, so the engine is only ever touched on that thread.
+using skycue::net::test::IoThread;
+using skycue::net::test::freeTcpPort;
+using skycue::net::test::freeUdpPort;
 
 // Records every skycue::Client callback.
 struct Events {

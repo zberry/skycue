@@ -64,13 +64,16 @@ struct IoThread {
         return fut.get();
     }
 
-    ~IoThread()
+    // Stops the io_context and joins the thread; the destructor does it too.
+    void join()
     {
         guard.reset();
         io.stop();
         if (thread.joinable())
             thread.join();
     }
+
+    ~IoThread() { join(); }
 };
 
 // Polls p every 5 ms until it is true or the limit passes.

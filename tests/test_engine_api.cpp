@@ -512,13 +512,6 @@ using skycued::webapi::ApiRequest;
 using skycued::webapi::ApiResponse;
 using Headers = std::map<std::string, std::string>;
 
-uint16_t freeUdpPort()
-{
-    asio::io_context io;
-    asio::ip::udp::socket s(io, asio::ip::udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return s.local_endpoint().port();
-}
-
 std::string psJson(const std::string& id, uint16_t port, const std::string& extra = "")
 {
     std::string body = "{";

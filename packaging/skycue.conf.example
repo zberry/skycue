@@ -54,6 +54,8 @@ WEB_BIND=127.0.0.1
 TRAIL_SECONDS=120
 # TCP port where cue clients connect to skycued; 0 for no listener (then
 # skycued forwards only to CUE_TCP_CONNECT and CUE_UDP_TARGETS).
+# Every cue TCP session, accepted or dialed, uses TCP keepalive, so a client
+# that vanished without closing is noticed and dropped.
 CUE_TCP_PORT=30500
 # Space-separated host:port list of cue clients that listen for
 # skycued to connect to them (skycued dials each one and keeps reconnecting);

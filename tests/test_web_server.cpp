@@ -403,22 +403,15 @@ int inChild(const std::function<int()>& body, std::chrono::milliseconds limit)
     return waitExit(pid, limit);
 }
 
-uint16_t freePort()
-{
-    asio::io_context io;
-    tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return a.local_endpoint().port();
-}
-
 // skycued --config `conf` `args` --web-bind 127.0.0.1 --web-port <free port>, logging to
-// `log`.<attempt>. freePort() releases the port before skycued binds it, so a parallel test
+// `log`.<attempt>. freeTcpPort() releases the port before skycued binds it, so a parallel test
 // can take it in between: on "cannot listen", try another port. Returns the pid and the web
 // port once "web: listening" is logged; fails the test otherwise.
 std::pair<pid_t, uint16_t> spawnServing(const std::string& conf, std::vector<std::string> args, const std::string& log)
 {
     args.insert(args.begin(), {"--config", conf});
     for (int attempt = 0; attempt < 5; ++attempt) {
-        const uint16_t port = freePort();
+        const uint16_t port = freeTcpPort();
         const std::string try_log = log + "." + std::to_string(attempt);
         std::vector<std::string> all = args;
         all.insert(all.end(), {"--web-bind", "127.0.0.1", "--web-port", std::to_string(port)});
@@ -2252,7 +2245,6 @@ BOOST_AUTO_TEST_CASE(stats_summary_by_country_top20_and_other)
         ++i;
     }
 }
-
 
 // ---- skycued --check-inputs ----
 

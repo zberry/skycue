@@ -1,3 +1,6 @@
+# The net library's test support (net_test_support.hpp: free ports, IoThread).
+include_directories(${PROJECT_SOURCE_DIR}/net/tests)
+
 add_executable(test_smoke test_smoke.cpp)
 target_link_libraries(test_smoke PRIVATE Boost::unit_test_framework)
 target_compile_definitions(test_smoke PRIVATE BOOST_TEST_DYN_LINK)

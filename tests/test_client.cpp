@@ -5,6 +5,7 @@
 #include <skycue/protocol.hpp>
 #include <skycue/types.hpp>
 
+#include "net_test_support.hpp"
 #include "test_slow.hpp"
 
 #include <boost/asio.hpp>
@@ -193,12 +194,7 @@ private:
     std::thread thread_;
 };
 
-uint16_t freeUdpPort()
-{
-    asio::io_context io;
-    udp::socket s(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return s.local_endpoint().port();
-}
+using skycue::net::test::freeUdpPort;
 
 class UdpSender {
 public:

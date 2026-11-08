@@ -52,13 +52,6 @@ std::string response(const std::string& status_line, const std::string& body, co
            std::to_string(body.size()) + "\r\n" + headers + "\r\n" + body;
 }
 
-uint16_t freeUdpPort()
-{
-    asio::io_context io;
-    udp::socket s(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return s.local_endpoint().port();
-}
-
 // A port nothing listens on.
 uint16_t closedTcpPort()
 {

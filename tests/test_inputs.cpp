@@ -119,19 +119,6 @@ InputDef cat021(const std::string& id, const std::string& transport, uint16_t po
                  where + R"(,"port":)" + std::to_string(port) + "}");
 }
 
-uint16_t freeUdpPort()
-{
-    asio::io_context io;
-    udp::socket s(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return s.local_endpoint().port();
-}
-uint16_t freeTcpPort()
-{
-    asio::io_context io;
-    tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return a.local_endpoint().port();
-}
-
 // True when 127.0.0.1:port can be bound for UDP right now (nothing holds it).
 bool udpPortFree(uint16_t port)
 {

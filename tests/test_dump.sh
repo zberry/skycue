@@ -31,11 +31,6 @@ fail() {
 }
 for f in "$skycued" "$dump" "$replay"; do [ -e "$f" ] || fail "$f missing"; done
 
-free_port() { # free_port tcp|udp
-  python3 -I -c 'import socket,sys
-t = socket.SOCK_STREAM if sys.argv[1] == "tcp" else socket.SOCK_DGRAM
-s = socket.socket(socket.AF_INET, t); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' "$1"
-}
 tcp_port=$(free_port tcp)
 udp_port=$(free_port udp)
 # KEYFRAME_INTERVAL_S=2: UDP targets get a Hello before every keyframe burst.

@@ -60,9 +60,6 @@ with open(sys.argv[2], "wb") as out:
         if not b: break
         out.write(b)
 EOF
-free_port() {
-  python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'
-}
 # play OUT ARGS...: rawplay ARGS with --raw-in/--beast-in pointed at a sink; prints the wall time.
 play_to_sink() {
   local out=$1 opt=$2; shift 2

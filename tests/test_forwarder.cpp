@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include "forwarder.hpp"
+#include "net_test_support.hpp"
 #include "test_slow.hpp"
 
 #include <skycue/client.hpp>
@@ -60,39 +61,11 @@ std::vector<Track> mkTracks(uint32_t n)
     return out;
 }
 
-// Runs an io_context on its own thread; call() runs a function there and
-// waits for its result, so the Forwarder is only ever touched on that thread.
-struct IoThread {
-    asio::io_context io;
-    std::optional<asio::executor_work_guard<asio::io_context::executor_type>> guard;
-    std::thread thread;
-
-    IoThread()
-    {
-        guard.emplace(asio::make_work_guard(io));
-        thread = std::thread([this] { io.run(); });
-    }
-    ~IoThread() { join(); }
-
-    void join()
-    {
-        guard.reset();
-        io.stop();
-        if (thread.joinable())
-            thread.join();
-    }
-
-    template <class F> auto call(F f) -> decltype(f())
-    {
-        using R = decltype(f());
-        auto task = std::make_shared<std::packaged_task<R()>>(std::move(f));
-        auto fut = task->get_future();
-        asio::post(io, [task] { (*task)(); });
-        if (fut.wait_for(kWait) != std::future_status::ready)
-            throw std::runtime_error("io thread call timed out");
-        return fut.get();
-    }
-};
+// IoThread runs an io_context on its own thread; call() runs a function there
+// and waits for its result, so the Forwarder is only ever touched on that thread.
+using skycue::net::test::IoThread;
+using skycue::net::test::freeTcpPort;
+using skycue::net::test::freeUdpPort;
 
 // A Forwarder on an IoThread. Members are destroyed in reverse order, and the
 // destructor resets the Forwarder on its thread before joining it.
@@ -255,13 +228,6 @@ struct RawUdp {
         }
     }
 };
-
-uint16_t freeUdpPort()
-{
-    asio::io_context io;
-    udp::socket s(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return s.local_endpoint().port();
-}
 
 } // namespace
 
@@ -870,13 +836,6 @@ BOOST_AUTO_TEST_CASE(dialled_target_marked)
 }
 
 namespace {
-
-uint16_t freeTcpPort()
-{
-    asio::io_context io;
-    tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return a.local_endpoint().port();
-}
 
 skycued::ForwarderDestination destination(const std::string& id, skycue::net::Transport transport,
                                           const std::string& host, uint16_t port)

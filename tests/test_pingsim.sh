@@ -37,11 +37,6 @@ fail() {
 }
 for f in "$skycued" "$pingsim" "$dump" "$sample"; do [ -e "$f" ] || fail "$f missing"; done
 
-free_port() { # free_port tcp|udp
-  python3 -I -c 'import socket,sys
-t = socket.SOCK_STREAM if sys.argv[1] == "tcp" else socket.SOCK_DGRAM
-s = socket.socket(socket.AF_INET, t); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' "$1"
-}
 web_port=$(free_port tcp)
 cat_port=$(free_port udp)
 json_port=$(free_port udp)

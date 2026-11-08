@@ -39,9 +39,6 @@ for f in "$skycued" "$replay" "$www/index.html" "$www/app.js" "$www/app_pure.js"
   [ -e "$f" ] || fail "$f missing"
 done
 
-free_port() {
-  python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'
-}
 web_port=$(free_port)
 cat > "$tmp/skycue.conf" <<EOF
 RECEIVER_LAT=38.9

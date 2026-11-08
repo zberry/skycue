@@ -77,21 +77,6 @@ template <class F> bool eventually(F pred)
     return pred();
 }
 
-// A port that is free right now (bound to 0 and released). Nothing connected
-// to it, so a TCP port has no TIME_WAIT either.
-uint16_t freeUdpPort()
-{
-    asio::io_context io;
-    udp::socket s(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return s.local_endpoint().port();
-}
-uint16_t freeTcpPort()
-{
-    asio::io_context io;
-    tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-    return a.local_endpoint().port();
-}
-
 void sendFrom(const std::string& from, uint16_t port, const std::string& payload)
 {
     asio::io_context io;

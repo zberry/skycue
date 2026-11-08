@@ -65,6 +65,10 @@ TrackState& TrackTable::apply(const TrackObservation& obs)
 
     mergeField(l.alt_baro_ft, obs.alt_baro_ft);
     mergeField(l.alt_geom_ft, obs.alt_geom_ft);
+    if (obs.alt_baro_ft)
+        s.alt_baro_at = obs.alt_baro_time.value_or(obs.received_time);
+    if (obs.alt_geom_ft)
+        s.alt_geom_at = obs.alt_geom_time.value_or(obs.received_time);
     mergeField(l.gs_kt, obs.gs_kt);
     mergeField(l.track_deg, obs.track_deg);
     mergeField(l.baro_rate_fpm, obs.baro_rate_fpm);

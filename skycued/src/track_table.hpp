@@ -1,5 +1,6 @@
 #pragma once
 
+#include "geom_altitude.hpp"
 #include "observation.hpp"
 
 #include <skycue/types.hpp>
@@ -22,6 +23,9 @@ struct TrackState {
     // received_time, source, raw_line and input_id always come from the
     // newest; on_ground from the newest that sets it.
     TrackObservation latest;
+    GeomHistory geom;                                           // last reported GNSS-minus-baro (learnGeomDiff)
+    // When the merged alt_baro_ft / alt_geom_ft were measured (obs.alt_*_time, else received_time).
+    std::chrono::system_clock::time_point alt_baro_at{}, alt_geom_at{};
     std::string last_input;                                     // the newest observation's input_id
     std::chrono::system_clock::time_point first_seen{};         // received_time of the first observation
     std::chrono::system_clock::time_point last_seen{};          // newest received_time

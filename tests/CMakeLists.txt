@@ -681,5 +681,12 @@ target_compile_definitions(test_altitude_fit PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_altitude_fit)
 add_test(NAME altitude_fit COMMAND test_altitude_fit)
 
+# Per-track geometric altitude policy: reported or estimated.
+add_executable(test_geom_altitude test_geom_altitude.cpp)
+target_link_libraries(test_geom_altitude PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_geom_altitude PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_geom_altitude)
+add_test(NAME geom_altitude COMMAND test_geom_altitude)
+
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

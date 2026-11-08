@@ -37,6 +37,7 @@ add_library(skycued_core STATIC
   src/fisb/location_index.cpp
   src/fisb/segment_assembler.cpp
   src/fisb/text_products.cpp
+  src/geom_altitude.cpp
   src/fisb/twgo.cpp
   src/fisb/uplink_frame.cpp
   src/file_util.cpp

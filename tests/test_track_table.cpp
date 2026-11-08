@@ -253,3 +253,25 @@ BOOST_AUTO_TEST_CASE(rebroadcast_alone_is_not_suppressed)
     BOOST_TEST(!table.lastApplySuppressedPosition());
     BOOST_TEST(s.latest.lat.has_value());
 }
+
+BOOST_AUTO_TEST_CASE(altitude_times_follow_the_carried_value)
+{
+    TrackTable table;
+    TrackObservation a = obs(0xA1, kT0, false);
+    a.alt_baro_ft = 30000;
+    a.alt_baro_time = kT0 - 4s;
+    a.alt_geom_ft = 30500;
+    table.apply(a);
+    auto* s = table.find(a.id);
+    BOOST_REQUIRE(s);
+    BOOST_CHECK(s->alt_baro_at == kT0 - 4s);
+    BOOST_CHECK(s->alt_geom_at == kT0);
+
+    // An observation without a value leaves the time alone.
+    TrackObservation b = obs(0xA1, kT0 + 10s, false);
+    b.alt_baro_ft = 30100;
+    table.apply(b);
+    s = table.find(a.id);
+    BOOST_CHECK(s->alt_baro_at == kT0 + 10s);
+    BOOST_CHECK(s->alt_geom_at == kT0);
+}

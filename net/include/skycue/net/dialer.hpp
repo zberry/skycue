@@ -42,6 +42,12 @@ public:
 
     void onData(std::function<void(const uint8_t*, std::size_t)> h);
     void onConnection(std::function<void(bool up)> h); // true after connect, false when lost (not after stop)
+    // Called once per failed attempt cycle: the lookup failed, or every resolved
+    // address failed or timed out. `why` is the text of counters().last_error
+    // ("resolve h: ...", "connect h:p: <addr>: <reason>"). Posted like the
+    // connection events, and never called after stop(). The Dialer retries
+    // by itself; call stop() from the handler for a one-shot probe.
+    void onFailure(std::function<void(const std::string& why)> h);
     void start();
     void stop();
     bool connected() const;

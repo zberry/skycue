@@ -43,6 +43,7 @@ struct Dialer::Impl {
     std::vector<uint8_t> rbuf;
     std::function<void(const uint8_t*, std::size_t)> on_data;
     std::function<void(bool)> on_conn;
+    std::function<void(const std::string&)> on_fail;
     mutable Counters counters;
     uint64_t closed_bytes_out = 0;    // written on connections that ended
     uint64_t closed_messages_out = 0;
@@ -76,6 +77,7 @@ Dialer::~Dialer() = default;
 
 void Dialer::onData(std::function<void(const uint8_t*, std::size_t)> h) { impl_->on_data = std::move(h); }
 void Dialer::onConnection(std::function<void(bool)> h) { impl_->on_conn = std::move(h); }
+void Dialer::onFailure(std::function<void(const std::string&)> h) { impl_->on_fail = std::move(h); }
 bool Dialer::connected() const { return impl_->up.load(); }
 const Counters& Dialer::counters() const
 {
@@ -276,6 +278,16 @@ void Dialer::lost(uint64_t gen, const std::string& why)
         });
     } else {
         log(quiet ? LogLevel::debug : LogLevel::warn, m.opts.name, why);
+    }
+    if (!was_up && m.on_fail) {
+        // A failed attempt cycle; asynchronous like the connection events.
+        std::weak_ptr<Dialer> weak = shared_from_this();
+        const uint64_t epoch = m.stop_epoch;
+        asio::post(m.io, [weak, epoch, why] {
+            auto self = weak.lock();
+            if (self && self->impl_->stop_epoch == epoch && self->impl_->on_fail)
+                self->impl_->on_fail(why);
+        });
     }
     if (was_up && m.on_conn) {
         // Always asynchronous: the caller of send() must not be re-entered.

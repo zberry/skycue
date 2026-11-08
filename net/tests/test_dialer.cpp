@@ -429,3 +429,48 @@ BOOST_AUTO_TEST_CASE(dialer_stale_connect_timer_does_not_close_live_connection)
     BOOST_TEST(downs.load() == 0);
     t.call([&] { srv->stopAll(); });
 }
+
+BOOST_AUTO_TEST_CASE(dialer_on_failure_reports_each_failed_cycle)
+{
+    test::IoThread t;
+    const uint16_t port = test::freeTcpPort();
+    auto d = Dialer::create(t.io, "127.0.0.1", port);
+    std::mutex m;
+    std::vector<std::string> whys;
+    d->onFailure([&](const std::string& why) {
+        std::lock_guard<std::mutex> l(m);
+        whys.push_back(why);
+    });
+    t.call([&] { d->start(); });
+    BOOST_REQUIRE(test::eventually([&] {
+        std::lock_guard<std::mutex> l(m);
+        return !whys.empty();
+    }));
+    t.call([&] { d->stop(); });
+    std::lock_guard<std::mutex> l(m);
+    BOOST_REQUIRE(whys.size() == 1u); // stopped before the 500 ms retry
+    BOOST_TEST(whys[0].find("Connection refused") != std::string::npos);
+    BOOST_TEST(whys[0].rfind("connect ", 0) == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(dialer_on_failure_reports_a_failed_lookup_and_is_silent_after_stop)
+{
+    test::IoThread t;
+    auto d = Dialer::create(t.io, "bad_host!", 30047);
+    std::mutex m;
+    std::vector<std::string> whys;
+    d->onFailure([&](const std::string& why) {
+        std::lock_guard<std::mutex> l(m);
+        whys.push_back(why);
+    });
+    t.call([&] { d->start(); });
+    BOOST_REQUIRE(test::eventually([&] {
+        std::lock_guard<std::mutex> l(m);
+        return !whys.empty();
+    }));
+    t.call([&] { d->stop(); });
+    std::this_thread::sleep_for(milliseconds(1200));
+    std::lock_guard<std::mutex> l(m);
+    BOOST_TEST(whys.size() == 1u);
+    BOOST_TEST(whys[0].rfind("resolve ", 0) == 0u);
+}

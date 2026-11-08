@@ -444,6 +444,7 @@ BOOST_AUTO_TEST_CASE(promote_without_list_file_keeps_delta, *boost::unit_test::d
     BOOST_TEST(f.filters().max_range_nm == 60.0);
 }
 
+// breaks in Task 4/5: asserts the old key name WEB_PORT in the restart warning and file:skycue.toml message wording
 BOOST_AUTO_TEST_CASE(watch_detects_conf_edit_within_2s)
 {
     RtFx f(headConf({{"filters.max_range_nm", "150"}}));
@@ -465,6 +466,7 @@ BOOST_AUTO_TEST_CASE(watch_detects_conf_edit_within_2s)
     BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().max_range_nm; }) == 98.0);
 }
 
+// breaks in Task 4/5: asserts the old key names RECORD_RAW, FISB_ENABLE, FISB_EXPERIMENTAL in the restart warning
 BOOST_AUTO_TEST_CASE(record_raw_and_fisb_edits_need_restart)
 {
     RtFx f(headConf({{"filters.max_range_nm", "150"}}));
@@ -586,6 +588,7 @@ BOOST_AUTO_TEST_CASE(list_file_relative_to_state_dir)
     BOOST_TEST(!exists(f.path("allow.list")));
 }
 
+// breaks in Task 4/5: asserts the old key name STATE_DIR in the warning
 BOOST_AUTO_TEST_CASE(list_reload_resolves_against_the_running_state_dir)
 {
     // A live reload of a changed list file name resolves it against STATE_DIR as

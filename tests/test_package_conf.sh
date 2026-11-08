@@ -42,7 +42,7 @@ done
 # Left as they are: the receiver position (0.0), the port defaults.
 for line in 'lat = 0.0' 'lon = 0.0' 'raw_port = 30978' 'json_port = 30047' \
             'tcp_port = 30500' 'port = 8080'; do
-  [ "$(grep -cE -- "^$line( +#.*)?\$" "$out")" -ge 1 ] || fail "$out: want '$line' kept from the example"
+  [ "$(grep -cE -- "^$line( +#.*)?\$" "$out")" = 1 ] || fail "$out: want '$line' kept from the example"
 done
 # Nothing but those six lines differs from the example.
 [ "$(wc -l <"$out")" = "$(wc -l <"$example")" ] || fail "$out and the example differ in line count"
@@ -57,8 +57,8 @@ grep -qE '^(state_dir|map_dir) = ""' "$out" && fail "$out: state_dir or map_dir 
 rc=$?
 [ "$rc" = 2 ] || { cat "$work/check.err"; fail "unset receiver.lat: exit $rc, want 2"; }
 [ "$(wc -l <"$work/check.err")" = 1 ] || { cat "$work/check.err"; fail "want one line on stderr"; }
-grep -qF "$out" "$work/check.err" && grep -q 'receiver\.lat' "$work/check.err" && grep -q 'receiver\.lon' "$work/check.err" \
-  || { cat "$work/check.err"; fail "stderr does not name $out, receiver.lat and receiver.lon"; }
+grep -qxF "skycued: $out:19: receiver.lat and receiver.lon are both 0.0: set the receiver's position" "$work/check.err" \
+  || { cat "$work/check.err"; fail "stderr is not the missing-position line naming $out"; }
 
 # Position set, state under the work dir, both decoder ports closed: the file
 # parses as a whole and the probes run (exit 1, the readsb line).

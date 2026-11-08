@@ -1625,8 +1625,7 @@ std::vector<std::string> inputIds(const pt::ptree& state)
     return ids;
 }
 
-// re-enabled in Task 4: /api/config keys are the dotted names
-BOOST_AUTO_TEST_CASE(dump978_enable_no_creates_no_uat_input, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(dump978_enable_no_creates_no_uat_input)
 {
     TempDir tmp;
     const std::string conf = tmp.path + "/skycue.toml";
@@ -1635,15 +1634,16 @@ BOOST_AUTO_TEST_CASE(dump978_enable_no_creates_no_uat_input, *boost::unit_test::
     const pt::ptree config = d.json("/api/config");
     BOOST_TEST(config.get<std::string>("daemon.mode") == "live");
     BOOST_TEST(config.get<bool>("daemon.dump978") == false);
-    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("value") == "no");
-    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "conf");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("value") == "no");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "conf");
     const auto ids = inputIds(d.json("/api/state"));
     BOOST_TEST(std::count(ids.begin(), ids.end(), "dump978") == 0);
     BOOST_TEST(d.terminate() == 0);
 }
 
-// re-enabled in Task 4: /api/config keys are the dotted names
-BOOST_AUTO_TEST_CASE(dump978_enabled_by_default, *boost::unit_test::disabled())  // the counterpart: today's behaviour
+BOOST_AUTO_TEST_CASE(dump978_enabled_by_default)  // the counterpart: today's behaviour
 {
     TempDir tmp;
     const std::string conf = tmp.path + "/skycue.toml";
@@ -1651,14 +1651,14 @@ BOOST_AUTO_TEST_CASE(dump978_enabled_by_default, *boost::unit_test::disabled()) 
     Spawned d(spawnServing(conf, {"--no-readsb"}, tmp.path + "/log"));
     const pt::ptree config = d.json("/api/config");
     BOOST_TEST(config.get<bool>("daemon.dump978") == true);
-    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "default");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "default");
     const auto ids = inputIds(d.json("/api/state"));
     BOOST_TEST(std::count(ids.begin(), ids.end(), "dump978") == 1);
     BOOST_TEST(d.terminate() == 0);
 }
 
-// re-enabled in Task 4: /api/config keys are the dotted names
-BOOST_AUTO_TEST_CASE(state_dir_holds_state_files, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(state_dir_holds_state_files)
 {
     TempDir tmp;
     const std::string etc = tmp.path + "/etc", state = tmp.path + "/state";
@@ -1672,7 +1672,8 @@ BOOST_AUTO_TEST_CASE(state_dir_holds_state_files, *boost::unit_test::disabled())
     BOOST_TEST(config.get<std::string>("daemon.inputs_path") == state + "/skycue.inputs.json");
     BOOST_TEST(config.get<std::string>("daemon.overlay_path") == state + "/skycue.runtime.json");
     BOOST_TEST(config.get<std::string>("daemon.locations.learned_path") == state + "/fisb-locations.json");
-    BOOST_TEST(configKey(config, "STATE_DIR").get<std::string>("value") == state);
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "STATE_DIR").get<std::string>("value") == state);
     BOOST_TEST(pollUntil([&] {
         const pt::ptree state_json = d.json("/api/state");
         for (const auto& in : state_json.get_child("inputs"))
@@ -1685,6 +1686,7 @@ BOOST_AUTO_TEST_CASE(state_dir_holds_state_files, *boost::unit_test::disabled())
     BOOST_TEST(!exists(etc + "/skycue.stats.json"));
 }
 
+// breaks in Task 4/5: asserts the product message "skycued: STATE_DIR ... is not a directory" (old key name)
 BOOST_AUTO_TEST_CASE(state_dir_missing_exits_2)
 {
     TempDir tmp;
@@ -1701,8 +1703,7 @@ BOOST_AUTO_TEST_CASE(state_dir_missing_exits_2)
     BOOST_TEST(has(readAll(log), "skycued: STATE_DIR " + tmp.path + "/file is not a directory"));
 }
 
-// re-enabled in Task 4: /api/config keys are the dotted names
-BOOST_AUTO_TEST_CASE(readsb_host_from_config_cli_wins, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(readsb_host_from_config_cli_wins)
 {
     TempDir tmp;
     const std::string conf = tmp.path + "/skycue.toml";
@@ -1712,14 +1713,20 @@ BOOST_AUTO_TEST_CASE(readsb_host_from_config_cli_wins, *boost::unit_test::disabl
                                 {"inputs.dump978.enable", "true"}}));
     Spawned d(spawnServing(conf, {"--readsb-host", "127.0.0.1", "--no-uat"}, tmp.path + "/log"));
     const pt::ptree config = d.json("/api/config");
-    BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("value") == "127.0.0.1");
-    BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("source") == "cli");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("value") == "127.0.0.1");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("source") == "cli");
     // No --dump978-host: the key applies.
-    BOOST_TEST(configKey(config, "DUMP978_HOST").get<std::string>("value") == "192.0.2.2");
-    BOOST_TEST(configKey(config, "DUMP978_HOST").get<std::string>("source") == "conf");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "DUMP978_HOST").get<std::string>("value") == "192.0.2.2");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "DUMP978_HOST").get<std::string>("source") == "conf");
     // --no-uat overrides DUMP978_ENABLE=yes.
-    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("value") == "no");
-    BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "cli");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("value") == "no");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "DUMP978_ENABLE").get<std::string>("source") == "cli");
     BOOST_TEST(config.get<bool>("daemon.dump978") == false);
     const auto ids = inputIds(d.json("/api/state"));
     BOOST_TEST(std::count(ids.begin(), ids.end(), "dump978") == 0);
@@ -1727,8 +1734,7 @@ BOOST_AUTO_TEST_CASE(readsb_host_from_config_cli_wins, *boost::unit_test::disabl
     BOOST_TEST(d.terminate() == 0);
 }
 
-// re-enabled in Task 4: /api/config keys are the dotted names
-BOOST_AUTO_TEST_CASE(readsb_host_from_config_without_flag, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(readsb_host_from_config_without_flag)
 {
     // No --readsb-host or --dump978-host: the keys are the hosts the built-in inputs use.
     TempDir tmp;
@@ -1736,8 +1742,10 @@ BOOST_AUTO_TEST_CASE(readsb_host_from_config_without_flag, *boost::unit_test::di
     writeFile(conf, headConf({{"cues.tcp_port", "0"}, {"inputs.readsb.host", str("192.0.2.1")}, {"inputs.dump978.host", str("192.0.2.2")}}));
     Spawned d(spawnServing(conf, {}, tmp.path + "/log"));
     const pt::ptree config = d.json("/api/config");
-    BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("value") == "192.0.2.1");
-    BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("source") == "conf");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("value") == "192.0.2.1");
+    // re-enabled in Task 4: /api/config keys are the dotted names
+    // BOOST_TEST(configKey(config, "READSB_HOST").get<std::string>("source") == "conf");
     std::map<std::string, std::string> hosts;  // input id -> host
     const pt::ptree inputs = d.json("/api/inputs");
     for (const auto& in : inputs.get_child("inputs"))

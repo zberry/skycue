@@ -86,9 +86,11 @@ free_port() {
 }
 web_port=$(free_port)
 cue_port=$(free_port)
-# write_conf FILE WEB_PORT CUE_PORT STATS_FILE [EXTRA_TABLES [EXTRA_CUES_LINES]]: the one
-# conf shape every skycued here uses; EXTRA_TABLES is whole [tables] (not
-# [cues]), EXTRA_CUES_LINES are further keys of [cues].
+# write_conf FILE WEB_PORT CUE_PORT STATS_FILE [EXTRA [EXTRA_CUES_LINES]]: the one
+# conf shape every skycued here uses. EXTRA is text appended after the last
+# table, [stats]: further [stats] keys, or whole other tables (but not [cues],
+# [receiver], [web], [filters] or [stats] again). EXTRA_CUES_LINES are
+# further keys of [cues].
 write_conf() {
   cat > "$1" <<EOC
 [receiver]

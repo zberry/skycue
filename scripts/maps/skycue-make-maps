@@ -147,6 +147,12 @@ if [ -n "$owner" ]; then id -u "$owner" >/dev/null 2>&1 || bad "no user '$owner'
 if [ -z "$map" ] || [ ${#around[@]} = 1 ]; then
   [ -f "$config" ] && [ -r "$config" ] || die "cannot read $config (pass --config FILE, or --map-dir DIR)"
   MAP_DIR= RECEIVER_LAT= RECEIVER_LON=
+  # TODO(Task 5): skycued --config FILE --dump-env does not exist yet. Once it
+  # does, take the values from it when skycued is on PATH and drop this guard.
+  # Until then the branch is never taken unless SKYCUE_USE_DUMP_ENV=1.
+  if [ "${SKYCUE_USE_DUMP_ENV:-}" = 1 ] && command -v skycued >/dev/null 2>&1; then
+    : # eval "$(skycued --config "$config" --dump-env)" -- map the dumped names to MAP_DIR, RECEIVER_LAT, RECEIVER_LON
+  fi
   load_config "$config" MAP_DIR=paths.map_dir RECEIVER_LAT=receiver.lat RECEIVER_LON=receiver.lon
   [ -n "$map" ] || map=$MAP_DIR
   [ -n "$map" ] || die "paths.map_dir is not set in $config; pass --map-dir"

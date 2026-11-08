@@ -345,9 +345,15 @@ test('reconnect_after_restart_converges', async ({ page }) => {
   await expect(page.locator('#conn-banner')).toBeHidden({ timeout: 15000 });
   await waitMarkers(page, 10);
   expect(await markerOf(page, 'fff000')).toBe(null);
-  const s = await state();
-  const known = new Set(s.tracks.map((t) => t.hex));
-  for (const m of await page.evaluate(() => window.skycueApp.markers())) expect(known.has(m.hex), m.hex).toBe(true);
+  // The replay restarts from its first second, so tracks keep appearing while
+  // this runs. Read the markers first, then the state: every marker already on
+  // the page must be in a state fetched after it (a poll, since the daemon's
+  // snapshot and the page's last update can differ by one replay tick).
+  await expect.poll(async () => {
+    const hexes = (await page.evaluate(() => window.skycueApp.markers())).map((m) => m.hex);
+    const known = new Set((await state()).tracks.map((t) => t.hex));
+    return hexes.filter((h) => !known.has(h));
+  }, { timeout: 10000 }).toEqual([]);
 });
 
 // A stopped (not exited) skycued keeps the TCP connection open, so no close

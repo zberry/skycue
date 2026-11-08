@@ -4,6 +4,10 @@
 // I/O and no clock, every call carries the arrival time. One decoder per input.
 // Modelled on ModesDecoder (same key LRU, field ages and counters) but there is
 // no CPR: every state vector carries a whole position.
+// Counters: each frame counts exactly one of unknown_type, no_position, unmapped
+// (types 7..10) or decoded. A position dropped by the range check counts in both
+// cpr_rejected and no_position; the frame's other fields still merge. Callsign,
+// category, squawk and emergency live with the key; all other fields expire at 60 s.
 
 #include <array>
 #include <chrono>

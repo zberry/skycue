@@ -42,7 +42,12 @@ void setField(UatKeyState& ks, Timed<T>& f, const T& v, TimePoint now) {
     f.set(v, now);
 }
 
-bool samePos(const cpr::Position& a, const cpr::Position& b) { return a.lat == b.lat && a.lon == b.lon; }
+// Identity fields live with the key (spec 14 item 5): changed when new or different, never expired.
+template <typename T>
+void setIdentity(UatKeyState& ks, Timed<T>& f, const T& v, TimePoint now) {
+    if (!f.has || !(f.value == v)) ks.dirty = true;
+    f.set(v, now);
+}
 
 }  // namespace
 
@@ -139,10 +144,10 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     setField(ks, ks.nic, sv.nic, now_);
 
     if (const auto ms = uat::decodeModeStatus(f)) {
-        if (!ms->emitter_category.empty()) setField(ks, ks.category, ms->emitter_category, now_);
-        if (ms->callsign) setField(ks, ks.callsign, *ms->callsign, now_);
-        if (ms->squawk) setField(ks, ks.squawk, *ms->squawk, now_);
-        if (ms->emergency) setField(ks, ks.emergency, *ms->emergency, now_);
+        if (!ms->emitter_category.empty()) setIdentity(ks, ks.category, ms->emitter_category, now_);
+        if (ms->callsign) setIdentity(ks, ks.callsign, *ms->callsign, now_);
+        if (ms->squawk) setIdentity(ks, ks.squawk, *ms->squawk, now_);
+        if (ms->emergency) setIdentity(ks, ks.emergency, *ms->emergency, now_);
         if (ms->nac_p) setField(ks, ks.nac_p, *ms->nac_p, now_);
     }
 
@@ -158,7 +163,7 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
             dropped = true;
         } else {
             if (!ks.first_pos) ks.first_pos = p;
-            if (!ks.last_pos || !samePos(*ks.last_pos, p)) accepted = p;
+            accepted = p;  // every accepted in-range fix is new, even a repeat: position_time must advance
             ks.last_pos = p;
         }
     }
@@ -194,10 +199,10 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     o.track_deg = ks.track.fresh(now_, kFieldFresh);
     o.baro_rate_fpm = ks.baro_rate.fresh(now_, kFieldFresh);
     o.geom_rate_fpm = ks.geom_rate.fresh(now_, kFieldFresh);
-    o.callsign = ks.callsign.fresh(now_, kFieldFresh);
-    o.squawk = ks.squawk.fresh(now_, kFieldFresh);
-    o.emergency = ks.emergency.fresh(now_, kFieldFresh);
-    o.category = ks.category.fresh(now_, kFieldFresh);
+    o.callsign = ks.callsign.has ? std::optional(ks.callsign.value) : std::nullopt;  // identity: lives with the key
+    o.squawk = ks.squawk.has ? std::optional(ks.squawk.value) : std::nullopt;  // identity: lives with the key
+    o.emergency = ks.emergency.has ? std::optional(ks.emergency.value) : std::nullopt;  // identity: lives with the key
+    o.category = ks.category.has ? std::optional(ks.category.value) : std::nullopt;  // identity: lives with the key
     o.nic = ks.nic.fresh(now_, kFieldFresh);
     o.nac_p = ks.nac_p.fresh(now_, kFieldFresh);
     o.rssi = rssiOf(ks);

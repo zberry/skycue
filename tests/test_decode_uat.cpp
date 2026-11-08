@@ -330,18 +330,54 @@ BOOST_AUTO_TEST_CASE(ms_fields_callsign_category_squawk_emergency_nacp)
 
 BOOST_AUTO_TEST_CASE(unchanged_frame_emits_nothing)
 {
-    Rig r(withRef());
-    r.feed(airborne(), 0.0);
-    r.feed(airborne(), 1.0);
+    Rig r;
+    auto s = airborne();
+    s.zero_position = true;  // no position: only the field rule applies
+    s.nic = 0;
+    r.feed(s, 0.0);
+    r.feed(s, 1.0);
     BOOST_CHECK_EQUAL(r.out.size(), 1u);
     BOOST_CHECK_EQUAL(r.dec.counters().observations, 1u);
-    // A changed field with the same position emits without lat/lon.
-    auto c = airborne();
+    // A changed field without a new position emits without lat/lon.
+    auto c = s;
     c.alt_ft = 5200;
     r.feed(c, 2.0);
     BOOST_REQUIRE_EQUAL(r.out.size(), 2u);
     BOOST_CHECK(!r.last().lat && !r.last().lon);
     BOOST_CHECK_EQUAL(r.last().alt_baro_ft.value_or(-1), 5200);
+}
+
+BOOST_AUTO_TEST_CASE(repeated_identical_fix_emits_position)
+{
+    Rig r(withRef());
+    r.feed(airborne(), 0.0);
+    r.feed(airborne(), 1.0);
+    BOOST_REQUIRE_EQUAL(r.out.size(), 2u);
+    BOOST_REQUIRE(r.last().lat && r.last().lon);
+    BOOST_CHECK(*r.last().position_time == r.last().received_time);
+    BOOST_CHECK(r.last().received_time > r.out[0].received_time);
+}
+
+BOOST_AUTO_TEST_CASE(identity_outlives_60s_with_the_key)
+{
+    Rig r;
+    r.feed(airborne(), 0.0);
+    auto b = airborne();
+    b.type = 0;
+    b.alt_ft = 5200;
+    r.feed(b, 120.0);
+    BOOST_REQUIRE_EQUAL(r.out.size(), 2u);
+    BOOST_CHECK_EQUAL(r.last().callsign.value_or(""), "KLM123");
+    BOOST_CHECK_EQUAL(r.last().category.value_or(""), "A3");
+    BOOST_CHECK(r.last().emergency);
+    BOOST_CHECK(!r.last().nac_p);  // dynamic: expired
+    Rig q;
+    auto t = airborne();
+    t.csid = false;
+    t.call = "7421";
+    q.feed(t, 0.0);
+    q.feed(b, 120.0);
+    BOOST_CHECK_EQUAL(q.last().squawk.value_or(""), "7421");
 }
 
 BOOST_AUTO_TEST_CASE(fields_expire_after_60s)
@@ -358,7 +394,7 @@ BOOST_AUTO_TEST_CASE(fields_expire_after_60s)
     BOOST_REQUIRE_EQUAL(r.out.size(), 2u);
     BOOST_CHECK_EQUAL(r.last().alt_geom_ft.value_or(-1), 5200);
     BOOST_CHECK(!r.last().alt_baro_ft);  // 70 s old
-    BOOST_CHECK(!r.last().callsign);     // type 0 carries none, the old one expired
+    BOOST_CHECK_EQUAL(r.last().callsign.value_or(""), "KLM123");  // identity lives with the key
 }
 
 BOOST_AUTO_TEST_CASE(rebroadcast_flag_and_direct_never_share_a_key)

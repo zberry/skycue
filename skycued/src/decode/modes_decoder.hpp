@@ -40,6 +40,8 @@ public:
     void feed(const std::vector<uint8_t>& bytes, Clock::time_point arrival, std::optional<uint8_t> signal);
     const DecodeCounters& counters() const;
     std::size_t keys() const;
+    // Replaces the reference position (a pingStation status moved); per-aircraft state is kept.
+    void setReference(std::optional<cpr::Position> reference) { cfg_.reference = reference; }
 
 private:
     KeyState* find(const StateKey& k);

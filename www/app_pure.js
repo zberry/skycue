@@ -660,6 +660,9 @@
   function isIntIn(v, lo, hi) { return typeof v === 'number' && Math.floor(v) === v && v >= lo && v <= hi; }
   function unset(v) { return v === undefined || v === null || v === ''; }
 
+  // pingstation_json `source`: the station's decoded fields or a decode of its rawData.
+  function validSource(v) { return v === 'device' || v === 'decode'; }
+
   // The form fields for an input of `type` over `transport`, in order. A
   // udp input with a `group` binds the group, so it has no `bind`.
   function inputFields(type, transport, group) {
@@ -673,6 +676,7 @@
     }
     if (type === 'pingstation_cat021') f.push('edition', 'sac', 'sic');
     if (type === 'beast_raw') f.push('format');
+    if (type === 'pingstation_json') f.push('source');
     if (isPingStation(type)) f.push('status_url', 'status_interval_s', 'time_mode');
     if (takesCapture(type)) f.push('capture');
     f.push('enabled');
@@ -738,6 +742,8 @@
     });
     if (has('format') && !unset(def.format) && def.format !== 'beast' && def.format !== 'avr')
       errors.format = 'format must be beast or avr';
+    if (has('source') && !unset(def.source) && !validSource(def.source))
+      errors.source = 'source must be device or decode';
     if (has('status_url') && !unset(def.status_url) && !(typeof def.status_url === 'string' && isHttpUrl(def.status_url)))
       errors.status_url = 'status_url must be an http:// URL without userinfo, with a port of 1 to 65535';
     if (has('status_interval_s') && def.status_interval_s !== undefined && !isIntIn(def.status_interval_s, 5, 3600))
@@ -869,6 +875,22 @@
         { obs_s: null, msg_s: null };
     });
     return out;
+  }
+
+  // The decoder line of an input card (spec 8.2): frames per second between two
+  // stats.inputs items `dtS` apart, then the cumulative CRC-failed share of
+  // frames and the fixed, pending, rejected and unknown counts. `state` and
+  // `prev` are the input's stats items (or states) with `decoding` and the
+  // decoder counters; null when `state` does not report decoding. The rate is
+  // an em dash without an earlier item, after a counter reset or for dtS <= 0.
+  function decoderLine(state, prev, dtS) {
+    if (!state || state.decoding !== true) return null;
+    var n = function (v) { return typeof v === 'number' && isFinite(v) ? v : 0; };
+    var frames = n(state.frames), rate = null;
+    if (prev && prev.decoding === true && dtS > 0 && frames >= n(prev.frames)) rate = (frames - n(prev.frames)) / dtS;
+    var pct = frames > 0 ? n(state.crc_fail) / frames * 100 : null;
+    return 'frames/s ' + formatNum(rate, 1) + ' · CRC fail ' + formatNum(pct, 1, '%') + ' · fixed ' + n(state.crc_fixed) +
+      ' · pending ' + n(state.cpr_pending) + ' · rejected ' + n(state.cpr_rejected) + ' · unknown ' + n(state.unknown_type);
   }
 
   // A device status is stale when it arrived more than 3 status intervals
@@ -2053,7 +2075,7 @@
     cityRankLimit: cityRankLimit, MAX_CITY_LABELS: MAX_CITY_LABELS, cullCities: cullCities,
     overlayOffer: overlayOffer,
     INPUT_TYPES: INPUT_TYPES, validateInputDef: validateInputDef, inputFields: inputFields, inputDot: inputDot,
-    inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, rejectedText: rejectedText,
+    inputRates: inputRates, validSource: validSource, decoderLine: decoderLine, statusStale: statusStale, inputEndpoint: inputEndpoint, rejectedText: rejectedText,
     inputTransport: inputTransport, OUTPUT_KINDS: OUTPUT_KINDS, OUTPUT_TRANSPORTS: OUTPUT_TRANSPORTS,
     outputFields: outputFields, validateOutputDef: validateOutputDef, outputEndpoint: outputEndpoint,
     outputDot: outputDot,

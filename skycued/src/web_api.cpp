@@ -78,15 +78,24 @@ void putStats(JsonWriter& w, const EngineStats& s)
         .add("web_clients", static_cast<int64_t>(s.web_clients));
     std::vector<std::string> inputs;
     inputs.reserve(s.inputs.size());
-    for (const auto& in : s.inputs)
-        inputs.push_back(JsonWriter()
-                             .add("id", in.id)
-                             .add("connected", in.connected)
-                             .add("messages", n(in.messages))
-                             .add("observations", n(in.observations))
-                             .add("uplinks", n(in.uplinks))
-                             .add("rejected", n(in.rejected))
-                             .str());
+    for (const auto& in : s.inputs) {
+        JsonWriter line;
+        line.add("id", in.id)
+            .add("connected", in.connected)
+            .add("messages", n(in.messages))
+            .add("observations", n(in.observations))
+            .add("uplinks", n(in.uplinks))
+            .add("rejected", n(in.rejected));
+        if (in.decoding)  // the decoder line of the input card (frame decoder spec 8.2)
+            line.add("decoding", true)
+                .add("frames", n(in.decoder.frames))
+                .add("crc_fail", n(in.decoder.crc_fail))
+                .add("crc_fixed", n(in.decoder.crc_fixed))
+                .add("cpr_pending", n(in.decoder.cpr_pending))
+                .add("cpr_rejected", n(in.decoder.cpr_rejected))
+                .add("unknown_type", n(in.decoder.unknown_type));
+        inputs.push_back(line.str());
+    }
     w.addRaw("inputs", jsonArray(inputs));
     // The decoder totals over the decoding inputs; absent when none decodes (TRACK_DECODER=readsb).
     InputCounters sum;

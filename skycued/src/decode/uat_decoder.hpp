@@ -58,6 +58,8 @@ public:
     void feed(const uat::UatFrame& frame, Clock::time_point arrival, std::optional<double> rssi_dbfs = std::nullopt);
     const DecodeCounters& counters() const;
     std::size_t keys() const;
+    // Replaces the reference position (a pingStation status moved); per-aircraft state is kept.
+    void setReference(std::optional<cpr::Position> reference) { cfg_.reference = reference; }
 
 private:
     UatKeyState& obtain(const StateKey& k, skycue::Source src);

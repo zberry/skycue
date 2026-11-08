@@ -764,6 +764,30 @@ BOOST_AUTO_TEST_CASE(format_only_on_beast_raw)
         BOOST_TEST(err(std::string(line) + R"(,"format":"avr")") == "format applies to beast_raw only", line);
 }
 
+BOOST_AUTO_TEST_CASE(source_defaults_device_and_roundtrips)
+{
+    BOOST_TEST(def(kPsJson).source == PingSource::device);
+    BOOST_TEST(def(std::string(kPsJson) + R"(,"source":"device")").source == PingSource::device);
+    const InputDef d = def(std::string(kPsJson) + R"(,"source":"decode")");
+    BOOST_TEST(d.source == PingSource::decode);
+    BOOST_TEST(inputDefJson(d).find(R"("source":"decode")") != std::string::npos);
+    BOOST_TEST(inputDefJson(def(kPsJson)).find(R"("source":"device")") != std::string::npos);
+    BOOST_TEST(def(inputDefJson(d).substr(1, inputDefJson(d).size() - 2)) == d);
+}
+
+BOOST_AUTO_TEST_CASE(source_rejects_other_value)
+{
+    BOOST_TEST(err(std::string(kPsJson) + R"(,"source":"mlat")") == "source must be device or decode");
+    BOOST_TEST(err(std::string(kPsJson) + R"(,"source":1)") == "source must be device or decode");
+}
+
+BOOST_AUTO_TEST_CASE(source_only_for_pingstation_json)
+{
+    for (const char* line : {kReadsb, kDump978, kCatUdp, R"("id":"u","type":"uat_raw","host":"h","port":1)",
+                             R"("id":"b","type":"beast_raw","host":"h","port":1)"})
+        BOOST_TEST(err(std::string(line) + R"(,"source":"decode")") == "source applies to pingstation_json only", line);
+}
+
 BOOST_AUTO_TEST_CASE(capture_accepted_on_raw_types)
 {
     for (const char* type : {"beast_raw", "uat_raw"}) {

@@ -110,6 +110,8 @@ std::string stateJson(const InputState& s, std::chrono::system_clock::time_point
     if (s.clock_offset_s && std::isfinite(*s.clock_offset_s))
         w.add("clock_offset_s", *s.clock_offset_s);
     w.add("status_fail_streak", static_cast<int64_t>(s.status_fail_streak)).add("last_error", s.last_error);
+    if (s.decoding)
+        w.add("decoding", true);
     putCounters(w, s.counters);
     if (s.device_status)
         w.addRaw("device_status", deviceStatusJson(*s.device_status));

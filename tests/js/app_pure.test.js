@@ -572,7 +572,7 @@ test('inputFields for cat021 tcp_connect has host not bind', () => {
     'interface', 'port', 'peer', 'edition', 'sac', 'sic', 'status_url', 'status_interval_s', 'time_mode', 'capture',
     'enabled']);
   assert.deepStrictEqual(P.inputFields('pingstation_json'), ['id', 'name', 'transport', 'bind', 'group', 'interface',
-    'port', 'peer', 'status_url', 'status_interval_s', 'time_mode', 'capture', 'enabled']);
+    'port', 'peer', 'source', 'status_url', 'status_interval_s', 'time_mode', 'capture', 'enabled']);
   assert.deepStrictEqual(P.inputFields('readsb'), ['id', 'name', 'transport', 'host', 'port', 'enabled']);
   // Before a transport is chosen the fields are udp's, the add form's preselected value.
   assert.deepStrictEqual(P.inputFields('pingstation_cat021'), P.inputFields('pingstation_cat021', 'udp'));
@@ -586,7 +586,7 @@ test('inputFields_per_type_and_transport', () => {
   assert.deepStrictEqual(f('uat_raw', 'udp'), ['id', 'name', 'transport', 'bind', 'group', 'interface', 'port', 'peer',
     'capture', 'enabled']);
   assert.deepStrictEqual(f('beast_raw'), ['id', 'name', 'transport', 'host', 'port', 'format', 'capture', 'enabled']);
-  assert.deepStrictEqual(f('pingstation_json', 'tcp_connect'), ['id', 'name', 'transport', 'host', 'port', 'status_url',
+  assert.deepStrictEqual(f('pingstation_json', 'tcp_connect'), ['id', 'name', 'transport', 'host', 'port', 'source', 'status_url',
     'status_interval_s', 'time_mode', 'capture', 'enabled']);
   // group and interface only for udp; format only for beast_raw; capture not for readsb.
   ['readsb', 'dump978', 'uat_raw', 'beast_raw', 'pingstation_json', 'pingstation_cat021'].forEach((type) => {
@@ -807,6 +807,38 @@ test('rejectedText shows rejected_peer only when non-zero', () => {
   assert.strictEqual(P.rejectedText({ rejected: 3, rejected_peer: 0 }), 'rejected 3');
   assert.strictEqual(P.rejectedText({}), 'rejected 0');
   assert.strictEqual(P.rejectedText({ rejected: 0, rejected_peer: 7 }), 'rejected 0 · rejected_peer 7');
+});
+
+test('validSource accepts device and decode only', () => {
+  assert.strictEqual(P.validSource('device'), true);
+  assert.strictEqual(P.validSource('decode'), true);
+  ['', 'Decode', 'mlat', null, undefined, 1].forEach((v) => assert.strictEqual(P.validSource(v), false, String(v)));
+  const ok = { id: 'ps', type: 'pingstation_json', port: 4000 };
+  assert.strictEqual(P.validateInputDef(Object.assign({ source: 'decode' }, ok)).ok, true);
+  assert.strictEqual(P.validateInputDef(Object.assign({ source: 'raw' }, ok)).errors.source, 'source must be device or decode');
+  // The field belongs to pingstation_json only.
+  assert.ok(P.inputFields('pingstation_json').indexOf('source') >= 0);
+  assert.ok(P.inputFields('pingstation_cat021', 'udp').indexOf('source') < 0);
+});
+
+test('decoderLine_formats_rates_and_percent', () => {
+  const prev = { decoding: true, frames: 1000, crc_fail: 100, crc_fixed: 3, cpr_pending: 5, cpr_rejected: 1, unknown_type: 0 };
+  const cur = { decoding: true, frames: 1050, crc_fail: 105, crc_fixed: 4, cpr_pending: 7, cpr_rejected: 2, unknown_type: 3 };
+  assert.strictEqual(P.decoderLine(cur, prev, 2),
+    'frames/s 25.0 · CRC fail 10.0% · fixed 4 · pending 7 · rejected 2 · unknown 3');
+  // No earlier item, a counter reset or dt <= 0: no rate; no frames: no percent.
+  assert.strictEqual(P.decoderLine(cur, null, 1), 'frames/s — · CRC fail 10.0% · fixed 4 · pending 7 · rejected 2 · unknown 3');
+  assert.ok(P.decoderLine(cur, prev, 0).startsWith('frames/s — · '));
+  assert.ok(P.decoderLine(prev, cur, 1).startsWith('frames/s — · '));
+  assert.strictEqual(P.decoderLine({ decoding: true }, null, 0),
+    'frames/s — · CRC fail — · fixed 0 · pending 0 · rejected 0 · unknown 0');
+});
+
+test('decoderLine_absent_without_decoding', () => {
+  assert.strictEqual(P.decoderLine({ frames: 5 }, null, 1), null);
+  assert.strictEqual(P.decoderLine({ decoding: false, frames: 5 }, { frames: 1 }, 1), null);
+  assert.strictEqual(P.decoderLine(null, null, 1), null);
+  assert.strictEqual(P.decoderLine(undefined, undefined, 1), null);
 });
 
 test('inputsSummary counts', () => {

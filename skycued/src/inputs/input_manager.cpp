@@ -98,8 +98,11 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
         decode.reference = inputReference(def, config);
         return std::make_unique<BeastRawInput>(io, def, record, std::move(decode));
     }
-    case InputType::pingstation_json:
-        return std::make_unique<PingJsonInput>(io, def, record);
+    case InputType::pingstation_json: {
+        RawDecodeOptions decode;  // `enabled` is not used: the input's own `source` decides
+        decode.reference = inputReference(def, config);
+        return std::make_unique<PingJsonInput>(io, def, record, std::move(decode));
+    }
     case InputType::pingstation_cat021:
         return std::make_unique<PingCat021Input>(io, def, record);
     case InputType::replay:

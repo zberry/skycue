@@ -3,6 +3,7 @@
 #include "inputs/ping_json.hpp"
 #include "log.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -74,6 +75,7 @@ InputState PingJsonInput::state() const
         c.unmapped = m.unmapped + u.unmapped;
         c.unknown_type = m.unknown_type + u.unknown_type;
         c.evicted = m.evicted + u.evicted;
+        c.rs_errors = m.rs_errors + u.rs_errors;
         c.decoder_observations = m.observations + u.observations;
     }
     return s;
@@ -81,7 +83,10 @@ InputState PingJsonInput::state() const
 
 void PingJsonInput::decodeFrames(const PingResult& r, std::chrono::system_clock::time_point arrival)
 {
-    // Aircraft whose rawData is missing: not a frame, not an unknown length.
+    // Aircraft whose rawData is missing: not a frame, not an unknown length. This is inferred
+    // from counts, so it depends on the parser (ping_json.cpp:231-234): addRawFrame runs only for
+    // an accepted aircraft, just before its observation is pushed, and an invalid hex string
+    // counts in raw_unknown_len. A parser change there must keep that, or count no_raw itself.
     const std::size_t with_raw = r.raw_frames.size() + r.raw_unknown_len;
     if (r.observations.size() > with_raw)
         counters_.no_raw += r.observations.size() - with_raw;
@@ -90,8 +95,16 @@ void PingJsonInput::decodeFrames(const PingResult& r, std::chrono::system_clock:
 
     // The device's last status position, else the configured one (spec 8.1).
     std::optional<decode::cpr::Position> ref = fallback_reference_;
-    if (const auto& st = deviceStatus(); st && st->lat && st->lon)
-        ref = decode::cpr::Position{*st->lat, *st->lon};
+    // The status position is used only when it can be a real fix: finite, in range, not exactly
+    // 0/0 (an unset position) and, when the device reports it, a GPS status of 2 or more (a lock).
+    if (const auto& st = deviceStatus(); st && st->lat && st->lon) {
+        const double la = *st->lat, lo = *st->lon;
+        const bool usable = std::isfinite(la) && std::isfinite(lo) && std::fabs(la) <= 90.0 &&
+                            std::fabs(lo) <= 180.0 && !(la == 0.0 && lo == 0.0) &&
+                            (!st->gps_status || *st->gps_status >= 2);
+        if (usable)
+            ref = decode::cpr::Position{la, lo};
+    }
     const bool same = ref.has_value() == reference_.has_value() &&
                       (!ref || (ref->lat == reference_->lat && ref->lon == reference_->lon));
     if (!same) {

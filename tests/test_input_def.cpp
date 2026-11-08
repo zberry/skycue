@@ -771,7 +771,7 @@ BOOST_AUTO_TEST_CASE(source_defaults_device_and_roundtrips)
     const InputDef d = def(std::string(kPsJson) + R"(,"source":"decode")");
     BOOST_CHECK(d.source == PingSource::decode);
     BOOST_TEST(inputDefJson(d).find(R"("source":"decode")") != std::string::npos);
-    BOOST_TEST(inputDefJson(def(kPsJson)).find(R"("source":"device")") != std::string::npos);
+    BOOST_TEST(inputDefJson(def(kPsJson)).find("source") == std::string::npos);  // default: not written
     BOOST_CHECK(def(inputDefJson(d).substr(1, inputDefJson(d).size() - 2)) == d);
 }
 

@@ -17,6 +17,7 @@ namespace {
 using std::chrono::seconds;
 using skycue::AddressType;
 using skycue::Source;
+using namespace limits;
 
 constexpr seconds kFieldFresh{60};      // our choice: observations carry fields <= 60 s old
 constexpr seconds kConfirmFresh{60};    // our choice: an address stays confirmed for 60 s
@@ -27,14 +28,7 @@ constexpr float kSlowGsKt = 25.0f;
 constexpr seconds kLocalLastPos{60};    // design 5.5 step 2: last position usable for a local decode; our choice, set by black-box comparison with the readsb golden (tests/test_decode_golden.cpp)
 constexpr seconds kSurfaceRefAge{300};  // design 5.5 step 1: last position usable as surface reference
 constexpr double kLocalRefNm = 180.0;   // our choice: reference-based local decode range (airborne)
-constexpr double kRangeNm = 300.0;      // our choice: reasonableness range from the reference/first position
-constexpr double kSpeedBaseNm = 0.5;    // our choice: speed check 0.5 NM + elapsed x max(1.5 gs, 150 kt)
-constexpr double kSpeedMinKt = 150.0;   // our choice
-constexpr double kSpeedCapAirKt = 1200.0;    // our choice
-constexpr double kSpeedCapSurfaceKt = 100.0;  // our choice
 constexpr seconds kDerivedBaroAge{10};  // design 5.4: baro/GNSS altitude ages for the TC19 difference
-constexpr seconds kNoPositionFor{10};   // design 7.2: change emissions only without a position this recent
-constexpr seconds kChangeInterval{1};   // design 7.2: at most one change emission per second
 constexpr std::size_t kRssiFrames = 8;  // our choice: rssi is the mean over the last 8 frames
 
 double secs(TimePoint a, TimePoint b) { return std::chrono::duration<double>(a - b).count(); }
@@ -329,7 +323,7 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
         const auto em = decodeEmergency(f);
         const auto sq = decodeSquawkTc28(f);
         if (em || sq) {
-            if (em) setField(ks, ks.emergency, *em, now_, false);
+            if (em) setField(ks, ks.emergency, *em, now_, true);
             if (sq) setField(ks, ks.squawk, *sq, now_, true);
             ++counters_.decoded;
         } else {
@@ -512,7 +506,7 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
     o.geom_rate_fpm = ks.geom_rate.fresh(now_, kFieldFresh);
     o.callsign = ks.callsign.has ? std::optional(ks.callsign.value) : std::nullopt;  // identity: lives with the key
     o.squawk = ks.squawk.has ? std::optional(ks.squawk.value) : std::nullopt;  // identity: lives with the key
-    o.emergency = ks.emergency.fresh(now_, kFieldFresh);
+    o.emergency = ks.emergency.has ? std::optional(ks.emergency.value) : std::nullopt;  // identity: lives with the key (spec 14 item 5)
     o.category = ks.category.has ? std::optional(ks.category.value) : std::nullopt;  // identity: lives with the key
     o.nic = ks.nic.fresh(now_, kFieldFresh);
     o.nac_p = ks.nac_p.fresh(now_, kFieldFresh);

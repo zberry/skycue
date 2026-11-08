@@ -73,7 +73,8 @@ void putCounters(JsonWriter& w, const InputCounters& c)
         .add("decoder_observations", num(c.decoder_observations))
         .add("mlat_skipped", num(c.mlat_skipped))
         .add("modeac_skipped", num(c.modeac_skipped))
-        .add("other_skipped", num(c.other_skipped));
+        .add("other_skipped", num(c.other_skipped))
+        .add("rs_errors", num(c.rs_errors));
 }
 
 std::string deviceStatusJson(const DeviceStatus& d)

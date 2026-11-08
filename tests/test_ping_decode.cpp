@@ -357,6 +357,45 @@ BOOST_AUTO_TEST_CASE(ps_reference_from_status_position)
     BOOST_TEST(std::abs(*got[0].lon - kP0.lon) < 0.01);
 }
 
+BOOST_AUTO_TEST_CASE(ps_unusable_status_position_keeps_the_fallback_reference)
+{
+    // The fallback is next to the aircraft; each status below is unusable and must not replace it.
+    const char* const bad[] = {
+        R"({"status":{"pingStationLatDD":10.0,"pingStationLonDD":10.0,"gpsStatus":1}})",   // no GPS lock
+        R"({"status":{"pingStationLatDD":10.0,"pingStationLonDD":10.0,"gpsStatus":0}})",   // no GPS
+        R"({"status":{"pingStationLatDD":0.0,"pingStationLonDD":0.0}})",                   // exactly 0/0
+        R"({"status":{"pingStationLatDD":95.0,"pingStationLonDD":10.0}})",                 // latitude out of range
+        R"({"status":{"pingStationLatDD":10.0,"pingStationLonDD":190.0}})"};               // longitude out of range
+    int i = 0;
+    for (const char* status : bad) {
+        BOOST_TEST_CONTEXT("status " << i++) {
+            Rig rig;
+            rig.run(R"(,"source":"decode")", true, std::make_pair(52.0, 4.0));
+            rig.send(status, kT0);
+            rig.send(aircraft(hexOf(air1090(false))), kT0 + 100);
+            const auto got = rig.observations();
+            BOOST_REQUIRE_EQUAL(got.size(), 1u);
+            BOOST_REQUIRE(got[0].lat && got[0].lon);
+            BOOST_TEST(std::abs(*got[0].lat - kP0.lat) < 0.01);
+            BOOST_TEST(std::abs(*got[0].lon - kP0.lon) < 0.01);
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(ps_status_position_with_gps_lock_replaces_the_fallback)
+{
+    // The fallback is far from the aircraft; a status with a GPS lock (2 or more) takes over.
+    Rig rig;
+    rig.run(R"(,"source":"decode")", true, std::make_pair(10.0, 10.0));
+    rig.send(R"({"status":{"pingStationLatDD":52.0,"pingStationLonDD":4.0,"gpsStatus":2}})", kT0);
+    rig.send(aircraft(hexOf(air1090(false))), kT0 + 100);
+    const auto got = rig.observations();
+    BOOST_REQUIRE_EQUAL(got.size(), 1u);
+    BOOST_REQUIRE(got[0].lat && got[0].lon);
+    BOOST_TEST(std::abs(*got[0].lat - kP0.lat) < 0.01);
+    BOOST_TEST(std::abs(*got[0].lon - kP0.lon) < 0.01);
+}
+
 BOOST_AUTO_TEST_CASE(ps_reference_falls_back_to_input_reference)
 {
     Rig rig;

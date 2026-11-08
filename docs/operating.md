@@ -309,7 +309,13 @@ else that is hex counts in `rejected`. What you get:
   `minimum_fuel` (the public table); dump978-fa prints `invalid` for it.
 - **Position range.** A position more than 300 NM from the input's
   reference (`ref_lat` and `ref_lon`, else `RECEIVER_LAT` and
-  `RECEIVER_LON`) is rejected and counted in `cpr_rejected`.
+  `RECEIVER_LON`) is rejected and counted in `cpr_rejected`. So is a fix too
+  far from the aircraft's last accepted one to have been flown (0.5 NM plus the
+  elapsed time at 1.5 times its ground speed, between 150 and 1200 kt, or 100
+  kt on the ground), as for 1090. A change without a position (an altitude, say)
+  is reported only after 10 s without an accepted position, and at most once a
+  second. Call sign, category, squawk and emergency status are kept for as long
+  as the aircraft is tracked, on both bands; all other fields for 60 s.
 - **Counters.** The same set as for 1090 ([`GET /api/inputs`](web-api.md#inputs)),
   and the `decoder` object of `GET /api/stats` sums them. The Receiver tab shows
   one line on the card of a decoding input: frames per second, the share of
@@ -317,8 +323,12 @@ else that is hex counts in `rejected`. What you get:
   (`fixed`), positions waiting for their pair (`pending`), positions rejected
   (`rejected`) and frames of a type it does not decode (`unknown`). dump978-fa
   has already done the error correction, so `crc_fail` and `crc_fixed` stay 0
-  for UAT; `unmapped` counts frames of payload type 7 or above, whose content
-  is not decoded.
+  for UAT; `rs_errors` sums the Reed-Solomon symbol errors dump978-fa reports
+  per frame (`rs=`); `unmapped` counts frames with a position of payload
+  type 7 to 10, whose state vector is decoded and reported but whose extra
+  content is not (without a position they count in `no_position`). Target State
+  content of types 3, 4 and 6 is not decoded either, but those frames count in
+  `decoded`.
 - **Geometric altitude.** A UAT long frame reports both altitudes, so the
   difference is the aircraft's own and feeds the population fit used for
   estimates ([below](#geometric-altitude)). TIS-B track-file targets (qualifier
@@ -345,7 +355,7 @@ executable (`SKYCUE_READSB` does the same for a readsb in the 1090
 tests); without them the committed goldens are used.
 
 **What is not verified against real data.** The captures hold no
-emitter category above A1, no emergency code other than none, no air/ground
+emitter category above A2, no emergency code other than none, no air/ground
 state 3, no use of the spare bit 98, no reserved call-sign or squawk symbols
 (38, 39) and no payload type above 2. The real captures cover payload types 0,
 1 and 2 (type 2 frames: 78 in the FlightAware sample, 42 in the Stratux

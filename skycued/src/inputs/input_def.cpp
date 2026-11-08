@@ -520,8 +520,8 @@ std::string inputDefJson(const InputDef& d)
         w.add("status_interval_s", static_cast<int64_t>(d.status_interval_s));
         w.add("time_mode", d.time_mode == TimeMode::gps ? "gps" : "utc");
     }
-    if (d.type == InputType::pingstation_json)
-        w.add("source", d.source == PingSource::decode ? "decode" : "device");
+    if (d.type == InputType::pingstation_json && d.source == PingSource::decode)
+        w.add("source", "decode");  // the default is not written, so a v1 file stays readable by the previous release
     if (takesCapture(d.type))
         w.add("capture", d.capture);
     return w.str();

@@ -321,6 +321,25 @@ BOOST_AUTO_TEST_CASE(identity_change_emits_without_position) {
     BOOST_CHECK_EQUAL(*r.obs[2].emergency, "none");
 }
 
+BOOST_AUTO_TEST_CASE(emergency_is_identity_and_outlives_60s) {
+    Rig r;
+    r.feed(df17(kAddr, identification(4, 3, "AAA1")), 0.0);
+    r.feed(df17(kAddr, emergencyStatus(1, "7700")), 1.0);
+    r.feed(df17(kAddr, identification(4, 3, "BBB2")), 20.0);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_REQUIRE(r.obs.back().emergency);
+    BOOST_CHECK_EQUAL(*r.obs.back().emergency, "general");
+    const std::size_t n = r.obs.size();
+    r.feed(df17(kAddr, identification(4, 3, "CCC3")), 200.0);  // 199 s later: still reported (spec 14 item 5)
+    BOOST_REQUIRE_EQUAL(r.obs.size(), n + 1);
+    BOOST_REQUIRE(r.obs.back().emergency);
+    BOOST_CHECK_EQUAL(*r.obs.back().emergency, "general");
+    // A change of the code is a change that emits.
+    r.feed(df17(kAddr, emergencyStatus(0, "7700")), 210.0);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), n + 2);
+    BOOST_CHECK_EQUAL(*r.obs.back().emergency, "none");
+}
+
 BOOST_AUTO_TEST_CASE(df18_cf_table) {
     struct Row {
         int cf;

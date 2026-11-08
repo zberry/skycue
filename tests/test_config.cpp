@@ -831,3 +831,35 @@ BOOST_AUTO_TEST_CASE(config_value_text)
     BOOST_TEST(configValueText(c, "paths.state_dir") == "");
     BOOST_TEST(configValueText(c, "inputs.readsb.enable") == "true");
 }
+
+BOOST_AUTO_TEST_CASE(tcp_connect_keeps_the_listener)
+{
+    const Config c = parseWith("[cues]\ntcp_connect = [\"10.0.0.5:4000\", \"cuehost:4001\"]\n");
+    BOOST_REQUIRE_EQUAL(c.cue_tcp_connect_targets.size(), 2u);
+    BOOST_TEST(c.cue_tcp_connect_targets[0].first == "10.0.0.5");
+    BOOST_TEST(c.cue_tcp_connect_targets[0].second == 4000);
+    BOOST_TEST(c.cue_tcp_port == 30500);  // the listener stays on: both roles at once
+}
+
+BOOST_AUTO_TEST_CASE(empty_stats_file_accepted)
+{
+    const Config c = parseWith("[stats]\nfile = \"\"\n");
+    BOOST_TEST(c.stats_file.empty());
+    BOOST_TEST(tomlConf({{"receiver.lat", ""}}).find("lat") == std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(installed_example_needs_a_position)
+{
+    const ConfigError e = expectError(readExample());
+    BOOST_TEST(contains(e.what(), "receiver.lat"), e.what());
+    BOOST_TEST(contains(e.what(), "receiver.lon"), e.what());
+    ScratchDir dir;
+    const std::string conf = dir.write("skycue.toml", readExample());
+    try {
+        skycued::parseConfigFile(conf);
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& err) {
+        BOOST_TEST(contains(err.what(), "receiver.lat"), err.what());
+        BOOST_TEST(contains(err.what(), "receiver.lon"), err.what());
+    }
+}

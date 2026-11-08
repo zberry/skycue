@@ -753,4 +753,11 @@ skycue_set_warnings(test_toml_lite)
 add_test(NAME toml_lite COMMAND test_toml_lite)
 set_tests_properties(toml_lite PROPERTIES TIMEOUT 60)
 
+add_executable(test_log test_log.cpp)
+target_link_libraries(test_log PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_log PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_log)
+add_test(NAME log COMMAND test_log)
+set_tests_properties(log PROPERTIES TIMEOUT 60)
+
 skycue_scale_test_timeouts()

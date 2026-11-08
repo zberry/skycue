@@ -164,6 +164,7 @@ private:
         }
         if (doc_.tables.count(name))
             fail("table [" + name + "] given twice");
+
         if (doc_.entries.count(name))
             fail("[" + name + "] is also a key");
         for (size_t dot = name.find('.'); dot != std::string::npos; dot = name.find('.', dot + 1))
@@ -193,6 +194,11 @@ private:
             fail("key " + full + " given twice");
         if (doc_.tables.count(full))
             fail("key " + full + " is also a table");
+        {  // a table below it ([a.b.c] seen, now b = 1 under [a]): the key's name is an implicit table
+            const auto below = doc_.tables.lower_bound(full + ".");
+            if (below != doc_.tables.end() && below->compare(0, full.size() + 1, full + ".") == 0)
+                fail("key " + full + " is also a table");
+        }
         Value v = value();
         doc_.entries.emplace(full, Entry{std::move(v), line});
     }

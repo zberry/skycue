@@ -25,7 +25,7 @@ namespace skycued::toml_lite {
 // below a key ([x.y] after x = 1).
 //
 // Stricter than TOML in strings: a string may not contain a raw control
-// character (other than a tab, DEL included), the escape \u0000, or a surrogate escape
+// character (any below U+0020 except a tab, and DEL), the escape \u0000, or a surrogate escape
 // (\uD800-\uDFFF); integers may not have leading zeros. A UTF-8 byte order
 // mark at the start of the text is skipped. The contents of strings are not
 // checked for valid UTF-8: they pass through as bytes.

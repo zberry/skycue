@@ -6,6 +6,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace skycue_test {
 
@@ -13,12 +14,16 @@ namespace skycue_test {
 // `dotted_key_to_toml_literal` (the literal as TOML spells it: "\"x\"", "8080",
 // "true", "[\"a:1\"]"), grouped under [table] headers by the part of the key
 // before its last dot. receiver.lat and receiver.lon are filled in (51.5,
-// -0.12) unless the map has them.
+// -0.12) unless the map has them; a receiver.lat or receiver.lon with the
+// empty literal "" is omitted (no position).
 inline std::string tomlConf(const std::map<std::string, std::string>& dotted_key_to_toml_literal = {})
 {
     std::map<std::string, std::string> kv = dotted_key_to_toml_literal;
     kv.emplace("receiver.lat", "51.5");
     kv.emplace("receiver.lon", "-0.12");
+    for (const char* k : {"receiver.lat", "receiver.lon"})
+        if (kv[k].empty())
+            kv.erase(k);
     std::map<std::string, std::string> tables;  // table -> its lines
     for (const auto& [key, literal] : kv) {
         const auto dot = key.rfind('.');

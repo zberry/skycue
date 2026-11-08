@@ -164,6 +164,9 @@ public:
     // paths.state_dir). The effective values do not change; anything that does
     // (a file edited meanwhile) is applied with origin "save-baseline".
     std::string promoteToBaseline();
+    // The filter keys the last promoteToBaseline() skipped because the
+    // environment or --set pins them: (dotted key, "env" or "set").
+    const std::vector<std::pair<std::string, std::string>>& skippedPinned() const { return skipped_; }
 
     // Starts the 1 s poll (see the top of this file). Once.
     void startWatching();
@@ -211,6 +214,7 @@ private:
 
     std::string conf_path_, overlay_path_;
     Engine& engine_;
+    std::vector<std::pair<std::string, std::string>> skipped_;
     std::vector<std::string> set_args_;
     std::map<std::string, std::string> env_;
     Config file_conf_;   // the last good parse of skycue.toml and the layers above it

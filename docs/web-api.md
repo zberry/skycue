@@ -789,7 +789,10 @@ in effect. Only the filter keys (`filters.max_range_nm`,
 other key that now differs from the value skycued is running with is
 logged at WARN as requiring a restart (setting it back clears that).
 
-The overlay wins over `skycue.toml`. A hand edit of `filters.max_range_nm` or
+The overlay wins over `skycue.toml` and `skycue.overrides.toml`, but not over
+the environment or `--set`: a filter key they set is read-only (a UI change
+is `409`, save as baseline skips it and lists it as `"skipped": [{"key",
+"source"}]` in its response, dropping it from the overlay). A hand edit of `filters.max_range_nm` or
 `filters.min_elevation_deg` while the overlay holds a value for that key
 changes nothing that skycued runs with, and is logged at WARN:
 `runtime: filters.max_range_nm edited in skycue.toml but overridden by
@@ -842,7 +845,7 @@ asked for.) From the 2015 fixture
 
 | key | meaning |
 | --- | --- |
-| `enabled` | `FISB_ENABLE` |
+| `enabled` | `fisb.enable` |
 | `uplinks`, `products`, `bad_frames`, `segments_open` | uplinks fed to the decoder, products decoded, uplinks rejected (bad hex, wrong size, overrun), segmented products waiting for segments |
 | `mosaic_blocks` | raster blocks held across every mosaic |
 | `uplink_duplicates` | uplinks dropped because another input delivered the same one within 2 s (two 978 feeds hearing the same ground station) |

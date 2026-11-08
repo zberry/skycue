@@ -962,6 +962,31 @@ BOOST_AUTO_TEST_CASE(runtime_overlay_does_not_override_pin)
     BOOST_TEST(f.filters().max_range_nm == 88.0);
 }
 
+BOOST_AUTO_TEST_CASE(promote_skips_pinned_keys)
+{
+    RtFx f(headConf({{"filters.max_range_nm", "150"}, {"filters.min_elevation_deg", "1"}}));
+    writeFile(f.path("skycue.runtime.json"),
+              "{\"version\":1,\"filters\":{\"max_range_nm\":30,\"min_elevation_deg\":6}}\n");
+    f.fx = std::make_unique<EngineFx>(skycued::parseConfigFile(f.conf, "", {"filters.max_range_nm=88"}), fakeSource(f.src),
+                                      10s, f.rec);
+    f.fx->t.call([&] {
+        f.rc = std::make_unique<RuntimeConfig>(f.fx->t.io, f.conf, *f.fx->engine);
+        f.rc->setLayers({"filters.max_range_nm=88"}, {});
+        f.rc->load();
+    });
+    BOOST_TEST(f.promote() == "");
+    const auto skipped = f.fx->t.call([&] { return f.rc->skippedPinned(); });
+    BOOST_REQUIRE(skipped.size() == 1u);
+    BOOST_TEST(skipped[0].first == "filters.max_range_nm");
+    BOOST_TEST(skipped[0].second == "set");
+    const std::string overrides = readAll(f.path("skycue.overrides.toml"));
+    BOOST_TEST(!has(overrides, "max_range_nm"), overrides);
+    BOOST_TEST(has(overrides, "min_elevation_deg = 6.0"), overrides);
+    BOOST_TEST(f.overlay().empty());
+    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+    BOOST_TEST(f.filters().max_range_nm == 88.0);
+}
+
 BOOST_AUTO_TEST_CASE(watcher_warns_pinned_by_set)
 {
     RtFx f(headConf({{"filters.max_range_nm", "150"}, {"filters.min_elevation_deg", "1"}}));

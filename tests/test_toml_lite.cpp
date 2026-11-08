@@ -292,6 +292,14 @@ BOOST_AUTO_TEST_CASE(unicode_escape_as_the_page_writes_it)
     BOOST_CHECK_EQUAL(str(parse("k = " + text + "\n", "t"), "k"), "caf\xC3\xA9 \x01 \xE2\x82\xAC");
 }
 
+BOOST_AUTO_TEST_CASE(string_as_tomlString_in_app_pure_js_emits_it)
+{
+    // www/app_pure.js tomlValue('recording.dir', 'caf\u00e9 "q" back\\slash \u20ac') (tomlString), copied exactly.
+    const std::string emitted = "\"caf\xC3\xA9 \\\"q\\\" back\\\\slash \xE2\x82\xAC\"";
+    const Document d = parse("k = " + emitted + "\n", "t");
+    BOOST_CHECK_EQUAL(str(d, "k"), "caf\xC3\xA9 \"q\" back\\slash \xE2\x82\xAC");
+}
+
 BOOST_AUTO_TEST_CASE(design_example_file_parses)
 {
     std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/skycue_example.toml", std::ios::binary);

@@ -701,7 +701,15 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
                 return *rejected;
             try {
                 const std::string unsaved = runtime.promoteToBaseline();
-                return json(200, JsonWriter().add("ok", true).add("unsaved", unsaved).str());
+                JsonWriter w;
+                w.add("ok", true).add("unsaved", unsaved);
+                if (!runtime.skippedPinned().empty()) {
+                    std::vector<std::string> items;
+                    for (const auto& [key, source] : runtime.skippedPinned())
+                        items.push_back(JsonWriter().add("key", key).add("source", source).str());
+                    w.addRaw("skipped", jsonArray(items));
+                }
+                return json(200, w.str());
             } catch (const std::exception& e) {
                 return error(500, e.what());
             }

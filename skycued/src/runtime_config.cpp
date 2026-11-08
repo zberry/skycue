@@ -674,6 +674,17 @@ std::string RuntimeConfig::promoteToBaseline()
     bool conf_written = false;
     bool list_written[2] = {false, false};
 
+    // A value pinned by the environment or --set is never written to the
+    // baseline; it leaves the overlay too, and is reported.
+    skipped_.clear();
+    if (next.max_range_nm && !pinnedBy("filters.max_range_nm").empty()) {
+        skipped_.emplace_back("filters.max_range_nm", pinnedBy("filters.max_range_nm"));
+        next.max_range_nm.reset();
+    }
+    if (next.min_elevation_deg && !pinnedBy("filters.min_elevation_deg").empty()) {
+        skipped_.emplace_back("filters.min_elevation_deg", pinnedBy("filters.min_elevation_deg"));
+        next.min_elevation_deg.reset();
+    }
     std::map<std::string, toml_lite::Value> values;
     if (next.max_range_nm)
         values["filters.max_range_nm"] = *next.max_range_nm;

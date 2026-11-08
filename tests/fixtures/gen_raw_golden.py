@@ -2,7 +2,8 @@
 
   collect PORT OUT      connect to readsb's JSON port, append every line to OUT
                         until the connection closes
-  reduce LINES OUT_GZ   one object per address, gzip JSONL sorted by hex:
+  reduce LINES OUT_GZ [--dump-series DIR]
+                        one object per address, gzip JSONL sorted by hex:
     {hex, positions, second{t,lat,lon}, last{t,lat,lon,alt_baro,gs,track,
      baro_rate,geom_rate}, flight, category, squawk, nic, nac_p}
 """
@@ -29,6 +30,26 @@ IDENT = (("flight", "flight"), ("category", "category"), ("squawk", "squawk"),
 # Fields of the "last" object (absent when that line has none).
 MOTION = (("alt_baro", "alt_baro"), ("gs", "gs"), ("track", "track"),
           ("baro_rate", "baro_rate"), ("geom_rate", "geom_rate"))
+
+
+def dump_series(lines, outdir):
+    """Per address a file HEX.tsv: now, alt_baro, gs, track, baro_rate, geom_rate of every line."""
+    import os
+    os.makedirs(outdir, exist_ok=True)
+    rows = {}
+    with open(lines, "r", encoding="utf-8", errors="replace") as f:
+        for raw in f:
+            try:
+                o = json.loads(raw)
+            except ValueError:
+                continue
+            h = o.get("hex")
+            if isinstance(h, str) and not h.startswith("~"):
+                rows.setdefault(h, []).append("\t".join(str(o.get(k, "")) for k in (
+                    "now", "alt_baro", "gs", "track", "baro_rate", "geom_rate")))
+    for h, r in rows.items():
+        with open(os.path.join(outdir, h + ".tsv"), "w") as g:
+            g.write("\n".join(r) + "\n")
 
 
 def reduce(lines, out):
@@ -85,5 +106,8 @@ if __name__ == "__main__":
         collect(sys.argv[2], sys.argv[3])
     elif len(sys.argv) == 4 and sys.argv[1] == "reduce":
         reduce(sys.argv[2], sys.argv[3])
+    elif len(sys.argv) == 6 and sys.argv[1] == "reduce" and sys.argv[4] == "--dump-series":
+        reduce(sys.argv[2], sys.argv[3])
+        dump_series(sys.argv[2], sys.argv[5])
     else:
         sys.exit(__doc__)

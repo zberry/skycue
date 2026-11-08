@@ -71,7 +71,9 @@ wait "$readsb_pid" 2>/dev/null || true
 wait "$collector_pid" 2>/dev/null || true
 pids=()
 
-python3 -I "$here/gen_raw_golden.py" reduce "$work/lines.jsonl" "$out"
+series=()
+[ -n "${GOLDEN_SERIES_DIR:-}" ] && series=(--dump-series "$GOLDEN_SERIES_DIR")
+python3 -I "$here/gen_raw_golden.py" reduce "$work/lines.jsonl" "$out" ${series[@]+"${series[@]}"}
 n=$(python3 -I -c 'import gzip,sys; print(sum(1 for _ in gzip.open(sys.argv[1], "rt")))' "$out")
 if [ "$n" -lt 100 ]; then
     echo "golden has only $n addresses (expected at least 100)" >&2

@@ -156,6 +156,8 @@ protected:
     void feedLines(const TransportData& data, const skycue::net::Framer::Out& out);
     // Lines dropped for being over 64 KiB, over every stream so far.
     uint64_t lineRejects() const;
+    // The transport's reason for the connection going down (valid in handleConnection(false)).
+    std::string lastCloseReason() const { return transport_ ? transport_->lastCloseReason() : std::string(); }
 
 private:
     void syncError();

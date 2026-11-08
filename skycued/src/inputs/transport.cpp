@@ -53,6 +53,8 @@ const std::string& Transport::lastError() const
     return state_->last_error;
 }
 
+std::string Transport::lastCloseReason() const { return state_->close_reason; }
+
 std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer)
 {
     if (peer.empty())

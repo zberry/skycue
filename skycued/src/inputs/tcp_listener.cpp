@@ -70,6 +70,7 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
                 on_conn(true);
             return;
         }
+        close_reason = listener->downInfo().why;
         remotes.erase(stream);
         if (live > 0)
             --live;

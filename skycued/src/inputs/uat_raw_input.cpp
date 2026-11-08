@@ -31,10 +31,15 @@ void UatRawInput::handleConnection(bool up)
 {
     if (def().transport != InputTransport::tcp_connect)
         return;
-    if (up)
+    if (up) {
         LOG_INFO(def().id << ": connected to " << def().host << ":" << def().port);
-    else
-        LOG_INFO(def().id << ": connection closed");
+    } else {
+        // As LineClient wrote it: the library's reason without its "read: " prefix.
+        std::string why = lastCloseReason();
+        if (why.compare(0, 6, "read: ") == 0)
+            why.erase(0, 6);
+        LOG_INFO(def().id << ": connection closed (" << why << ")");
+    }
 }
 
 bool UatRawInput::reportsTransportErrors() const

@@ -353,6 +353,58 @@ BOOST_AUTO_TEST_CASE(tcp_connect_delivers_chunks_in_order)
     });
 }
 
+BOOST_AUTO_TEST_CASE(close_reason_is_set_when_a_connection_goes_down)
+{
+    IoThread t;
+    asio::io_context sio;
+    tcp::acceptor server(sio, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const uint16_t port = server.local_endpoint().port();
+    std::mutex m;
+    std::string connect_reason, listen_reason;
+    std::unique_ptr<TcpConnectClient> c;
+    std::unique_ptr<TcpListener> l;
+    const uint16_t lport = freeTcpPort();
+    t.call([&] {
+        c = std::make_unique<TcpConnectClient>(t.io, "127.0.0.1", port);
+        c->onConnection([&](bool up) {
+            std::lock_guard<std::mutex> lock(m);
+            if (!up)
+                connect_reason = c->lastCloseReason();
+        });
+        c->start();
+        l = std::make_unique<TcpListener>(t.io, "127.0.0.1", lport, "", kRebind);
+        l->onStreamClosed([&](uint64_t) {
+            std::lock_guard<std::mutex> lock(m);
+            listen_reason = l->lastCloseReason();
+        });
+        l->start();
+        BOOST_CHECK_EQUAL(c->lastCloseReason(), "");  // nothing has gone down yet
+    });
+    {
+        tcp::socket s(sio);
+        server.accept(s);
+        BOOST_REQUIRE(eventually([&] { return t.call([&] { return c->connected(); }); }));
+    }
+    {
+        asio::io_context cio;
+        tcp::socket p(cio);
+        BOOST_REQUIRE(eventually([&] {
+            boost::system::error_code ec;
+            p.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), lport), ec);
+            return !ec;
+        }));
+        BOOST_REQUIRE(eventually([&] { return t.call([&] { return l->connected(); }); }));
+    }
+    BOOST_REQUIRE(eventually([&] {
+        std::lock_guard<std::mutex> lock(m);
+        return !connect_reason.empty() && !listen_reason.empty();
+    }));
+    t.call([&] {
+        c.reset();
+        l.reset();
+    });
+}
+
 BOOST_AUTO_TEST_CASE(tcp_listen_counts_peers_and_streams)
 {
     IoThread t;

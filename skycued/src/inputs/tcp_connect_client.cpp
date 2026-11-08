@@ -46,7 +46,10 @@ struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Imp
                 return;
             if (up) {
                 self->stream = self->dialer->counters().connects;
-            } else if (self->on_stream_closed) {
+            } else {
+                self->close_reason = self->dialer->downInfo().why;
+            }
+            if (!up && self->on_stream_closed) {
                 self->on_stream_closed(self->stream);
                 if (self->stopping)
                     return;

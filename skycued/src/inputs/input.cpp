@@ -179,11 +179,17 @@ void TransportInput::feedLines(const TransportData& data, const skycue::net::Fra
     auto it = line_framers_.find(datagram ? 0 : data.stream);
     if (it == line_framers_.end())
         it = line_framers_.emplace(datagram ? 0 : data.stream, skycue::net::LineFramer(64 * 1024)).first;
+    // Key 0 is the datagram framer (TCP streams count from 1). A datagram is
+    // followed by a '\n' so that a last line without one counts and no partial
+    // line carries over to the next datagram.
+    const uint64_t rejected_before = it->second.rejected();
     it->second.feed(data.data, data.size, out);
     if (datagram) {
         static const uint8_t newline = '\n';
         it->second.feed(&newline, 1, out);
     }
+    if (it->second.rejected() > rejected_before)
+        LOG_DEBUG(def().id << ": discarding a line longer than 65536 bytes");
 }
 
 uint64_t TransportInput::lineRejects() const

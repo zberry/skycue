@@ -46,6 +46,7 @@ struct TransportState {
     uint64_t connects = 0, bytes = 0, rejected_peer = 0;
     std::size_t peers = 0;
     std::string last_error;
+    std::string close_reason;  // why the last connection or peer went away; "" when unknown
     bool started = false, stopping = false;
     // Copies the library component's counters into the fields above; called
     // before each read of them (the library has no events for every change).
@@ -72,6 +73,10 @@ public:
     uint64_t rejectedPeer() const;   // datagrams or connections refused by `peer` or the peer cap
     std::size_t peers() const;       // open TCP sessions; 0 for UDP
     const std::string& lastError() const;  // "" until something fails
+    // Why the last connection (or TCP peer) went away, as the library words it
+    // ("read: End of file"); valid inside the onConnection(false) and
+    // onStreamClosed calls, "" when unknown (UDP).
+    std::string lastCloseReason() const;
 
 protected:
     Transport() = default;

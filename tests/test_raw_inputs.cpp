@@ -15,7 +15,12 @@
 #include "json_lite.hpp"
 #include "net_test_support.hpp"
 
+#include "log.hpp"
+
 #include <boost/asio.hpp>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <cmath>
@@ -387,6 +392,77 @@ BOOST_AUTO_TEST_CASE(dump978_alias_keeps_id_type_and_behaviour)
     BOOST_TEST(rig.state().counters.connects == 2u);
     BOOST_TEST(rig.state().last_error == "");  // as before: the input notes no transport error
     BOOST_TEST(rig.state().counters.messages == 3u);
+}
+
+namespace {
+
+// Everything written to stderr (the log) while alive.
+struct StderrCapture {
+    int saved, fd;
+    std::string path;
+    StderrCapture()
+    {
+        char name[] = "/tmp/skycue-log-XXXXXX";
+        fd = ::mkstemp(name);
+        path = name;
+        saved = ::dup(2);
+        ::dup2(fd, 2);
+    }
+    std::string finish()
+    {
+        if (saved >= 0) {
+            ::dup2(saved, 2);
+            ::close(saved);
+            saved = -1;
+        }
+        std::string text;
+        char buf[4096];
+        ::lseek(fd, 0, SEEK_SET);
+        for (ssize_t n; (n = ::read(fd, buf, sizeof buf)) > 0;)
+            text.append(buf, static_cast<std::size_t>(n));
+        return text;
+    }
+    ~StderrCapture()
+    {
+        finish();
+        ::close(fd);
+        ::unlink(path.c_str());
+    }
+};
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(dump978_logs_connected_and_closed_with_reason)
+{
+    skycued::setLogLevel(skycued::LogLevel::info);
+    asio::io_context sio;
+    tcp::acceptor acc(sio, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const std::string port = std::to_string(acc.local_endpoint().port());
+    StderrCapture cap;
+    {
+        Rig rig;
+        InputDef def;
+        def.id = "dump978";
+        def.type = skycued::InputType::dump978;
+        def.host = "127.0.0.1";
+        def.port = acc.local_endpoint().port();
+        def.builtin = true;
+        rig.run(std::make_unique<skycued::UatRawInput>(rig.t.io, def));
+        tcp::socket server = acc.accept();
+        BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+        server.close();
+        BOOST_REQUIRE(eventually([&] { return !rig.connected(); }));
+    }
+    const std::string log = cap.finish();
+    BOOST_TEST(log.find(" INFO  dump978: connected to 127.0.0.1:" + port + "\n") != std::string::npos);
+    const auto at = log.find(" INFO  dump978: connection closed (");
+    BOOST_REQUIRE(at != std::string::npos);
+    const auto open = log.find('(', at), close = log.find(")\n", at);
+    BOOST_REQUIRE(close != std::string::npos);
+    const std::string why = log.substr(open + 1, close - open - 1);
+    BOOST_TEST(!why.empty());
+    BOOST_TEST(why.compare(0, 6, "read: ") != 0);  // the library's prefix is stripped
+    BOOST_TEST_MESSAGE("reason: " << why);
 }
 
 BOOST_AUTO_TEST_CASE(second_uat_feed_same_uplink_deduped)

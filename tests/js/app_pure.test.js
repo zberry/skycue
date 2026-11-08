@@ -72,6 +72,21 @@ test('decisionColors gives the documented colours', () => {
   for (const k of Object.keys(P.DECISION_COLORS)) assert.ok(/^#[0-9a-f]{6}$/.test(P.DECISION_COLORS[k]), k);
 });
 
+test('formatGeomAlt_reported', () => {
+  assert.strictEqual(P.formatGeomAlt({ alt_geom_ft: 12300, alt_geom_source: 'reported' }), '12,300 ft');
+  assert.strictEqual(P.formatGeomAlt({ alt_geom_ft: 12300 }), '12,300 ft');
+});
+test('formatGeomAlt_estimated_shows_est_and_plusminus', () => {
+  assert.strictEqual(P.formatGeomAlt({ alt_geom_ft: 12300, alt_geom_source: 'estimated', alt_geom_uncertainty_ft: 240 }), '12,300 ft est. ±250');
+  assert.strictEqual(P.formatGeomAlt({ alt_geom_ft: 12300, alt_geom_source: 'estimated', alt_geom_uncertainty_ft: 130 }), '12,300 ft est. ±150');
+});
+test('formatGeomAlt_absent', () => {
+  assert.strictEqual(P.formatGeomAlt({}), '—');
+});
+test('formatAlt_geom_fallback_estimated', () => {
+  assert.strictEqual(P.formatAlt({ alt_geom_ft: 2650, alt_geom_source: 'estimated' }), '2,650 ft (geom est.)');
+  assert.strictEqual(P.formatAlt({ alt_geom_ft: 2650, alt_geom_source: 'reported' }), '2,650 ft (geom)');
+});
 test('formatAlt', () => {
   assert.strictEqual(P.formatAlt({ alt_baro_ft: 36000 }), '36,000 ft');
   assert.strictEqual(P.formatAlt({ alt_baro_ft: 2500, alt_geom_ft: 2650 }), '2,500 ft');

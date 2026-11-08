@@ -5237,3 +5237,27 @@ test('recalled_view_restores_radar_opacity_without_modified_marker', async ({ pa
   await expect(page.locator('#view-set-select option:checked')).toHaveText('Dim');
   expect(await page.locator('#radar-opacity').inputValue()).toBe('0.4');
 });
+
+test('box_shows_est_marker', async ({ page }) => {
+  await openPage(page);
+  await waitMarkers(page, 1);
+  const base = { addr_type: 'icao', lat: 38.95, lon: -76.9, decision: 'send', track_deg: 0, alt_geom_ft: 12300 };
+  await page.evaluate((b) => {
+    window.skycueApp.injectTestMarker(Object.assign({ hex: 'fff6e1', alt_geom_source: 'estimated',
+      alt_geom_uncertainty_ft: 240, alt_geom_age_s: 12.3 }, b));
+  }, base);
+  const panel = page.locator('#details');
+  await page.locator('.ac-marker[data-hex="fff6e1"] .ac-glyph').click();
+  const cell = panel.locator('[data-field="alt_geom_ft"]');
+  await expect(cell).toHaveText('12,300 ft est. ±250');
+  await expect(cell.locator('small.est').first()).toHaveText('est.');
+  await expect(cell.locator('small[title]')).toHaveText('±250');
+  await expect(cell.locator('small[title]')).toHaveAttribute('title', /12\.3 s old/);
+  // The second marker is injected after the first is selected (injected ones overlap).
+  await page.evaluate((b) => window.skycueApp.injectTestMarker(Object.assign({ hex: 'fff6e2',
+    alt_geom_source: 'reported', alt_geom_age_s: 1.0 }, b)), base);
+  await page.locator('.ac-marker[data-hex="fff6e2"] .ac-glyph').click();
+  await expect(panel.locator('[data-field="hex"]')).toHaveText('fff6e2');
+  await expect(cell).toHaveText('12,300 ft');
+  await expect(cell.locator('small')).toHaveCount(0);
+});

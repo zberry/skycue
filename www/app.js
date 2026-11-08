@@ -1609,7 +1609,19 @@
     ['lon', 'Longitude', function (v) { return v.toFixed(5) + '°'; }],
     ['position_time', 'Position time', fmtTime],
     ['alt_baro_ft', 'Altitude (baro)', function (v) { return P.thousands(v) + ' ft'; }],
-    ['alt_geom_ft', 'Altitude (geom)', function (v) { return P.thousands(v) + ' ft'; }],
+    ['alt_geom_ft', 'Altitude (geom)', function (v, t) {
+      var text = P.formatGeomAlt(t);
+      if (t.alt_geom_source !== 'estimated') return text;
+      // "est." and the uncertainty as small muted text; the text content is formatGeomAlt's.
+      var m = /^(.*) est\.(?: (±.*))?$/.exec(text);
+      var age = typeof t.alt_geom_age_s === 'number' ? 'estimate, ' + t.alt_geom_age_s.toFixed(1) + ' s old' : 'estimate';
+      return { text: text, html: esc(m[1]) + ' <small class="est">est.</small>' +
+        (m[2] ? ' <small class="est" title="' + esc(age) + '">' + esc(m[2]) + '</small>' : '') };
+    }],
+    ['alt_geom_source', 'Geom source'],
+    ['alt_geom_uncertainty_ft', 'Geom uncertainty', function (v) { return '±' + P.thousands(v) + ' ft'; }],
+    ['alt_geom_age_s', 'Geom age', function (v) { return v.toFixed(1) + ' s'; }],
+    ['geom_minus_baro_ft', 'Geom − baro', function (v) { return signed(v) + ' ft'; }],
     ['alt_is_geom', 'Elevation uses geom alt', yesNo],
     ['on_ground', 'On ground', yesNo],
     ['gs_kt', 'Ground speed', function (v) { return v.toFixed(0) + ' kt'; }],
@@ -1651,9 +1663,9 @@
       known[f[0]] = true;
       var v = t[f[0]];
       if (v === undefined || v === null) return;
-      var shown = f[2] ? f[2](v) : String(v);   // a string, or {text, title}
+      var shown = f[2] ? f[2](v, t) : String(v);   // a string, or {text, title}
       if (typeof shown === 'string') rows.push([f[0], f[1], shown]);
-      else rows.push([f[0], f[1], shown.text, shown.title]);
+      else rows.push([f[0], f[1], shown.text, shown.title, shown.html]);
     });
     Object.keys(t).forEach(function (k) {
       if (known[k] || k === 'type') return;
@@ -1662,7 +1674,7 @@
     });
     $('details-fields').tBodies[0].innerHTML = rows.map(function (row) {
       return '<tr><th scope="row">' + esc(row[1]) + '</th><td data-field="' + esc(row[0]) + '"' +
-        (row[3] ? ' title="' + esc(row[3]) + '"' : '') + '>' + esc(row[2]) + '</td></tr>';
+        (row[3] ? ' title="' + esc(row[3]) + '"' : '') + '>' + (row[4] || esc(row[2])) + '</td></tr>';
     }).join('');
     renderActions(t);
   }

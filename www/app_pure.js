@@ -147,8 +147,20 @@
   function formatAlt(t) {
     if (t.on_ground) return 'ground';
     if (typeof t.alt_baro_ft === 'number') return thousands(t.alt_baro_ft) + ' ft';
-    if (typeof t.alt_geom_ft === 'number') return thousands(t.alt_geom_ft) + ' ft (geom)';
+    if (typeof t.alt_geom_ft === 'number') {
+      return thousands(t.alt_geom_ft) + ' ft (geom' + (t.alt_geom_source === 'estimated' ? ' est.' : '') + ')';
+    }
     return '—';
+  }
+  // The geometric altitude alone: reported as '12,300 ft', estimated as
+  // '12,300 ft est. ±250' (uncertainty rounded to 50 ft), absent as '—'.
+  function formatGeomAlt(t) {
+    if (typeof t.alt_geom_ft !== 'number') return '—';
+    var s = thousands(t.alt_geom_ft) + ' ft';
+    if (t.alt_geom_source !== 'estimated') return s;
+    s += ' est.';
+    if (typeof t.alt_geom_uncertainty_ft === 'number') s += ' ±' + thousands(Math.round(t.alt_geom_uncertainty_ft / 50) * 50);
+    return s;
   }
   function formatNum(v, digits, unit) {
     if (typeof v !== 'number' || !isFinite(v)) return '—';
@@ -2018,7 +2030,7 @@
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
-    decisionColor: decisionColor, formatAlt: formatAlt, formatNum: formatNum, formatAge: formatAge,
+    decisionColor: decisionColor, formatAlt: formatAlt, formatGeomAlt: formatGeomAlt, formatNum: formatNum, formatAge: formatAge,
     thousands: thousands, trackKey: trackKey, markerLabel: markerLabel, listHas: listHas,
     sortTracks: sortTracks, graticuleStep: graticuleStep, parentTile: parentTile,
     tileBounds: tileBounds, tileInsideRegions: tileInsideRegions,

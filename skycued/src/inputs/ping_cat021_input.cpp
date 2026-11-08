@@ -87,6 +87,7 @@ void PingCat021Input::handleData(const TransportData& data)
 void PingCat021Input::handleBlock(const uint8_t* block, std::size_t size)
 {
     const InputDef& d = def();
+    publishRaw(RawKind::cat021, block, size);
     const asterix::DecodedBlock decoded = asterix::decodeBlock(block, size, edition_);
     const Cat021Context ctx{std::chrono::system_clock::now(), d.time_mode, d.sac, d.sic};
     for (const auto& record : decoded.records) {

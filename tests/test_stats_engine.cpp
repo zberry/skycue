@@ -7,7 +7,7 @@
 #include "engine_events.hpp"
 #include "engine_test_support.hpp"
 #include "filters.hpp"
-#include "inputs/dump978_input.hpp"
+#include "inputs/uat_raw_input.hpp"
 #include "restricted_fixtures.hpp"
 #include "stats_store.hpp"
 #include "time_util.hpp"
@@ -346,7 +346,7 @@ BOOST_AUTO_TEST_CASE(fisb_products_of_unpaced_replay_counted,
 
 BOOST_AUTO_TEST_CASE(uat_frames_reach_the_series)
 {
-    // A real Dump978Input (EngineStats takes uat_downlink/uat_uplink from
+    // A real UatRawInput (EngineStats takes uat_downlink/uat_uplink from
     // it) beside a track input that starts the data clock.
     TestServer server;
     FakeInput* readsb = nullptr;
@@ -358,7 +358,7 @@ BOOST_AUTO_TEST_CASE(uat_frames_reach_the_series)
         InputDef uat = fakeDef("dump978", InputType::dump978);
         uat.port = server.port();
         uat.builtin = true;
-        inputs->addBuiltin(std::make_unique<skycued::Dump978Input>(io, uat));
+        inputs->addBuiltin(std::make_unique<skycued::UatRawInput>(io, uat));
         inputs->load();
         return inputs;
     };

@@ -92,7 +92,8 @@ std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer)
 // Call once, before any transport or line client starts.
 void installNetLogSink();
 
-// The transport a pingStation input definition names. Throws
+// The transport an input definition names (readsb, dump978, uat_raw and the
+// pingStation types; a multicast `group` on udp). Throws
 // std::invalid_argument for any other type.
 std::unique_ptr<Transport> makeTransport(boost::asio::io_context& io, const InputDef& def);
 

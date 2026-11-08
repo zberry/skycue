@@ -1,7 +1,7 @@
 #include "engine.hpp"
 
 #include "file_util.hpp"
-#include "inputs/dump978_input.hpp"
+#include "inputs/uat_raw_input.hpp"
 #include "log.hpp"
 #include "time_util.hpp"
 
@@ -840,7 +840,7 @@ EngineStats Engine::stats() const
     s.readsb_connected = readsb && readsb->state().connected;
     if (const Input* uat = inputs_->builtin("dump978")) {
         s.dump978_connected = uat->state().connected;
-        if (const auto* d = dynamic_cast<const Dump978Input*>(uat)) {
+        if (const auto* d = dynamic_cast<const UatRawInput*>(uat)) {
             s.uat_downlink = d->downlinkFrames();
             s.uat_uplink = d->uplinkFrames();
         }

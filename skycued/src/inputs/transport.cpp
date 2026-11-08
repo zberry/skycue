@@ -81,11 +81,20 @@ void installNetLogSink()
 
 std::unique_ptr<Transport> makeTransport(boost::asio::io_context& io, const InputDef& def)
 {
-    const bool json = def.type == InputType::pingstation_json;
-    if (!json && def.type != InputType::pingstation_cat021)
+    switch (def.type) {
+    case InputType::readsb:
+    case InputType::dump978:
+    case InputType::pingstation_json:
+    case InputType::pingstation_cat021:
+    case InputType::uat_raw:
+        break;
+    case InputType::beast_raw:
+    case InputType::replay:
         throw std::invalid_argument(std::string("no transport for input type ") + inputTypeName(def.type));
-    if (json || def.transport == InputTransport::udp)
-        return std::make_unique<UdpListener>(io, def.bind, def.port, def.peer, std::chrono::seconds(5), def.id);
+    }
+    if (def.transport == InputTransport::udp)
+        return std::make_unique<UdpListener>(io, def.bind, def.port, def.peer, std::chrono::seconds(5), def.id,
+                                             def.group, def.iface);
     if (def.transport == InputTransport::tcp_connect)
         return std::make_unique<TcpConnectClient>(io, def.host, def.port, def.id);
     return std::make_unique<TcpListener>(io, def.bind, def.port, def.peer, std::chrono::seconds(5), def.id);

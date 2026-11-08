@@ -145,6 +145,8 @@ public:
     std::size_t enabledCount() const;
     std::vector<InputStatsLine> statsLines() const;
     const Input* builtin(const std::string& id) const;
+    // Where every input publishes its raw messages (attach() points each at it).
+    RawTap& rawTap() { return tap_; }
     const InputManagerConfig& config() const { return config_; }
 
 private:
@@ -192,6 +194,7 @@ private:
     InputManagerConfig config_;
     std::unique_ptr<SettledFile> watch_;  // null when in-memory
     boost::asio::steady_timer timer_;
+    RawTap tap_;  // before slots_: the inputs that point at it go first
     std::vector<Slot> slots_;  // built-ins first, then user inputs
     std::size_t builtin_count_ = 0;
     std::map<std::string, bool> file_builtin_;     // "builtin" as last read or written

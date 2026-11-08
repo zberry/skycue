@@ -127,16 +127,27 @@ void TransportInput::start()
         connects_before_ += transport_->connects();
         rejected_peer_before_ += transport_->rejectedPeer();
     }
+    for (const auto& f : line_framers_)
+        line_rejects_closed_ += f.second.rejected();
+    line_framers_.clear();
     resetStreams();
     transport_ = makeTransport(io_, def());
     transport_->onData([this](const TransportData& d) {
         noteData(d.size);
         handleData(d);
     });
-    transport_->onStreamClosed([this](uint64_t stream) { handleStreamClosed(stream); });
+    transport_->onStreamClosed([this](uint64_t stream) {
+        const auto it = line_framers_.find(stream);
+        if (it != line_framers_.end()) {
+            line_rejects_closed_ += it->second.rejected();
+            line_framers_.erase(it);
+        }
+        handleStreamClosed(stream);
+    });
     transport_->onConnection([this](bool up) {
         syncError();
         setConnected(up);
+        handleConnection(up);
     });
     transport_->start();
     if (status_poller_ && running_)
@@ -162,13 +173,34 @@ void TransportInput::tick(std::chrono::system_clock::time_point now)
         syncError();
 }
 
+void TransportInput::feedLines(const TransportData& data, const skycue::net::Framer::Out& out)
+{
+    const bool datagram = transport_->datagrams();
+    auto it = line_framers_.find(datagram ? 0 : data.stream);
+    if (it == line_framers_.end())
+        it = line_framers_.emplace(datagram ? 0 : data.stream, skycue::net::LineFramer(64 * 1024)).first;
+    it->second.feed(data.data, data.size, out);
+    if (datagram) {
+        static const uint8_t newline = '\n';
+        it->second.feed(&newline, 1, out);
+    }
+}
+
+uint64_t TransportInput::lineRejects() const
+{
+    uint64_t n = line_rejects_closed_;
+    for (const auto& f : line_framers_)
+        n += f.second.rejected();
+    return n;
+}
+
 void TransportInput::syncError()
 {
     const std::string& e = transport_->lastError();
     if (e == copied_error_)
         return;
     copied_error_ = e;
-    if (!e.empty())
+    if (!e.empty() && reportsTransportErrors())
         noteError(e);
 }
 

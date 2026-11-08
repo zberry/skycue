@@ -62,6 +62,7 @@ void SourceInput::start()
         ++counters_.uplinks;
         emitUplink(t, hex);
     });
+    source_->onRaw([this](const uint8_t* data, std::size_t size) { publishRaw(RawKind::json, data, size); });
     source_->onConnection([this](bool up) {
         if (up)
             ++counters_.connects;

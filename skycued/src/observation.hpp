@@ -3,6 +3,7 @@
 #include <skycue/types.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -45,6 +46,10 @@ public:
     // their receive time and payload hex. Most sources have none.
     // NOLINTNEXTLINE(performance-unnecessary-value-param): the default no-op of a virtual whose overrides take the handler by value and move it
     virtual void onUplink(std::function<void(std::chrono::system_clock::time_point, const std::string& hex)>) {}
+    // Every raw line the source received, before it is parsed (the raw tap
+    // of the hub). Most sources have none.
+    // NOLINTNEXTLINE(performance-unnecessary-value-param): the default no-op of a virtual whose overrides take the handler by value and move it
+    virtual void onRaw(std::function<void(const uint8_t*, std::size_t)>) {}
     virtual void start() = 0;
     virtual void stop() = 0;
     // Lines or records that did not parse (counted in the input's messages

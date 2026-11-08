@@ -10,10 +10,10 @@
 #include "config.hpp"
 #include "engine.hpp"
 #include "forwarder.hpp"
-#include "inputs/dump978_input.hpp"
 #include "inputs/input_manager.hpp"
 #include "inputs/inputs_file.hpp"
 #include "inputs/source_input.hpp"
+#include "inputs/uat_raw_input.hpp"
 #include "log.hpp"
 #include "readsb_json_source.hpp"
 #include "recorder.hpp"
@@ -351,7 +351,7 @@ int run(int argc, char** argv)
                     })));
             }
             if (use_dump978)
-                inputs->addBuiltin(std::make_unique<Dump978Input>(
+                inputs->addBuiltin(std::make_unique<UatRawInput>(
                     io, builtin("dump978", InputType::dump978, dump978_host, config.dump978_raw_port)));
         }
         inputs->load();

@@ -6,7 +6,6 @@
 #include "asterix/cat021_encode.hpp"
 #include "engine_test_support.hpp"
 #include "file_util.hpp"
-#include "inputs/dump978_input.hpp"
 #include "inputs/input.hpp"
 #include "inputs/input_def.hpp"
 #include "inputs/input_manager.hpp"
@@ -14,6 +13,7 @@
 #include "inputs/ping_cat021_input.hpp"
 #include "inputs/ping_json_input.hpp"
 #include "inputs/source_input.hpp"
+#include "inputs/uat_raw_input.hpp"
 #include "json_lite.hpp"
 
 #include <fcntl.h>
@@ -25,7 +25,7 @@
 
 using namespace enginetest;
 using asio::ip::udp;
-using skycued::Dump978Input;
+using skycued::UatRawInput;
 using skycued::Input;
 using skycued::InputConflict;
 using skycued::InputDef;
@@ -1294,7 +1294,7 @@ BOOST_AUTO_TEST_CASE(any_track_input_connected_ignores_dump978_and_disabled)
     FakeHub hub;
     Mgr m(t, fileConfig(tmp), [&](InputManager& im) {
         im.addBuiltin(fakeReadsb(hub));
-        im.addBuiltin(std::make_unique<Dump978Input>(t.io, uat));
+        im.addBuiltin(std::make_unique<UatRawInput>(t.io, uat));
     });
     tcp::socket server = acc.accept();
     BOOST_REQUIRE(eventually([&] { return m.state("dump978").connected; }));

@@ -185,6 +185,8 @@ ReadsbJsonSource::ReadsbJsonSource(boost::asio::io_context& io, std::string host
     client_.onLine([this](const std::string& line) {
         if (stopped_)
             return;
+        if (on_raw_)
+            on_raw_(reinterpret_cast<const uint8_t*>(line.data()), line.size());
         auto obs = parseReadsbLine(line);
         if (!obs) {
             ++bad_;
@@ -207,6 +209,11 @@ void ReadsbJsonSource::onObservation(std::function<void(const TrackObservation&)
 }
 
 void ReadsbJsonSource::onConnection(std::function<void(bool)> handler) { on_connection_ = std::move(handler); }
+
+void ReadsbJsonSource::onRaw(std::function<void(const uint8_t*, std::size_t)> handler)
+{
+    on_raw_ = std::move(handler);
+}
 
 void ReadsbJsonSource::start()
 {

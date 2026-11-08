@@ -29,6 +29,7 @@ public:
 
     void onObservation(std::function<void(const TrackObservation&)> handler) override;
     void onConnection(std::function<void(bool)> handler) override;
+    void onRaw(std::function<void(const uint8_t*, std::size_t)> handler) override;
     void start() override;
     void stop() override;
 
@@ -42,6 +43,7 @@ private:
     LineClient client_;
     std::function<void(const TrackObservation&)> on_observation_;
     std::function<void(bool)> on_connection_;
+    std::function<void(const uint8_t*, std::size_t)> on_raw_;
     uint64_t parsed_ = 0, bad_ = 0;
     bool stopped_ = false;
 };

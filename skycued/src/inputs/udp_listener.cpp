@@ -11,13 +11,15 @@ namespace net = skycue::net;
 
 struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
     Impl(asio::io_context& io_, std::string bind, uint16_t port, const std::string& peer,
-         std::chrono::milliseconds rebind_delay, std::string name)
+         std::chrono::milliseconds rebind_delay, std::string name, std::string group, std::string iface)
     {
         parsePeerFilter(peer);  // the same error text as the other transports
         net::UdpReceiveOptions o;
         o.peer = peer;
         o.rebind_delay = rebind_delay;
         o.name = std::move(name);
+        o.group = std::move(group);
+        o.iface = std::move(iface);
         receiver = net::UdpReceiver::create(io_, std::move(bind), port, std::move(o));
     }
 
@@ -76,8 +78,10 @@ struct UdpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
 };
 
 UdpListener::UdpListener(asio::io_context& io, std::string bind, uint16_t port, const std::string& peer,
-                         std::chrono::milliseconds rebind_delay, std::string name)
-    : impl_(std::make_shared<Impl>(io, std::move(bind), port, peer, rebind_delay, std::move(name)))
+                         std::chrono::milliseconds rebind_delay, std::string name, std::string group,
+                         std::string iface)
+    : impl_(std::make_shared<Impl>(io, std::move(bind), port, peer, rebind_delay, std::move(name), std::move(group),
+                                   std::move(iface)))
 {
     state_ = impl_;
     impl_->wire();

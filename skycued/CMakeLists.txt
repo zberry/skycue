@@ -26,7 +26,6 @@ add_library(skycued_core STATIC
   src/check_inputs.cpp
   src/conf_rewrite.cpp
   src/config.cpp
-  src/dump978_raw_source.cpp
   src/engine.cpp
   src/fisb/apdu.cpp
   src/fisb/dlac.cpp
@@ -43,12 +42,12 @@ add_library(skycued_core STATIC
   src/filters.cpp
   src/forwarder.cpp
   src/geo.cpp
+  src/hub/hub.cpp
   src/hub/raw_tap.cpp
   src/icao_class.cpp
   src/inputs/capture_writer.cpp
   src/inputs/cat021_map.cpp
   src/inputs/device_time.cpp
-  src/inputs/dump978_input.cpp
   src/inputs/input.cpp
   src/inputs/input_def.cpp
   src/inputs/input_manager.cpp
@@ -57,11 +56,13 @@ add_library(skycued_core STATIC
   src/inputs/ping_encode.cpp
   src/inputs/ping_json.cpp
   src/inputs/ping_json_input.cpp
+  src/inputs/readsb_stream_input.cpp
   src/inputs/source_input.cpp
   src/inputs/status_poller.cpp
   src/inputs/tcp_connect_client.cpp
   src/inputs/tcp_listener.cpp
   src/inputs/transport.cpp
+  src/inputs/uat_raw_input.cpp
   src/inputs/udp_listener.cpp
   src/json_lite.cpp
   src/line_client.cpp

@@ -1,11 +1,12 @@
 #include "inputs/input_manager.hpp"
 
 #include "file_util.hpp"
-#include "inputs/dump978_input.hpp"
 #include "inputs/inputs_file.hpp"
 #include "inputs/ping_cat021_input.hpp"
 #include "inputs/ping_json_input.hpp"
+#include "inputs/readsb_stream_input.hpp"
 #include "inputs/source_input.hpp"
+#include "inputs/uat_raw_input.hpp"
 #include "json_lite.hpp"
 #include "log.hpp"
 #include "readsb_json_source.hpp"
@@ -73,6 +74,8 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
     const RecordOptions record{config.record_dir, config.record_raw, config.record_max_bytes};
     switch (def.type) {
     case InputType::readsb: {
+        if (def.transport != InputTransport::tcp_connect)
+            return std::make_unique<ReadsbStreamInput>(io, def);
         const std::string host = def.host;
         const uint16_t port = def.port;
         return std::make_unique<SourceInput>(
@@ -81,13 +84,13 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
             }));
     }
     case InputType::dump978:
-        return std::make_unique<Dump978Input>(io, def);
+    case InputType::uat_raw:
+        return std::make_unique<UatRawInput>(io, def);
     case InputType::pingstation_json:
         return std::make_unique<PingJsonInput>(io, def, record);
     case InputType::pingstation_cat021:
         return std::make_unique<PingCat021Input>(io, def, record);
-    case InputType::beast_raw:  // their inputs arrive with the hub's input tasks
-    case InputType::uat_raw:
+    case InputType::beast_raw:  // its input arrives with the hub's beast task
     case InputType::replay:
         break;
     }
@@ -463,6 +466,7 @@ std::unique_ptr<Input> InputManager::build(const InputDef& def)
 
 void InputManager::attach(Input& input)
 {
+    input.setRawTap(&tap_);
     input.onObservation([this](const TrackObservation& obs) {
         Dispatch d(dispatching_);
         if (on_observation_)

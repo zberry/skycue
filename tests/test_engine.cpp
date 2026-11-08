@@ -2,7 +2,6 @@
 #include <boost/test/unit_test.hpp>
 
 #include "config.hpp"
-#include "dump978_raw_source.hpp"
 #include "engine.hpp"
 #include "forwarder.hpp"
 #include "line_client.hpp"
@@ -207,45 +206,6 @@ BOOST_AUTO_TEST_CASE(oversize_line_discarded)
     BOOST_TEST(t.call([&] { return src->linesRejected(); }) == 1u);
     BOOST_TEST(t.call([&] { return src->linesParsed(); }) == 1u);
     BOOST_TEST(got.at(0).id.address == 0xac5e81u);
-    t.call([&] {
-        src->stop();
-        src.reset();
-    });
-}
-
-BOOST_AUTO_TEST_CASE(dump978_raw_lines_counted)
-{
-    TestServer server;
-    IoThread t;
-    std::mutex m;
-    std::condition_variable cv;
-    std::vector<std::string> uplinks;
-    std::unique_ptr<skycued::Dump978RawSource> src;
-    t.call([&] {
-        src = std::make_unique<skycued::Dump978RawSource>(t.io, "127.0.0.1", server.port());
-        src->onUplink([&](std::chrono::system_clock::time_point, const std::string& hex) {
-            std::lock_guard<std::mutex> lk(m);
-            uplinks.push_back(hex);
-            cv.notify_all();
-        });
-        src->start();
-    });
-    auto sock = server.accept(3s);
-    BOOST_REQUIRE(sock);
-    sock->non_blocking(false);
-    const std::string payload = "-00a66ef135445d525a0c0519119021204800;rs=1;rssi=-10.0;\n"
-                                "!meta;\n"
-                                "+3c5e8a;rs=2;\r\n"
-                                "-00a66ef1354;\n";
-    asio::write(*sock, asio::buffer(payload));
-    {
-        std::unique_lock<std::mutex> lk(m);
-        BOOST_TEST(cv.wait_for(lk, kWait, [&] { return uplinks.size() == 1; }));
-    }
-    std::this_thread::sleep_for(100ms);
-    BOOST_TEST(uplinks.at(0) == "3c5e8a");
-    BOOST_TEST(t.call([&] { return src->downlinkFrames(); }) == 2u);
-    BOOST_TEST(t.call([&] { return src->uplinkFrames(); }) == 1u);
     t.call([&] {
         src->stop();
         src.reset();

@@ -1,7 +1,8 @@
 #pragma once
 
-// PingJsonInput: pingStation 3 JSON over UDP (spec §5.1). Each datagram is
-// one message, parsed with parsePingDatagram: its observations are passed
+// PingJsonInput: pingStation 3 JSON over UDP (spec §5.1), or one message per
+// line over tcp_listen and tcp_connect. Each datagram (as received) or line
+// is also published to the raw tap as `pingstation_json`. Each message is parsed with parsePingDatagram: its observations are passed
 // on, a status updates device_status and fires onStatus, a datagram or
 // aircraft that does not parse is counted in rejected and noted in
 // last_error. A squawk that is not a display code is logged once per input.
@@ -35,6 +36,10 @@ protected:
 
 private:
     void flushWriters();
+    // One message: a datagram as received, or one line of a TCP stream.
+    void handleText(const uint8_t* bytes, std::size_t size, const boost::asio::ip::address& peer);
+
+    bool datagrams_;  // udp: whole datagrams; else lines
 
     bool bad_squawk_logged_ = false;
     std::unique_ptr<CaptureWriter> capture_;  // null unless capture and a record_dir

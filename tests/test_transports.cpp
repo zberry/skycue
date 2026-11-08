@@ -636,7 +636,7 @@ BOOST_AUTO_TEST_CASE(make_transport_by_type)
         d.transport = skycued::InputTransport::udp;
         BOOST_CHECK(dynamic_cast<UdpListener*>(skycued::makeTransport(t.io, d).get()));
 
-        d.type = skycued::InputType::readsb;
+        d.type = skycued::InputType::replay;
         d.transport = skycued::InputTransport::tcp_connect;
         BOOST_CHECK_THROW(skycued::makeTransport(t.io, d), std::invalid_argument);
     });

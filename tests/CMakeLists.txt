@@ -418,6 +418,15 @@ target_compile_definitions(test_raw_tap PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_raw_tap)
 add_test(NAME raw_tap COMMAND test_raw_tap)
 
+# The hub core: per-kind buses and output lifecycle.
+add_executable(test_hub_core test_hub_core.cpp)
+target_link_libraries(test_hub_core PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_hub_core PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_hub_core)
+target_include_directories(test_hub_core PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
+add_test(NAME hub_core COMMAND test_hub_core)
+set_tests_properties(hub_core PROPERTIES TIMEOUT 60)
+
 # pingStation transports: UDP listener, TCP connect client, TCP listener.
 add_executable(test_transports test_transports.cpp)
 target_link_libraries(test_transports PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
@@ -475,6 +484,15 @@ skycue_set_warnings(test_inputs)
 target_include_directories(test_inputs PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME inputs COMMAND test_inputs)
 set_tests_properties(inputs PROPERTIES TIMEOUT 120)
+
+# Every input's raw messages on the tap; readsb and pingStation JSON on any transport; uat_raw.
+add_executable(test_raw_inputs test_raw_inputs.cpp)
+target_link_libraries(test_raw_inputs PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_raw_inputs PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_raw_inputs)
+target_include_directories(test_raw_inputs PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
+add_test(NAME raw_inputs COMMAND test_raw_inputs)
+set_tests_properties(raw_inputs PROPERTIES TIMEOUT 120)
 
 # The pingStation status poll over HTTP against an in-test server.
 add_executable(test_status_poller test_status_poller.cpp)

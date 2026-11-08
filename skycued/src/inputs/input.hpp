@@ -9,11 +9,14 @@
 // idempotent, never invokes a callback, and leaves the input not connected.
 // No callback runs after stop().
 
+#include "hub/raw_tap.hpp"
 #include "inputs/input_def.hpp"
 #include "inputs/input_types.hpp"
 #include "inputs/status_poller.hpp"
 #include "inputs/transport.hpp"
 #include "observation.hpp"
+
+#include "skycue/net/framer.hpp"
 
 #include <boost/asio/io_context.hpp>
 
@@ -21,9 +24,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace skycued {
 
@@ -61,6 +66,8 @@ public:
     void onUplink(std::function<void(std::chrono::system_clock::time_point, const std::string& hex)> handler);
     void onConnection(std::function<void(bool)> handler);
     void onStatus(std::function<void()> handler);  // device_status changed
+    // Where raw messages go (the manager's tap); null publishes nothing.
+    void setRawTap(RawTap* tap) { tap_ = tap; }
 
     // When noteError last wrote a log line; nullopt before the first.
     std::optional<std::chrono::steady_clock::time_point> lastErrorLoggedAt() const { return last_error_logged_at_; }
@@ -81,6 +88,17 @@ protected:
     void noteError(const std::string& message);
     void noteStatus(DeviceStatus status);
     void noteClockOffset(std::optional<double> offset_s);
+    // One raw message to the tap, tagged with this input's id. Nothing is
+    // copied unless an enabled output wants the kind.
+    void publishRaw(RawKind kind, const uint8_t* data, std::size_t size)
+    {
+        if (tap_)
+            tap_->publish(kind, data, size, def_.id);
+    }
+    void publishRaw(RawKind kind, std::string_view text)
+    {
+        publishRaw(kind, reinterpret_cast<const uint8_t*>(text.data()), text.size());
+    }
 
     InputCounters counters_;
 
@@ -96,6 +114,7 @@ private:
     std::function<void(std::chrono::system_clock::time_point, const std::string&)> on_uplink_;
     std::function<void(bool)> on_connection_;
     std::function<void()> on_status_;
+    RawTap* tap_ = nullptr;
 };
 
 // The shared half of the pingStation inputs: a transport from makeTransport,
@@ -124,6 +143,19 @@ protected:
     virtual void handleStreamClosed(uint64_t /*stream*/) {}
     // A new transport is about to start: forget per-stream state.
     virtual void resetStreams() {}
+    // Whether the transport's last error becomes the input's last_error (and a
+    // WARN line). False keeps a v1 `dump978` as it always was: the library
+    // logs its own connect failures and the input reports none.
+    virtual bool reportsTransportErrors() const { return true; }
+    // The transport went up or down (after the input's own bookkeeping).
+    virtual void handleConnection(bool /*up*/) {}
+    // Cuts what the transport delivered into lines: a TCP stream through its
+    // own net::LineFramer, a datagram with a '\n' appended so that it carries
+    // one or more lines and an unterminated last line counts. `out` gets each
+    // line without its terminator; it must check running() itself.
+    void feedLines(const TransportData& data, const skycue::net::Framer::Out& out);
+    // Lines dropped for being over 64 KiB, over every stream so far.
+    uint64_t lineRejects() const;
 
 private:
     void syncError();
@@ -136,6 +168,8 @@ private:
     bool running_ = false;
     uint64_t connects_before_ = 0, rejected_peer_before_ = 0;  // of earlier transports
     std::string copied_error_;
+    std::map<uint64_t, skycue::net::LineFramer> line_framers_;  // per stream; 0 for datagrams
+    uint64_t line_rejects_closed_ = 0;                          // of framers already dropped
 };
 
 }  // namespace skycued

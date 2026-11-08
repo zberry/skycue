@@ -7,7 +7,8 @@
 // counted in rejectedPeer() and dropped. The socket does not set
 // reuse_address, so a port another process holds shows as a bind failure.
 // It asks for a 4 MiB receive buffer (best effort) so a burst survives a slow consumer.
-// An adapter over skycue::net::UdpReceiver.
+// With a `group` the socket joins it (on `iface` when set) and binds the
+// group address, so `bind` is not used. An adapter over skycue::net::UdpReceiver.
 
 #include "inputs/transport.hpp"
 
@@ -25,7 +26,8 @@ public:
 
     UdpListener(boost::asio::io_context& io, std::string bind, uint16_t port, const std::string& peer,
                 std::chrono::milliseconds rebind_delay = std::chrono::seconds(5),
-                std::string name = {});  // name: the log prefix (the input id)
+                std::string name = {},  // name: the log prefix (the input id)
+                std::string group = {}, std::string iface = {});  // group: join this multicast group (bound at the group address)
     ~UdpListener() override;
 
     void start() override;

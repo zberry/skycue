@@ -755,5 +755,13 @@ target_include_directories(test_uat_raw_decode PRIVATE ${PROJECT_SOURCE_DIR}/net
 add_test(NAME uat_raw_decode COMMAND test_uat_raw_decode)
 set_tests_properties(uat_raw_decode PROPERTIES TIMEOUT 120)
 
+# skycued's own UAT decoder against dump978-fa, live: the 439-downlink sample replayed at speed 1
+# (about 2 minutes) through a uat_raw input under TRACK_DECODER=skycued, compared per address with
+# the committed golden and, with SKYCUE_DUMP978 set, a fresh dump978-fa run. Skips without fixtures.
+add_test(NAME decode_differential_uat
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential_uat.sh
+    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+    $<TARGET_FILE:skycue-iqgen>)
+set_tests_properties(decode_differential_uat PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
 skycue_scale_test_timeouts()

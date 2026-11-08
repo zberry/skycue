@@ -121,6 +121,14 @@ and `nac_p` appear in the golden more often than in the decoder's output.
 - Licence: derived from `uat-sample.txt.gz` (frames and the decoded values of them), so
   BSD-2-Clause as for the dump978 repository's sample data.
 - Used by `tests/test_decode_uat_golden.cpp` (ctest `decode_uat_golden`).
+- Also used by `tests/test_decode_differential_uat.sh` (ctest `decode_differential_uat`),
+  the live end-to-end twin: skycue-rawplay replays `uat-sample.txt.gz` at speed 1 into
+  skycued (`TRACK_DECODER=skycued`, a `uat_raw` input), the recorded received stream is
+  reduced per address (`reduce_received.py --uat`), the golden the same way
+  (`--uat-golden`; positions more than 300 NM from the test's receiver, one aircraft, are left
+  out because the decoder rejects them), and `compare_tracks.py --uat` compares. With
+  `SKYCUE_DUMP978` set to a dump978-fa executable the golden is also regenerated fresh
+  and ours is compared with that.
 
 ## raw/uat-stratux.golden.jsonl.gz
 

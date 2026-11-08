@@ -60,6 +60,11 @@ BOOST_AUTO_TEST_CASE(tables_and_keys_dotted)
     BOOST_CHECK_EQUAL(d.entries.at("c.d.y_1").line, 6);
     BOOST_CHECK(d.tables.count("a") && d.tables.count("b") && d.tables.count("c.d"));
     BOOST_CHECK_EQUAL(d.tables.size(), 3u);
+    // Each header's line, an empty table's too.
+    BOOST_CHECK_EQUAL(d.table_lines.at("a"), 2);
+    BOOST_CHECK_EQUAL(d.table_lines.at("b"), 4);
+    BOOST_CHECK_EQUAL(d.table_lines.at("c.d"), 5);
+    BOOST_CHECK_EQUAL(d.table_lines.size(), d.tables.size());
 }
 
 BOOST_AUTO_TEST_CASE(nested_table_header)

@@ -199,12 +199,14 @@ void collectFile(const std::string& text, const std::string& name, int layer, En
     }
     for (const auto& t : doc.tables)
         if (!knownTables().count(t))
-            throw ConfigError(name, 0, "unknown table '" + t + "'");
+            throw ConfigError(name, doc.table_lines.count(t) ? doc.table_lines.at(t) : 0, "unknown table '" + t + "'");
 }
 
 // The value of an environment variable or a --set argument: a TOML value, or a
-// bare word, which is a string ("" is the empty string).
-tl::Value parseLiteral(const std::string& raw_value, const std::string& source, const std::string& key)
+// bare word, which is a string ("" is the empty string). For a string key an
+// unquoted value is the text itself, even if it reads as a number or a bool
+// (a serial 1234, a gain 49.6).
+tl::Value parseLiteral(const std::string& raw_value, const std::string& source, const std::string& key, Type type)
 {
     const auto first = raw_value.find_first_not_of(" \t");
     const auto last = raw_value.find_last_not_of(" \t");
@@ -213,6 +215,8 @@ tl::Value parseLiteral(const std::string& raw_value, const std::string& source, 
         throw ConfigError(source, 0, key + ": the value must be on one line");
     if (raw.empty())
         return std::string();
+    if (type == Type::string && raw.find_first_of("\"'[]#") == std::string::npos)
+        return tl::Value{std::move(raw)};
     try {
         tl::Document d = tl::parse("v = " + raw + "\n", source);
         if (d.entries.size() == 1 && d.entries.count("v"))
@@ -231,7 +235,7 @@ void applyEnvironment(const std::map<std::string, std::string>& env, Entries& en
         const std::string name = envNameOf(spec.key);
         const auto it = env.find(name);
         if (it != env.end())
-            entries[spec.key] = Src{parseLiteral(it->second, name, spec.key), name, 0, 2};
+            entries[spec.key] = Src{parseLiteral(it->second, name, spec.key, spec.type), name, 0, 2};
     }
 }
 
@@ -244,9 +248,10 @@ void applySetArgs(const std::vector<std::string>& set_args, Entries& entries)
         const auto k0 = arg.find_first_not_of(" \t");
         const auto k1 = arg.find_last_not_of(" \t", eq == 0 ? 0 : eq - 1);
         const std::string key = k0 == std::string::npos || k0 >= eq ? std::string() : arg.substr(k0, k1 - k0 + 1);
-        if (!findSpec(key))
+        const KeySpec* spec = findSpec(key);
+        if (!spec)
             throw ConfigError("--set", 0, unknownKeyMessage(key));
-        entries[key] = Src{parseLiteral(arg.substr(eq + 1), "--set", key), "--set", 0, 3};
+        entries[key] = Src{parseLiteral(arg.substr(eq + 1), "--set", key, spec->type), "--set", 0, 3};
     }
 }
 
@@ -459,6 +464,34 @@ Config convertEntries(const Entries& entries, const std::string& name, bool posi
     conv.str("sdr.serial_978", c.sdr_978_serial);
     conv.str("sdr.gain_1090", c.gain_1090);
     conv.str("sdr.gain_978", c.gain_978);
+    {
+        // "auto", "auto-verbose" (1090 only) or a decimal number in dB.
+        auto gain_ok = [](const std::string& g, bool verbose_ok) {
+            if (g == "auto" || (verbose_ok && g == "auto-verbose"))
+                return true;
+            size_t i = g.compare(0, 1, "-") == 0 ? 1 : 0;
+            const size_t int_start = i;
+            while (i < g.size() && std::isdigit(static_cast<unsigned char>(g[i])))
+                ++i;
+            if (i == int_start)
+                return false;
+            if (i < g.size() && g[i] == '.') {
+                const size_t frac_start = ++i;
+                while (i < g.size() && std::isdigit(static_cast<unsigned char>(g[i])))
+                    ++i;
+                if (i == frac_start)
+                    return false;
+            }
+            return i == g.size();
+        };
+        if (!gain_ok(c.gain_1090, true))
+            conv.fail("sdr.gain_1090", "sdr.gain_1090 must be \"auto\", \"auto-verbose\" or a number of dB in a string, got '" +
+                                           c.gain_1090 + "'");
+        if (!gain_ok(c.gain_978, false))
+            conv.fail("sdr.gain_978", "sdr.gain_978 must be \"auto\" or a number of dB in a string, got '" + c.gain_978 + "'");
+        if (!c.sdr_1090_serial.empty() && c.sdr_1090_serial == c.sdr_978_serial)
+            conv.fail("sdr.serial_978", "sdr.serial_978 must differ from sdr.serial_1090, both are '" + c.sdr_978_serial + "'");
+    }
     conv.str("web.bind", c.web_bind);
     if (c.web_bind.empty())
         conv.fail("web.bind", "web.bind must not be empty");
@@ -601,6 +634,7 @@ std::map<std::string, std::string> environmentOverrides()
         return n;
     }();
     std::map<std::string, std::string> env;
+    std::string unknown_names;
     for (char** e = environ; e && *e; ++e) {
         const char* eq = std::strchr(*e, '=');
         if (!eq)
@@ -609,10 +643,17 @@ std::map<std::string, std::string> environmentOverrides()
         if (name.compare(0, 7, "SKYCUE_") != 0)
             continue;
         if (!known.count(name)) {
-            LOG_DEBUG("config: ignoring the environment variable " << name << " (no such key)");
+            unknown_names += (unknown_names.empty() ? "" : ", ") + name;
             continue;
         }
         env[name] = eq + 1;
+    }
+    // One line, once per distinct list: a mistyped variable must show at the
+    // default log level (startup reads the environment more than once).
+    static std::string last_warned;
+    if (!unknown_names.empty() && unknown_names != last_warned) {
+        last_warned = unknown_names;
+        LOG_WARN("config: ignoring the environment variable(s) " << unknown_names << " (no such key)");
     }
     return env;
 }

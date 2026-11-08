@@ -114,8 +114,8 @@ std::string dumpEnv(const Config& config)
     std::string out;
     for (const auto& key : knownConfigKeys())
 {
-        // An unset position (possible here only) is an empty value, not "nan".
-        const bool unset = (key == "receiver.lat" || key == "receiver.lon") && !std::isfinite(key == "receiver.lat" ? config.receiver_lat : config.receiver_lon);
+        // An unset position (possible here only: none given, nan or both 0.0) is an empty value.
+        const bool unset = (key == "receiver.lat" || key == "receiver.lon") && !config.receiver_position_set;
         out += envNameOf(key) + "=" + shellQuote(unset ? std::string() : configValueText(config, key)) + "\n";
     }
     return out;
@@ -364,7 +364,7 @@ int run(int argc, char** argv)
     if (vm.count("web-bind"))
         config.web_bind = web_bind;
     if (vm.count("dump-env")) {
-        if (!inputs_file.empty())
+        if (vm.count("inputs-file"))
             config.inputs_file = inputs_file;
         std::cout << dumpEnv(config);
         std::cout.flush();
@@ -533,7 +533,7 @@ int run(int argc, char** argv)
         return 2;
     }
     // The runtime overlay (skycue.runtime.json in paths.state_dir, else next to the
-    // config) on top of skycue.conf, and hot reload of both and of the list files.
+    // config) on top of skycue.toml, and hot reload of both and of the list files.
     std::unique_ptr<RuntimeConfig> runtime;
     try {
         runtime = std::make_unique<RuntimeConfig>(io, config_path, *engine);

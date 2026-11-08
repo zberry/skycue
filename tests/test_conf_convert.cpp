@@ -225,3 +225,30 @@ BOOST_AUTO_TEST_CASE(an_old_overrides_file_converts_to_an_overrides_file)
     // Any other key makes it a main file.
     BOOST_TEST(contains(convertOldConf("MAX_RANGE_NM=90\nWEB_PORT=9000\n", "o.conf"), "[receiver]"));
 }
+
+BOOST_AUTO_TEST_CASE(an_old_overrides_file_without_assignments_converts_to_an_empty_one)
+{
+    for (const char* text : {"", "\n", "# nothing set\n\n# still nothing\n"}) {
+        const std::string out = convertOldConf(text, "o.conf");
+        BOOST_TEST(!contains(out, "[receiver]"));
+        BOOST_TEST(!contains(out, "[web]"));
+        BOOST_TEST(!contains(out, "["));  // not even [filters]: the header line only
+        BOOST_TEST(out.size() < 200u);
+        // It is a valid overrides file.
+        BOOST_CHECK_NO_THROW(skycued::parseConfigLayers(std::string(), "skycue.toml", out, "skycue.overrides.toml", {}, {}, false));
+    }
+    // A main file with only an empty position is still a main file.
+    BOOST_TEST(contains(convertOldConf("RECEIVER_LAT=\nRECEIVER_LON=\n", "t"), "[receiver]"));
+}
+
+BOOST_AUTO_TEST_CASE(whole_number_keys_take_digits_with_an_optional_sign_only)
+{
+    for (const char* line : {"WEB_PORT=0x10", "WEB_PORT=1e3", "WEB_PORT=2.0", "WEB_PORT=+", "WEB_PORT=-", "WEB_PORT=8_0",
+                             "STATS_SAVE_S=0x20"}) {
+        ConfigError e = expectError(std::string(kLatLon) + line + "\n");
+        BOOST_TEST(e.line == 3, line);
+        BOOST_TEST(contains(e.what(), "must be a whole number"), line);
+    }
+    BOOST_TEST(converted(std::string(kLatLon) + "WEB_PORT=+8081\n").web_port == 8081);
+    BOOST_TEST(converted(std::string(kLatLon) + "WEB_PORT=08081\n").web_port == 8081);
+}

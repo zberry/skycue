@@ -171,6 +171,7 @@ private:
             if (doc_.entries.count(name.substr(0, dot)))
                 fail("[" + name + "]: " + name.substr(0, dot) + " is a key, not a table");
         doc_.tables.insert(name);
+        doc_.table_lines[name] = line_;
         prefix_ = name + ".";
     }
 

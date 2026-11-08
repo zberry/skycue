@@ -120,10 +120,14 @@ std::string literal(const Mapping& m, const legacy::Assignment& a, const std::st
             fail(name, a.line, std::string(m.old_key) + " must be yes or no, got '" + v + "'");
         return v == "yes" ? "true" : "false";
     case Kind::integer: {
-        double d = 0;
-        if (!parseDouble(v, d) || d != std::floor(d) || std::fabs(d) > 9e15)
+        // Digits with an optional sign: not 0x10, not 1e3, not 2.0.
+        size_t i = !v.empty() && (v[0] == '+' || v[0] == '-') ? 1 : 0;
+        bool ok = i < v.size() && v.size() - i <= 15;
+        for (size_t j = i; ok && j < v.size(); ++j)
+            ok = std::isdigit(static_cast<unsigned char>(v[j])) != 0;
+        if (!ok)
             fail(name, a.line, std::string(m.old_key) + " must be a whole number, got '" + v + "'");
-        return toml_lite::formatValue(static_cast<int64_t>(d));
+        return toml_lite::formatValue(static_cast<int64_t>(std::strtoll(v.c_str(), nullptr, 10)));
     }
     case Kind::number: {
         double d = 0;
@@ -199,15 +203,24 @@ std::string convertOldConf(const std::string& old_text, const std::string& name,
 
     // An old overrides file: only the filter keys it may hold.
     const auto& live = overridesFileKeys();
-    const bool overrides_style =
-        !values.empty() && std::all_of(values.begin(), values.end(), [&](const auto& kv) {
-            return std::find(live.begin(), live.end(), kv.first) != live.end();
-        });
+    // An input with no assignments at all is one too: it converts to an empty
+    // overrides file, never to the whole example.
+    // Judged on the assigned keys, not the non-empty values: an untouched old
+    // template (empty position) has main-file keys and stays a main file.
+    bool overrides_style = true;
+    for (const auto& [old_key, a] : last) {
+        const auto m = std::find_if(mappings().begin(), mappings().end(),
+                                    [&](const Mapping& x) { return old_key == x.old_key; });
+        if (std::find(live.begin(), live.end(), m->key) == live.end())
+            overrides_style = false;
+    }
 
     std::string out;
     if (overrides_style) {
         out = "# converted from skycue.overrides.conf by skycued --convert-conf; only filter keys; "
-              "edits are picked up live\n\n[filters]\n";
+              "edits are picked up live\n";
+        if (!values.empty())
+            out += "\n[filters]\n";
         for (const auto& key : live) {
             const auto it = values.find(key);
             if (it != values.end())

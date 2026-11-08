@@ -45,6 +45,8 @@ struct Document {
     // Every table named by a header, dotted ("inputs.readsb"), including
     // empty ones. Parents that no header names are not listed.
     std::set<std::string> tables;
+    // The line of each header in `tables`, 1-based.
+    std::map<std::string, int> table_lines;
 };
 
 // what() reads "<name>:<line>: <message>".

@@ -277,8 +277,11 @@ BOOST_AUTO_TEST_CASE(unknown_table_is_error)
     ConfigError e = expectError(std::string(kLatLon) + "[bogus]\nx = 1\n");
     BOOST_TEST(e.line == 5);
     BOOST_TEST(contains(e.what(), "unknown table 'bogus'"), e.what());
-    e = expectError(std::string(kLatLon) + "[bogus]\n");  // an empty one too
+    e = expectError(std::string(kLatLon) + "[bogus]\n");  // an empty one too, with its line
     BOOST_TEST(contains(e.what(), "unknown table 'bogus'"), e.what());
+    BOOST_TEST(contains(e.what(), "test.toml:4: "), e.what());
+    e = expectError(std::string(kLatLon) + "\n[web]\nport = 80\n\n[inputs.nope]\n");
+    BOOST_TEST(contains(e.what(), "test.toml:8: unknown table 'inputs.nope'"), e.what());
     e = expectError(std::string(kLatLon) + "[inputs.nope]\nhost = \"x\"\n");
     BOOST_TEST(contains(e.what(), "unknown table 'inputs.nope'"), e.what());
 }
@@ -677,9 +680,52 @@ BOOST_AUTO_TEST_CASE(env_bad_type_names_key)
     BOOST_TEST(contains(e.what(), "SKYCUE_WEB_BIND: web.bind: "), e.what());
     e = expectError(kLatLon, {}, {{"SKYCUE_WEB_BIND", "a\nb"}});
     BOOST_TEST(contains(e.what(), "web.bind"), e.what());
-    // A string key given a bare number is an error, as in the file.
-    e = expectError(kLatLon, {}, {{"SKYCUE_SDR_GAIN_1090", "49.6"}});
-    BOOST_TEST(std::string(e.what()) == "SKYCUE_SDR_GAIN_1090: sdr.gain_1090: expected a string");
+    // A number or bool given to an integer or bool key is not a string: still typed.
+    e = expectError(kLatLon, {}, {{"SKYCUE_WEB_PORT", "\"8080\""}});
+    BOOST_TEST(std::string(e.what()) == "SKYCUE_WEB_PORT: web.port: expected an integer");
+}
+
+BOOST_AUTO_TEST_CASE(env_and_set_string_keys_take_the_raw_text)
+{
+    // A string key takes an unquoted value as text, even if it reads as a number or a bool.
+    Config c = parseWith("", {"sdr.gain_1090=49.6", "sdr.serial_1090=1234", "sdr.gain_978=30"});
+    BOOST_TEST(c.gain_1090 == "49.6");
+    BOOST_TEST(c.sdr_1090_serial == "1234");
+    BOOST_TEST(c.gain_978 == "30");
+    c = parseWith("", {}, {{"SKYCUE_SDR_SERIAL_1090", "1234"}, {"SKYCUE_SDR_GAIN_1090", "49.6"},
+                           {"SKYCUE_SDR_SERIAL_978", "true"}});
+    BOOST_TEST(c.sdr_1090_serial == "1234");
+    BOOST_TEST(c.gain_1090 == "49.6");
+    BOOST_TEST(c.sdr_978_serial == "true");
+    // Quoted still works; a number key still parses as TOML.
+    BOOST_TEST(parseWith("", {"sdr.serial_1090=\"00000001\""}).sdr_1090_serial == "00000001");
+    BOOST_TEST(parseWith("", {"web.port=9000"}).web_port == 9000);
+    BOOST_TEST(parseWith("", {"fisb.enable=true"}).fisb_enable);
+    // The file itself is still strict: a bare number is not a string.
+    const ConfigError e = expectError(std::string(kLatLon) + "[sdr]\ngain_1090 = 49.6\n");
+    BOOST_TEST(contains(e.what(), "sdr.gain_1090: expected a string"), e.what());
+}
+
+BOOST_AUTO_TEST_CASE(sdr_gain_and_serial_checks)
+{
+    for (const char* ok : {"auto", "auto-verbose", "49.6", "0", "-1.5", "30"})
+        BOOST_CHECK_NO_THROW(parseWith(std::string("[sdr]\ngain_1090 = \"") + ok + "\"\n"));
+    for (const char* ok : {"auto", "49.6", "30"})
+        BOOST_CHECK_NO_THROW(parseWith(std::string("[sdr]\ngain_978 = \"") + ok + "\"\n"));
+    for (const char* bad : {"", "loud", "49.", ".5", "1e3", "auto-verbose2", "4 9"}) {
+        ConfigError e = expectError(std::string(kLatLon) + "[sdr]\ngain_1090 = \"" + bad + "\"\n");
+        BOOST_TEST(contains(e.what(), "sdr.gain_1090 must be"), e.what());
+        BOOST_TEST(contains(e.what(), "test.toml:5"), e.what());
+    }
+    ConfigError e = expectError(std::string(kLatLon) + "[sdr]\ngain_978 = \"auto-verbose\"\n");
+    BOOST_TEST(contains(e.what(), "sdr.gain_978 must be"), e.what());
+    e = expectError(std::string(kLatLon) + "[sdr]\nserial_1090 = \"A\"\nserial_978 = \"A\"\n");
+    BOOST_TEST(contains(e.what(), "sdr.serial_978 must differ from sdr.serial_1090"), e.what());
+    BOOST_TEST(contains(e.what(), "test.toml:6"), e.what());
+    BOOST_CHECK_NO_THROW(parseWith("[sdr]\nserial_1090 = \"A\"\nserial_978 = \"B\"\n"));
+    BOOST_CHECK_NO_THROW(parseWith("[sdr]\nserial_1090 = \"\"\nserial_978 = \"\"\n"));  // both empty: fine
+    e = expectError(kLatLon, {"sdr.gain_978=loud"});
+    BOOST_TEST(contains(e.what(), "sdr.gain_978 must be"), e.what());
 }
 
 BOOST_AUTO_TEST_CASE(env_unknown_ignored)

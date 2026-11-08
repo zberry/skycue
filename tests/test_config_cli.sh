@@ -185,7 +185,59 @@ convert_conf_reports_dropped_comments() {
   "$skycued" --convert-conf "$tmp/missing.conf" >/dev/null 2>&1; [ $? = 2 ] || fail "missing file"
 }
 
-for t in dump_env_shell_roundtrip dump_env_error_exit2_empty_stdout set_overrides_file_value \
+dump_env_placeholder_position_is_empty() {
+  # The shipped file's lat = 0.0 / lon = 0.0 is no position: empty values, as for a missing one.
+  printf '[receiver]\nlat = 0.0\nlon = 0.0\n' >"$tmp/zero.toml"
+  out=$("$skycued" --config "$tmp/zero.toml" --dump-env) || fail "zero position: exit $?"
+  grep -qx "SKYCUE_RECEIVER_LAT=''" <<<"$out" && grep -qx "SKYCUE_RECEIVER_LON=''" <<<"$out" || fail "zero position: $(grep RECEIVER_L <<<"$out")"
+  # One side zero is a real position (the equator): printed as is.
+  printf '[receiver]\nlat = 0.0\nlon = 10.5\n' >"$tmp/equator.toml"
+  out=$("$skycued" --config "$tmp/equator.toml" --dump-env) || fail "equator: exit $?"
+  [ "$(value SKYCUE_RECEIVER_LAT <<<"$out")" = 0 ] && [ "$(value SKYCUE_RECEIVER_LON <<<"$out")" = 10.5 ] || fail "equator: $(grep RECEIVER_L <<<"$out")"
+}
+
+dump_env_inputs_file_flag_even_empty() {
+  { base; printf '[inputs]\nfile = "from-config.json"\n'; } >"$tmp/if.toml"
+  [ "$("$skycued" --config "$tmp/if.toml" --dump-env | value SKYCUE_INPUTS_FILE)" = from-config.json ] || fail "config value lost"
+  [ "$("$skycued" --config "$tmp/if.toml" --inputs-file other.json --dump-env | value SKYCUE_INPUTS_FILE)" = other.json ] ||
+    fail "--inputs-file not honoured"
+  [ -z "$("$skycued" --config "$tmp/if.toml" --inputs-file "" --dump-env | value SKYCUE_INPUTS_FILE)" ] ||
+    fail "--inputs-file '' not honoured"
+}
+
+string_keys_take_raw_text_from_set_and_env() {
+  base >"$tmp/s.toml"
+  [ "$("$skycued" --config "$tmp/s.toml" --set sdr.gain_1090=49.6 --dump-env | value SKYCUE_SDR_GAIN_1090)" = 49.6 ] || fail "--set gain"
+  [ "$(SKYCUE_SDR_SERIAL_1090=1234 "$skycued" --config "$tmp/s.toml" --dump-env | value SKYCUE_SDR_SERIAL_1090)" = 1234 ] || fail "env serial"
+  "$skycued" --config "$tmp/s.toml" --set sdr.gain_1090=loud --dump-env >"$tmp/out" 2>"$tmp/err"; rc=$?
+  [ "$rc" = 2 ] && grep -q 'sdr.gain_1090 must be' "$tmp/err" || fail "bad gain: exit $rc"
+  "$skycued" --config "$tmp/s.toml" --set sdr.serial_1090=7 --set sdr.serial_978=7 --dump-env >"$tmp/out" 2>"$tmp/err"; rc=$?
+  [ "$rc" = 2 ] && grep -q 'sdr.serial_978 must differ' "$tmp/err" || fail "same serials: exit $rc"
+}
+
+unknown_environment_variables_warn_once() {
+  base >"$tmp/w.toml"
+  SKYCUE_WEB_PROT=1 SKYCUE_NOPE=2 "$skycued" --config "$tmp/w.toml" --dump-env >"$tmp/out" 2>"$tmp/err" || fail "exit $?"
+  [ "$(grep -c ' WARN ' "$tmp/err")" = 1 ] || { cat "$tmp/err"; fail "want exactly one WARN line"; }
+  grep -q 'SKYCUE_WEB_PROT' "$tmp/err" && grep -q 'SKYCUE_NOPE' "$tmp/err" || { cat "$tmp/err"; fail "the WARN line does not list both"; }
+  SKYCUE_NOPE=2 "$skycued" --config "$tmp/w.toml" --dump-env >/dev/null 2>"$tmp/err" --log-level error || fail "exit $?"
+  [ ! -s "$tmp/err" ] || fail "WARN shown at log level error"
+  "$skycued" --config "$tmp/w.toml" --dump-env >/dev/null 2>"$tmp/err" || fail "exit $?"
+  [ ! -s "$tmp/err" ] || fail "a warning without unknown variables"
+}
+
+convert_conf_empty_overrides_file() {
+  printf '# nothing\n\n' >"$tmp/empty.conf"
+  out=$("$skycued" --convert-conf "$tmp/empty.conf" 2>/dev/null) || fail "exit $?"
+  [ "$(grep -c '' <<<"$out")" = 1 ] && grep -q '^#' <<<"$out" || fail "want the header line only: $out"
+  printf 'WEB_PORT=0x10\nRECEIVER_LAT=1\nRECEIVER_LON=2\n' >"$tmp/hex.conf"
+  "$skycued" --convert-conf "$tmp/hex.conf" >"$tmp/out" 2>"$tmp/err"; rc=$?
+  [ "$rc" = 2 ] && grep -q 'hex.conf:1' "$tmp/err" || fail "hex port: exit $rc"
+}
+
+for t in dump_env_placeholder_position_is_empty dump_env_inputs_file_flag_even_empty \
+         string_keys_take_raw_text_from_set_and_env unknown_environment_variables_warn_once \
+         convert_conf_empty_overrides_file dump_env_shell_roundtrip dump_env_error_exit2_empty_stdout set_overrides_file_value \
          no_uat_flag_wins_over_set convert_conf_example_matches_toml_example convert_conf_overrides_style \
          convert_conf_reports_dropped_comments; do
   current=$t

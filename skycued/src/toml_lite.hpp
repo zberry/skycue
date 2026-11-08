@@ -21,7 +21,14 @@ namespace skycued::toml_lite {
 // Rejected, naming the line: a dotted key in an assignment, a quoted key,
 // inline tables, multi-line strings, dates and times, hexadecimal, inf and
 // nan, an array holding anything but strings, a duplicate key, a table
-// header seen twice, and a key and a table of the same name.
+// header seen twice, a key and a table of the same name, and a table header
+// below a key ([x.y] after x = 1).
+//
+// Stricter than TOML in strings: a string may not contain a raw control
+// character (other than a tab, DEL included), the escape \u0000, or a surrogate escape
+// (\uD800-\uDFFF); integers may not have leading zeros. A UTF-8 byte order
+// mark at the start of the text is skipped. The contents of strings are not
+// checked for valid UTF-8: they pass through as bytes.
 
 using Array = std::vector<std::string>;
 using Value = std::variant<std::string, int64_t, double, bool, Array>;

@@ -1,0 +1,121 @@
+# skycue configuration. skycued --config skycue.toml
+#
+# Grammar: a strict subset of TOML 1.0. Tables [name] and [name.sub]; keys of
+# letters, digits and _; values: "basic strings", 'literal strings', integers,
+# floats, true/false, and arrays of strings; # comments anywhere. Nothing else
+# (multi-line strings, inline tables, dates, arrays of tables) is accepted; an
+# unknown table or key, a value of the wrong type or out of range, or a key
+# given twice stops skycued with exit status 2 and names the line.
+#
+# Any key can be overridden for one run: --set inputs.readsb.host=10.0.0.2 on
+# skycued's command line, or SKYCUE_INPUTS_READSB_HOST=10.0.0.2 in its
+# environment. Precedence, lowest first: built-in defaults, this file,
+# skycue.overrides.toml (written by skycued, see [paths]), environment, --set.
+# A key you leave out keeps the default shown here.
+
+[receiver]
+# Required: skycued refuses to start while lat and lon are both missing or
+# both 0.0 (the message names both keys). skycue-stats does not need them.
+lat = 0.0               # decimal degrees, -90..90
+lon = 0.0               # decimal degrees, -180..180
+alt_m = 0.0             # ground altitude, metres above mean sea level
+antenna_height_m = 0.0  # antenna height above the ground; the sum sets elevation angles
+
+[inputs]
+# skycued takes aircraft from any number of inputs, of these kinds:
+#   readsb       readsb's JSON position output (readsb --net-json-port)
+#   beast_raw    Mode S / ADS-B frames in Beast format, decoded by skycued:
+#                readsb or dump1090 --net-bo-port 30005, a Beast splitter, a
+#                Radarcape, or another machine's readsb
+#   uat_raw      978 MHz UAT lines as dump978-fa prints them, decoded by skycued
+#   dump978      the same lines, taken as dump978-fa decodes them
+#   pingstation  a uAvionix pingStation 3: its JSON texts or ASTERIX CAT021
+#   replay       a skycue recording played back
+# Each input is TCP (client or server), UDP unicast or multicast. Inputs are
+# managed in the web page (Receiver tab) or with the /api/inputs endpoint and
+# kept in the inputs file; see docs/operating.md "The inputs file". Two inputs
+# are built in and configured below: a readsb on this machine and a dump978-fa
+# on this machine. Disable either if you do not have it; add anything else in
+# the inputs file. The same file holds the outputs: skycued can serve every
+# input stream on again, as a hub.
+file = ""               # the inputs file; "" means skycue.inputs.json beside this file
+# Who decodes 1090 and 978 MHz frames for the built-in inputs:
+#   "readsb"  : take readsb's decoded JSON (json_port) and dump978-fa's decoded lines
+#   "skycued" : skycued decodes readsb's Beast output (beast_port) and the raw
+#               UAT lines itself; readsb then only demodulates. Needed for the
+#               per-aircraft decode statistics and the geometric-altitude
+#               estimate's full input; see docs/operating.md "Decoding in skycued".
+decoder = "readsb"
+
+[inputs.readsb]         # the built-in 1090 MHz input
+enable = true
+host = "127.0.0.1"      # where readsb runs
+json_port = 30047       # readsb --net-json-port (used when decoder = "readsb")
+beast_port = 30005      # readsb --net-bo-port   (used when decoder = "skycued")
+
+[inputs.dump978]        # the built-in 978 MHz input (USA only; disable elsewhere)
+enable = true
+host = "127.0.0.1"
+raw_port = 30978        # dump978-fa --raw-port
+json_port = 30979       # dump978-fa --json-port (not read by skycued; the launcher passes it)
+
+[sdr]
+# Used by the launcher that starts readsb and dump978-fa, not by skycued
+# itself (skycued only checks the values). Serial numbers as rtl_test prints
+# them; "" means the only dongle, or let the program choose.
+serial_1090 = ""
+serial_978 = ""         # must differ from serial_1090 when both are set
+gain_1090 = "auto"      # dB as a decimal in a string ("49.6"), "auto", or "auto-verbose"
+gain_978 = "auto"       # dB as a decimal in a string, or "auto" (SDR AGC)
+
+[cues]
+# The cue stream: skycue's own compact track protocol for programs that act on
+# aircraft (docs/protocol.md; libskycue reads it). TCP sessions use keepalive.
+# More cue outputs, and raw rebroadcast outputs, can be added in the inputs
+# file; these are the built-in ones.
+tcp_port = 30500        # where cue clients connect; 0 for no listener
+tcp_connect = []        # clients skycued dials and keeps reconnecting to: ["host:port", ...]
+udp_targets = []        # hosts skycued sends UDP cues to: ["host:port", ...]
+min_interval_s = 1.0    # minimum seconds between cues for one aircraft (identity changes go at once); >= 0.1
+max_interval_s = 10.0   # maximum seconds between cues even if unchanged; >= min_interval_s
+track_timeout_s = 60.0  # seconds without a message before a track is dropped; >= 1
+keyframe_interval_s = 10.0  # seconds between full-state keyframes; >= 1
+
+[filters]
+max_range_nm = 150      # ignore aircraft farther than this from the receiver; > 0
+min_elevation_deg = 0   # ignore aircraft below this elevation angle; -90..90
+# Curated lists, read at startup: one entry per line, an address (six hex
+# digits) or a registration (N123AB, G-ABCD); '#' starts a comment. The block
+# list is checked first; an allow-listed aircraft is sent whatever its range or
+# elevation. A relative path is taken from paths.state_dir.
+allow_list_file = ""    # aircraft to always include; "" for none
+block_list_file = ""    # aircraft to always exclude; "" for none
+
+[web]
+port = 8080             # HTTP port of the web page; 0 turns it off
+bind = "127.0.0.1"      # "0.0.0.0" to listen on every interface
+trail_seconds = 120     # position history drawn behind each aircraft, 0..3600
+
+[recording]
+dir = ""                # where received-*/sent-* streams go; "" disables recording
+formats = ["jsonl", "csv"]  # at least one while dir is set; a received-*.jsonl replays with --replay
+raw = false             # also write pingStation rawData frames to dir/raw-<input id>-*
+max_gb = 0              # disk budget for dir and dir/raw together, 10^9 bytes; 0 for no limit
+
+[fisb]
+enable = true           # decode weather and TWGO reports from the 978 MHz uplinks
+experimental = false    # also decode layouts the open decoders disagree on
+
+[paths]
+# state_dir: an absolute directory for the files skycued keeps: the inputs file,
+# the overrides file, statistics, learned report locations; a relative
+# inputs.file, locations_file, stats.file or list file is taken from it.
+# "" means beside this file.
+state_dir = ""
+map_dir = ""            # tiles/ and overlays/ for the map; "" uses skycued's web directory
+locations_file = ""     # optional CSV id,lat,lon under the learned FIS-B report positions
+
+[stats]
+file = "skycue.stats.json"  # "" keeps statistics in memory only
+aircraft_max = 20000    # 100..100000; past it the 5 % heard longest ago are forgotten
+save_s = 300            # 10..86400 seconds between saves while changed

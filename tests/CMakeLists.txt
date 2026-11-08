@@ -20,7 +20,7 @@ add_test(NAME client COMMAND test_client)
 set_tests_properties(client PROPERTIES TIMEOUT 60)
 
 get_filename_component(_skycue_example_conf
-  "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/skycue.conf.example" ABSOLUTE)
+  "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/skycue.toml.example" ABSOLUTE)
 add_executable(test_config test_config.cpp)
 target_link_libraries(test_config PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_config PRIVATE BOOST_TEST_DYN_LINK

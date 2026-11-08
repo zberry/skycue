@@ -29,6 +29,7 @@ add_library(skycued_core STATIC
   src/check_inputs.cpp
   src/conf_rewrite.cpp
   src/config.cpp
+  src/conf_legacy.cpp
   src/engine.cpp
   src/fisb/apdu.cpp
   src/fisb/dlac.cpp

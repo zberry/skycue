@@ -166,6 +166,9 @@ private:
             fail("table [" + name + "] given twice");
         if (doc_.entries.count(name))
             fail("[" + name + "] is also a key");
+        for (size_t dot = name.find('.'); dot != std::string::npos; dot = name.find('.', dot + 1))
+            if (doc_.entries.count(name.substr(0, dot)))
+                fail("[" + name + "]: " + name.substr(0, dot) + " is a key, not a table");
         doc_.tables.insert(name);
         prefix_ = name + ".";
     }

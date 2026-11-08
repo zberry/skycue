@@ -182,6 +182,14 @@ BOOST_AUTO_TEST_CASE(error_duplicate_table)
     expectError("[a.b]\n[a]\nb = 1\n", 3, "also a table");
 }
 
+BOOST_AUTO_TEST_CASE(error_table_below_a_key)
+{
+    expectError("x = 1\n[x.y]\n", 2, "is a key");
+    expectError("[a]\nb = 1\n[a.b.c]\n", 3, "a.b is a key");
+    expectError("[a]\nb = 1\n[a.b.c.d]\n", 3, "a.b is a key");
+    BOOST_CHECK_NO_THROW(parse("x = 1\n[y.z]\n[y]\n", "t.toml"));  // another name is fine
+}
+
 BOOST_AUTO_TEST_CASE(error_dotted_key_in_assignment)
 {
     expectError("a.b = 1\n", 1, "dotted");

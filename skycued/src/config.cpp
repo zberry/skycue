@@ -1,6 +1,8 @@
 #include "config.hpp"
 
 #include "json_lite.hpp"
+#include "log.hpp"
+#include "toml_lite.hpp"
 
 #include <sys/stat.h>
 
@@ -13,6 +15,8 @@
 #include <map>
 #include <sstream>
 
+extern char** environ;
+
 namespace skycued {
 
 ConfigError::ConfigError(const std::string& file, int l, const std::string& message)
@@ -21,82 +25,236 @@ ConfigError::ConfigError(const std::string& file, int l, const std::string& mess
 {
 }
 
-const std::vector<std::string>& knownConfigKeys()
-{
-    static const std::vector<std::string> keys{
-        "RECEIVER_LAT",    "RECEIVER_LON",      "RECEIVER_ALT_M",    "ANTENNA_HEIGHT_M",
-        "SDR_1090_SERIAL", "SDR_978_SERIAL",    "GAIN_1090",         "GAIN_978",
-        "DUMP978_RAW_PORT", "DUMP978_JSON_PORT", "READSB_JSON_PORT",
-        "READSB_BEAST_PORT", "TRACK_DECODER",
-        "READSB_HOST",     "DUMP978_HOST",      "DUMP978_ENABLE",    "WEB_PORT",
-        "CUE_TCP_PORT",    "CUE_TCP_CONNECT",   "CUE_UDP_TARGETS",   "RECORD_DIR",
-        "RECORD_FORMATS",
-        "MAX_RANGE_NM",    "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE",   "BLOCK_LIST_FILE",
-        "MIN_INTERVAL_S",  "MAX_INTERVAL_S",    "TRACK_TIMEOUT_S",   "KEYFRAME_INTERVAL_S",
-        "RECORD_RAW",
-        "WEB_BIND",        "RECORD_MAX_GB",     "TRAIL_SECONDS",
-        "FISB_ENABLE",     "FISB_EXPERIMENTAL", "STATE_DIR",         "MAP_DIR",
-        "INPUTS_FILE",     "LOCATIONS_FILE",
-        "STATS_FILE",      "STATS_AIRCRAFT_MAX", "STATS_SAVE_S",
-    };
-    return keys;
-}
-
 namespace {
 
-// The character classes below are the grammar documented in packaging/skycue.conf.example.
+namespace tl = toml_lite;
 
-// [[:space:]] in the C locale: includes \r, so a CR-only line is blank.
-bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'; }
-bool isUpper(char c) { return c >= 'A' && c <= 'Z'; }
-bool isDigit(char c) { return c >= '0' && c <= '9'; }
-bool isKeyChar(char c) { return isUpper(c) || isDigit(c) || c == '_'; }
-bool isPlainChar(char c)
+enum class Type { string, integer, number, boolean, strings };
+
+struct KeySpec {
+    const char* key;
+    Type type;
+};
+
+// In the order of packaging/skycue.toml.example. A number key takes an integer
+// or a float literal; an integer key only an integer literal.
+const std::vector<KeySpec>& keySpecs()
 {
-    return isUpper(c) || (c >= 'a' && c <= 'z') || isDigit(c) || std::strchr("_.,:/+@%=-", c) != nullptr;
+    static const std::vector<KeySpec> specs{
+        {"receiver.lat", Type::number},
+        {"receiver.lon", Type::number},
+        {"receiver.alt_m", Type::number},
+        {"receiver.antenna_height_m", Type::number},
+        {"inputs.file", Type::string},
+        {"inputs.decoder", Type::string},
+        {"inputs.readsb.enable", Type::boolean},
+        {"inputs.readsb.host", Type::string},
+        {"inputs.readsb.json_port", Type::integer},
+        {"inputs.readsb.beast_port", Type::integer},
+        {"inputs.dump978.enable", Type::boolean},
+        {"inputs.dump978.host", Type::string},
+        {"inputs.dump978.raw_port", Type::integer},
+        {"inputs.dump978.json_port", Type::integer},
+        {"sdr.serial_1090", Type::string},
+        {"sdr.serial_978", Type::string},
+        {"sdr.gain_1090", Type::string},
+        {"sdr.gain_978", Type::string},
+        {"cues.tcp_port", Type::integer},
+        {"cues.tcp_connect", Type::strings},
+        {"cues.udp_targets", Type::strings},
+        {"cues.min_interval_s", Type::number},
+        {"cues.max_interval_s", Type::number},
+        {"cues.track_timeout_s", Type::number},
+        {"cues.keyframe_interval_s", Type::number},
+        {"filters.max_range_nm", Type::number},
+        {"filters.min_elevation_deg", Type::number},
+        {"filters.allow_list_file", Type::string},
+        {"filters.block_list_file", Type::string},
+        {"web.port", Type::integer},
+        {"web.bind", Type::string},
+        {"web.trail_seconds", Type::integer},
+        {"recording.dir", Type::string},
+        {"recording.formats", Type::strings},
+        {"recording.raw", Type::boolean},
+        {"recording.max_gb", Type::number},
+        {"fisb.enable", Type::boolean},
+        {"fisb.experimental", Type::boolean},
+        {"paths.state_dir", Type::string},
+        {"paths.map_dir", Type::string},
+        {"paths.locations_file", Type::string},
+        {"stats.file", Type::string},
+        {"stats.aircraft_max", Type::integer},
+        {"stats.save_s", Type::integer},
+    };
+    return specs;
 }
 
-// ^[[:space:]]*(#.*)?$
-bool isBlankOrComment(const std::string& line)
+const KeySpec* findSpec(const std::string& key)
 {
-    auto it = std::find_if(line.begin(), line.end(), [](char c) { return !isSpace(c); });
-    return it == line.end() || *it == '#';
+    for (const auto& s : keySpecs())
+        if (key == s.key)
+            return &s;
+    return nullptr;
 }
 
-// Splits on spaces and tabs, dropping empty fields.
-std::vector<std::string> words(const std::string& s)
+// The tables the known keys sit in ("inputs", "inputs.readsb", ...).
+const std::set<std::string>& knownTables()
 {
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : s) {
-        if (c == ' ' || c == '\t') {
-            if (!cur.empty())
-                out.push_back(cur);
-            cur.clear();
-        } else {
-            cur += c;
+    static const std::set<std::string> tables = [] {
+        std::set<std::string> t;
+        for (const auto& s : keySpecs()) {
+            const std::string key = s.key;
+            const auto dot = key.rfind('.');
+            if (dot != std::string::npos)
+                t.insert(key.substr(0, dot));
+        }
+        return t;
+    }();
+    return tables;
+}
+
+size_t editDistance(const std::string& a, const std::string& b)
+{
+    std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
+    for (size_t j = 0; j <= b.size(); ++j)
+        prev[j] = j;
+    for (size_t i = 1; i <= a.size(); ++i) {
+        cur[0] = i;
+        for (size_t j = 1; j <= b.size(); ++j)
+            cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1)});
+        std::swap(prev, cur);
+    }
+    return prev[b.size()];
+}
+
+// "unknown key 'web.prot' (did you mean 'web.port'?)", or the unknown table.
+std::string unknownKeyMessage(const std::string& key)
+{
+    const auto dot = key.rfind('.');
+    if (dot != std::string::npos && !knownTables().count(key.substr(0, dot)))
+        return "unknown table '" + key.substr(0, dot) + "' (for key '" + key + "')";
+    std::string best;
+    size_t best_d = 3;
+    for (const auto& s : keySpecs()) {
+        const size_t d = editDistance(key, s.key);
+        if (d < best_d) {
+            best_d = d;
+            best = s.key;
         }
     }
-    if (!cur.empty())
-        out.push_back(cur);
-    return out;
+    return "unknown key '" + key + "'" + (best.empty() || key.size() < 4 ? "" : " (did you mean '" + best + "'?)");
 }
 
-// One assignment: its value and where it is (file name and line).
-struct Entry {
-    std::string value;
-    std::string file;
-    int line;
+// One effective value and where it came from.
+struct Src {
+    tl::Value value;
+    std::string file;  // for errors: a file name, the variable's name or "--set"
+    int line = 0;
+    int layer = 0;  // 0 main file, 1 overrides file, 2 environment, 3 --set
 };
+using Entries = std::map<std::string, Src>;
+
+// `e`'s message without its "<name>:<line>: " prefix.
+std::string bareMessage(const tl::Error& e, const std::string& name)
+{
+    const std::string what = e.what();
+    const std::string prefix = name + ":" + std::to_string(e.line) + ": ";
+    return what.compare(0, prefix.size(), prefix) == 0 ? what.substr(prefix.size()) : what;
+}
+
+// `name` in directory `dir` (absolute, no trailing slash unless it is "/").
+std::string underDir(const std::string& dir, const std::string& name)
+{
+    return (dir == "/" ? dir : dir + "/") + name;
+}
+
+// The assignments of the TOML `text` (the file `name`) into `entries`, a later
+// layer replacing an earlier one. Checks the grammar and that each key and
+// table is known; `allowed`, when given, is the only keys the file may assign.
+void collectFile(const std::string& text, const std::string& name, int layer, Entries& entries,
+                 const std::vector<std::string>* allowed = nullptr)
+{
+    tl::Document doc;
+    try {
+        doc = tl::parse(text, name);
+    } catch (const tl::Error& e) {
+        throw ConfigError(name, e.line, bareMessage(e, name));
+    }
+    std::vector<std::pair<std::string, const tl::Entry*>> in_file;
+    in_file.reserve(doc.entries.size());
+    for (const auto& e : doc.entries)
+        in_file.emplace_back(e.first, &e.second);
+    std::sort(in_file.begin(), in_file.end(), [](const auto& a, const auto& b) { return a.second->line < b.second->line; });
+    for (const auto& [key, entry] : in_file) {
+        if (!findSpec(key))
+            throw ConfigError(name, entry->line, unknownKeyMessage(key));
+        if (allowed && std::find(allowed->begin(), allowed->end(), key) == allowed->end()) {
+            std::string only;
+            for (const auto& k : *allowed)
+                only += (only.empty() ? "" : ", ") + k;
+            throw ConfigError(name, entry->line,
+                              key + " cannot be set in " + kOverridesFileName + " (only " + only + ")");
+        }
+        entries[key] = Src{entry->value, name, entry->line, layer};
+    }
+    for (const auto& t : doc.tables)
+        if (!knownTables().count(t))
+            throw ConfigError(name, 0, "unknown table '" + t + "'");
+}
+
+// The value of an environment variable or a --set argument: a TOML value, or a
+// bare word, which is a string ("" is the empty string).
+tl::Value parseLiteral(const std::string& raw_value, const std::string& source, const std::string& key)
+{
+    const auto first = raw_value.find_first_not_of(" \t");
+    const auto last = raw_value.find_last_not_of(" \t");
+    std::string raw = first == std::string::npos ? std::string() : raw_value.substr(first, last - first + 1);
+    if (raw.find_first_of("\r\n") != std::string::npos)
+        throw ConfigError(source, 0, key + ": the value must be on one line");
+    if (raw.empty())
+        return std::string();
+    try {
+        tl::Document d = tl::parse("v = " + raw + "\n", source);
+        if (d.entries.size() == 1 && d.entries.count("v"))
+            return d.entries.at("v").value;
+        throw ConfigError(source, 0, key + ": malformed value");
+    } catch (const tl::Error& e) {
+        if (raw.find_first_of("\"'[]#") == std::string::npos)
+            return tl::Value{std::move(raw)};
+        throw ConfigError(source, 0, key + ": " + bareMessage(e, source));
+    }
+}
+
+void applyEnvironment(const std::map<std::string, std::string>& env, Entries& entries)
+{
+    for (const auto& spec : keySpecs()) {
+        const std::string name = envNameOf(spec.key);
+        const auto it = env.find(name);
+        if (it != env.end())
+            entries[spec.key] = Src{parseLiteral(it->second, name, spec.key), name, 0, 2};
+    }
+}
+
+void applySetArgs(const std::vector<std::string>& set_args, Entries& entries)
+{
+    for (const auto& arg : set_args) {
+        const auto eq = arg.find('=');
+        if (eq == std::string::npos)
+            throw ConfigError("--set", 0, "expected key=value, got '" + arg + "'");
+        const auto k0 = arg.find_first_not_of(" \t");
+        const auto k1 = arg.find_last_not_of(" \t", eq == 0 ? 0 : eq - 1);
+        const std::string key = k0 == std::string::npos || k0 >= eq ? std::string() : arg.substr(k0, k1 - k0 + 1);
+        if (!findSpec(key))
+            throw ConfigError("--set", 0, unknownKeyMessage(key));
+        entries[key] = Src{parseLiteral(arg.substr(eq + 1), "--set", key), "--set", 0, 3};
+    }
+}
 
 class Converter {
 public:
     // `file`: the name for an error not tied to an assignment (a missing key,
     // a default out of range).
-    Converter(const std::string& file, const std::map<std::string, Entry>& entries)
-        : file_(file), entries_(entries)
-    {
-    }
+    Converter(const std::string& file, const Entries& entries) : file_(file), entries_(entries) {}
 
     [[noreturn]] void fail(const std::string& key, const std::string& message) const
     {
@@ -106,16 +264,21 @@ public:
         throw ConfigError(it->second.file, it->second.line, message);
     }
 
-    const Entry* find(const std::string& key) const
+    const Src* find(const std::string& key) const
     {
         auto it = entries_.find(key);
         return it == entries_.end() ? nullptr : &it->second;
     }
 
+    static std::string show(double v) { return formatRoundTrip(v); }
+
     void str(const std::string& key, std::string& out) const
     {
-        if (auto e = find(key))
-            out = e->value;
+        if (auto e = find(key)) {
+            if (!std::holds_alternative<std::string>(e->value))
+                fail(key, key + ": expected a string");
+            out = std::get<std::string>(e->value);
+        }
     }
 
     void num(const std::string& key, double& out, double lo = -HUGE_VAL, double hi = HUGE_VAL) const
@@ -123,67 +286,97 @@ public:
         auto e = find(key);
         if (!e)
             return;
-        const std::string& v = e->value;
         double d = 0;
-        bool ok = !v.empty() && !isSpace(v[0]);
-        if (ok) {
-            try {
-                size_t used = 0;
-                d = std::stod(v, &used);
-                ok = used == v.size() && std::isfinite(d);
-            } catch (const std::exception&) {
-                ok = false;
-            }
-        }
-        if (!ok)
-            fail(key, key + " must be a number, got '" + v + "'");
+        if (std::holds_alternative<double>(e->value))
+            d = std::get<double>(e->value);
+        else if (std::holds_alternative<int64_t>(e->value))
+            d = static_cast<double>(std::get<int64_t>(e->value));
+        else
+            fail(key, key + ": expected a number");
+        if (!std::isfinite(d))
+            fail(key, key + ": expected a finite number");
         if (d < lo || d > hi) {
             std::ostringstream ss;
-            ss << key << " must be in [" << lo << "," << hi << "], got '" << v << "'";
+            ss << key << " must be in [" << lo << "," << hi << "], got '" << show(d) << "'";
             fail(key, ss.str());
         }
         out = d;
     }
 
-    static bool parsePort(const std::string& v, uint16_t& out, unsigned long min = 1)
-    {
-        if (v.empty() || v.size() > 5 || !std::all_of(v.begin(), v.end(), isDigit))
-            return false;
-        unsigned long n = std::stoul(v);
-        if (n < min || n > 65535)
-            return false;
-        out = static_cast<uint16_t>(n);
-        return true;
-    }
-
-    void yesNo(const std::string& key, bool& out) const
+    // An integer in [lo, hi].
+    void whole(const std::string& key, int64_t lo, int64_t hi, int64_t& out) const
     {
         auto e = find(key);
         if (!e)
             return;
-        if (e->value == "yes")
-            out = true;
-        else if (e->value == "no")
-            out = false;
-        else
-            fail(key, key + " must be yes or no, got '" + e->value + "'");
+        if (!std::holds_alternative<int64_t>(e->value))
+            fail(key, key + ": expected an integer");
+        const int64_t v = std::get<int64_t>(e->value);
+        if (v < lo || v > hi)
+            fail(key, key + " must be in [" + std::to_string(lo) + "," + std::to_string(hi) + "], got '" +
+                          std::to_string(v) + "'");
+        out = v;
+    }
+
+    void wholeInt(const std::string& key, int64_t lo, int64_t hi, int& out) const
+    {
+        int64_t v = out;
+        whole(key, lo, hi, v);
+        out = static_cast<int>(v);
     }
 
     // allow_zero: 0 is accepted too (it means "off" for that key).
     void port(const std::string& key, uint16_t& out, bool allow_zero = false) const
     {
         auto e = find(key);
-        if (e && !parsePort(e->value, out, allow_zero ? 0 : 1))
-            fail(key, key + " must be a port number " + (allow_zero ? "0" : "1") + "-65535, got '" + e->value + "'");
+        if (!e)
+            return;
+        if (!std::holds_alternative<int64_t>(e->value))
+            fail(key, key + ": expected an integer");
+        const int64_t v = std::get<int64_t>(e->value);
+        if (v < (allow_zero ? 0 : 1) || v > 65535)
+            fail(key, key + " must be a port number " + (allow_zero ? "0" : "1") + "-65535, got '" +
+                          std::to_string(v) + "'");
+        out = static_cast<uint16_t>(v);
     }
 
-    // "host:port host:port ..."; empty for none.
-    void endpoints(const std::string& key, std::vector<std::pair<std::string, uint16_t>>& out) const
+    void boolean(const std::string& key, bool& out) const
+    {
+        if (auto e = find(key)) {
+            if (!std::holds_alternative<bool>(e->value))
+                fail(key, key + ": expected true or false");
+            out = std::get<bool>(e->value);
+        }
+    }
+
+    const tl::Array* array(const std::string& key) const
     {
         auto e = find(key);
         if (!e)
+            return nullptr;
+        if (!std::holds_alternative<tl::Array>(e->value))
+            fail(key, key + ": expected an array of strings");
+        return &std::get<tl::Array>(e->value);
+    }
+
+    static bool parsePort(const std::string& v, uint16_t& out)
+    {
+        if (v.empty() || v.size() > 5 || !std::all_of(v.begin(), v.end(), [](char c) { return c >= '0' && c <= '9'; }))
+            return false;
+        const unsigned long n = std::stoul(v);
+        if (n < 1 || n > 65535)
+            return false;
+        out = static_cast<uint16_t>(n);
+        return true;
+    }
+
+    // ["host:port", ...]; empty for none.
+    void endpoints(const std::string& key, std::vector<std::pair<std::string, uint16_t>>& out) const
+    {
+        const auto* a = array(key);
+        if (!a)
             return;
-        for (const auto& w : words(e->value)) {
+        for (const auto& w : *a) {
             size_t colon = w.rfind(':');
             uint16_t p = 0;
             if (colon == std::string::npos || colon == 0 || !parsePort(w.substr(colon + 1), p))
@@ -194,61 +387,11 @@ public:
 
 private:
     const std::string& file_;
-    const std::map<std::string, Entry>& entries_;
+    const Entries& entries_;
 };
 
-// `name` in directory `dir` (absolute, no trailing slash unless it is "/").
-std::string underDir(const std::string& dir, const std::string& name)
-{
-    return (dir == "/" ? dir : dir + "/") + name;
-}
-
-// The assignments of `text` (the file `name`) into `entries`, a later one
-// replacing an earlier one. Checks the grammar and that each key is known;
-// `allowed`, when given, is the only keys the file may assign.
-void collectEntries(const std::string& text, const std::string& name, std::map<std::string, Entry>& entries,
-                    const std::vector<std::string>* allowed = nullptr)
-{
-    const auto& known = knownConfigKeys();
-    std::istringstream in(text);
-    int n = 0;
-    for (std::string line; std::getline(in, line);) {
-        ++n;
-        if (isBlankOrComment(line))
-            continue;
-        // ^([A-Z][A-Z0-9_]*)=(.*)$ : the key ends at the first '='.
-        size_t eq = line.find('=');
-        if (eq == std::string::npos || eq == 0 || !isUpper(line[0]) ||
-            !std::all_of(line.begin(), line.begin() + static_cast<std::ptrdiff_t>(eq), isKeyChar))
-            throw ConfigError(name, n, "malformed line (want KEY=value, KEY=\"value\" or KEY='value')");
-        std::string key = line.substr(0, eq);
-        std::string val = line.substr(eq + 1);
-
-        // ^"([^"$`\\]*)"$  or  ^'([^']*)'$  or  ^[A-Za-z0-9_.,:/+@%=-]*$
-        auto quoted = [&](char q, const char* forbidden) {
-            return val.size() >= 2 && val.front() == q && val.back() == q &&
-                   val.find_first_of(forbidden, 1) == val.size() - 1;
-        };
-        if (quoted('"', "\"$`\\") || quoted('\'', "'")) {
-            val = val.substr(1, val.size() - 2);
-        } else if (!std::all_of(val.begin(), val.end(), isPlainChar)) {
-            throw ConfigError(name, n,
-                              "malformed value for " + key + " (quote it; no $, `, \\ or nested quotes)");
-        }
-        if (std::find(known.begin(), known.end(), key) == known.end())
-            throw ConfigError(name, n, "unknown key " + key);
-        if (allowed && std::find(allowed->begin(), allowed->end(), key) == allowed->end()) {
-            std::string only;
-            for (const auto& k : *allowed)
-                only += (only.empty() ? "" : ", ") + k;
-            throw ConfigError(name, n, key + " cannot be set in " + kOverridesFileName + " (only " + only + ")");
-        }
-        entries[key] = Entry{val, name, n};
-    }
-}
-
 // Reads the file at `path` into `out`. False when it does not exist (nor its
-// directory: main() reports a STATE_DIR that is not one); throws ConfigError
+// directory: main() reports a state_dir that is not one); throws ConfigError
 // when it cannot be read.
 bool readConfigFile(const std::string& path, std::string& out)
 {
@@ -272,82 +415,74 @@ bool readConfigFile(const std::string& path, std::string& out)
 }
 
 // The Config the merged `entries` describe; `name` is the main file's.
-Config convertEntries(const std::map<std::string, Entry>& entries, const std::string& name)
+Config convertEntries(const Entries& entries, const std::string& name, bool position_required)
 {
     Converter conv(name, entries);
-    for (const char* key : {"RECEIVER_LAT", "RECEIVER_LON"}) {
-        auto e = conv.find(key);
-        if (!e || e->value.empty())
-            throw ConfigError(name, 0, std::string("missing required key ") + key);
+    if (position_required) {
+        const bool lat = conv.find("receiver.lat"), lon = conv.find("receiver.lon");
+        if (!lat && !lon)
+            throw ConfigError(name, 0, "receiver.lat and receiver.lon are required: set the receiver's position");
+        for (const char* key : {"receiver.lat", "receiver.lon"})
+            if (!conv.find(key))
+                throw ConfigError(name, 0, std::string("missing required key ") + key);
     }
 
     Config c;
-    conv.num("RECEIVER_LAT", c.receiver_lat, -90, 90);
-    conv.num("RECEIVER_LON", c.receiver_lon, -180, 180);
-    conv.num("RECEIVER_ALT_M", c.receiver_alt_m);
-    conv.num("ANTENNA_HEIGHT_M", c.antenna_height_m);
-    conv.port("DUMP978_RAW_PORT", c.dump978_raw_port);
-    conv.port("DUMP978_JSON_PORT", c.dump978_json_port);
-    conv.port("READSB_JSON_PORT", c.readsb_json_port);
-    conv.port("READSB_BEAST_PORT", c.readsb_beast_port);
-    conv.str("TRACK_DECODER", c.track_decoder);
+    c.position_required = position_required;
+    conv.num("receiver.lat", c.receiver_lat, -90, 90);
+    conv.num("receiver.lon", c.receiver_lon, -180, 180);
+    if (position_required && c.receiver_lat == 0.0 && c.receiver_lon == 0.0)
+        conv.fail("receiver.lat", "receiver.lat and receiver.lon are both 0.0: set the receiver's position");
+    conv.num("receiver.alt_m", c.receiver_alt_m);
+    conv.num("receiver.antenna_height_m", c.antenna_height_m);
+    conv.port("inputs.dump978.raw_port", c.dump978_raw_port);
+    conv.port("inputs.dump978.json_port", c.dump978_json_port);
+    conv.port("inputs.readsb.json_port", c.readsb_json_port);
+    conv.port("inputs.readsb.beast_port", c.readsb_beast_port);
+    conv.str("inputs.decoder", c.track_decoder);
     if (c.track_decoder != "readsb" && c.track_decoder != "skycued")
-        conv.fail("TRACK_DECODER", "TRACK_DECODER must be readsb or skycued, got '" + c.track_decoder + "'");
-    conv.port("WEB_PORT", c.web_port, true);
-    conv.port("CUE_TCP_PORT", c.cue_tcp_port, true);
-    conv.str("RECORD_DIR", c.record_dir);
-    conv.num("MAX_RANGE_NM", c.max_range_nm);
-    conv.num("MIN_ELEVATION_DEG", c.min_elevation_deg);
-    conv.str("ALLOW_LIST_FILE", c.allow_list_file);
-    conv.str("BLOCK_LIST_FILE", c.block_list_file);
-    conv.num("MIN_INTERVAL_S", c.min_interval_s);
-    conv.num("MAX_INTERVAL_S", c.max_interval_s);
-    conv.num("TRACK_TIMEOUT_S", c.track_timeout_s);
-    conv.num("KEYFRAME_INTERVAL_S", c.keyframe_interval_s);
-    conv.str("SDR_1090_SERIAL", c.sdr_1090_serial);
-    conv.str("SDR_978_SERIAL", c.sdr_978_serial);
-    conv.str("GAIN_1090", c.gain_1090);
-    conv.str("GAIN_978", c.gain_978);
-    conv.str("WEB_BIND", c.web_bind);
+        conv.fail("inputs.decoder", "inputs.decoder must be readsb or skycued, got '" + c.track_decoder + "'");
+    conv.port("web.port", c.web_port, true);
+    conv.port("cues.tcp_port", c.cue_tcp_port, true);
+    conv.str("recording.dir", c.record_dir);
+    conv.num("filters.max_range_nm", c.max_range_nm);
+    conv.num("filters.min_elevation_deg", c.min_elevation_deg);
+    conv.str("filters.allow_list_file", c.allow_list_file);
+    conv.str("filters.block_list_file", c.block_list_file);
+    conv.num("cues.min_interval_s", c.min_interval_s);
+    conv.num("cues.max_interval_s", c.max_interval_s);
+    conv.num("cues.track_timeout_s", c.track_timeout_s);
+    conv.num("cues.keyframe_interval_s", c.keyframe_interval_s);
+    conv.str("sdr.serial_1090", c.sdr_1090_serial);
+    conv.str("sdr.serial_978", c.sdr_978_serial);
+    conv.str("sdr.gain_1090", c.gain_1090);
+    conv.str("sdr.gain_978", c.gain_978);
+    conv.str("web.bind", c.web_bind);
     if (c.web_bind.empty())
-        conv.fail("WEB_BIND", "WEB_BIND must not be empty");
-    conv.num("RECORD_MAX_GB", c.record_max_gb, 0);
-    {
-        double trail = c.trail_seconds;
-        conv.num("TRAIL_SECONDS", trail, 0, 3600);
-        if (trail != std::floor(trail))
-            conv.fail("TRAIL_SECONDS", "TRAIL_SECONDS must be a whole number, got '" +
-                                           conv.find("TRAIL_SECONDS")->value + "'");
-        c.trail_seconds = static_cast<int>(trail);
-    }
-    // A whole number in [min, max], like TRAIL_SECONDS.
-    auto wholeNumber = [&](const char* key, int& field, double min, double max) {
-        double v = field;
-        conv.num(key, v, min, max);
-        if (v != std::floor(v))
-            conv.fail(key, std::string(key) + " must be a whole number, got '" + conv.find(key)->value + "'");
-        field = static_cast<int>(v);
-    };
+        conv.fail("web.bind", "web.bind must not be empty");
+    conv.num("recording.max_gb", c.record_max_gb, 0);
+    conv.wholeInt("web.trail_seconds", 0, 3600, c.trail_seconds);
     // At most 100000: at about 300 bytes an aircraft the stats file stays
     // well under kStatsFileMaxBytes (32 MiB), so it can always be read back.
-    wholeNumber("STATS_AIRCRAFT_MAX", c.stats_aircraft_max, 100, 100000);
-    wholeNumber("STATS_SAVE_S", c.stats_save_s, 10, 86400);
+    conv.wholeInt("stats.aircraft_max", 100, 100000, c.stats_aircraft_max);
+    conv.wholeInt("stats.save_s", 10, 86400, c.stats_save_s);
 
-    conv.yesNo("RECORD_RAW", c.record_raw);
-    conv.yesNo("FISB_ENABLE", c.fisb_enable);
-    conv.yesNo("FISB_EXPERIMENTAL", c.fisb_experimental);
-    conv.str("INPUTS_FILE", c.inputs_file);
-    conv.str("LOCATIONS_FILE", c.locations_file);
-    conv.str("STATS_FILE", c.stats_file);
+    conv.boolean("recording.raw", c.record_raw);
+    conv.boolean("fisb.enable", c.fisb_enable);
+    conv.boolean("fisb.experimental", c.fisb_experimental);
+    conv.str("inputs.file", c.inputs_file);
+    conv.str("paths.locations_file", c.locations_file);
+    conv.str("stats.file", c.stats_file);
 
-    auto host = [&](const char* key, std::string& field) {  // like WEB_BIND
+    auto host = [&](const char* key, std::string& field) {  // like web.bind
         conv.str(key, field);
         if (field.empty())
             conv.fail(key, std::string(key) + " must not be empty");
     };
-    host("READSB_HOST", c.readsb_host);
-    host("DUMP978_HOST", c.dump978_host);
-    conv.yesNo("DUMP978_ENABLE", c.dump978_enable);
+    host("inputs.readsb.host", c.readsb_host);
+    host("inputs.dump978.host", c.dump978_host);
+    conv.boolean("inputs.readsb.enable", c.inputs_readsb_enable);
+    conv.boolean("inputs.dump978.enable", c.dump978_enable);
     // "" (unset) or absolute; one trailing slash dropped ("/" stays "/").
     auto absoluteDir = [&](const char* key, std::string& field) {
         conv.str(key, field);
@@ -356,97 +491,190 @@ Config convertEntries(const std::map<std::string, Entry>& entries, const std::st
         if (field.size() > 1 && field.back() == '/')
             field.pop_back();
     };
-    absoluteDir("STATE_DIR", c.state_dir);
-    absoluteDir("MAP_DIR", c.map_dir);
+    absoluteDir("paths.state_dir", c.state_dir);
+    absoluteDir("paths.map_dir", c.map_dir);
     c.allow_list_path = listFilePath(c.state_dir, c.allow_list_file);
     c.block_list_path = listFilePath(c.state_dir, c.block_list_file);
 
-    conv.endpoints("CUE_TCP_CONNECT", c.cue_tcp_connect_targets);
-    conv.endpoints("CUE_UDP_TARGETS", c.cue_udp_targets);
-    if (auto e = conv.find("RECORD_FORMATS")) {
+    conv.endpoints("cues.tcp_connect", c.cue_tcp_connect_targets);
+    conv.endpoints("cues.udp_targets", c.cue_udp_targets);
+    if (const auto* formats = conv.array("recording.formats")) {
         c.record_formats.clear();
-        for (const auto& w : words(e->value)) {
+        for (const auto& w : *formats) {
             if (w != "jsonl" && w != "csv")
-                conv.fail("RECORD_FORMATS", "RECORD_FORMATS entries must be jsonl or csv, got '" + w + "'");
+                conv.fail("recording.formats", "recording.formats entries must be jsonl or csv, got '" + w + "'");
             c.record_formats.insert(w);
         }
     }
 
     // Range checks, applied to defaults and file values alike. Each error
     // names the key (and the line it is on, when it is in the file).
-    auto show = [](double v) {
-        std::ostringstream ss;
-        ss << v;
-        return ss.str();
-    };
     auto atLeast = [&](const char* key, double v, double min) {
         if (v < min)
-            conv.fail(key, std::string(key) + " must be at least " + show(min) + ", got " + show(v));
+            conv.fail(key, std::string(key) + " must be at least " + Converter::show(min) + ", got " + Converter::show(v));
     };
-    atLeast("KEYFRAME_INTERVAL_S", c.keyframe_interval_s, 1);
-    atLeast("MIN_INTERVAL_S", c.min_interval_s, 0.1);
-    atLeast("TRACK_TIMEOUT_S", c.track_timeout_s, 1);
+    atLeast("cues.keyframe_interval_s", c.keyframe_interval_s, 1);
+    atLeast("cues.min_interval_s", c.min_interval_s, 0.1);
+    atLeast("cues.track_timeout_s", c.track_timeout_s, 1);
     if (c.max_interval_s < c.min_interval_s)
-        conv.fail(conv.find("MAX_INTERVAL_S") ? "MAX_INTERVAL_S" : "MIN_INTERVAL_S",
-                  "MAX_INTERVAL_S (" + show(c.max_interval_s) + ") must be at least MIN_INTERVAL_S (" +
-                      show(c.min_interval_s) + ")");
+        conv.fail(conv.find("cues.max_interval_s") ? "cues.max_interval_s" : "cues.min_interval_s",
+                  "cues.max_interval_s (" + Converter::show(c.max_interval_s) + ") must be at least cues.min_interval_s (" +
+                      Converter::show(c.min_interval_s) + ")");
     if (!(c.max_range_nm > 0))
-        conv.fail("MAX_RANGE_NM", "MAX_RANGE_NM must be greater than 0, got " + show(c.max_range_nm));
+        conv.fail("filters.max_range_nm", "filters.max_range_nm must be greater than 0, got " + Converter::show(c.max_range_nm));
     if (c.min_elevation_deg < -90 || c.min_elevation_deg > 90)
-        conv.fail("MIN_ELEVATION_DEG", "MIN_ELEVATION_DEG must be in [-90,90], got " + show(c.min_elevation_deg));
+        conv.fail("filters.min_elevation_deg",
+                  "filters.min_elevation_deg must be in [-90,90], got " + Converter::show(c.min_elevation_deg));
     if (!c.record_dir.empty() && c.record_formats.empty())
-        conv.fail(conv.find("RECORD_FORMATS") ? "RECORD_FORMATS" : "RECORD_DIR",
-                  "RECORD_FORMATS must name at least one of jsonl, csv when RECORD_DIR is set");
+        conv.fail(conv.find("recording.formats") ? "recording.formats" : "recording.dir",
+                  "recording.formats must name at least one of jsonl, csv when recording.dir is set");
     return c;
+}
+
+// `name`'s directory part as resolveConfigRelative uses it.
+std::string overridesBeside(const std::string& conf_path) { return resolveConfigRelative(conf_path, kOverridesFileName); }
+
+// paths.state_dir of the entries, normalised as convertEntries does, or "" when
+// unset or not a usable absolute string (the full parse reports those).
+std::string stateDirOf(const Entries& entries)
+{
+    const auto it = entries.find("paths.state_dir");
+    if (it == entries.end() || !std::holds_alternative<std::string>(it->second.value))
+        return std::string();
+    std::string dir = std::get<std::string>(it->second.value);
+    if (dir.empty() || dir.front() != '/')
+        return std::string();
+    if (dir.size() > 1 && dir.back() == '/')
+        dir.pop_back();
+    return dir;
+}
+
+std::string overridesPathOfText(const std::string& text, const std::string& name,
+                                const std::vector<std::string>& set_args,
+                                const std::map<std::string, std::string>& env)
+{
+    Entries entries;
+    collectFile(text, name, 0, entries);
+    applyEnvironment(env, entries);
+    applySetArgs(set_args, entries);
+    const std::string dir = stateDirOf(entries);
+    return dir.empty() ? overridesBeside(name) : underDir(dir, kOverridesFileName);
+}
+
+std::string readMainConfig(const std::string& path)
+{
+    std::string text;
+    if (!readConfigFile(path, text))
+        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
+    return text;
 }
 
 }  // namespace
 
+const std::vector<std::string>& knownConfigKeys()
+{
+    static const std::vector<std::string> keys = [] {
+        std::vector<std::string> k;
+        for (const auto& s : keySpecs())
+            k.push_back(s.key);
+        return k;
+    }();
+    return keys;
+}
+
+std::string envNameOf(const std::string& dotted_key)
+{
+    std::string name = "SKYCUE_";
+    for (char c : dotted_key)
+        name += c == '.' ? '_' : static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return name;
+}
+
+std::map<std::string, std::string> environmentOverrides()
+{
+    static const std::set<std::string> known = [] {
+        std::set<std::string> n;
+        for (const auto& s : keySpecs())
+            n.insert(envNameOf(s.key));
+        return n;
+    }();
+    std::map<std::string, std::string> env;
+    for (char** e = environ; e && *e; ++e) {
+        const char* eq = std::strchr(*e, '=');
+        if (!eq)
+            continue;
+        const std::string name(*e, static_cast<size_t>(eq - *e));
+        if (name.compare(0, 7, "SKYCUE_") != 0)
+            continue;
+        if (!known.count(name)) {
+            LOG_DEBUG("config: ignoring the environment variable " << name << " (no such key)");
+            continue;
+        }
+        env[name] = eq + 1;
+    }
+    return env;
+}
+
 const std::vector<std::string>& overridesFileKeys()
 {
-    static const std::vector<std::string> keys{"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE",
-                                               "BLOCK_LIST_FILE"};
+    static const std::vector<std::string> keys{"filters.max_range_nm", "filters.min_elevation_deg",
+                                               "filters.allow_list_file", "filters.block_list_file"};
     return keys;
 }
 
 std::string overridesPath(const Config& c)
 {
-    return c.state_dir.empty() ? std::string() : underDir(c.state_dir, kOverridesFileName);
+    return c.state_dir.empty() ? overridesBeside(c.conf_path) : underDir(c.state_dir, kOverridesFileName);
 }
 
 Config parseConfigLayers(const std::string& main_text, const std::string& main_name,
-                         const std::string& overrides_text, const std::string& overrides_name)
+                         const std::string& overrides_text, const std::string& overrides_name,
+                         const std::vector<std::string>& set_args, const std::map<std::string, std::string>& env,
+                         bool position_required)
 {
-    std::map<std::string, Entry> entries, overrides;
-    collectEntries(main_text, main_name, entries);
-    collectEntries(overrides_text, overrides_name, overrides, &overridesFileKeys());
-    std::set<std::string> main_keys, override_keys;
+    Entries entries;
+    collectFile(main_text, main_name, 0, entries);
+    std::set<std::string> main_keys;
     std::map<std::string, std::string> main_values;
     for (const auto& e : entries) {
         main_keys.insert(e.first);
-        main_values[e.first] = e.second.value;
+        main_values[e.first] = tl::formatValue(e.second.value);
     }
-    for (auto& e : overrides) {
-        override_keys.insert(e.first);
-        entries[e.first] = std::move(e.second);
+    std::set<std::string> override_keys;
+    if (!overrides_text.empty()) {
+        Entries overrides;
+        collectFile(overrides_text, overrides_name, 1, overrides, &overridesFileKeys());
+        for (auto& e : overrides) {
+            override_keys.insert(e.first);
+            entries[e.first] = std::move(e.second);
+        }
     }
-    Config c = convertEntries(entries, main_name);
+    applyEnvironment(env, entries);
+    applySetArgs(set_args, entries);
+    Config c = convertEntries(entries, main_name, position_required);
+    c.conf_path = main_name;
     c.file_keys = std::move(main_keys);
     c.file_values = std::move(main_values);
     c.override_keys = std::move(override_keys);
+    static const char* const kLayerNames[] = {"", "overrides", "env", "--set"};
+    for (const auto& key : knownConfigKeys()) {
+        const auto it = entries.find(key);
+        if (it != entries.end() && it->second.layer > 0)
+            c.sources.push_back(ConfigSource{key, kLayerNames[it->second.layer]});
+    }
     return c;
 }
 
-Config parseConfigText(const std::string& text, const std::string& name)
+Config parseConfigText(const std::string& text, const std::string& name, bool position_required)
 {
-    return parseConfigLayers(text, name, std::string(), std::string());
+    return parseConfigLayers(text, name, std::string(), std::string(), {}, {}, position_required);
 }
 
 std::string configValueText(const Config& c, const std::string& key)
 {
     // Static: the table below (built once) calls them without capturing.
     static const auto num = [](double v) { return formatRoundTrip(v); };
-    static const auto yesNo = [](bool v) { return std::string(v ? "yes" : "no"); };
+    static const auto flag = [](bool v) { return std::string(v ? "true" : "false"); };
     static const auto endpoints = [](const std::vector<std::pair<std::string, uint16_t>>& v) {
         std::string out;
         for (const auto& e : v)
@@ -454,55 +682,56 @@ std::string configValueText(const Config& c, const std::string& key)
         return out;
     };
     static const std::map<std::string, std::function<std::string(const Config&)>> text{
-        {"RECEIVER_LAT", [](const Config& x) { return num(x.receiver_lat); }},
-        {"RECEIVER_LON", [](const Config& x) { return num(x.receiver_lon); }},
-        {"RECEIVER_ALT_M", [](const Config& x) { return num(x.receiver_alt_m); }},
-        {"ANTENNA_HEIGHT_M", [](const Config& x) { return num(x.antenna_height_m); }},
-        {"SDR_1090_SERIAL", [](const Config& x) { return x.sdr_1090_serial; }},
-        {"SDR_978_SERIAL", [](const Config& x) { return x.sdr_978_serial; }},
-        {"GAIN_1090", [](const Config& x) { return x.gain_1090; }},
-        {"GAIN_978", [](const Config& x) { return x.gain_978; }},
-        {"DUMP978_RAW_PORT", [](const Config& x) { return std::to_string(x.dump978_raw_port); }},
-        {"DUMP978_JSON_PORT", [](const Config& x) { return std::to_string(x.dump978_json_port); }},
-        {"READSB_JSON_PORT", [](const Config& x) { return std::to_string(x.readsb_json_port); }},
-        {"READSB_BEAST_PORT", [](const Config& x) { return std::to_string(x.readsb_beast_port); }},
-        {"TRACK_DECODER", [](const Config& x) { return x.track_decoder; }},
-        {"READSB_HOST", [](const Config& x) { return x.readsb_host; }},
-        {"DUMP978_HOST", [](const Config& x) { return x.dump978_host; }},
-        {"DUMP978_ENABLE", [](const Config& x) { return yesNo(x.dump978_enable); }},
-        {"WEB_PORT", [](const Config& x) { return std::to_string(x.web_port); }},
-        {"CUE_TCP_PORT", [](const Config& x) { return std::to_string(x.cue_tcp_port); }},
-        {"CUE_TCP_CONNECT", [](const Config& x) { return endpoints(x.cue_tcp_connect_targets); }},
-        {"CUE_UDP_TARGETS", [](const Config& x) { return endpoints(x.cue_udp_targets); }},
-        {"RECORD_DIR", [](const Config& x) { return x.record_dir; }},
-        {"RECORD_FORMATS",
+        {"receiver.lat", [](const Config& x) { return num(x.receiver_lat); }},
+        {"receiver.lon", [](const Config& x) { return num(x.receiver_lon); }},
+        {"receiver.alt_m", [](const Config& x) { return num(x.receiver_alt_m); }},
+        {"receiver.antenna_height_m", [](const Config& x) { return num(x.antenna_height_m); }},
+        {"inputs.file", [](const Config& x) { return x.inputs_file; }},
+        {"inputs.decoder", [](const Config& x) { return x.track_decoder; }},
+        {"inputs.readsb.enable", [](const Config& x) { return flag(x.inputs_readsb_enable); }},
+        {"inputs.readsb.host", [](const Config& x) { return x.readsb_host; }},
+        {"inputs.readsb.json_port", [](const Config& x) { return std::to_string(x.readsb_json_port); }},
+        {"inputs.readsb.beast_port", [](const Config& x) { return std::to_string(x.readsb_beast_port); }},
+        {"inputs.dump978.enable", [](const Config& x) { return flag(x.dump978_enable); }},
+        {"inputs.dump978.host", [](const Config& x) { return x.dump978_host; }},
+        {"inputs.dump978.raw_port", [](const Config& x) { return std::to_string(x.dump978_raw_port); }},
+        {"inputs.dump978.json_port", [](const Config& x) { return std::to_string(x.dump978_json_port); }},
+        {"sdr.serial_1090", [](const Config& x) { return x.sdr_1090_serial; }},
+        {"sdr.serial_978", [](const Config& x) { return x.sdr_978_serial; }},
+        {"sdr.gain_1090", [](const Config& x) { return x.gain_1090; }},
+        {"sdr.gain_978", [](const Config& x) { return x.gain_978; }},
+        {"cues.tcp_port", [](const Config& x) { return std::to_string(x.cue_tcp_port); }},
+        {"cues.tcp_connect", [](const Config& x) { return endpoints(x.cue_tcp_connect_targets); }},
+        {"cues.udp_targets", [](const Config& x) { return endpoints(x.cue_udp_targets); }},
+        {"cues.min_interval_s", [](const Config& x) { return num(x.min_interval_s); }},
+        {"cues.max_interval_s", [](const Config& x) { return num(x.max_interval_s); }},
+        {"cues.track_timeout_s", [](const Config& x) { return num(x.track_timeout_s); }},
+        {"cues.keyframe_interval_s", [](const Config& x) { return num(x.keyframe_interval_s); }},
+        {"filters.max_range_nm", [](const Config& x) { return num(x.max_range_nm); }},
+        {"filters.min_elevation_deg", [](const Config& x) { return num(x.min_elevation_deg); }},
+        {"filters.allow_list_file", [](const Config& x) { return x.allow_list_file; }},
+        {"filters.block_list_file", [](const Config& x) { return x.block_list_file; }},
+        {"web.port", [](const Config& x) { return std::to_string(x.web_port); }},
+        {"web.bind", [](const Config& x) { return x.web_bind; }},
+        {"web.trail_seconds", [](const Config& x) { return std::to_string(x.trail_seconds); }},
+        {"recording.dir", [](const Config& x) { return x.record_dir; }},
+        {"recording.formats",
          [](const Config& x) {
              std::string out;
              for (const auto& f : x.record_formats)
                  out += (out.empty() ? "" : " ") + f;
              return out;
          }},
-        {"MAX_RANGE_NM", [](const Config& x) { return num(x.max_range_nm); }},
-        {"MIN_ELEVATION_DEG", [](const Config& x) { return num(x.min_elevation_deg); }},
-        {"ALLOW_LIST_FILE", [](const Config& x) { return x.allow_list_file; }},
-        {"BLOCK_LIST_FILE", [](const Config& x) { return x.block_list_file; }},
-        {"MIN_INTERVAL_S", [](const Config& x) { return num(x.min_interval_s); }},
-        {"MAX_INTERVAL_S", [](const Config& x) { return num(x.max_interval_s); }},
-        {"TRACK_TIMEOUT_S", [](const Config& x) { return num(x.track_timeout_s); }},
-        {"KEYFRAME_INTERVAL_S", [](const Config& x) { return num(x.keyframe_interval_s); }},
-        {"RECORD_RAW", [](const Config& x) { return yesNo(x.record_raw); }},
-        {"WEB_BIND", [](const Config& x) { return x.web_bind; }},
-        {"RECORD_MAX_GB", [](const Config& x) { return num(x.record_max_gb); }},
-        {"TRAIL_SECONDS", [](const Config& x) { return std::to_string(x.trail_seconds); }},
-        {"FISB_ENABLE", [](const Config& x) { return yesNo(x.fisb_enable); }},
-        {"FISB_EXPERIMENTAL", [](const Config& x) { return yesNo(x.fisb_experimental); }},
-        {"STATE_DIR", [](const Config& x) { return x.state_dir; }},
-        {"MAP_DIR", [](const Config& x) { return x.map_dir; }},
-        {"INPUTS_FILE", [](const Config& x) { return x.inputs_file; }},
-        {"LOCATIONS_FILE", [](const Config& x) { return x.locations_file; }},
-        {"STATS_FILE", [](const Config& x) { return x.stats_file; }},
-        {"STATS_AIRCRAFT_MAX", [](const Config& x) { return std::to_string(x.stats_aircraft_max); }},
-        {"STATS_SAVE_S", [](const Config& x) { return std::to_string(x.stats_save_s); }},
+        {"recording.raw", [](const Config& x) { return flag(x.record_raw); }},
+        {"recording.max_gb", [](const Config& x) { return num(x.record_max_gb); }},
+        {"fisb.enable", [](const Config& x) { return flag(x.fisb_enable); }},
+        {"fisb.experimental", [](const Config& x) { return flag(x.fisb_experimental); }},
+        {"paths.state_dir", [](const Config& x) { return x.state_dir; }},
+        {"paths.map_dir", [](const Config& x) { return x.map_dir; }},
+        {"paths.locations_file", [](const Config& x) { return x.locations_file; }},
+        {"stats.file", [](const Config& x) { return x.stats_file; }},
+        {"stats.aircraft_max", [](const Config& x) { return std::to_string(x.stats_aircraft_max); }},
+        {"stats.save_s", [](const Config& x) { return std::to_string(x.stats_save_s); }},
     };
     const auto it = text.find(key);
     if (it == text.end())
@@ -537,58 +766,35 @@ std::string listFilePath(const std::string& state_dir, const std::string& value)
     return state_dir.empty() || value.empty() || value.front() == '/' ? value : underDir(state_dir, value);
 }
 
-namespace {
-
-// The overrides file of skycue.conf text: STATE_DIR from the grammar pass alone.
-std::string overridesPathOfText(const std::string& text, const std::string& name)
+std::string overridesPathOf(const std::string& path, const std::vector<std::string>& set_args,
+                            const std::map<std::string, std::string>& env)
 {
-    std::map<std::string, Entry> entries;
-    collectEntries(text, name, entries);
-    const auto it = entries.find("STATE_DIR");
-    if (it == entries.end())
-        return std::string();
-    Config c;
-    c.state_dir = it->second.value;
-    if (c.state_dir.empty() || c.state_dir.front() != '/')
-        return std::string();
-    if (c.state_dir.size() > 1 && c.state_dir.back() == '/')  // as convertEntries does
-        c.state_dir.pop_back();
-    return overridesPath(c);
+    return overridesPathOfText(readMainConfig(path), path, set_args, env);
 }
 
-std::string readMainConfig(const std::string& path)
+Config parseConfigFile(const std::string& path, const std::string& overrides_path,
+                       const std::vector<std::string>& set_args, const std::map<std::string, std::string>& env,
+                       bool position_required)
 {
-    std::string text;
-    if (!readConfigFile(path, text))
-        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
-    return text;
-}
-
-}  // namespace
-
-std::string overridesPathOf(const std::string& path) { return overridesPathOfText(readMainConfig(path), path); }
-
-Config parseConfigFile(const std::string& path, const std::string& overrides_path)
-{
-    std::string text, overrides_text;
-    if (!readConfigFile(path, text))
-        throw ConfigError(path, 0, std::string("cannot open: ") + std::strerror(errno));
+    const std::string text = readMainConfig(path);
+    std::string overrides_text;
     if (overrides_path.empty() || !readConfigFile(overrides_path, overrides_text))
-        return parseConfigText(text, path);
-    return parseConfigLayers(text, path, overrides_text, overrides_path);
+        overrides_text.clear();
+    return parseConfigLayers(text, path, overrides_text, overrides_path, set_args, env, position_required);
 }
 
 Config parseConfigFile(const std::string& path)
 {
-    // The main file's STATE_DIR says where the overrides are: from its
-    // grammar pass alone, so a value only the overrides make valid is no
-    // reason to refuse it. One read of the main file.
+    // The main file's paths.state_dir (and the environment's) says where the
+    // overrides are: from the grammar pass alone, so a value only the overrides
+    // make valid is no reason to refuse it. One read of the main file.
     const std::string text = readMainConfig(path);
-    const std::string overrides_path = overridesPathOfText(text, path);
+    const auto env = environmentOverrides();
+    const std::string overrides_path = overridesPathOfText(text, path, {}, env);
     std::string overrides_text;
-    if (overrides_path.empty() || !readConfigFile(overrides_path, overrides_text))
-        return parseConfigText(text, path);
-    return parseConfigLayers(text, path, overrides_text, overrides_path);
+    if (!readConfigFile(overrides_path, overrides_text))
+        overrides_text.clear();
+    return parseConfigLayers(text, path, overrides_text, overrides_path, {}, env);
 }
 
 }  // namespace skycued

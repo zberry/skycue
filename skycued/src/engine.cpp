@@ -5,6 +5,7 @@
 #include "log.hpp"
 #include "time_util.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cmath>
@@ -173,8 +174,10 @@ Engine::Engine(boost::asio::io_context& io, const Config& config, std::unique_pt
     forwarder_.setKeyframeProvider([this] {
         std::vector<skycue::Track> out;
         table_.forEach([&](TrackState& s) {
-            if (s.currently_forwarded)
-                out.push_back(toTrack(s, true, s.last_sent ? s.last_sent->alt_is_geom : false));
+            if (s.currently_forwarded) {
+                const GeomView view(s, resolveGeom(s));
+                out.push_back(makeTrack(view, true, s.last_sent ? s.last_sent->alt_is_geom : false));
+            }
         });
         return out;
     });
@@ -273,6 +276,10 @@ void Engine::handleObservation(const TrackObservation& obs)
     TrackState& state = table_.apply(obs);
     if (table_.lastApplySuppressedPosition())
         ++rebroadcast_suppressed_;
+    // A difference counts whoever sent it, rebroadcast copies included (only their
+    // positions are set aside). The fit key is the address: one point per aircraft.
+    if (const auto diff = learnGeomDiff(state.geom, obs); diff && obs.alt_baro_ft)
+        altitude_fit_.add(state.id.address, state.geom.diff_time, *obs.alt_baro_ft, *diff);
     process(obs, state, steady::now(), obs.lat.has_value() && !table_.lastApplySuppressedPosition());
 }
 
@@ -434,19 +441,43 @@ void Engine::process(const TrackObservation& obs, TrackState& state, steady::tim
     // the latest values, so the decision, the stats and the observed event
     // all see the same result; and the stats ledger entry exists before the
     // sent()/dropped() that the decision causes.
-    const FilterResult result = filters_.evaluate(state);
+    const GeomView view(state, resolveGeom(state));
+    const FilterResult result = filters_.evaluate(view.state());
     stats_store_.observe(obs, state, result);
-    decide(state, result, now);
+    decide(state, view, result, now);
     if (positioned && sink_ && !stopped_) {
         EngineEvent ev = kindEvent(EventKind::observed);
-        ev.track = trackSnapshot(state, result);
+        ev.track = trackSnapshot(view, result);
         emit(ev);
     }
 }
 
-void Engine::decide(TrackState& state, const FilterResult& result, steady::time_point now)
+Engine::GeomView::GeomView(const TrackState& state, GeomResult geom) : orig_(&state), geom_(geom)
 {
-    const SendReason reason = shouldSend(state, now, thresholds_);
+    if (geom_.alt_geom_ft != state.latest.alt_geom_ft) {
+        copy_ = state;
+        copy_->latest.alt_geom_ft = geom_.alt_geom_ft;
+    }
+}
+
+GeomResult Engine::resolveGeom(const TrackState& state) const
+{
+    const auto now = dataNow();
+    return resolveGeomAltitude(state, now, altitude_fit_.fit(now));
+}
+
+skycue::Track Engine::makeTrack(const GeomView& view, bool keyframe, bool alt_is_geom) const
+{
+    skycue::Track t = toTrack(view.state(), keyframe, alt_is_geom);
+    const GeomResult& g = view.geom();
+    if (g.source == GeomSource::estimated && g.uncertainty_ft)
+        t.alt_geom_uncertainty_ft = static_cast<uint16_t>(std::clamp<int32_t>(*g.uncertainty_ft, 0, 65535));
+    return t;
+}
+
+void Engine::decide(TrackState& state, const GeomView& view, const FilterResult& result, steady::time_point now)
+{
+    const SendReason reason = shouldSend(view.state(), now, thresholds_);
     if (reason == SendReason::none) {
         if (!state.latest.lat)
             return;
@@ -462,15 +493,16 @@ void Engine::decide(TrackState& state, const FilterResult& result, steady::time_
     if (isSend(result.decision)) {
         if (reason == SendReason::none && state.currently_forwarded)
             return;  // still eligible; nothing worth sending yet
-        forward(state, result, now);
+        forward(state, view, result, now);
     } else if (state.currently_forwarded) {
         drop(state, skycue::DropReason::filtered, result.decision);
     }
 }
 
-void Engine::forward(TrackState& state, const FilterResult& result, steady::time_point now)
+void Engine::forward(TrackState& state, const GeomView& view, const FilterResult& result,
+                     steady::time_point now)
 {
-    const skycue::Track track = toTrack(state, false, result.alt_is_geom);
+    const skycue::Track track = makeTrack(view, false, result.alt_is_geom);
     forwarder_.sendUpdate(track);
     markSent(state, track, now);
     state.currently_forwarded = true;
@@ -480,7 +512,7 @@ void Engine::forward(TrackState& state, const FilterResult& result, steady::time
         sent_->writeTrack(track, "update");
     if (sink_) {
         EngineEvent ev = kindEvent(EventKind::update);
-        ev.track = trackSnapshot(state, result);
+        ev.track = trackSnapshot(view, result);
         emit(ev);
     }
 }
@@ -554,12 +586,13 @@ void Engine::reevaluate()
     // forward() change only the state they are given, never the table.
     const auto now = steady::now();
     table_.forEach([&](TrackState& s) {
-        const FilterResult r = filters_.evaluate(s);
+        const GeomView view(s, resolveGeom(s));
+        const FilterResult r = filters_.evaluate(view.state());
         if (s.currently_forwarded) {
             if (!isSend(r.decision))
                 drop(s, skycue::DropReason::filtered, r.decision);
         } else if (isSend(r.decision)) {  // implies a position
-            forward(s, r, now);
+            forward(s, view, r, now);
         }
     });
 }
@@ -853,6 +886,20 @@ EngineStats Engine::stats() const
         }
     }
     s.inputs = inputs_->statsLines();
+    {
+        const auto now = dataNow();
+        if (const auto f = altitude_fit_.fit(now)) {
+            AltitudeFitStats& a = s.altitude_fit;
+            a.a = f->a;
+            a.b = f->b;
+            a.samples = f->samples;
+            a.aircraft = f->aircraft;
+            a.p90_ft = f->p90_ft;
+            a.age_s = std::chrono::duration<double>(now - f->newest).count();
+            a.linear = f->linear;
+            a.valid = true;
+        }
+    }
     s.fisb_uplink_duplicates = uplink_duplicates_;
     s.tcp_clients = forwarder_.tcpClientCount();
     s.udp_targets = forwarder_.udpTargetCount();
@@ -878,10 +925,12 @@ EngineStats Engine::stats() const
     return s;
 }
 
-TrackSnapshot Engine::trackSnapshot(const TrackState& state, const FilterResult& result) const
+TrackSnapshot Engine::trackSnapshot(const GeomView& view, const FilterResult& result) const
 {
+    const TrackState& state = view.state();
     TrackSnapshot t;
-    t.track = toTrack(state, false, result.alt_is_geom);
+    t.track = makeTrack(view, false, result.alt_is_geom);
+    t.geom = view.geom();
     t.decision = result.decision;
     t.range_nm = result.range_nm;
     t.elevation_deg = result.elevation_deg;
@@ -900,7 +949,10 @@ Snapshot Engine::snapshot() const
     Snapshot s;
     s.now = dataNow();
     s.tracks.reserve(table_.size());
-    table_.forEach([&](const TrackState& t) { s.tracks.push_back(trackSnapshot(t, filters_.evaluate(t))); });
+    table_.forEach([&](const TrackState& t) {
+        const GeomView view(t, resolveGeom(t));
+        s.tracks.push_back(trackSnapshot(view, filters_.evaluate(view.state())));
+    });
     s.filters = filters_.config();
     s.allow_entries = filters_.allow().size();
     s.block_entries = filters_.block().size();

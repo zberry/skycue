@@ -114,6 +114,9 @@ struct Track {
     std::optional<std::string> registration; // tail number (e.g. "N123AB"), at most 16 bytes
     std::optional<uint8_t> nic;   // Navigation Integrity Category as reported (0-11, higher is better)
     std::optional<uint8_t> nac_p; // Navigation Accuracy Category for position (0-11, higher is better)
+    // Present exactly when alt_geom_ft is an estimate rather than a reported value:
+    // its expected error, feet (saturates at 65535). Absent: reported, or no geometric altitude.
+    std::optional<uint16_t> alt_geom_uncertainty_ft;
 };
 
 } // namespace skycue

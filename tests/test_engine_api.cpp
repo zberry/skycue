@@ -1016,3 +1016,25 @@ BOOST_AUTO_TEST_CASE(make_api_request_splits_target)
     BOOST_TEST(f.path == "/api/state");
     BOOST_TEST(f.query == "");
 }
+
+BOOST_AUTO_TEST_CASE(snapshot_geom_and_fit_stats_for_a_reported_track)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(baseConfig(), fakeSource(src));
+    TrackObservation o = nearbyObservation(0x402001, 0);
+    o.alt_geom_ft = 5400;  // reported with its baro
+    fx.t.call([&] {
+        src->connection(true);
+        src->emit(o);
+    });
+    const Snapshot s = fx.t.call([&] { return fx.engine->snapshot(); });
+    const TrackSnapshot* t = find(s, icao(0x402001));
+    BOOST_REQUIRE(t != nullptr);
+    BOOST_TEST((t->geom.source == skycued::GeomSource::reported));
+    BOOST_TEST((t->track.alt_geom_ft == std::optional<int32_t>(5400)));
+    BOOST_TEST(!t->track.alt_geom_uncertainty_ft.has_value());
+    BOOST_TEST(s.stats.altitude_fit.valid);  // one aircraft: the median fallback, not a line
+    BOOST_TEST(!s.stats.altitude_fit.linear);
+    BOOST_TEST(s.stats.altitude_fit.aircraft == 1u);
+    BOOST_TEST(s.stats.altitude_fit.b == 0.0);
+}

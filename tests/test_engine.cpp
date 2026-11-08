@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
@@ -986,4 +987,270 @@ BOOST_AUTO_TEST_CASE(engine_counts_rebroadcast_suppressed)
     // The suppressed position is not a fresh one: only the direct one is observed.
     BOOST_TEST(fx.t.call([&] { return observed; }) == 1);
     fx.t.call([&] { fx.engine->onEvent({}); });
+}
+
+// ---- geometric altitude: reported or estimated, applied when a track is built ----
+
+namespace {
+
+using Tp = std::chrono::system_clock::time_point;
+
+// The truth the synthetic population follows: GNSS minus baro = kA + kB * baro.
+constexpr double kTruthA = 150, kTruthB = 0.02;
+int32_t truthDiff(int32_t baro) { return static_cast<int32_t>(std::lround(kTruthA + kTruthB * baro)); }
+
+TrackObservation geomObs(uint32_t address, Tp t, int32_t baro, bool with_geom, double lat_offset)
+{
+    TrackObservation o = nearbyObservation(address, lat_offset);
+    o.received_time = t;
+    o.position_time = t;
+    o.alt_baro_ft = baro;
+    if (with_geom)
+        o.alt_geom_ft = baro + truthDiff(baro);
+    return o;
+}
+
+// Six aircraft 6000 ft apart, each reporting four paired baro+geom altitudes 5 s
+// apart (24 samples, 6 aircraft, 30000 ft of span). Returns the time of the last.
+Tp seedFit(FakeSource& src, Tp t0)
+{
+    Tp last = t0;
+    for (int k = 0; k < 4; ++k)
+        for (int i = 0; i < 6; ++i) {
+            last = t0 + std::chrono::seconds(5 * k);
+            src.emit(geomObs(0x300000 + static_cast<uint32_t>(i), last, 12000 + 6000 * i, true, 0.01 * i));
+        }
+    return last;
+}
+
+Config geomConfig()
+{
+    Config cfg = baseConfig();
+    cfg.min_interval_s = 0.05;
+    cfg.track_timeout_s = 3600;
+    return cfg;
+}
+
+// Every update the engine sent, in order (io thread only).
+struct UpdateLog {
+    std::vector<skycued::TrackSnapshot> updates;
+    void attach(Engine& e)
+    {
+        e.onEvent([this](const skycued::EngineEvent& ev) {
+            if (ev.kind == skycued::EventKind::update && ev.track)
+                updates.push_back(*ev.track);
+        });
+    }
+    const skycued::TrackSnapshot* last(TrackId id) const
+    {
+        for (auto it = updates.rbegin(); it != updates.rend(); ++it)
+            if (it->track.id == id)
+                return &*it;
+        return nullptr;
+    }
+};
+
+const skycued::TrackSnapshot* findTrack(const skycued::Snapshot& s, TrackId id)
+{
+    for (const auto& t : s.tracks)
+        if (t.track.id == id)
+            return &t;
+    return nullptr;
+}
+
+Tp hoursAgo() { return std::chrono::system_clock::now() - std::chrono::hours(2); }
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(reported_geom_track_unchanged)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(geomConfig(), fakeSource(src));
+    UpdateLog log;
+    const TrackId id{0x401001, AddressType::icao};
+    const Tp t0 = hoursAgo();
+    TrackObservation o = geomObs(id.address, t0, 30000, true, 0);
+    fx.t.call([&] {
+        log.attach(*fx.engine);
+        src->connection(true);
+        src->emit(o);
+    });
+    const auto got = fx.t.call([&] { return log.last(id) ? std::optional<Track>(log.last(id)->track) : std::nullopt; });
+    BOOST_REQUIRE(got.has_value());
+    // What the encoder produced before estimates existed: the reported fields, no bit 10.
+    Track want;
+    want.id = id;
+    want.source = o.source;
+    want.position_time = *o.position_time;
+    want.lat_deg = *o.lat;
+    want.lon_deg = *o.lon;
+    want.alt_is_geom = true;
+    want.alt_baro_ft = o.alt_baro_ft;
+    want.alt_geom_ft = o.alt_geom_ft;
+    want.ground_speed_kt = static_cast<float>(*o.gs_kt);
+    want.track_deg = static_cast<float>(*o.track_deg);
+    BOOST_TEST(skycue::encodeTrackUpdate(*got) == skycue::encodeTrackUpdate(want), boost::test_tools::per_element());
+    BOOST_TEST(!got->alt_geom_uncertainty_ft.has_value());
+    const auto snap = fx.t.call([&] { return fx.engine->snapshot(); });
+    const auto* t = findTrack(snap, id);
+    BOOST_REQUIRE(t != nullptr);
+    BOOST_TEST((t->geom.source == skycued::GeomSource::reported));
+    BOOST_TEST(!t->geom.uncertainty_ft.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(estimate_after_reported_expires)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(geomConfig(), fakeSource(src));
+    UpdateLog log;
+    const TrackId id{0x401002, AddressType::icao};
+    const Tp t0 = hoursAgo();
+    fx.t.call([&] {
+        log.attach(*fx.engine);
+        src->connection(true);
+        src->emit(geomObs(id.address, t0, 30000, true, 0));  // reported, diff truthDiff(30000)
+    });
+    std::this_thread::sleep_for(100ms);  // past MIN_INTERVAL_S
+    fx.t.call([&] {
+        // 61 s later, baro only, moved: the reported value is too old to stand
+        src->emit(geomObs(id.address, t0 + 61s, 30000, false, 0.01));
+    });
+    fx.t.call([&] {
+        const auto* last = log.last(id);
+        BOOST_REQUIRE(last != nullptr);
+        BOOST_REQUIRE(log.updates.size() >= 2u);
+        BOOST_TEST((last->geom.source == skycued::GeomSource::estimated));
+        BOOST_TEST((last->track.alt_geom_ft == std::optional<int32_t>(30000 + truthDiff(30000))));
+        BOOST_REQUIRE(last->track.alt_geom_uncertainty_ft.has_value());
+        BOOST_TEST(*last->track.alt_geom_uncertainty_ft >= 75);
+        BOOST_TEST(*last->track.alt_geom_uncertainty_ft <= 325);
+        // The first update carried the reported value and no uncertainty.
+        BOOST_TEST(!log.updates.front().track.alt_geom_uncertainty_ft.has_value());
+    });
+}
+
+BOOST_AUTO_TEST_CASE(fit_learns_from_other_aircraft)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(geomConfig(), fakeSource(src));
+    UpdateLog log;
+    const TrackId id{0x401003, AddressType::icao};
+    const Tp t0 = hoursAgo();
+    fx.t.call([&] {
+        log.attach(*fx.engine);
+        src->connection(true);
+        const Tp last = seedFit(*src, t0);
+        src->emit(geomObs(id.address, last + 1s, 33000, false, 0.02));  // baro only
+    });
+    const auto snap = fx.t.call([&] { return fx.engine->snapshot(); });
+    const auto* t = findTrack(snap, id);
+    BOOST_REQUIRE(t != nullptr);
+    BOOST_TEST((t->geom.source == skycued::GeomSource::estimated));
+    BOOST_REQUIRE(t->track.alt_geom_ft.has_value());
+    BOOST_TEST(std::abs(*t->track.alt_geom_ft - (33000 + truthDiff(33000))) <= 100);
+    BOOST_REQUIRE(t->track.alt_geom_uncertainty_ft.has_value());
+    BOOST_TEST(*t->track.alt_geom_uncertainty_ft >= 100);
+    const auto st = fx.stats();
+    BOOST_TEST(st.altitude_fit.valid);
+    BOOST_TEST(st.altitude_fit.aircraft == 6u);
+    BOOST_TEST(st.altitude_fit.samples >= 20u);
+}
+
+BOOST_AUTO_TEST_CASE(tisb_target_gets_estimate)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(geomConfig(), fakeSource(src));
+    UpdateLog log;
+    const TrackId id{0x2c4a20, AddressType::non_icao};
+    const Tp t0 = hoursAgo();
+    fx.t.call([&] {
+        log.attach(*fx.engine);
+        src->connection(true);
+        const Tp last = seedFit(*src, t0);
+        TrackObservation o = geomObs(id.address, last + 1s, 25000, false, 0.03);
+        o.id = id;
+        o.source = skycue::Source::tisb;
+        o.rebroadcast = true;
+        src->emit(o);
+    });
+    fx.t.call([&] {
+        const auto* last = log.last(id);
+        BOOST_REQUIRE(last != nullptr);  // sent, with an estimate
+        BOOST_TEST((last->geom.source == skycued::GeomSource::estimated));
+        BOOST_REQUIRE(last->track.alt_geom_ft.has_value());
+        BOOST_TEST(std::abs(*last->track.alt_geom_ft - (25000 + truthDiff(25000))) <= 100);
+        BOOST_TEST(last->track.alt_geom_uncertainty_ft.has_value());
+    });
+}
+
+BOOST_AUTO_TEST_CASE(track_without_baro_has_no_geom)
+{
+    FakeSource* src = nullptr;
+    EngineFx fx(geomConfig(), fakeSource(src));
+    const TrackId none{0x401005, AddressType::icao}, stale{0x401006, AddressType::icao};
+    const Tp t0 = hoursAgo();
+    fx.t.call([&] {
+        src->connection(true);
+        const Tp last = seedFit(*src, t0);
+        TrackObservation o = geomObs(none.address, last + 1s, 0, false, 0.02);
+        o.alt_baro_ft.reset();  // no altitude at all
+        src->emit(o);
+        src->emit(geomObs(stale.address, last + 1s, 30000, false, 0.03));
+        // 30 s on, another aircraft moves the data clock: stale's baro is 30 s old
+        src->emit(geomObs(0x300000, last + 31s, 12000, true, 0));
+    });
+    const auto snap = fx.t.call([&] { return fx.engine->snapshot(); });
+    for (const auto& id : {none, stale}) {
+        const auto* t = findTrack(snap, id);
+        BOOST_REQUIRE(t != nullptr);
+        BOOST_TEST((t->geom.source == skycued::GeomSource::none));
+        BOOST_TEST(!t->track.alt_geom_ft.has_value());
+        BOOST_TEST(!t->track.alt_geom_uncertainty_ft.has_value());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(replay_uses_data_clock_for_window)
+{
+    // The recorded times are two hours in the past; the 120 s window is on them.
+    FakeSource* src = nullptr;
+    EngineFx fx(geomConfig(), fakeSource(src));
+    const Tp t0 = hoursAgo();
+    Tp last;
+    fx.t.call([&] {
+        src->connection(true);
+        last = seedFit(*src, t0);
+    });
+    BOOST_TEST(fx.stats().altitude_fit.valid);  // a wall-clock window would have none of them
+    BOOST_TEST(fx.stats().altitude_fit.age_s < 60.0);
+    fx.t.call([&] { src->emit(geomObs(0x401007, last + 130s, 20000, false, 0.05)); });
+    BOOST_TEST(!fx.stats().altitude_fit.valid);  // recorded time moved past the window
+}
+
+BOOST_AUTO_TEST_CASE(estimate_does_not_touch_received_recording)
+{
+    TempDir tmp;
+    const TrackId id{0x401008, AddressType::icao};
+    {
+        FakeSource* src = nullptr;
+        EngineFx fx(geomConfig(), fakeSource(src), 10s, tmp.path);
+        UpdateLog log;
+        const Tp t0 = hoursAgo();
+        fx.t.call([&] {
+            log.attach(*fx.engine);
+            src->connection(true);
+            const Tp last = seedFit(*src, t0);
+            src->emit(geomObs(id.address, last + 1s, 33000, false, 0.02));
+        });
+        fx.t.call([&] {
+            const auto* last = log.last(id);
+            BOOST_REQUIRE(last != nullptr);
+            BOOST_TEST(last->track.alt_geom_uncertainty_ft.has_value());  // estimated on the wire
+        });
+        fx.stop();
+    }
+    const std::string received = streamText(tmp.path, "received");
+    BOOST_TEST(countOf(received, "\"type\":\"obs\"") == 25u);
+    BOOST_TEST(countOf(received, "\"alt_geom_ft\"") == 24u);  // the seeds' reported values only
+    const std::string sent = streamText(tmp.path, "sent");
+    BOOST_TEST(countOf(sent, "\"event\":\"update\"") >= 7u);
 }

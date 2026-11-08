@@ -4,6 +4,7 @@
 // snapshot of every track, and the events it emits as things happen.
 
 #include "filters.hpp"
+#include "geom_altitude.hpp"
 #include "fisb/fisb_store.hpp"
 #include "inputs/input_types.hpp"
 
@@ -18,6 +19,16 @@
 #include <vector>
 
 namespace skycued {
+
+// The population fit of GNSS-minus-baro altitude (AltitudeFit::fit) as of the data clock.
+struct AltitudeFitStats {
+    double a = 0, b = 0;            // diff ~= a + b * baro
+    std::size_t samples = 0, aircraft = 0;
+    double p90_ft = 0;              // 90th percentile of |residual|
+    double age_s = 0;               // data clock minus the newest sample used
+    bool linear = false;            // false: the median
+    bool valid = false;             // false: no fit, the other fields are 0
+};
 
 struct EngineStats {
     uint64_t observations = 0, sent_updates = 0, sent_drops = 0, tracks_total = 0, tracks_forwarded = 0,
@@ -47,6 +58,7 @@ struct EngineStats {
     // and dump978_connected above (and uat_downlink, uat_uplink) are those of
     // the built-ins readsb (or replay) and dump978, kept for one release.
     std::vector<InputStatsLine> inputs;
+    AltitudeFitStats altitude_fit;
 };
 
 // Counts one drop in counters named as in EngineStats: drops_timeout,
@@ -94,6 +106,7 @@ struct TrackSnapshot {
     std::optional<std::string> emergency, category;
     double rssi = 0;  // dBFS; NaN when never reported
     std::string input;  // the newest observation's input id; empty when not known
+    GeomResult geom;    // reported or estimated geometric altitude; track.alt_geom_ft is its value
 };
 
 struct Snapshot {

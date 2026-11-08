@@ -349,3 +349,65 @@ BOOST_AUTO_TEST_CASE(version_header_matches_cmake)
     BOOST_TEST(std::string(skycue::kVersionString) == SKYCUE_CMAKE_VERSION);
     BOOST_TEST(std::string(SKYCUE_VERSION_STRING) == SKYCUE_CMAKE_VERSION);
 }
+
+BOOST_AUTO_TEST_CASE(uncertainty_bit_10_roundtrip)
+{
+    Track in = fullTrack();
+    in.alt_geom_uncertainty_ft = static_cast<uint16_t>(325);
+    const Frame f = decodeOne(encodeTrackUpdate(in));
+    // presence is a u16 at payload offset 24; bit 10 is bit 2 of its high byte (little endian)
+    BOOST_TEST((f.payload[25] & 0x04) == 0x04);
+    // the u16 value is the last field, little endian
+    BOOST_REQUIRE(f.payload.size() > 2u);
+    BOOST_TEST(f.payload[f.payload.size() - 2] == 0x45);  // 325 = 0x0145
+    BOOST_TEST(f.payload[f.payload.size() - 1] == 0x01);
+    Track out;
+    BOOST_TEST(decodeTrackUpdate(f, out));
+    checkEqual(in, out);
+    BOOST_TEST((out.alt_geom_uncertainty_ft == std::optional<uint16_t>(325)));
+}
+
+BOOST_AUTO_TEST_CASE(old_reader_stops_at_bit_10)
+{
+    // A reader that knows bits 0-9 stops at the first unknown set bit: bit 10 comes after
+    // every field it knows, so it reads all of them and ignores the rest. Shown by hand:
+    // the payload with bit 10 is the payload without it, plus the presence bit and the
+    // two trailing bytes, nothing moved.
+    const Track base = fullTrack();
+    Track with = base;
+    with.alt_geom_uncertainty_ft = static_cast<uint16_t>(125);
+    const Frame fb = decodeOne(encodeTrackUpdate(base));
+    const Frame fw = decodeOne(encodeTrackUpdate(with));
+    BOOST_REQUIRE(fw.payload.size() == fb.payload.size() + 2);
+    std::vector<uint8_t> expect = fb.payload;
+    expect[25] = static_cast<uint8_t>(expect[25] | 0x04);
+    expect.push_back(125);
+    expect.push_back(0);
+    BOOST_TEST(fw.payload == expect, boost::test_tools::per_element());
+    // bits 0-9 decode identically from either; the new one is simply absent without it
+    Track a, b;
+    BOOST_TEST(decodeTrackUpdate(fb, a));
+    BOOST_TEST(decodeTrackUpdate(fw, b));
+    b.alt_geom_uncertainty_ft.reset();
+    checkEqual(a, b);
+}
+
+BOOST_AUTO_TEST_CASE(no_bit_10_for_reported)
+{
+    Track t = fullTrack();  // a reported alt_geom_ft, no uncertainty
+    const Frame f = decodeOne(encodeTrackUpdate(t));
+    BOOST_TEST((f.payload[25] & 0x04) == 0);
+    // and the golden bytes of track_golden_bytes are unchanged by the new field
+    Track out;
+    BOOST_TEST(decodeTrackUpdate(f, out));
+    BOOST_TEST(!out.alt_geom_uncertainty_ft.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(uncertainty_saturates_at_65535)
+{
+    Track t = fullTrack();
+    t.alt_geom_uncertainty_ft = static_cast<uint16_t>(65535);
+    Track out;
+    BOOST_TEST(decodeTrackUpdate(decodeOne(encodeTrackUpdate(t)), out));
+    BOOST_TEST((out.alt_geom_uncertainty_ft == std::optional<uint16_t>(65535)));
+}

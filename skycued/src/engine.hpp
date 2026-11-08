@@ -102,7 +102,9 @@
 #include "stats_store.hpp"
 #include "track_table.hpp"
 
+#include "altitude_fit.hpp"
 #include "change_detector.hpp"
+#include "geom_altitude.hpp"
 #include "fisb/fisb_decoder.hpp"
 #include "fisb/fisb_store.hpp"
 #include "fisb/location_index.hpp"
@@ -257,14 +259,36 @@ private:
     // (an observed event follows).
     void process(const TrackObservation& obs, TrackState& state, std::chrono::steady_clock::time_point now,
                  bool positioned);
-    // `result` is filters_.evaluate(state), made by the caller.
-    void decide(TrackState& state, const FilterResult& result, std::chrono::steady_clock::time_point now);
-    void forward(TrackState& state, const FilterResult& result, std::chrono::steady_clock::time_point now);
+    // A track as filters, change detector and wire see it: its latest values with the
+    // geometric altitude replaced by the resolved one (reported or estimated; nothing when
+    // neither). When that equals the reported value the state itself is used, no copy.
+    // Applied here only, never to the observation, the table or the received recording.
+    class GeomView {
+    public:
+        GeomView(const TrackState& state, GeomResult geom);
+        GeomView(const GeomView&) = delete;
+        GeomView& operator=(const GeomView&) = delete;
+        const TrackState& state() const { return copy_ ? *copy_ : *orig_; }
+        const GeomResult& geom() const { return geom_; }
+
+    private:
+        const TrackState* orig_;
+        GeomResult geom_;
+        std::optional<TrackState> copy_;
+    };
+    GeomResult resolveGeom(const TrackState& state) const;
+    skycue::Track makeTrack(const GeomView& view, bool keyframe, bool alt_is_geom) const;
+    // `result` is filters_.evaluate(view.state()), made by the caller; `state` is the
+    // table's, `view` its geometric-altitude view.
+    void decide(TrackState& state, const GeomView& view, const FilterResult& result,
+                std::chrono::steady_clock::time_point now);
+    void forward(TrackState& state, const GeomView& view, const FilterResult& result,
+                 std::chrono::steady_clock::time_point now);
     void drop(TrackState& state, skycue::DropReason reason, std::optional<Decision> decision = std::nullopt);
     void countDrop(skycue::DropReason reason, std::optional<Decision> decision = std::nullopt);
     void applied(const std::string& note, EventKind kind);
     void reevaluate();
-    TrackSnapshot trackSnapshot(const TrackState& state, const FilterResult& result) const;
+    TrackSnapshot trackSnapshot(const GeomView& view, const FilterResult& result) const;
     std::chrono::system_clock::time_point dataNow() const;
     void advanceDataClock(std::chrono::system_clock::time_point t);
     void emit(const EngineEvent& event);
@@ -303,6 +327,7 @@ private:
     Thresholds thresholds_;
     std::chrono::seconds track_timeout_;
     TrackTable table_;
+    mutable AltitudeFit altitude_fit_;  // fit() caches; learns in handleObservation, read on the data clock
     StatsStore stats_store_;                      // after filters_ (the receiver) and config_
     std::string stats_path_;                      // "" : not saved
     std::chrono::seconds stats_save_interval_{300};

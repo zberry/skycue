@@ -22,7 +22,8 @@ enum PresenceBit : unsigned {
     p_registration = 7,
     p_nic = 8,
     p_nac_p = 9,
-    p_known_count = 10,
+    p_alt_geom_uncertainty = 10,
+    p_known_count = 11,
 };
 
 constexpr uint8_t kFlagKeyframe = 0x01;
@@ -232,6 +233,7 @@ std::vector<uint8_t> encodeTrackUpdate(const Track& t)
     mark(t.registration.has_value(), p_registration);
     mark(t.nic.has_value(), p_nic);
     mark(t.nac_p.has_value(), p_nac_p);
+    mark(t.alt_geom_uncertainty_ft.has_value(), p_alt_geom_uncertainty);
     w.u16(presence);
 
     if (t.alt_baro_ft)
@@ -254,6 +256,8 @@ std::vector<uint8_t> encodeTrackUpdate(const Track& t)
         w.u8(*t.nic);
     if (t.nac_p)
         w.u8(*t.nac_p);
+    if (t.alt_geom_uncertainty_ft)
+        w.u16(*t.alt_geom_uncertainty_ft);
     return w.finish();
 }
 
@@ -350,6 +354,7 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
         case p_registration: ok = readOptionalStr(r, t.registration, kMaxRegistrationLen); break;
         case p_nic: ok = readOptional(r, t.nic, &Reader::u8); break;
         case p_nac_p: ok = readOptional(r, t.nac_p, &Reader::u8); break;
+        case p_alt_geom_uncertainty: ok = readOptional(r, t.alt_geom_uncertainty_ft, &Reader::u16); break;
         default: out = std::move(t); return true; // unknown bit
         }
         if (!ok)

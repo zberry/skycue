@@ -346,6 +346,76 @@ Hello's). Bind one UDP port per sending skycued. **`tcp`** talks to one
 skycued; use one `Client` per sender if you need several (and merge them
 yourself), or `tcp_listen`.
 
+## Cartesian state (ECEF)
+
+`#include <skycue/ecef.hpp>` (namespace `skycue::geo`) turns a `Track`
+(degrees, feet, knots) into a WGS-84 Earth-centred, Earth-fixed position (m)
+and velocity (m/s), each with a 1-sigma error, and computes look angles
+(azimuth, elevation, slant range) from a sensor site. skycued sends what it
+received and does not extrapolate, so a state is exact at its
+`position_time`; call `propagate(state, now)` if you want it moved forward.
+Nothing in the library does that for you.
+
+When a field is missing, a fixed ladder picks a substitute, and the state
+names the rung it used (`altitude_source`, `velocity_source`,
+`vertical_source`, `error_source`) so you can threshold on quality. The first
+rung that applies wins:
+
+| Ladder | Rungs, best first | Source enum |
+|---|---|---|
+| Height above the ellipsoid (sigma) | `alt_geom_ft` reported (15 m); `alt_geom_ft` with `alt_geom_uncertainty_ft` (that value); `alt_baro_ft` (`baro_sigma_m`, 300 m); `Options::default_height_m` (30 m); otherwise no state | `AltitudeSource`: `geom_reported`, `geom_estimated`, `baro`, `caller_default` |
+| Horizontal velocity | `ground_speed_kt` and `track_deg`; derived from the previous fix (needs `derive_velocity` and `EcefTracker`); none | `VelocitySource`: `reported`, `derived`, `none` |
+| Vertical velocity (only with a horizontal one) | `vertical_rate_fpm`; derived from the previous state on the same altitude rung; zero | `VerticalSource`: `reported`, `derived`, `assumed_zero` |
+| Horizontal error (sigma) | `nac_p`; `nic`; `default_horizontal_sigma_m` (1852 m) | `ErrorSource`: `nac_p`, `nic`, `default_` |
+
+The library never invents a height: with no altitude rung, `toEcef()` and
+`EcefTracker::update()` return `nullopt`. `toEcef()` is a pure function and
+uses only the reported rungs. `EcefTracker` keeps the last state per track,
+which is what the derived rungs need, and also drops tracks that go quiet
+(`Options::stale_after`, applied when you call `expire()`). It is thread-safe,
+so the Client's I/O thread can feed it while your own thread reads it.
+
+There are two ways to take the result into a program, and both are shown as
+complete examples in `examples/`:
+
+| | Push | Pull |
+|---|---|---|
+| Client mode | poll mode (`run_io_thread = false`) | thread mode (the default) |
+| How states reach you | `EcefTracker::onState` / `onDropped` callbacks, inside `poll()` on your thread | `Options::collect_changes`, then `takeChanges()` from your loop |
+| Locking in your code | none, everything is on one thread | none, the tracker holds the lock |
+| Pick it when | you want to react to each update with the lowest latency and no second thread | your loop already exists, runs on its own clock and wants batches |
+| Example | `examples/ecef_consumer.cpp` | `examples/ecef_batch_consumer.cpp` |
+
+`examples/ecef_consumer.cpp` keeps its callbacks thin (store, mark changed),
+ticks at 10 Hz, and once a second calls `expire()`, picks the highest-elevation
+target, propagates it to now and prints a pointing line (with
+`--sensor LAT,LON,H_M`), then a summary line. A `~` in front of a value marks
+it as derived rather than reported. Against a running skycued, with the sensor
+at the receiver's position:
+
+```
+$ ecef_consumer --sensor 52.0,4.5,10 tcp 127.0.0.1:30500
+POINT 4d012c az=345.7 el=25.3 range=27.2km age=3.1s alt=geom vel=reported err=nacp
+SUMMARY tracks=208 vel(reported=203 derived=0 none=5) alt(geom=202 geom_est=5 baro=1 default=0)
+```
+
+Without `--sensor` it prints the states that changed instead of the pointing
+line:
+
+```
+STATE 4a3121 pos=4114.676,508.265,4845.187km vel=63.7,235.4,-78.3m/s sigma=38,15m alt=geom vert=reported err=nacp
+```
+
+`examples/ecef_batch_consumer.cpp` registers only the two feed callbacks, and
+once a second takes the batch with `takeChanges()`: `new` for a track seen for
+the first time, `upd` for later states, `drop` with the reason. One entry
+per track, however many updates arrived in between.
+
+```
+$ ecef_batch_consumer --sensor 52.0,4.5,10 tcp 127.0.0.1:30500
+upd 392aef pos=4041.346,312.057,4921.305km vel=163.6,-61.7,-139.6m/s sigma=12,15m alt=geom err=nacp az=182.4 el=3.5 range=143.9km
+```
+
 ## Tuning `Config`
 
 | Field | Default | Effect |

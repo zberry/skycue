@@ -70,6 +70,9 @@ change live, and how often to send updates. Forwarded aircraft go to your
 own programs and devices as cues over TCP or UDP in a small, documented wire protocol
 ([docs/protocol.md](docs/protocol.md)). To receive them in your own program,
 use the C++ client library ([docs/libskycue.md](docs/libskycue.md)).
+The library can also turn a track into ECEF position, velocity and look angles
+from a sensor site, with documented fallbacks when fields are missing
+([Cartesian state](docs/libskycue.md#cartesian-state-ecef)).
 
 **The web map.** skycued serves a map page that loads nothing from the
 internet. It shows:
@@ -161,7 +164,7 @@ For contributors:
 | `tools/` | the command-line tools (`skycue-dump`, `-rawrec`, `-rawplay`, `-pingsim`, `-stats`, `-fisb`; `iqgen/` for `skycue-iqgen`) |
 | `www/` | the web page (Leaflet and ECharts are added from `sources/` at build time) |
 | `cmake/` | CMake modules |
-| `examples/` | a client demo and a parent-project example |
+| `examples/` | three client demos (minimal, ECEF with callbacks, ECEF with `takeChanges()`) and a parent-project example |
 | `docs/` | the documentation |
 | `packaging/` | the `skycue.toml` example, systemd unit, RPM spec, container build and verify scripts, source tarball script |
 | `debian/` | Debian packaging |

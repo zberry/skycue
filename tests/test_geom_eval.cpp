@@ -36,6 +36,7 @@
 #include "decode/uat_decoder.hpp"
 #include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
+#include "restricted_fixtures.hpp"
 #include "test_slow.hpp"
 
 using skycued::AltitudeFit;
@@ -275,13 +276,9 @@ BOOST_AUTO_TEST_CASE(geom_eval_own_diff_hold_opensky)
 
 // UAT long frames carry the AUX altitude (about 0.5 Hz); the spread of the difference they
 // report is logged for the record. No pass threshold: it only has to be non-empty.
-BOOST_AUTO_TEST_CASE(geom_eval_uat_difference_spread)
+BOOST_AUTO_TEST_CASE(geom_eval_uat_difference_spread, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const std::string path = kFixtures + "/raw/uat-sample.txt.gz";
-    if (!std::ifstream(path).good()) {
-        std::cout << "geom_eval: raw/uat-sample.txt.gz is missing, UAT spread not reported\n";
-        return;
-    }
     skycued::decode::UatDecoder dec(DecoderConfig{}, "geom-eval-uat");
     std::vector<double> diffs;
     std::map<uint32_t, int> aircraft;
@@ -300,6 +297,7 @@ BOOST_AUTO_TEST_CASE(geom_eval_uat_difference_spread)
             dec.feed(*f, at(1.7e9 + static_cast<double>(n++)), std::nullopt);  // the capture has no timestamps
         }
     }
+    BOOST_CHECK(!diffs.empty());  // a fixture without both altitudes must fail, not pass silently
     if (diffs.empty()) {
         std::cout << "geom_eval: the UAT capture has no frame carrying both altitudes\n";
         return;

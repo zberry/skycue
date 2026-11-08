@@ -18,14 +18,16 @@
 //       (9 bits); bit 98 unused (confirmed against the dump978-fa golden)
 //     ground:   99-109 speed (11 bits), 110-111 track type (1 = true track; 0 n/a,
 //       2 magnetic heading, 3 true heading give no track), 112-120 track/heading
-//       (9 bits, x 360/512); confirmed by the Stratux golden for types 0 and 1,
-//       types 2 and 3 do not occur in it
+//       (9 bits, x 360/512); confirmed by the Stratux golden for types 0 and 1 and by the
+//       synthetic golden for 2 and 3 (dump978-fa prints heading, no track)
 //   mode status   bytes 17-28 (types 1 and 3): emitter category + eight base-40
 //     characters in three 16-bit groups (bits 136-183), emergency (3 bits at
 //     184), NACp (4 bits at 200), CSID (bit 214: 1 = call sign, 0 = squawk)
 //   AUX SV        bytes 29-33 (types 1, 2, 5, 6): bits 232-243 secondary altitude
 // Every field is cited next to its constant in uat_frame.cpp; the dump978-fa
-// golden comparison (tests/test_decode_uat_golden.cpp) settled the ones that say so.
+// golden comparisons (tests/test_decode_uat_golden.cpp on real captures,
+// tests/test_decode_uat_synthetic.cpp on frames built from every field value) settled the ones
+// that say so.
 
 #include <cstdint>
 #include <optional>
@@ -88,7 +90,7 @@ struct StateVector {
 };
 
 struct ModeStatus {
-    std::string emitter_category;  // "A0".."D7" from value / 8, % 8; 32..39 empty
+    std::string emitter_category;  // "A0".."E7" from value / 8, % 8 (32..39 are E0..E7 as dump978-fa prints them)
     std::optional<std::string> callsign;  // CSID 1
     std::optional<std::string> squawk;    // CSID 0 and four octal digits
     std::optional<std::string> emergency; // 0..6 as decoder spec §5.3

@@ -63,6 +63,7 @@ InputState UatRawInput::state() const
         c.unmapped = d.unmapped;
         c.unknown_type = d.unknown_type;
         c.evicted = d.evicted;
+        c.rs_errors = d.rs_errors;
         c.decoder_observations = d.observations;
     }
     return s;

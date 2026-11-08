@@ -19,7 +19,7 @@ const char* const kKeys[] = {"id",      "name", "type", "enabled",           "tr
                              "host",    "port", "peer", "edition",           "sac",       "sic",
                              "status_url",      "status_interval_s",         "time_mode", "capture",
                              "group",   "interface",    "format",
-                             "ref_lat", "ref_lon"};
+                             "ref_lat", "ref_lon", "source"};
 const char* const kReservedIds[] = {"readsb", "dump978", "replay"};
 const char* const kEditions[] = {"2.2", "2.3", "2.4", "2.5", "2.6", "2.7"};
 
@@ -263,6 +263,8 @@ std::string notApplicable(const std::string& key, InputType type, InputTransport
         return type == InputType::beast_raw || type == InputType::uat_raw
                    ? ""
                    : key + " applies to beast_raw and uat_raw only";
+    if (key == "source")
+        return type == InputType::pingstation_json ? "" : "source applies to pingstation_json only";
     if (key == "capture")
         return takesCapture(type) ? ""
                                   : "capture applies to beast_raw, uat_raw, pingstation_json and pingstation_cat021 only";
@@ -331,7 +333,7 @@ bool InputDef::operator==(const InputDef& o) const
            sic == o.sic && status_url == o.status_url && status_interval_s == o.status_interval_s &&
            time_mode == o.time_mode && capture == o.capture && peer == o.peer && builtin == o.builtin &&
            group == o.group && iface == o.iface && format == o.format && ref_lat == o.ref_lat &&
-           ref_lon == o.ref_lon;
+           ref_lon == o.ref_lon && source == o.source;
 }
 
 InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
@@ -450,6 +452,15 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
                 fail("time_mode must be utc or gps");
         }
     }
+    if (d.type == InputType::pingstation_json && o.has("source")) {
+        const std::string source = getText(o, "source", "device or decode");
+        if (source == "device")
+            d.source = PingSource::device;
+        else if (source == "decode")
+            d.source = PingSource::decode;
+        else
+            fail("source must be device or decode");
+    }
     if (takesCapture(d.type) && o.has("capture"))
         d.capture = getFlag(o, "capture");
     if (d.type == InputType::beast_raw && o.has("format")) {
@@ -509,6 +520,8 @@ std::string inputDefJson(const InputDef& d)
         w.add("status_interval_s", static_cast<int64_t>(d.status_interval_s));
         w.add("time_mode", d.time_mode == TimeMode::gps ? "gps" : "utc");
     }
+    if (d.type == InputType::pingstation_json && d.source == PingSource::decode)
+        w.add("source", "decode");  // the default is not written, so a v1 file stays readable by the previous release
     if (takesCapture(d.type))
         w.add("capture", d.capture);
     return w.str();

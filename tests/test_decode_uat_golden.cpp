@@ -130,7 +130,8 @@ Report compare(const std::string& golden, const Variant& v)
             const double a = *sv.altitude_ft + v.alt_delta_ft;
             (sv.alt_type == AltType::geometric ? altGeom : altBaro) = a;
         }
-        if (aux) altGeom = *aux + v.alt_delta_ft;  // a long frame's secondary altitude is the other kind
+        if (aux)  // a long frame's secondary altitude is the other kind than the primary
+            (sv.alt_type == AltType::geometric ? altBaro : altGeom) = *aux + v.alt_delta_ft;
         cmp(r, hex, "alt_baro", altBaro, optNum(*g, "alt_baro"));
         cmp(r, hex, "alt_geom", altGeom, optNum(*g, "alt_geom"));
 

@@ -89,6 +89,7 @@ protected:
     // kErrorLogInterval.
     void noteError(const std::string& message);
     void noteStatus(DeviceStatus status);
+    const std::optional<DeviceStatus>& deviceStatus() const { return device_status_; }
     void noteClockOffset(std::optional<double> offset_s);
     // One raw message to the tap, tagged with this input's id. Nothing is
     // copied unless an enabled output wants the kind.

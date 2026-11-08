@@ -280,9 +280,12 @@ every such input produces observations. What changes:
   `ref_lon` (both or neither; a `beast_raw` or `uat_raw` input only) for its
   decoder's range check; without them it uses `RECEIVER_LAT` and
   `RECEIVER_LON`. Setting them makes the inputs file version 2.
-- **UAT is not tracked under `skycued` yet.** dump978-fa still feeds its
-  FIS-B weather and uplink counts, but UAT aircraft reach the track table
-  only through readsb's JSON, which this mode does not read.
+- **UAT is decoded too.** The built-in `dump978` input and every `uat_raw`
+  input decode the 978 MHz downlinks (see [UAT (978 MHz)](#uat-978-mhz-in-skycued));
+  FIS-B uplinks and their counts are unchanged. The `uat_in` connector in
+  readsb is not needed and should be dropped: a readsb JSON input that still
+  carries the UAT traffic double-feeds it, and `--check-inputs` and the
+  startup log warn about that as they do for 1090.
 - **The `json` output carries nothing.** It is built from readsb's JSON
   input; with that input gone it stays defined and enabled but idle.
 - **Leftover readsb inputs double-feed.** An enabled input of type `readsb`
@@ -302,7 +305,9 @@ every such input produces observations. What changes:
   `decoder` object ([the stats object](web-api.md#the-state-object)).
 - **Replay.** Play a capture to the decoder with
   `skycue-rawplay --1090-listen PORT` and point `READSB_BEAST_PORT` (or a
-  `beast_raw` input) at it; see [Raw capture and replay](#raw-capture-and-replay).
+  `beast_raw` input) at it; for UAT, `skycue-rawplay --uat-listen PORT` and a
+  `uat_raw` input pointed at that port; the simpler route is to set
+  `DUMP978_RAW_PORT` to it, so the built-in `dump978` input reads the replay. See [Raw capture and replay](#raw-capture-and-replay).
 
 The default keeps readsb's own decoding and its JSON. The decoder follows the
 public Mode S layouts and was compared with readsb on the same capture;
@@ -310,6 +315,116 @@ Comm-B vertical rates (BDS 6,0) are not decoded yet, so the barometric
 vertical rate of a few aircraft can differ from readsb's in interrogated
 airspace (the comparison accepts 95 % agreement on that one value, and measured
 about 97 % on the 120 s capture).
+
+### UAT (978 MHz) in skycued
+
+Under `TRACK_DECODER=skycued` the built-in `dump978` input (dump978-fa's raw
+port, `DUMP978_HOST` and `DUMP978_RAW_PORT`) and every `uat_raw` input decode the downlink lines
+(`-HEX;...`) themselves; no setting beyond `TRACK_DECODER` is needed.
+Uplink lines (`+HEX;...`) go to the FIS-B decoder as before. A downlink of
+18 bytes (payload type 0) or 34 bytes (types 1 to 10) is decoded; anything
+else that is hex counts in `rejected`. What you get:
+
+- **Fields.** Address, address qualifier, position, barometric or geometric
+  altitude, ground speed and track (ground or air), vertical rate and its
+  source, NIC, NACp, emitter category, emergency status, call sign or squawk,
+  and the air/ground state. Long frames also carry the second altitude, so
+  both barometric and geometric are known and their difference is reported.
+- **Address qualifiers.** 0 and 1 (ADS-B), 2 (TIS-B or ADS-R with an ICAO
+  address; skycued does not tell the two apart), 3 (TIS-B track file), 4
+  (surface vehicle), 5 (fixed beacon) and 6 (ADS-R with a non-ICAO address)
+  are mapped to the address type and source of the track; 7 is reserved and
+  counted in `unknown_type`, as is a frame whose length does not fit its
+  payload type.
+- **Categories and emergencies.** Emitter categories 32 to 39 are shown as
+  `E0` to `E7`, the way dump978-fa prints them. Emergency code 3 is shown as
+  `minimum_fuel` (the public table); dump978-fa prints `invalid` for it.
+- **Position range.** A position more than 300 NM from the input's
+  reference (`ref_lat` and `ref_lon`, else `RECEIVER_LAT` and
+  `RECEIVER_LON`) is rejected and counted in `cpr_rejected`. There is no
+  speed check against the previous fix (UAT positions are whole fixes, and the
+  error correction makes a corrupt one very rare). A change without a position (an altitude, say)
+  is reported only after 10 s without an accepted position, and at most once a
+  second. Call sign, category, squawk and emergency status are kept for as long
+  as the aircraft is tracked, on both bands; all other fields for 60 s.
+- **Counters.** The same set as for 1090 ([`GET /api/inputs`](web-api.md#inputs)),
+  and the `decoder` object of `GET /api/stats` sums them. The Receiver tab shows
+  one line on the card of a decoding input: frames per second, the share of
+  frames that failed the CRC, and the counts of frames the decoder repaired
+  (`fixed`), positions waiting for their pair (`pending`), positions rejected
+  (`rejected`) and frames of a type it does not decode (`unknown`). dump978-fa
+  has already done the error correction, so `crc_fail` and `crc_fixed` stay 0
+  for UAT; `rs_errors` sums the Reed-Solomon symbol errors dump978-fa reports
+  per frame (`rs=`); `unmapped` counts frames with a position of payload
+  type 7 to 10, whose state vector is decoded and reported but whose extra
+  content is not (without a position they count in `no_position`). Target State
+  content of types 3, 4 and 6 is not decoded either, but those frames count in
+  `decoded`.
+- **Geometric altitude.** A UAT long frame reports both altitudes, so the
+  difference is the aircraft's own and feeds the population fit used for
+  estimates ([below](#geometric-altitude)). TIS-B track-file targets (qualifier
+  3) carry no geometric altitude and get an estimate like 1090 aircraft without
+  one.
+
+**How it was validated.** The decoder was compared field by field with a
+dump978-fa build on three public captures (the dump978 sample data and two
+Stratux logs, 439, 3,760 and 303 downlinks) and on a synthetic matrix of 109
+frames built to carry all 40 emitter categories, all 8 emergency codes, the
+four ground track types, all NIC and NACp values and representative rows for
+the rest (qualifiers, velocity, vertical rate, altitude and position limits,
+squawk and call sign, AUX). All are payload type 1 long frames. The
+golden files are in `tests/fixtures/raw/` and the tests run without any
+other decoder installed. A live differential plays the captures into skycued
+as a `uat_raw` input and compares the tracks it builds with dump978-fa's
+output per aircraft: every compared field agreed on the 22, 43 and 7
+aircraft compared (positions, altitudes, speed, track, vertical rate,
+identity, NACp, category). Identity and geometric altitude are compared only
+where both sides report them, and one aircraft in the FlightAware sample lies
+outside the 300 NM limit and is excluded. To regenerate the goldens or run the
+differential against your own build, set `SKYCUE_DUMP978` to a dump978-fa
+executable (`SKYCUE_READSB` does the same for a readsb in the 1090
+tests); without them the committed goldens are used.
+
+**What is not verified against real data.** The captures hold no
+emitter category above A2, no emergency code other than none, no air/ground
+state 3, no use of the spare bit 98, no reserved call-sign or squawk symbols
+(38, 39) and no payload type above 2. The real captures cover payload types 0,
+1 and 2 (type 2 frames: 78 in the FlightAware sample, 42 in the Stratux
+capture, all agreeing with dump978-fa); the synthetic matrix covers type 1;
+types 3 to 10 (mode status without AUX, the length and type pairing of 4 and
+7 to 10) are not verified against dump978-fa and rest on the public layout and
+unit tests. The categories and emergency codes rest on the public layout and
+the synthetic matrix read by dump978-fa, not on traffic. Emitter categories 32 to 39 follow
+dump978-fa alone, since the public table has no set E. Treat a track with one
+of these values as unconfirmed, and report a frame that disagrees with
+dump978-fa.
+
+### pingStation decode mode
+
+A `pingstation_json` input normally trusts the fields the device decoded.
+With `"source":"decode"` skycued ignores those fields and decodes the
+`rawData` frame of each aircraft itself, 1090 or UAT by length (7 or 14
+bytes: Mode S; 18 or 34 bytes: UAT), whatever `TRACK_DECODER` is. The
+position reference is the device's own status position when it has polled
+one (`status_url`), else `RECEIVER_LAT` and `RECEIVER_LON`.
+
+```json
+{"id":"ps-north","type":"pingstation_json","port":4000,"source":"decode"}
+```
+
+`source` is `device` (the default) or `decode`, applies to
+`pingstation_json` only, and `decode` makes the inputs file version 2. Notes:
+
+- A device repeats its snapshot every few tenths of a second, so a frame
+  byte-equal to one already decoded less than 1 s earlier is skipped and
+  counted in `raw_duplicates`; a repeat is decoded again once a second has
+  passed since the last decoded copy.
+- An aircraft without `rawData` cannot be decoded and counts in `no_raw`;
+  it does not reach the track table. Check that the device sends raw frames
+  before switching a receiver to `decode`.
+- The decoder counters of [UAT](#uat-978-mhz-in-skycued) and Mode S appear on the
+  input, and the Receiver tab offers `source` in the input form and the decoder
+  line on the card.
 
 ## Geometric altitude
 
@@ -431,6 +546,9 @@ Accepted files: `.bin` (Beast, to `--beast-in`), `.csv[.gz]`
 with the `uat_in` connector above). `--speed N` (0: as fast as possible) and
 `--loop` work as for a JSONL replay. Since rawplay serves the UAT lines to
 readsb only, skycued does not see the UAT port and uplinks are not counted.
+To track the UAT lines in skycued instead, serve them to a `uat_raw` input
+(`TRACK_DECODER=skycued`; no readsb is needed for them):
+`skycue-rawplay --uat-listen 30978 uat-20261101-120000.txt`.
 The receiver position given to readsb (and in `skycue.conf`) must match the
 capture's region, or readsb cannot decode positions and the range filter
 drops everything: the sample capture in `tests/fixtures/raw/` is European,
@@ -513,7 +631,7 @@ file, at startup or in a hand edit, the entry is kept and runs, skycued logs
 one WARN ("capture needs RECORD_DIR: not capturing") and nothing is captured. With `RECORD_RAW=yes` a `pingstation_json` input also writes the raw 1090 and
 UAT frames the device includes (`rawData`) to `RECORD_DIR/raw-<id>-*.csv` and
 `.txt`, which `skycue-rawplay` accepts like skycue-rawrec's
-files. Both formats are in [recording-format.md](recording-format.md#pingstation-capture-and-raw-frames).
+files. A `pingstation_json` input may also decode those frames itself ([pingStation decode mode](#pingstation-decode-mode)). Both formats are in [recording-format.md](recording-format.md#pingstation-capture-and-raw-frames).
 
 **Hand edits.** skycued checks the file about once a second and applies a
 change once the file has stopped changing for a second, so an editor that
@@ -579,7 +697,8 @@ Two types read the decoders' raw output directly:
   built-in `dump978`: downlinks are counted and uplinks reach the FIS-B
   decoder exactly as the built-in's do, a second copy of an uplink another
   input already delivered is dropped as a duplicate, and the lines go to the
-  `uat` outputs. The built-in keeps its id `dump978`, and `dump978` stays a
+  `uat` outputs. Under `TRACK_DECODER=skycued` the downlinks are decoded to
+  aircraft too ([UAT in skycued](#uat-978-mhz-in-skycued)). The built-in keeps its id `dump978`, and `dump978` stays a
   valid `type` for an input you add (it is the same input class).
 
 `"capture":true` on a `beast_raw` or `uat_raw` input needs `RECORD_DIR` like

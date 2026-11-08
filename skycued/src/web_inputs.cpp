@@ -73,7 +73,8 @@ void putCounters(JsonWriter& w, const InputCounters& c)
         .add("decoder_observations", num(c.decoder_observations))
         .add("mlat_skipped", num(c.mlat_skipped))
         .add("modeac_skipped", num(c.modeac_skipped))
-        .add("other_skipped", num(c.other_skipped));
+        .add("other_skipped", num(c.other_skipped))
+        .add("rs_errors", num(c.rs_errors));
 }
 
 std::string deviceStatusJson(const DeviceStatus& d)
@@ -110,6 +111,8 @@ std::string stateJson(const InputState& s, std::chrono::system_clock::time_point
     if (s.clock_offset_s && std::isfinite(*s.clock_offset_s))
         w.add("clock_offset_s", *s.clock_offset_s);
     w.add("status_fail_streak", static_cast<int64_t>(s.status_fail_streak)).add("last_error", s.last_error);
+    if (s.decoding)
+        w.add("decoding", true);
     putCounters(w, s.counters);
     if (s.device_status)
         w.addRaw("device_status", deviceStatusJson(*s.device_status));

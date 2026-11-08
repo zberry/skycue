@@ -29,6 +29,7 @@ struct DecoderConfig {
 struct DecodeCounters {
     uint64_t frames = 0, crc_fail = 0, crc_fixed = 0, ap_unconfirmed = 0, no_position = 0, cpr_pending = 0,
              cpr_rejected = 0, decoded = 0, unmapped = 0, unknown_type = 0, evicted = 0, observations = 0;
+    uint64_t rs_errors = 0;  // UAT only: Reed-Solomon symbol errors corrected, summed over the frames (the "rs=" values)
 };
 
 class ModesDecoder {
@@ -40,6 +41,8 @@ public:
     void feed(const std::vector<uint8_t>& bytes, Clock::time_point arrival, std::optional<uint8_t> signal);
     const DecodeCounters& counters() const;
     std::size_t keys() const;
+    // Replaces the reference position (a pingStation status moved); per-aircraft state is kept.
+    void setReference(std::optional<cpr::Position> reference) { cfg_.reference = reference; }
 
 private:
     KeyState* find(const StateKey& k);

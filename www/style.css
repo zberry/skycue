@@ -506,6 +506,7 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .input-endpoint, .output-endpoint { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text); margin: 2px 0; }
 .input-stats, .output-stats { display: flex; flex-wrap: wrap; gap: 0 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .input-device { color: var(--muted); margin-top: 2px; }
+.input-decoder { color: var(--muted); margin-top: 2px; }
 .input-device.stale { color: var(--elev); }
 .input-error, .output-error { color: var(--blocked); margin-top: 2px; overflow-wrap: anywhere; }
 .input-actions, .output-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }

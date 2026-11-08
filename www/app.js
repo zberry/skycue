@@ -2921,6 +2921,7 @@
     inputs: [],                     // input objects, as GET /api/inputs lists them
     wall: 0,                        // Date.now() when they arrived (for the data ages)
     rates: {},                      // id -> {obs_s, msg_s}
+    decoderLines: {},               // id -> the decoder line text (decoding inputs only)
     dataWall: {},                   // id -> Date.now() of the stats item its message count last grew in
     prevLines: null, prevWall: 0,   // the previous stats.inputs
     stats: null,                    // the latest stats object (recorder drops)
@@ -2957,7 +2958,7 @@
     // An id that went may come back as a new input: forget its client state.
     var ids = {};
     rx.inputs.forEach(function (i) { ids[i.id] = true; });
-    [rx.dataWall, rx.rates].forEach(function (byId) {
+    [rx.dataWall, rx.rates, rx.decoderLines].forEach(function (byId) {
       Object.keys(byId).forEach(function (id) { if (!ids[id]) delete byId[id]; });
     });
     if (rx.prevLines) rx.prevLines = rx.prevLines.filter(function (l) { return ids[l.id]; });
@@ -2972,6 +2973,13 @@
     if (!Array.isArray(lines)) return;
     rx.rates = P.inputRates(rx.prevLines, lines, rx.prevLines ? (now - rx.prevWall) / 1000 : 0);
     lines.forEach(function (l) { if (rx.rates[l.id].msg_s > 0) rx.dataWall[l.id] = now; });
+    var before = {};
+    (rx.prevLines || []).forEach(function (l) { before[l.id] = l; });
+    rx.decoderLines = {};
+    lines.forEach(function (l) {
+      var text = P.decoderLine(l, before[l.id], rx.prevLines ? (now - rx.prevWall) / 1000 : 0);
+      if (text !== null) rx.decoderLines[l.id] = text;
+    });
     rx.prevLines = lines;
     rx.prevWall = now;
     lines.forEach(function (l) {
@@ -3005,6 +3013,7 @@
     var line = el('div', 'input-stats');
     ['input-age', 'input-rates', 'input-rejected'].forEach(function (c) { line.appendChild(el('span', c)); });
     card.appendChild(line);
+    card.appendChild(el('div', 'input-decoder'));
     card.appendChild(el('div', 'input-device'));
     card.appendChild(el('div', 'input-error'));
     var acts = el('div', 'input-actions');
@@ -3051,6 +3060,10 @@
     var rates = setText(card, 'input-rates', 'obs/s ' + P.formatNum(r.obs_s, 1) + ' · msg/s ' + P.formatNum(r.msg_s, 1));
     rates.setAttribute('data-obs-s', r.obs_s === null ? '' : String(r.obs_s));
     setText(card, 'input-rejected', P.rejectedText(st));
+    var dec = card.querySelector('.input-decoder');
+    var decText = rx.decoderLines[inp.id];
+    dec.hidden = decText === undefined;
+    if (decText !== undefined) setText(card, 'input-decoder', decText);
     var ping = inp.type === 'pingstation_json' || inp.type === 'pingstation_cat021';
     var dev = card.querySelector('.input-device');
     dev.hidden = !ping;
@@ -3427,6 +3440,7 @@
       if (v !== '') def[f] = NUMERIC_FIELDS[f] ? Number(v) : v;
     });
     if (def.type !== 'pingstation_cat021' && def.transport === P.inputTransport(def.type)) delete def.transport;
+    if (def.source === 'device') delete def.source;  // the default; leaves a v1 inputs file one
     return def;
   }
   function showFieldErrors(errors) {

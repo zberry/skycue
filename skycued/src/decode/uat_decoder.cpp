@@ -6,7 +6,10 @@
 #include "coding/bits.hpp"
 
 // Rules: decoder spec sections 5.4 (altitude), 6 (address qualifiers) and 7
-// (observation production). Constants marked "our choice" are not cited values.
+// (observation production). Position: only the 300 NM range check of 5.5 step 4, not its speed
+// check. UAT positions are plain lat/lon (no CPR), so there is no decode ambiguity for a speed
+// check to catch; Reed-Solomon coding makes an undetected bit error in a position vanishingly
+// rare; and a speed gate on 978 only rejects fixes the reference decoder accepts. Constants marked "our choice" are not cited values.
 
 namespace skycued::decode {
 
@@ -15,9 +18,9 @@ namespace {
 using std::chrono::seconds;
 using skycue::AddressType;
 using skycue::Source;
+using namespace limits;  // range and emission limits shared with the 1090 decoder
 
 constexpr seconds kFieldFresh{60};     // our choice: observations carry fields <= 60 s old
-constexpr double kRangeNm = 300.0;     // our choice: same reasonableness range as the 1090 decoder
 constexpr std::size_t kRssiFrames = 8; // our choice: rssi is the mean power over the last 8 frames
 
 void pushRssi(UatKeyState& ks, double dbfs) {
@@ -90,6 +93,7 @@ void UatDecoder::evictIdle() {
 
 void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::optional<double> rssi_dbfs) {
     ++counters_.frames;
+    if (f.rs_errors && *f.rs_errors > 0) counters_.rs_errors += static_cast<uint64_t>(*f.rs_errors);
     const auto map = uat::mapQualifier(f.qualifier());
     if (!map || !f.lengthMatchesType()) {
         ++counters_.unknown_type;
@@ -107,7 +111,6 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     key.type = map->type;
     key.rebroadcast = map->rebroadcast;
     UatKeyState& ks = obtain(key, map->source);
-    ks.dirty = false;
     const auto level = rssi_dbfs ? rssi_dbfs : f.rssi_dbfs;
     if (level && std::isfinite(*level)) pushRssi(ks, *level);
 
@@ -138,8 +141,13 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     if (sv.track_deg) setField(ks, ks.track, *sv.track_deg, now_);
     if (sv.vrate_fpm) {
         const float r = static_cast<float>(*sv.vrate_fpm);
-        if (sv.vrate_geometric.value_or(false)) ks.geom_rate.set(r, now_);
-        else ks.baro_rate.set(r, now_);
+        Timed<float>& mine = sv.vrate_geometric.value_or(false) ? ks.geom_rate : ks.baro_rate;
+        Timed<float>& other = sv.vrate_geometric.value_or(false) ? ks.baro_rate : ks.geom_rate;
+        setField(ks, mine, r, now_);
+        if (other.has) {  // the source flipped: the other source's rate is stale, not carried for 60 s
+            other = Timed<float>{};
+            ks.dirty = true;
+        }
     }
     setField(ks, ks.nic, sv.nic, now_);
 
@@ -157,12 +165,14 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     if (sv.lat && sv.lon) {
         const cpr::Position p{*sv.lat, *sv.lon};
         const std::optional<cpr::Position> anchor = cfg_.reference ? cfg_.reference : ks.first_pos;
-        if (!std::isfinite(p.lat) || !std::isfinite(p.lon) || std::fabs(p.lat) > 90.0 ||
-            (anchor && cpr::distanceNm(p, *anchor) > kRangeNm)) {
-            ++counters_.cpr_rejected;  // the position is dropped, no stored position is touched
+        bool ok = std::isfinite(p.lat) && std::isfinite(p.lon) && std::fabs(p.lat) <= 90.0 &&
+                  !(anchor && cpr::distanceNm(p, *anchor) > kRangeNm);
+        if (!ok) {
+            ++counters_.cpr_rejected;  // the fix is dropped; no stored position is touched
             dropped = true;
         } else {
             if (!ks.first_pos) ks.first_pos = p;
+            ks.last_accept_at = now_;
             accepted = p;  // every accepted in-range fix is new, even a repeat: position_time must advance
         }
     }
@@ -172,8 +182,18 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     else if (f.payload_type() >= 7) ++counters_.unmapped;  // target state / trajectory change content is not decoded
     else ++counters_.decoded;
 
-    if (!accepted && !ks.dirty) return;
-    if (!handler_) return;
+    if (!handler_) {
+        if (accepted) ks.dirty = false;
+        return;
+    }
+    if (!accepted) {
+        // Spec 7.2: without an accepted position in the last 10 s, a change emits, at most once
+        // per second; a change held back waits for the next frame (dirty stays set).
+        if (!ks.dirty) return;
+        if (ks.last_accept_at && now_ - *ks.last_accept_at <= kNoPositionFor) return;
+        if (ks.last_change_emit && now_ - *ks.last_change_emit < kChangeInterval) return;
+        ks.last_change_emit = now_;
+    }
 
     skycued::TrackObservation o;
     o.id.address = ks.key.address;

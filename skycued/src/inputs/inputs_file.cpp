@@ -25,6 +25,8 @@ std::string inputV2Key(const JsonObject& e)
     for (const char* key : {"group", "interface", "format", "ref_lat", "ref_lon"})
         if (e.has(key))
             return key;
+    if (e.getString("source") == std::optional<std::string>("decode"))
+        return "source";
     if (type && e.has("transport") && (*type == "readsb" || *type == "dump978" || *type == "pingstation_json"))
         return "transport";
     return "";
@@ -34,7 +36,7 @@ std::string inputV2Key(const JsonObject& e)
 bool inputNeedsV2(const InputDef& d)
 {
     if (d.type == InputType::beast_raw || d.type == InputType::uat_raw || !d.group.empty() ||
-        d.ref_lat || d.ref_lon)
+        d.ref_lat || d.ref_lon || d.source != PingSource::device)
         return true;
     const InputTransport v1 =
         d.type == InputType::pingstation_json ? InputTransport::udp : InputTransport::tcp_connect;

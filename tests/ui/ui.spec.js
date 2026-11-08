@@ -3070,6 +3070,38 @@ test.describe('receiver tab (pingsim)', () => {
     await expect(card.locator('.input-rates')).toHaveText(/^obs\/s (—|0\.0) · msg\/s (—|0\.0)$/);
   });
 
+  // Task 4's UI: the Source field of a pingstation_json input (device by default, decode
+  // as the option) and the decoder line of a card whose stats item reports `decoding`.
+  // The receivers skycued runs no decoder, so the stats frames are marked on the way through.
+  test('pingstation_source_field_and_decoder_line', async ({ page }) => {
+    await page.routeWebSocket(/\/ws$/, (ws) => {
+      const server = ws.connectToServer();
+      server.onMessage((m) => {
+        let o;
+        try { o = JSON.parse(String(m)); } catch (e) { ws.send(m); return; }
+        const mark = (st) => {
+          const l = st && Array.isArray(st.inputs) && st.inputs.find((i) => i.id === 'ps-sim');
+          if (l) Object.assign(l, { decoding: true, frames: 40, crc_fail: 2, crc_fixed: 1, cpr_pending: 3, cpr_rejected: 4, unknown_type: 5 });
+        };
+        if (o.type === 'snapshot') mark(o.stats);
+        else if (o.type === 'events' && Array.isArray(o.items)) o.items.filter((i) => i.type === 'stats').forEach(mark);
+        ws.send(JSON.stringify(o));
+      });
+      ws.onMessage((m) => server.send(m));
+    });
+    await openReceiverTab(page);
+    const form = page.locator('#input-form');
+    await form.locator('select[name=type]').selectOption('pingstation_json');
+    const source = form.locator('select[name=source]');
+    await expect(source).toBeVisible();
+    await expect(source).toHaveValue('device');
+    expect(await source.locator('option').evaluateAll((os) => os.map((o) => o.value))).toEqual(['device', 'decode']);
+    await form.locator('select[name=type]').selectOption('beast_raw');
+    await expect(source).toBeHidden();
+    await expect(inputCard(page, 'ps-sim').locator('.input-decoder')).toHaveText(
+      /^frames\/s .* · CRC fail 5\.0% · fixed 1 · pending 3 · rejected 4 · unknown 5$/, { timeout: 10000 });
+  });
+
   test('input_name_is_text_not_html', async ({ page }) => {
     const name = '<img src=x onerror="window.__xss=1">';
     const port = await freeUdpPort();

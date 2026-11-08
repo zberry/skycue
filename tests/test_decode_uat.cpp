@@ -347,6 +347,78 @@ BOOST_AUTO_TEST_CASE(unchanged_frame_emits_nothing)
     BOOST_CHECK_EQUAL(r.last().alt_baro_ft.value_or(-1), 5200);
 }
 
+// Spec 7.2, as in the 1090 decoder: without a position, a change emits only after 10 s without
+// an accepted one, at most once per second, and a held-back change waits for the next frame.
+BOOST_AUTO_TEST_CASE(change_without_position_is_gated)
+{
+    Rig r(withRef());
+    r.feed(airborne(), 0.0);  // an accepted position: emits
+    BOOST_REQUIRE_EQUAL(r.out.size(), 1u);
+    auto c = airborne();
+    c.zero_position = true;
+    c.nic = 0;
+    c.alt_ft = 5200;
+    r.feed(c, 5.0);  // changed, but a position was accepted 5 s ago
+    BOOST_CHECK_EQUAL(r.out.size(), 1u);
+    c.alt_ft = 5300;
+    r.feed(c, 11.0);  // 11 s without a position: emits
+    BOOST_REQUIRE_EQUAL(r.out.size(), 2u);
+    BOOST_CHECK(!r.last().lat);
+    BOOST_CHECK_EQUAL(r.last().alt_baro_ft.value_or(-1), 5300);
+    c.alt_ft = 5400;
+    r.feed(c, 11.5);  // within 1 s of the last change emission: held back
+    BOOST_CHECK_EQUAL(r.out.size(), 2u);
+    r.feed(c, 12.2);  // nothing new in the frame, but the held change goes out
+    BOOST_REQUIRE_EQUAL(r.out.size(), 3u);
+    BOOST_CHECK_EQUAL(r.last().alt_baro_ft.value_or(-1), 5400);
+    r.feed(c, 13.5);
+    BOOST_CHECK_EQUAL(r.out.size(), 3u);
+}
+
+BOOST_AUTO_TEST_CASE(vertical_rate_change_emits_and_a_flip_drops_the_other_source)
+{
+    Rig r;
+    auto s = airborne();
+    s.zero_position = true;
+    s.nic = 0;
+    s.vrate_fpm = 640;
+    s.vrate_geometric = false;
+    r.feed(s, 0.0);
+    BOOST_REQUIRE_EQUAL(r.out.size(), 1u);
+    BOOST_REQUIRE(r.last().baro_rate_fpm);
+    BOOST_CHECK_EQUAL(*r.last().baro_rate_fpm, 640.0f);
+    s.vrate_fpm = 704;  // only the rate changed
+    r.feed(s, 2.0);
+    BOOST_REQUIRE_EQUAL(r.out.size(), 2u);
+    BOOST_CHECK_EQUAL(*r.last().baro_rate_fpm, 704.0f);
+    s.vrate_geometric = true;  // the source flips: the baro rate is dropped at once
+    s.vrate_fpm = 128;
+    r.feed(s, 4.0);
+    BOOST_REQUIRE_EQUAL(r.out.size(), 3u);
+    BOOST_REQUIRE(r.last().geom_rate_fpm);
+    BOOST_CHECK_EQUAL(*r.last().geom_rate_fpm, 128.0f);
+    BOOST_CHECK(!r.last().baro_rate_fpm);
+    s.vrate_geometric = false;
+    s.vrate_fpm = 192;
+    r.feed(s, 6.0);
+    BOOST_REQUIRE_EQUAL(r.out.size(), 4u);
+    BOOST_CHECK(!r.last().geom_rate_fpm);
+    BOOST_REQUIRE(r.last().baro_rate_fpm);
+}
+
+BOOST_AUTO_TEST_CASE(rs_errors_are_summed)
+{
+    Rig r;
+    auto f = frameOf(airborne());
+    r.dec.feed(f, t0);
+    BOOST_CHECK_EQUAL(r.dec.counters().rs_errors, 0u);
+    f.rs_errors = 2;
+    r.dec.feed(f, t0 + seconds(1));
+    f.rs_errors = 1;
+    r.dec.feed(f, t0 + seconds(2));
+    BOOST_CHECK_EQUAL(r.dec.counters().rs_errors, 3u);
+}
+
 BOOST_AUTO_TEST_CASE(repeated_identical_fix_emits_position)
 {
     Rig r(withRef());

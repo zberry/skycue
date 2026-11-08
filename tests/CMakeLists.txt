@@ -748,7 +748,31 @@ skycue_set_warnings(test_decode_uat_golden)
 add_test(NAME decode_uat_golden COMMAND test_decode_uat_golden)
 set_tests_properties(decode_uat_golden PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
-# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
+# Synthetic UAT coverage matrix (about 110 frames built with encodeUat): uat_synth prints the
+# frames and the values built into them (fixtures/gen_uat_synthetic.sh runs it, then dump978-fa);
+# the test compares dump978-fa's decode of them, the built-in values and our decoder; skips when a
+# golden is absent.
+add_executable(uat_synth uat_synth.cpp)
+skycue_set_warnings(uat_synth)
+add_executable(test_decode_uat_synthetic test_decode_uat_synthetic.cpp)
+target_link_libraries(test_decode_uat_synthetic PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
+target_compile_definitions(test_decode_uat_synthetic PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_decode_uat_synthetic)
+add_test(NAME decode_uat_synthetic COMMAND test_decode_uat_synthetic)
+set_tests_properties(decode_uat_synthetic PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+# pingStation `source: decode`: rawData frames of both bands through the decoders, the 1 s duplicate
+# rule, the reference from the status position, and device mode unchanged.
+add_executable(test_ping_decode test_ping_decode.cpp)
+target_link_libraries(test_ping_decode PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_ping_decode PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_ping_decode)
+target_include_directories(test_ping_decode PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
+add_test(NAME ping_decode COMMAND test_ping_decode)
+set_tests_properties(ping_decode PROPERTIES TIMEOUT 120)
+
 # UatRawInput with the 978 decoder on (TRACK_DECODER=skycued): the dump978 sample and the
 # Stratux log through a real input, the counters and the double-feed warning.
 add_executable(test_uat_raw_decode test_uat_raw_decode.cpp)
@@ -760,6 +784,14 @@ target_include_directories(test_uat_raw_decode PRIVATE ${PROJECT_SOURCE_DIR}/net
 add_test(NAME uat_raw_decode COMMAND test_uat_raw_decode)
 set_tests_properties(uat_raw_decode PROPERTIES TIMEOUT 120)
 
+# skycued's own UAT decoder against dump978-fa, live: the 439-downlink sample replayed at speed 1
+# (about 2 minutes), then the Stratux captures, through a uat_raw input under TRACK_DECODER=skycued, compared per address with
+# the committed golden and, with SKYCUE_DUMP978 set, a fresh dump978-fa run. Skips without fixtures.
+add_test(NAME decode_differential_uat
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential_uat.sh
+    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+    $<TARGET_FILE:skycue-iqgen>)
+set_tests_properties(decode_differential_uat PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 
 add_executable(test_toml_lite test_toml_lite.cpp)
 target_link_libraries(test_toml_lite PRIVATE skycued_core Boost::unit_test_framework)
@@ -783,4 +815,5 @@ add_test(NAME config_cli
     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skycue_example_old.conf ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(config_cli PROPERTIES TIMEOUT 60)
 
+# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

@@ -2,6 +2,7 @@
 
   compare_tracks.py OURS THEIRS            print every mismatch and the agreement
                                            per criterion; exit 1 when one fails
+  compare_tracks.py --uat OURS THEIRS      the same for UAT (see below)
   compare_tracks.py --shift KIND IN OUT    write a deliberately wrong copy of IN
                                            (KIND pos: second and last position +2e-5
                                            degrees; dyn: alt_baro +100, gs +5) on every
@@ -14,6 +15,12 @@ Criteria (those of the C++ golden test, dynamic fields raised to 97 %):
   identity (flight, category, squawk) exact where both have a value;
   alt_baro, gs (+-1 kt), track (+-0.1 deg, circular), baro_rate, geom_rate, nac_p:
   >= 97 % agreement per field where both have a value.
+--uat (dump978-fa golden, reduce_received.py --uat/--uat-golden): every THEIRS address with
+>= 1 position is positioned by OURS (100 %; UAT positions are absolute, one frame each) and
+>= 100 % of the second and of the last positions are within 1e-5 degrees; identity as above;
+alt_geom joins the per-field agreement. Every floor is 100 % under --uat (both decoders read the
+same frame, so what both report must agree); a field absent on one side (a surface frame has
+no track) is not compared; a field the golden never carries is skipped with a note.
 Observation counts and `positions` are reported only. Standard library only.
 """
 import gzip
@@ -33,6 +40,7 @@ NOTE_BY_FIELD = {"baro_rate": "known cause: readsb's Comm-B BDS 6,0 rate (32 ft/
 IDENT = ("flight", "category", "squawk")
 DYN = (("alt_baro", 0.0, False), ("gs", 1.0, False), ("track", 0.1, True),
        ("baro_rate", 0.0, False), ("geom_rate", 0.0, False))
+UAT_DYN = (("alt_geom", 0.0, False),)
 
 
 def load(path):
@@ -77,17 +85,19 @@ def close(a, b, tol, circular):
     return d <= tol + 1e-9
 
 
-def compare(ours, theirs):
+def compare(ours, theirs, uat=False):
     ok = True
-    eligible = [h for h, r in theirs.items() if r.get("positions", 0) >= 2]
+    pos_min = 1.0 if uat else POS_MIN
+    dyn = DYN + UAT_DYN if uat else DYN
+    eligible = [h for h, r in theirs.items() if r.get("positions", 0) >= (1 if uat else 2)]
     positioned = [h for h in eligible if h in ours and "last" in ours[h]]
     for h in eligible:
         if h not in positioned:
             print("no position from us: %s (theirs %d)" % (h, theirs[h]["positions"]))
     pct = lambda n, d: 100.0 * n / d if d else 0.0
     rate = len(positioned) / len(eligible) if eligible else 0.0
-    print("positioned: %d of %d (%.2f %%, need %.0f %%)" % (len(positioned), len(eligible), 100 * rate, 100 * POS_MIN))
-    ok &= bool(eligible) and rate >= POS_MIN
+    print("positioned: %d of %d (%.2f %%, need %.0f %%)" % (len(positioned), len(eligible), 100 * rate, 100 * pos_min))
+    ok &= bool(eligible) and rate >= pos_min
 
     second_ok = last_ok = second_n = 0
     for h in positioned:
@@ -107,10 +117,11 @@ def compare(ours, theirs):
         else:
             print("last position differs: %s ours %.6f,%.6f theirs %.6f,%.6f (positions ours %d theirs %d)" % (
                 h, ol["lat"], ol["lon"], tl["lat"], tl["lon"], o["positions"], t["positions"]))
-    for name, n, d in (("second", second_ok, second_n), ("last", last_ok, len(positioned))):
+    for name, n, d, need in (("second", second_ok, second_n, pos_min),
+                             ("last", last_ok, len(positioned), pos_min)):
         r = n / d if d else 0.0
-        print("%s positions within %g deg: %d of %d (%.2f %%, need %.0f %%)" % (name, POS_TOL, n, d, 100 * r, 100 * POS_MIN))
-        ok &= d > 0 and r >= POS_MIN
+        print("%s positions within %g deg: %d of %d (%.2f %%, need %.0f %%)" % (name, POS_TOL, n, d, 100 * r, 100 * need))
+        ok &= d > 0 and r >= need
 
     for f in IDENT:
         n = bad = 0
@@ -122,11 +133,12 @@ def compare(ours, theirs):
                     print("%s differs: %s ours %r theirs %r" % (f, h, ours[h][f], theirs[h][f]))
         print("%s: %d compared, %d differ (need 0)" % (f, n, bad))
         ok &= bad == 0
-    for f, tol, circ in DYN + (("nac_p", 0.0, False),):
-        n = good = 0
+    for f, tol, circ in dyn + (("nac_p", 0.0, False),):
+        n = good = theirs_n = 0
         for h in positioned:
             ov = ours[h]["last"].get(f) if f != "nac_p" else ours[h].get(f)
             tv = theirs[h]["last"].get(f) if f != "nac_p" else theirs[h].get(f)
+            theirs_n += tv is not None
             if ov is None or tv is None:
                 continue
             n += 1
@@ -135,10 +147,13 @@ def compare(ours, theirs):
             else:
                 print("%s differs: %s ours %s theirs %s" % (f, h, ov, tv))
         r = good / n if n else 0.0
-        need = MIN_BY_FIELD.get(f, DYN_MIN)
+        need = 1.0 if uat else MIN_BY_FIELD.get(f, DYN_MIN)
         print("%s: %d of %d agree (%.2f %%, need %.0f %%)" % (f, good, n, 100 * r, 100 * need))
         if f in NOTE_BY_FIELD and good < n:
             print("  classification: %s" % NOTE_BY_FIELD[f])
+        if uat and theirs_n == 0:
+            print("  note: the golden has no %s here, nothing to compare" % f)  # e.g. a capture without geometric altitude
+            continue
         if n == 0:
             print("  FAIL: no comparable rows for %s (a vacuous pass is not a pass)" % f)
         ok &= n > 0 and r >= need
@@ -152,6 +167,8 @@ def compare(ours, theirs):
 if __name__ == "__main__":
     if len(sys.argv) == 5 and sys.argv[1] == "--shift" and sys.argv[2] in ("pos", "dyn"):
         shift(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif len(sys.argv) == 4 and sys.argv[1] == "--uat":
+        sys.exit(0 if compare(load(sys.argv[2]), load(sys.argv[3]), uat=True) else 1)
     elif len(sys.argv) == 3:
         sys.exit(0 if compare(load(sys.argv[1]), load(sys.argv[2])) else 1)
     else:

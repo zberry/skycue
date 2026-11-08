@@ -88,9 +88,11 @@ inline Bytes encodeUat(const UatSpec& s)
     put(b, 96, 2, s.ag);
     if (s.ag == 0 || s.ag == 1) {
         const int div = s.ag == 1 ? 4 : 1;
-        if (s.ns_kt && s.ew_kt) {
+        if (s.ns_kt) {  // each component alone: nullopt leaves its raw field 0 (not available)
             put(b, 99, 1, *s.ns_kt < 0);
             put(b, 100, 10, static_cast<uint32_t>(std::abs(*s.ns_kt) / div + 1));
+        }
+        if (s.ew_kt) {
             put(b, 110, 1, *s.ew_kt < 0);
             put(b, 111, 10, static_cast<uint32_t>(std::abs(*s.ew_kt) / div + 1));
         }

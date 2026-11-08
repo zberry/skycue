@@ -18,6 +18,8 @@ namespace skycued {
 // from the API or the inputs file, so users have the other four.
 enum class InputType { readsb, dump978, pingstation_json, pingstation_cat021, beast_raw, uat_raw, replay };
 enum class InputTransport { tcp_connect, udp, tcp_listen };
+// pingstation_json: take the station's decoded fields (device) or decode its rawData frames (decode).
+enum class PingSource { device, decode };
 
 const char* inputTypeName(InputType type);            // "pingstation_cat021", ...
 const char* transportName(InputTransport transport);  // "tcp_listen", ...
@@ -46,6 +48,7 @@ struct InputDef {
     int status_interval_s = 30;        // pingstation_*
     TimeMode time_mode = TimeMode::utc;  // pingstation_*
     bool capture = false;              // pingstation_*, beast_raw, uat_raw
+    PingSource source = PingSource::device;  // pingstation_json only; JSON key "source"
     std::string peer;                  // udp/tcp_listen; "" = any
     bool builtin = false;              // set by the daemon, never parsed
 

@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -27,6 +28,7 @@ namespace {
 // dump978's own sample (all airborne) and the 2015 Stratux capture (551 surface frames, TIS-B).
 const std::string kGolden = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-sample.golden.jsonl.gz";
 const std::string kStratux = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux.golden.jsonl.gz";
+const std::string kStratuxB = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux-b.golden.jsonl.gz";  // the 2015 "problem" log
 
 bool exists(const std::string& p) { return std::ifstream(p).good(); }
 
@@ -34,6 +36,7 @@ bool exists(const std::string& p) { return std::ifstream(p).good(); }
 struct Variant {
     int alt_delta_ft = 0;
     double lat_scale = 1.0;
+    bool flip_vrate_source = false;
 };
 
 struct Tally {
@@ -145,6 +148,10 @@ Report compare(const std::string& golden, const Variant& v)
             cmp(r, hex, ground ? "track_ground" : "track", trk, optNum(*g, "track"), 0.5);
         }
         cmp(r, hex, "vrate", vr, optNum(*g, "vrate"));
+        std::optional<std::string> vsrc;  // the source is only defined where there is a rate
+        if (sv.vrate_fpm && sv.vrate_geometric)
+            vsrc = (*sv.vrate_geometric != v.flip_vrate_source) ? "geometric" : "barometric";
+        cmp(r, hex, "vrate_src", vsrc, vr ? optStr(*g, "vrate_src") : std::nullopt);
         cmp<double>(r, hex, "nic", static_cast<double>(sv.nic), optNum(*g, "nic"));
 
         std::optional<std::string> cs, sq, cat, em;
@@ -176,19 +183,28 @@ void print(const std::string& label, const Report& r)
         if (++shown <= 20) std::cout << "  " << m << "\n";
 }
 
+// A missing golden is a skip (exit status 77, ctest SKIP_RETURN_CODE), not a pass.
+struct RequireGoldens {
+    RequireGoldens()
+    {
+        if (!exists(kGolden) || !exists(kStratux) || !exists(kStratuxB)) {
+            std::cout << "SKIP: raw/uat-sample.golden.jsonl.gz or raw/uat-stratux.golden.jsonl.gz or raw/uat-stratux-b.golden.jsonl.gz is missing "
+                         "(gen_uat_golden.sh makes them)\n";
+            std::exit(77);
+        }
+    }
+};
+BOOST_GLOBAL_FIXTURE(RequireGoldens);
+
 }  // namespace
 
 BOOST_AUTO_TEST_CASE(golden_matches_dump978)
 {
-    if (!exists(kGolden)) {
-        std::cout << "SKIP: raw/uat-sample.golden.jsonl.gz is missing (gen_uat_golden.sh makes it)\n";
-        return;
-    }
     const Report r = compare(kGolden, Variant{});
     print("sample", r);
     BOOST_TEST(r.entries >= 400);
     BOOST_TEST(r.failures == 0);
-    for (const char* name : {"lat", "lon", "alt_baro", "alt_geom", "gs", "track", "vrate", "nic", "callsign", "squawk",
+    for (const char* name : {"lat", "lon", "alt_baro", "alt_geom", "gs", "track", "vrate", "vrate_src", "nic", "callsign", "squawk",
                              "category", "emergency", "nac_p", "qualifier", "address", "ground"}) {
         BOOST_TEST_CONTEXT(name) {
             BOOST_TEST(r.fields.at(name).both > 0, "no entry with a value from both sides: the comparison is vacuous");
@@ -199,16 +215,26 @@ BOOST_AUTO_TEST_CASE(golden_matches_dump978)
 // Stratux 2015: surface state vectors (speed, track type 0/1, track), TIS-B track files.
 BOOST_AUTO_TEST_CASE(golden_matches_dump978_stratux)
 {
-    if (!exists(kStratux)) {
-        std::cout << "SKIP: raw/uat-stratux.golden.jsonl.gz is missing (gen_uat_golden.sh makes it)\n";
-        return;
-    }
     const Report r = compare(kStratux, Variant{});
     print("stratux", r);
     BOOST_TEST(r.entries >= 3000);
     BOOST_TEST(r.failures == 0);
-    for (const char* name : {"lat", "lon", "alt_baro", "gs", "gs_ground", "track", "track_ground", "vrate", "nic", "callsign",
+    for (const char* name : {"lat", "lon", "alt_baro", "gs", "gs_ground", "track", "track_ground", "vrate", "vrate_src", "nic", "callsign",
                              "category", "emergency", "nac_p", "ground"}) {
+        BOOST_TEST_CONTEXT(name) {
+            BOOST_TEST(r.fields.at(name).both > 0, "no entry with a value from both sides: the comparison is vacuous");
+        }
+    }
+}
+
+// Stratux 2015 "problem" log: TIS-B airborne only; the same comparison.
+BOOST_AUTO_TEST_CASE(golden_matches_dump978_stratux_b)
+{
+    const Report r = compare(kStratuxB, Variant{});
+    print("stratux-b", r);
+    BOOST_TEST(r.entries >= 300);
+    BOOST_TEST(r.failures == 0);
+    for (const char* name : {"lat", "lon", "alt_baro", "gs", "track", "vrate", "vrate_src", "nic", "category", "nac_p"}) {
         BOOST_TEST_CONTEXT(name) {
             BOOST_TEST(r.fields.at(name).both > 0, "no entry with a value from both sides: the comparison is vacuous");
         }
@@ -217,12 +243,9 @@ BOOST_AUTO_TEST_CASE(golden_matches_dump978_stratux)
 
 BOOST_AUTO_TEST_CASE(golden_catches_wrong_decoder)
 {
-    if (!exists(kGolden) || !exists(kStratux)) {
-        std::cout << "SKIP: a UAT golden is missing\n";
-        return;
-    }
-    for (const std::string& g : {kGolden, kStratux}) {
+    for (const std::string& g : {kGolden, kStratux, kStratuxB}) {
         BOOST_TEST(compare(g, Variant{25, 1.0}).failures > 0);   // altitude formula off by 25 ft
         BOOST_TEST(compare(g, Variant{0, 1.001}).failures > 0);  // latitude scaling off
+        BOOST_TEST(compare(g, Variant{0, 1.0, true}).failures > 0);  // vertical-rate source inverted
     }
 }

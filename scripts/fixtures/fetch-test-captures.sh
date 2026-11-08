@@ -9,6 +9,8 @@
 #   tests/fixtures/raw/uat-sample.txt.gz           flightaware/dump978 (BSD-2-Clause)
 #   tests/fixtures/raw/stratux-uat-2015.log.gz     cyoung/stratux (BSD-3-Clause),
 #                                                  the upstream log, gzip -9n
+#   tests/fixtures/raw/stratux-uat-2015b.log.gz    stratux/stratux (BSD-3-Clause),
+#                                                  test-data/gms5002-09072015-problem-stratux-uat.log, gzip -9n
 #   tests/fixtures/fisb/tg30.978                   rand-projects/fisb-decode
 #                                                  (BSD-2-Clause Plus Patent)
 #   tests/fixtures/raw/pymodes-adsb.csv            junzis/pyModeS tests/data (GPL-3.0,
@@ -67,8 +69,10 @@ builtin_pins() {
 pin pyModeS-airsquitter_2026-07-13_120s.csv.gz fa433eb8dc2ec9cf6ebd40c1bf0a095ae753960d5e8c42ae6da15cc28eb3baea https://raw.githubusercontent.com/junzis/pyModeS/487cfd6139ecea10a833afea2e58f631dc875702/scripts/data/airsquitter_2026-07-13_120s.csv.gz
 pin dump978-sample-data.txt.gz 86248797f4334a134ccf4349dabf800a7054d698828b88838dc7950a99f9ae24 https://raw.githubusercontent.com/flightaware/dump978/f40aa9a0d2d0a0067c0c628b44ba316f7049b8ce/sample-data.txt.gz
 pin stratux-cyoung-09062015-noproblem-stratux-uat.log fd4b376c7d90fe92dd1f9d5f2f8d11a19deb81ea3dc68e9b6e10f091e33d73f5 https://raw.githubusercontent.com/cyoung/stratux/1a0d1ca9e94d1c98ae1f4305e073fdd6b5a810be/test-data/cyoung-09062015-noproblem-stratux-uat.log
+pin stratux-gms5002-09072015-problem-stratux-uat.log 379280d38af927b338302b542d6e59014227d16e8f3d010dc2e5c0e740d0ee96 https://raw.githubusercontent.com/stratux/stratux/240f7825991eed62ff3dcd8bf7465e597df00442/test-data/gms5002-09072015-problem-stratux-uat.log
 pin fisb-decode-tg30.978 6df9e5671b501e4317bc7f7b661e3931bf461d47f3666e853457e7f6abd45583 https://raw.githubusercontent.com/rand-projects/fisb-decode/c3d3b0473429336b1a98672b2e8b276c24d49765/tg/tg-source/generated/tg30.978
 gzip raw/stratux-uat-2015.log.gz 53fc80938c55d777ef85929fbaef519a7ccfa41ecb37c6e23aa773daebe5d588
+gzip raw/stratux-uat-2015b.log.gz 0044d32b2989d85310076c1e53335c4ae46af04b5fa2c9eb52960c4244511980
 derived fisb/received-with-uplinks.jsonl 2ee0a8e9805bf6f0afa14121d9807f8f5ed8f69a312253c9d05e22a36a4ca346
 derived fisb/received-tg30.jsonl 95633adbe73d449c2904d41b7b65d80e1735d3f4101b4a07df3bf38fe486a399
 # pyModeS tests/data: GPL-3.0 repository, fetched at test time and never redistributed.
@@ -165,6 +169,7 @@ install_path() {
     opensky-*.tar.gz) echo "opensky/${1#opensky-}" | sed 's/\.tar\.gz$//' ;;
     zenodo-23342598-*) echo iq/porto-awec2026 ;;
     dump978-sample-data.txt.gz) echo raw/uat-sample.txt.gz ;;
+    stratux-gms5002-*) echo raw/stratux-uat-2015b.log.gz ;;
     stratux-*) echo raw/stratux-uat-2015.log.gz ;;
     fisb-decode-tg30.978) echo fisb/tg30.978 ;;
     *) die "no install path for cache file $1" ;;
@@ -285,7 +290,7 @@ PY
     echo "sha256 ok: $dest (unpacked)"
     continue
   fi
-  if [ "$rel" = raw/stratux-uat-2015.log.gz ]; then
+  if [ "$rel" = raw/stratux-uat-2015.log.gz ] || [ "$rel" = raw/stratux-uat-2015b.log.gz ]; then
     # The installed file is the upstream log, gzip -9n; its content is what is
     # pinned strictly, the compressed bytes only warn.
     if [ -f "$dest" ] && [ "$(gzip -dc "$dest" 2>/dev/null | sha256sum | cut -d' ' -f1)" = "$sha" ]; then

@@ -720,16 +720,17 @@ target_compile_definitions(test_decode_uat PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_decode_uat)
 add_test(NAME decode_uat COMMAND test_decode_uat)
 
-# The UAT frame decoders against dump978-fa on the sample's 439 downlinks, field by
-# field, from fixtures/raw/uat-sample.golden.jsonl.gz (skips when the golden is absent).
+# The UAT frame decoders against dump978-fa, field by field, on the sample's 439
+# downlinks (fixtures/raw/uat-sample.golden.jsonl.gz) and the two Stratux captures' 3760
+# and 303 (uat-stratux.golden.jsonl.gz, uat-stratux-b.golden.jsonl.gz); skips when a
+# golden is absent.
 add_executable(test_decode_uat_golden test_decode_uat_golden.cpp)
 target_link_libraries(test_decode_uat_golden PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
 target_compile_definitions(test_decode_uat_golden PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_decode_uat_golden)
 add_test(NAME decode_uat_golden COMMAND test_decode_uat_golden)
-set_tests_properties(decode_uat_golden PROPERTIES TIMEOUT 120)
+set_tests_properties(decode_uat_golden PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
-
 skycue_scale_test_timeouts()

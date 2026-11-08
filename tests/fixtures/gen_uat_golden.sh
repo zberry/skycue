@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Regenerates raw/uat-sample.golden.jsonl.gz: what dump978-fa makes of the UAT sample.
+# Regenerates raw/uat-sample.golden.jsonl.gz and raw/uat-stratux.golden.jsonl.gz: what
+# dump978-fa makes of the UAT sample and of the Stratux log, one run per file.
 #
 #   gen_uat_golden.sh DUMP978 IQGEN SAMPLE_GZ OUT_GZ
 #
@@ -20,7 +21,21 @@ fi
 dump978=$1 iqgen=$2 sample=$3 out=$4
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+# A failed run keeps the tools' logs (tails on stderr, files in the current directory).
+cleanup() {
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        for f in iqgen.log dump978.log; do
+            if [ -s "$work/$f" ]; then
+                echo "--- $f (tail) ---" >&2
+                tail -n 20 "$work/$f" >&2
+                cp "$work/$f" "./gen_uat_golden.$f" 2>/dev/null || true
+            fi
+        done
+    fi
+    rm -rf "$work"
+}
+trap cleanup EXIT
 
 gzip -dc "$sample" | grep -E '^([0-9]+,)?-' | sed -E 's/^[0-9]+,//' >"$work/downlinks.txt" || true
 if [ ! -s "$work/downlinks.txt" ]; then

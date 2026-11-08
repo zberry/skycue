@@ -255,13 +255,14 @@ std::optional<ModeStatus> decodeModeStatus(const UatFrame& f)
                 ms.callsign = cs;
         } else {
             // A squawk is four octal digits; the other four symbols are padding, which is
-            // symbol 37 in the golden (a space, 36, is accepted too).
+            // symbol 37 in the golden. A space (36) is accepted too; 38 and 39 are reserved
+            // and never seen, so a field holding them is not read as a squawk.
             std::string sq;
             for (unsigned i = 0; i < 4; ++i)
                 sq += idx[i] < 8 ? static_cast<char>('0' + idx[i]) : '?';
             bool pad = true;
             for (unsigned i = 4; i < 8; ++i)
-                pad = pad && idx[i] >= 36;
+                pad = pad && (idx[i] == 36 || idx[i] == 37);
             if (pad && sq.find('?') == std::string::npos)
                 ms.squawk = sq;
         }

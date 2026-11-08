@@ -57,6 +57,8 @@ def main(src, out):
                 objs[t] = o
             elif line.startswith("-"):
                 m = RAW.match(line)
+                if m is None:
+                    sys.exit("unparseable raw line: " + line[:80])
                 t = None
                 for kv in m.group(2).split(";"):
                     if kv.startswith("t="):

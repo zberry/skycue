@@ -47,6 +47,11 @@ stratux (https://github.com/cyoung/stratux,
 test-data/cyoung-09062015-noproblem-stratux-uat.log, gzip-compressed),
 Copyright (c) 2015 Christopher Young, under the BSD-3-Clause License.
 
+tests/fixtures/raw/stratux-uat-2015b.log.gz is a second UAT receiver log from
+stratux (https://github.com/stratux/stratux,
+test-data/gms5002-09072015-problem-stratux-uat.log, gzip-compressed), under the
+same BSD-3-Clause License and copyright.
+
 The FIS-B decoder in skycued/src/fisb/ follows the field layouts and
 product handling of fisb-decode (same copyright and licence as above). It is
 an independent C++ implementation written from docs/fisb-reference.md; no

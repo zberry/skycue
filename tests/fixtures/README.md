@@ -37,6 +37,7 @@ them are skipped (the skip message names the file).
 downloads the captures below from their upstream repositories (or, for OpenSky
 and Zenodo, their data hosts) at pinned URLs, checks their SHA-256 values and installs
 `raw/modes-120s.csv.gz`, `raw/uat-sample.txt.gz`, `raw/stratux-uat-2015.log.gz`,
+`raw/stratux-uat-2015b.log.gz`,
 `fisb/tg30.978`, `raw/pymodes-*.csv`, `raw/dump1090-modes1.bin` and `opensky/*/`
 (`iq/porto-awec2026/` only with `SKYCUE_FETCH_IQ=1`), then
 regenerates `fisb/received-with-uplinks.jsonl` and `fisb/received-tg30.jsonl`
@@ -49,6 +50,7 @@ one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
 | modes | junzis/pyModeS | `487cfd6139ecea10a833afea2e58f631dc875702` |
 | uat sample | flightaware/dump978 | `f40aa9a0d2d0a0067c0c628b44ba316f7049b8ce` |
 | stratux log | cyoung/stratux | `1a0d1ca9e94d1c98ae1f4305e073fdd6b5a810be` |
+| stratux log b | stratux/stratux | `240f7825991eed62ff3dcd8bf7465e597df00442` (the commit that added the file; it is absent at the commit above) |
 | tg30 | rand-projects/fisb-decode | `c3d3b0473429336b1a98672b2e8b276c24d49765` |
 | pyModeS tests/data | junzis/pyModeS | `487cfd6139ecea10a833afea2e58f631dc875702` |
 | modes1.bin | MalcolmRobb/dump1090 | `bff92c4ad772a0a8d433f788d39dae97e00e4dbe` |
@@ -116,6 +118,8 @@ and `nac_p` appear in the golden more often than in the decoder's output.
 - Coverage: every frame is airborne; qualifiers `adsb_icao`, `tisb_icao`,
   `tisb_trackfile`; emitter categories A0-A2; emergency always `none`.
   Surface frames come from the Stratux golden below.
+- Licence: derived from `uat-sample.txt.gz` (frames and the decoded values of them), so
+  BSD-2-Clause as for the dump978 repository's sample data.
 - Used by `tests/test_decode_uat_golden.cpp` (ctest `decode_uat_golden`).
 
 ## raw/uat-stratux.golden.jsonl.gz
@@ -131,6 +135,32 @@ and `nac_p` appear in the golden more often than in the decoder's output.
   frames.
 - Not covered: track types 2 and 3, categories above A1, emergency values other
   than `none`, frames without a position.
+- Licence: derived from `stratux-uat-2015.log.gz` (frames and the decoded values of
+  them), so BSD-3-Clause, Copyright (c) 2015 Christopher Young, as for the stratux
+  repository (the licence text is under `raw/stratux-uat-2015.log.gz` below).
+
+## raw/uat-stratux-b.golden.jsonl.gz
+
+- The same pipeline on the downlinks of `stratux-uat-2015b.log.gz`: 303 of 303
+  paired (ratio 1.00), all airborne `tisb_trackfile`, category A0, emergency
+  `none`, every frame positioned. It adds no coverage the other two goldens lack.
+- Licence: derived from `stratux-uat-2015b.log.gz`, so BSD-3-Clause, Copyright
+  (c) 2015 Christopher Young, as for the stratux repository.
+
+## raw/stratux-uat-2015b.log.gz
+
+- Origin: https://github.com/stratux/stratux, file
+  `test-data/gms5002-09072015-problem-stratux-uat.log` at commit
+  `240f7825991eed62ff3dcd8bf7465e597df00442` (renamed here, content
+  unchanged, compressed with `gzip -9n`). The `LICENSE` file is identical to the
+  one at the commit of the first log.
+- Licence: BSD-3-Clause, Copyright (c) 2015 Christopher Young (text below, under
+  `raw/stratux-uat-2015.log.gz`).
+- Content: 686 UAT messages, 303 downlink and 383 uplink; same line format as
+  the first log.
+- sha256: `0044d32b2989d85310076c1e53335c4ae46af04b5fa2c9eb52960c4244511980`
+  (the uncompressed log:
+  `379280d38af927b338302b542d6e59014227d16e8f3d010dc2e5c0e740d0ee96`)
 
 ## raw/stratux-uat-2015.log.gz
 

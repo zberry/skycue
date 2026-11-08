@@ -757,7 +757,6 @@ target_include_directories(test_ping_decode PRIVATE ${PROJECT_SOURCE_DIR}/net/te
 add_test(NAME ping_decode COMMAND test_ping_decode)
 set_tests_properties(ping_decode PROPERTIES TIMEOUT 120)
 
-# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 # UatRawInput with the 978 decoder on (TRACK_DECODER=skycued): the dump978 sample and the
 # Stratux log through a real input, the counters and the double-feed warning.
 add_executable(test_uat_raw_decode test_uat_raw_decode.cpp)
@@ -778,4 +777,5 @@ add_test(NAME decode_differential_uat
     $<TARGET_FILE:skycue-iqgen>)
 set_tests_properties(decode_differential_uat PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 
+# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

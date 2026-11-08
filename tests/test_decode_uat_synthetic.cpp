@@ -246,6 +246,8 @@ Report compare(const std::vector<Row>& rows)
             const auto h = g.getDouble(key), e = row.expect.getDouble("heading");
             if (!h || !e || std::fabs(*h - *e) > 0.6 || g.has("track") || ours.num.count("track")) fail("heading");
             else ++tl.agree;
+        } else if (g.has("mag_heading") || g.has("true_heading")) {
+            fail("heading reported on a row that is not a ground track-type 2/3 row");
         }
     }
     return r;
@@ -267,7 +269,7 @@ void print(const Report& r)
 BOOST_AUTO_TEST_CASE(synthetic_rows_all_paired)
 {
     const auto rows = loadRows();
-    BOOST_TEST(rows.size() >= 100u);
+    BOOST_TEST(rows.size() == 109u);
     std::set<std::string> hexes;
     std::string missed;
     for (const Row& r : rows) {
@@ -284,7 +286,7 @@ BOOST_AUTO_TEST_CASE(synthetic_golden_matches_builtin_values)
     const Report r = compare(rows);
     print(r);
     BOOST_TEST(r.failures == 0);
-    BOOST_TEST(r.rows >= 100);
+    BOOST_TEST(r.rows == 109);
     for (const auto& kv : r.groups) {
         BOOST_TEST_CONTEXT(kv.first) { BOOST_TEST(kv.second.agree > 0); }
     }

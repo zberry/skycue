@@ -52,11 +52,16 @@ run_case() {
   [ -e "$sample" ] && [ -e "$golden" ] || { echo "case $name: skipped, $sample or $golden is not there"; return 0; }
   mkdir -p "$d/rec"
   if [ "$ref" = median ]; then
-    read -r ref_lat ref_lon < <(python3 -I -c '
+    local med
+    med=$(python3 -I -c '
 import gzip, json, statistics, sys
 p = [json.loads(l) for l in gzip.open(sys.argv[1], "rt") if l.strip()]
 p = [(o["lat"], o["lon"]) for o in p if "lat" in o]
-print(statistics.median(a for a, _ in p), statistics.median(b for _, b in p))' "$golden")
+if not p:
+    sys.exit(3)
+print(statistics.median(a for a, _ in p), statistics.median(b for _, b in p))' "$golden") \
+      || fail "case $name: golden $golden has no positions, cannot take the median receiver"
+    read -r ref_lat ref_lon <<<"$med"
   else
     read -r ref_lat ref_lon <<<"$ref"
   fi

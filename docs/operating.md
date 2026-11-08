@@ -347,9 +347,11 @@ tests); without them the committed goldens are used.
 **What is not verified against real data.** The captures hold no
 emitter category above A1, no emergency code other than none, no air/ground
 state 3, no use of the spare bit 98, no reserved call-sign or squawk symbols
-(38, 39) and no payload type other than 0 and 1; the synthetic matrix covers
-only payload type 1, so types 2 to 10 (AUX positions, mode status without AUX,
-the length and type pairing of 4 and 7 to 10) rest on the public layout and
+(38, 39) and no payload type above 2. The real captures cover payload types 0,
+1 and 2 (type 2 frames: 78 in the FlightAware sample, 42 in the Stratux
+capture, all agreeing with dump978-fa); the synthetic matrix covers type 1;
+types 3 to 10 (mode status without AUX, the length and type pairing of 4 and
+7 to 10) are not verified against dump978-fa and rest on the public layout and
 unit tests. The categories and emergency codes rest on the public layout and
 the synthetic matrix read by dump978-fa, not on traffic. Emitter categories 32 to 39 follow
 dump978-fa alone, since the public table has no set E. Treat a track with one

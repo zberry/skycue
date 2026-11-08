@@ -21,7 +21,8 @@ fi
 dump978=$1 iqgen=$2 sample=$3 out=$4
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
-# A failed run keeps the tools' logs (tails on stderr, files in the current directory).
+# A failed run keeps the tools' logs (tails on stderr; files in the
+# current directory only with GEN_UAT_GOLDEN_KEEP_LOGS=1).
 cleanup() {
     status=$?
     if [ "$status" -ne 0 ]; then
@@ -29,7 +30,9 @@ cleanup() {
             if [ -s "$work/$f" ]; then
                 echo "--- $f (tail) ---" >&2
                 tail -n 20 "$work/$f" >&2
-                cp "$work/$f" "./gen_uat_golden.$f" 2>/dev/null || true
+                if [ "${GEN_UAT_GOLDEN_KEEP_LOGS:-}" = 1 ]; then
+                    cp "$work/$f" "./gen_uat_golden.$f" 2>/dev/null || true
+                fi
             fi
         done
     fi

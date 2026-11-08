@@ -195,8 +195,8 @@ void buildMatrix()
 std::string num(double v)
 {
     char b[48];
-    std::snprintf(b, sizeof b, "%.7g", v);
-    return b;
+    const int n = std::snprintf(b, sizeof b, "%.7g", v);
+    return n > 0 ? std::string(b) : std::string("0");
 }
 
 // The built-in values of one row, as a JSON object. Fields the row builds as not available are
@@ -209,7 +209,7 @@ std::string expectJson(const Row& r, const std::string& hex)
     auto kv = [&](const char* k, const std::string& v) { o += std::string(",\"") + k + "\":" + v; };
     auto str = [&](const std::string& v) { return "\"" + v + "\""; };
     char ab[8];
-    std::snprintf(ab, sizeof ab, "%06x", static_cast<unsigned>(s.address));
+    if (std::snprintf(ab, sizeof ab, "%06x", static_cast<unsigned>(s.address)) < 0) ab[0] = '\0';
     kv("address", str(ab));
     kv("qualifier_code", std::to_string(s.qualifier));
     kv("ag", str(s.ag == 2 ? "ground" : "airborne"));

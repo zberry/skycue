@@ -240,6 +240,8 @@ std::optional<ModeStatus> decodeModeStatus(const UatFrame& f)
     // Sets A-D, 0 = "A0" (no information, as the golden prints it and as the 1090 decoder does).
     // 32..39: dump978-fa prints E0..E7 for them (synthetic golden), so the letter E; the public
     // spec text this layout follows names no set E, so that is the tool's reading, taken as is.
+    // GDL-90 and the public numbering treat 22..39 as reserved; "E0".."E7" follows dump978-fa's
+    // convention only.
     if (cat <= 39) {
         ms.emitter_category = std::string(1, "ABCDE"[cat / 8]);
         ms.emitter_category += static_cast<char>('0' + cat % 8);

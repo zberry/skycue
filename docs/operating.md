@@ -274,8 +274,8 @@ every such input produces observations. What changes:
 - **Replay.** Play a capture to the decoder with
   `skycue-rawplay --1090-listen PORT` and point `READSB_BEAST_PORT` (or a
   `beast_raw` input) at it; for UAT, `skycue-rawplay --uat-listen PORT` and a
-  `uat_raw` input (or `DUMP978_HOST` and the dump978 port) pointed at that
-  port. See [Raw capture and replay](#raw-capture-and-replay).
+  `uat_raw` input pointed at that port; the simpler route is to set
+  `DUMP978_RAW_PORT` to it, so the built-in `dump978` input reads the replay. See [Raw capture and replay](#raw-capture-and-replay).
 
 The default keeps readsb's own decoding and its JSON. The decoder follows the
 public Mode S layouts and was compared with readsb on the same capture;
@@ -287,7 +287,7 @@ about 97 % on the 120 s capture).
 ### UAT (978 MHz) in skycued
 
 Under `TRACK_DECODER=skycued` the built-in `dump978` input (dump978-fa's raw
-port, `DUMP978_HOST`) and every `uat_raw` input decode the downlink lines
+port, `DUMP978_HOST` and `DUMP978_RAW_PORT`) and every `uat_raw` input decode the downlink lines
 (`-HEX;...`) themselves; no setting beyond `TRACK_DECODER` is needed.
 Uplink lines (`+HEX;...`) go to the FIS-B decoder as before. A downlink of
 18 bytes (payload type 0) or 34 bytes (types 1 to 10) is decoded; anything
@@ -328,23 +328,30 @@ else that is hex counts in `rejected`. What you get:
 **How it was validated.** The decoder was compared field by field with a
 dump978-fa build on three public captures (the dump978 sample data and two
 Stratux logs, 439, 3,760 and 303 downlinks) and on a synthetic matrix of 109
-frames built to carry every value of the fields (categories, emergency codes,
-qualifiers, NIC, NACp, ground track types, velocity and altitude limits). The
+frames built to carry all 40 emitter categories, all 8 emergency codes, the
+four ground track types, all NIC and NACp values and representative rows for
+the rest (qualifiers, velocity, vertical rate, altitude and position limits,
+squawk and call sign, AUX). All are payload type 1 long frames. The
 golden files are in `tests/fixtures/raw/` and the tests run without any
 other decoder installed. A live differential plays the captures into skycued
 as a `uat_raw` input and compares the tracks it builds with dump978-fa's
-output per aircraft: every compared field agrees on all 22, 43 and 7
-aircraft of the three captures (positions, altitudes, speed, track, vertical
-rate, identity, NACp, category). To regenerate the goldens or run the
+output per aircraft: every compared field agreed on the 22, 43 and 7
+aircraft compared (positions, altitudes, speed, track, vertical rate,
+identity, NACp, category). Identity and geometric altitude are compared only
+where both sides report them, and one aircraft in the FlightAware sample lies
+outside the 300 NM limit and is excluded. To regenerate the goldens or run the
 differential against your own build, set `SKYCUE_DUMP978` to a dump978-fa
 executable (`SKYCUE_READSB` does the same for a readsb in the 1090
 tests); without them the committed goldens are used.
 
 **What is not verified against real data.** The captures hold no
 emitter category above A1, no emergency code other than none, no air/ground
-state 3 and no payload type other than 0 and 1, so those rest on the public
-layout and, for the categories and emergency codes, on the synthetic matrix
-read by dump978-fa, not on traffic. Emitter categories 32 to 39 follow
+state 3, no use of the spare bit 98, no reserved call-sign or squawk symbols
+(38, 39) and no payload type other than 0 and 1; the synthetic matrix covers
+only payload type 1, so types 2 to 10 (AUX positions, mode status without AUX,
+the length and type pairing of 4 and 7 to 10) rest on the public layout and
+unit tests. The categories and emergency codes rest on the public layout and
+the synthetic matrix read by dump978-fa, not on traffic. Emitter categories 32 to 39 follow
 dump978-fa alone, since the public table has no set E. Treat a track with one
 of these values as unconfirmed, and report a frame that disagrees with
 dump978-fa.

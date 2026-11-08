@@ -727,10 +727,12 @@ way `soak.sh` samples an instance. The source is the 120 s capture from
 
 1. `skycue-rawplay --1090-listen PORT --loop --speed 5` on the capture, and
    a second one with `--uat-listen UATPORT --loop --speed 5` on
-   `uat-sample.txt.gz`, so one instance decodes both bands.
+   `tests/fixtures/raw/uat-sample.txt.gz`, so one instance decodes both bands.
 2. A skycued with `TRACK_DECODER=skycued`, `READSB_BEAST_PORT=PORT`, a
    `uat_raw` input on `UATPORT` (the built-in `dump978` input would do
-   as well, with the dump978 port at `UATPORT`), a web port and the test
+   as well, with `DUMP978_RAW_PORT=UATPORT`), `--no-uat` (it only stops the
+   built-in dump978 connection to the default port; the `uat_raw` input is
+   unaffected), a web port and the test
    receiver position (not the capture's region; give each input the
    `ref_lat` and `ref_lon` of its capture, see
    [operating.md](operating.md#raw-capture-and-replay)), with the same WebSocket and cue clients

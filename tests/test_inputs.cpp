@@ -1672,3 +1672,41 @@ BOOST_AUTO_TEST_CASE(builtin_cue_outputs_only_enable_and_disable)
     BOOST_REQUIRE(eventuallyWithin(3s, [&] { return w.callbacks.load() == 2; }));
     BOOST_TEST(m.on([](InputManager& im) { return im.outputBuiltinStates(); }).at("cue-tcp") == true);
 }
+
+// The file's "builtin" object names the cue outputs too; it must not touch
+// the built-in inputs it does not mention, with or without outputs, and a
+// replay reads no file at all.
+BOOST_AUTO_TEST_CASE(builtin_dump978_stays_enabled_when_the_file_does_not_disable_it)
+{
+    for (const bool replaying : {false, true}) {
+        IoThread t;
+        TempDir tmp;
+        auto cfg = fileConfig(tmp);
+        cfg.replaying = replaying;
+        const uint16_t port = freeTcpPort();
+        handWrite(cfg.inputs_file, fileWith({}, {beastOut("bo", port)}, {{"cue-tcp", false}, {"cue-udp-1", false}}));
+        InputDef uat;
+        uat.id = "dump978";
+        uat.type = InputType::dump978;
+        uat.host = "127.0.0.1";
+        uat.port = 1;
+        uat.builtin = true;
+        FakeHub hub;
+        Mgr m(t, cfg, [&](InputManager& im) {
+            im.addBuiltin(fakeReadsb(hub));
+            im.addBuiltin(std::make_unique<UatRawInput>(t.io, uat));
+        });
+        BOOST_TEST_CONTEXT("replaying=" << replaying)
+        {
+            BOOST_TEST(m.find("dump978")->def.enabled);
+            BOOST_TEST(m.find("readsb")->def.enabled);
+            BOOST_TEST(m.on([](InputManager& im) { return im.enabledCount(); }) == 2u);
+            if (!replaying) {
+                // The cue states are the outputs' business only.
+                const auto states = m.on([](InputManager& im) { return im.outputBuiltinStates(); });
+                BOOST_TEST(states.size() == 2u);
+                BOOST_TEST(!states.at("cue-tcp"));
+            }
+        }
+    }
+}

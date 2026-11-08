@@ -3,6 +3,9 @@
 #
 #   gen_uat_golden.sh DUMP978 IQGEN SAMPLE_GZ OUT_GZ
 #
+# SAMPLE_GZ lines are "-HEX;..." or "TIMESTAMP,-HEX;..." (the Stratux log); uplinks and
+# other lines are skipped.
+#
 # DUMP978 is the dump978-fa binary, IQGEN the built skycue-iqgen; both are
 # passed in, nothing here knows where they live. The downlink lines of the
 # sample are modulated to a temporary CU8 file (about 80 KB per frame, deleted
@@ -19,7 +22,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-gzip -dc "$sample" | grep '^-' >"$work/downlinks.txt" || true
+gzip -dc "$sample" | grep -E '^([0-9]+,)?-' | sed -E 's/^[0-9]+,//' >"$work/downlinks.txt" || true
 if [ ! -s "$work/downlinks.txt" ]; then
     echo "no downlink lines in $sample" >&2
     exit 1

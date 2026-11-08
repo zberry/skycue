@@ -18,8 +18,8 @@
 //       (9 bits); bit 98 unused (confirmed against the dump978-fa golden)
 //     ground:   99-109 speed (11 bits), 110-111 track type (1 = true track; 0 n/a,
 //       2 magnetic heading, 3 true heading give no track), 112-120 track/heading
-//       (9 bits, x 360/512); placed by analogy with the airborne block, the golden
-//       has no ground frame, so these are not confirmed
+//       (9 bits, x 360/512); confirmed by the Stratux golden for types 0 and 1,
+//       types 2 and 3 do not occur in it
 //   mode status   bytes 17-28 (types 1 and 3): emitter category + eight base-40
 //     characters in three 16-bit groups (bits 136-183), emergency (3 bits at
 //     184), NACp (4 bits at 200), CSID (bit 214: 1 = call sign, 0 = squawk)

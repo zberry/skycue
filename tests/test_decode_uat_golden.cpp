@@ -24,7 +24,9 @@ using namespace skycued::decode::uat;
 
 namespace {
 
+// dump978's own sample (all airborne) and the 2015 Stratux capture (551 surface frames, TIS-B).
 const std::string kGolden = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-sample.golden.jsonl.gz";
+const std::string kStratux = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux.golden.jsonl.gz";
 
 bool exists(const std::string& p) { return std::ifstream(p).good(); }
 
@@ -86,10 +88,10 @@ std::optional<std::string> optStr(const JsonObject& o, const char* k) { return o
 std::optional<double> optNum(const JsonObject& o, const char* k) { return o.getDouble(k); }
 
 // Decodes every golden entry and compares. A wrong variant is expected to accumulate failures.
-Report compare(const Variant& v)
+Report compare(const std::string& golden, const Variant& v)
 {
     Report r;
-    skycued::GzLineReader in(kGolden);
+    skycued::GzLineReader in(golden);
     std::string line;
     while (in.getline(line)) {
         const auto g = JsonObject::parse(line);
@@ -133,13 +135,14 @@ Report compare(const Variant& v)
         if (sv.gs_kt) gs = *sv.gs_kt;
         if (sv.track_deg) trk = *sv.track_deg;
         if (sv.vrate_fpm) vr = *sv.vrate_fpm;
-        cmp(r, hex, "gs", gs, optNum(*g, "gs"), 1.0);
+        const bool ground = agName == "ground";
+        cmp(r, hex, ground ? "gs_ground" : "gs", gs, optNum(*g, "gs"), 1.0);
         if (trk && g->getDouble("track")) {  // wraparound: 359.95 and 0.0
             double d = std::fabs(*trk - *g->getDouble("track"));
             d = std::min(d, 360.0 - d);
-            cmp<double>(r, hex, "track", d, 0.0, 0.5);
+            cmp<double>(r, hex, ground ? "track_ground" : "track", d, 0.0, 0.5);
         } else {
-            cmp(r, hex, "track", trk, optNum(*g, "track"), 0.5);
+            cmp(r, hex, ground ? "track_ground" : "track", trk, optNum(*g, "track"), 0.5);
         }
         cmp(r, hex, "vrate", vr, optNum(*g, "vrate"));
         cmp<double>(r, hex, "nic", static_cast<double>(sv.nic), optNum(*g, "nic"));
@@ -162,9 +165,9 @@ Report compare(const Variant& v)
     return r;
 }
 
-void print(const Report& r)
+void print(const std::string& label, const Report& r)
 {
-    std::cout << "uat golden: " << r.entries << " downlinks, " << r.failures << " field disagreements\n";
+    std::cout << "uat golden " << label << ": " << r.entries << " downlinks, " << r.failures << " field disagreements\n";
     for (const auto& [name, t] : r.fields)
         std::cout << "uat golden field " << name << ": both " << t.both << ", agree " << t.agree << ", only dump978-fa "
                   << t.only_theirs << ", only ours " << t.only_ours << "\n";
@@ -181,8 +184,8 @@ BOOST_AUTO_TEST_CASE(golden_matches_dump978)
         std::cout << "SKIP: raw/uat-sample.golden.jsonl.gz is missing (gen_uat_golden.sh makes it)\n";
         return;
     }
-    const Report r = compare(Variant{});
-    print(r);
+    const Report r = compare(kGolden, Variant{});
+    print("sample", r);
     BOOST_TEST(r.entries >= 400);
     BOOST_TEST(r.failures == 0);
     for (const char* name : {"lat", "lon", "alt_baro", "alt_geom", "gs", "track", "vrate", "nic", "callsign", "squawk",
@@ -193,12 +196,33 @@ BOOST_AUTO_TEST_CASE(golden_matches_dump978)
     }
 }
 
-BOOST_AUTO_TEST_CASE(golden_catches_wrong_decoder)
+// Stratux 2015: surface state vectors (speed, track type 0/1, track), TIS-B track files.
+BOOST_AUTO_TEST_CASE(golden_matches_dump978_stratux)
 {
-    if (!exists(kGolden)) {
-        std::cout << "SKIP: raw/uat-sample.golden.jsonl.gz is missing\n";
+    if (!exists(kStratux)) {
+        std::cout << "SKIP: raw/uat-stratux.golden.jsonl.gz is missing (gen_uat_golden.sh makes it)\n";
         return;
     }
-    BOOST_TEST(compare(Variant{25, 1.0}).failures > 0);   // altitude formula off by 25 ft
-    BOOST_TEST(compare(Variant{0, 1.001}).failures > 0);  // latitude scaling off
+    const Report r = compare(kStratux, Variant{});
+    print("stratux", r);
+    BOOST_TEST(r.entries >= 3000);
+    BOOST_TEST(r.failures == 0);
+    for (const char* name : {"lat", "lon", "alt_baro", "gs", "gs_ground", "track", "track_ground", "vrate", "nic", "callsign",
+                             "category", "emergency", "nac_p", "ground"}) {
+        BOOST_TEST_CONTEXT(name) {
+            BOOST_TEST(r.fields.at(name).both > 0, "no entry with a value from both sides: the comparison is vacuous");
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(golden_catches_wrong_decoder)
+{
+    if (!exists(kGolden) || !exists(kStratux)) {
+        std::cout << "SKIP: a UAT golden is missing\n";
+        return;
+    }
+    for (const std::string& g : {kGolden, kStratux}) {
+        BOOST_TEST(compare(g, Variant{25, 1.0}).failures > 0);   // altitude formula off by 25 ft
+        BOOST_TEST(compare(g, Variant{0, 1.001}).failures > 0);  // latitude scaling off
+    }
 }

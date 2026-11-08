@@ -38,7 +38,7 @@ IGNORED = {
     "north_velocity", "east_velocity", "metadata", "uplink_feedback", "utc_coupled",
     "capability_codes", "operational_modes", "mops_version", "nac_v", "nic_baro",
     "nic_supplement", "sil", "sil_supplement", "sda", "gva", "single_antenna",
-    "transmit_mso", "tisb_site_id", "position", "address",
+    "transmit_mso", "tisb_site_id", "position", "address", "aircraft_size",
     "vertical_velocity_barometric", "vertical_velocity_geometric",
 }
 RAW = re.compile(r"^-([0-9a-fA-F]+);(.*)$")

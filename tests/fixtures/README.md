@@ -114,9 +114,23 @@ and `nac_p` appear in the golden more often than in the decoder's output.
   `vrate`, `vrate_src`, `callsign`, `squawk` (dump978-fa's `flightplan_id`),
   `category`, `emergency`, `nic`, `nac_p`; keys the tool did not print are absent.
 - Coverage: every frame is airborne; qualifiers `adsb_icao`, `tisb_icao`,
-  `tisb_trackfile`; emitter categories A0-A2; emergency always `none`. Ground
-  frames, headings and categories above A2 are therefore not covered.
+  `tisb_trackfile`; emitter categories A0-A2; emergency always `none`.
+  Surface frames come from the Stratux golden below.
 - Used by `tests/test_decode_uat_golden.cpp` (ctest `decode_uat_golden`).
+
+## raw/uat-stratux.golden.jsonl.gz
+
+- The same pipeline on the downlinks of `stratux-uat-2015.log.gz`: the generator
+  strips the leading `TIMESTAMP,` of each `TIMESTAMP,-HEX;rs=N;` line and skips
+  uplinks and `START,` lines. One CU8 file for all 3,760 frames (about 310 MB,
+  deleted on exit); the run takes about 15 s.
+- Content: 3,760 of 3,760 downlinks paired. 3,209 airborne, 551 surface (426 with
+  track type 1 and a track, 125 with type 0 and none); 3,576 `tisb_trackfile`
+  and 184 `adsb_icao`; categories A0 and A1 only; emergency always `none`;
+  every frame has a position; adds `aircraft_size` (read, not kept) on surface
+  frames.
+- Not covered: track types 2 and 3, categories above A1, emergency values other
+  than `none`, frames without a position.
 
 ## raw/stratux-uat-2015.log.gz
 

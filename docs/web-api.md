@@ -348,10 +348,10 @@ A track object:
 | `source` | `adsb_1090`, `uat_978`, `tisb`, `adsr`, `mlat`, `other` |
 | `lat`, `lon`, `position_time` | only when the track has a position |
 | `alt_baro_ft`, `alt_geom_ft`, `gs_kt`, `track_deg`, `vr_fpm` | when known; `alt_geom_ft` may be an estimate (next four rows) |
-| `alt_geom_source` | `reported` or `estimated`; present only when the track has a geometric altitude (a track without one has none of these four keys) (see [Geometric altitude](operating.md#geometric-altitude)) |
-| `alt_geom_uncertainty_ft` | only when `alt_geom_source` is `estimated`: the stated error, feet (75 for an own difference under 60 s old, 125 to 325 for an older one, the fit's 90th percentile in steps of 25 and at least 100 for a fit) |
+| `alt_geom_source` | `reported` or `estimated`; present only when the track has a geometric altitude (a track without one has none of these four keys, including `geom_minus_baro_ft` below) (see [Geometric altitude](operating.md#geometric-altitude)) |
+| `alt_geom_uncertainty_ft` | only when `alt_geom_source` is `estimated`: the stated error, feet (75 for an own difference under 60 s old, 125 to 325 for an older one, the fit's 90th percentile in steps of 25 and at least 100 for a line, at least 600 for the median fallback) |
 | `alt_geom_age_s` | age of the data the geometric altitude rests on, seconds, one decimal, never negative |
-| `geom_minus_baro_ft` | geometric minus barometric altitude, feet, signed; also present on a reported track when the difference is known |
+| `geom_minus_baro_ft` | geometric minus barometric altitude, feet, signed; present with `alt_geom_source`, also on a reported track, when the difference is known |
 | `callsign`, `squawk`, `registration`, `nic`, `nac_p` | when known |
 | `on_ground`, `alt_is_geom` | booleans |
 | `range_nm`, `elevation_deg` | from the receiver; left out when they cannot be computed |

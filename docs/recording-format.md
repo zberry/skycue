@@ -191,7 +191,10 @@ lines above).
 | `nic` | integer | navigation integrity category, 0-255 |
 | `nac_p` | integer | navigation accuracy (position), 0-255 |
 | `rssi` | number | signal level, dBFS |
-| `geom_minus_baro_ft` | integer | signed difference geometric minus barometric altitude, feet, when the input reported both within 2 s (JSONL only; absent when unknown; replays as recorded) |
+| `geom_minus_baro_ft` | integer | signed difference geometric minus barometric altitude, feet, when the input reported both in one message or record, or a 1090 TC 19 velocity message gave it; the difference carries its own time (`geom_minus_baro_age_s`) (JSONL only; absent when unknown; replays as recorded) |
+| `alt_baro_age_s` | number | seconds from the barometric altitude's measurement to `time`, one decimal (JSONL only; omitted when absent or 0: measured on arrival). A carried 1090 value is older than the frame that carries it |
+| `alt_geom_age_s` | number | the same for `alt_geom_ft` (JSONL only; omitted when absent or 0) |
+| `geom_minus_baro_age_s` | number | the same for `geom_minus_baro_ft` (JSONL only; omitted when absent or 0). A replay restores the three times from these ages, so the altitude estimates come out as they did live |
 | `raw` | string | the original input line (JSONL only): the readsb JSON line; for a pingStation JSON input the datagram text, on the first observation of a datagram only (a `{"aircraft":[...]}` datagram with several aircraft is recorded once, the other observations have no `raw`); for a CAT021 input `cat021:` and the record's bytes as hex |
 | `rebroadcast` | boolean | a rebroadcast copy (TIS-B, ADS-R); present only when true (JSONL only) |
 | `input` | string | id of the input that produced the observation; absent when not known |
@@ -272,7 +275,7 @@ from the block's NW corner), so a 1000-block CONUS mosaic is typically a few ten
 RFC 4180: comma-separated, one header line, a field containing `,`, `"` or a line break
 is quoted with `"` and its `"` doubled. Absent values are empty; booleans are `0`/`1`;
 other values are written as in JSONL. The columns are the JSONL keys, minus the
-JSONL-only ones (`emergency`, `category`, `raw`, `geom_minus_baro_ft`, `alt_geom_source`,
+JSONL-only ones (`emergency`, `category`, `raw`, `geom_minus_baro_ft`, the three `*_age_s` keys, `alt_geom_source`,
 `alt_geom_uncertainty_ft`); the CSV headers are unchanged. The received stream keeps what
 the input said; an estimated altitude appears only in the sent stream, where `alt_geom_source`
 says so. Older files without the new keys replay as before.

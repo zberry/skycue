@@ -292,21 +292,25 @@ estimate, under every `TRACK_DECODER`.
 - **Estimated.** Otherwise, with a barometric altitude under 10 s old and the
   aircraft not on the ground:
   1. if the aircraft's own difference between geometric and barometric
-     altitude (from TC 9-18 and 20-22 messages, or a reported
-     `alt_geom`) is at most 300 s old, estimate the barometric altitude plus
-     that difference, corrected by a slope for the altitude change since;
+     altitude (from a TC 19 velocity message, from a TC 20-22 height paired
+     with a barometric altitude, or from a reported `alt_geom`) is at most
+     300 s old, estimate the barometric altitude plus that difference,
+     corrected by a slope for the altitude change since;
   2. else, with a fit over other aircraft (below), the barometric altitude
      plus the fit's difference at that altitude;
-  3. else no estimate: the track simply has no geometric altitude.
+  3. else a reported geometric altitude up to 60 s old stays as reported;
+  4. else no estimate: the track simply has no geometric altitude.
   The fit is made of the differences aircraft reported in the last 120 s: a
   straight line in barometric altitude when at least 5 distinct aircraft and
-  20 samples are in the window, else their median. It is visible as
+  20 samples are in the window, else, with at least 3 aircraft, their median
+  (with fewer than 3 there is no fit). It is visible as
   `altitude_fit` in `GET /api/stats`.
 - **No made-up numbers.** There is no estimate without a barometric altitude
   under 10 s old, none on the ground, and none when there is neither an own
   difference nor any other aircraft's difference in the window. With fewer than
   5 aircraft or 20 samples in the window the fit is the median of the
-  differences, not a line, and its stated uncertainty is large; read
+  differences (needs 3 aircraft), not a line, and its stated uncertainty is
+  large (at least 600 ft); read
   `altitude_fit.aircraft` in `GET /api/stats` for how many it rests on.
 - **Where it shows.** Tracks carry `alt_geom_source`, `alt_geom_uncertainty_ft`
   (estimates only), `alt_geom_age_s` and `geom_minus_baro_ft`
@@ -317,16 +321,16 @@ estimate, under every `TRACK_DECODER`.
   Recordings keep what the input said: the received stream never holds an
   estimate.
 - **How good it is** (the `geom_eval` test, which prints these numbers).
-  Against other aircraft on the 120 s capture (241 aircraft, 5,219
-  samples), the error of a 60 s or 120 s fit is about 165 ft at the 90th
-  percentile (about 75 ft median, at most about 310 ft); a plain median of
+  Against other aircraft on the 120 s capture (244 aircraft, 5,239
+  samples), the error of a 60 s or 120 s fit is about 165 to 175 ft at the 90th
+  percentile (about 75 ft median, at most about 700 ft); a plain median of
   the others is about 550 to 575 ft. Held from the aircraft's own difference
   (five recorded flights, about 35,000 samples), the 90th percentile is about
   52 ft after 60 s and about 185 ft after 300 s; rare maxima reach about
   2,000 ft in a climb or descent. The uncertainty on the wire is stated
   conservatively: 75 ft for an own difference under 60 s old, growing from
   125 ft at 60 s to 325 ft at 300 s, and for a fit its 90th percentile rounded
-  up to 25 ft (at least 100 ft). Treat an estimate as good to a few hundred
+  up to 25 ft (at least 100 ft for a line, at least 600 ft for the median). Treat an estimate as good to a few hundred
   feet, not a measurement.
 
 ## Replaying a JSONL recording

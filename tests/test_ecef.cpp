@@ -3,6 +3,7 @@
 
 #include <skycue/ecef.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <thread>
@@ -215,7 +216,7 @@ BOOST_AUTO_TEST_CASE(velocity_reported_from_gs_track)
     BOOST_REQUIRE(s && s->velocity);
     BOOST_CHECK(s->velocity_source == VelocitySource::reported);
     BOOST_CHECK_SMALL(s->velocity->x, 1e-6);
-    BOOST_CHECK_CLOSE(s->velocity->y, 51.4444, 1e-6);
+    BOOST_CHECK_CLOSE(s->velocity->y, 100.0 * 1852.0 / 3600.0, 1e-9);
     BOOST_CHECK_SMALL(s->velocity->z, 1e-6);
     BOOST_CHECK(s->vertical_source == VerticalSource::assumed_zero);
 }
@@ -295,7 +296,7 @@ BOOST_AUTO_TEST_CASE(vertical_reported_fpm)
     BOOST_REQUIRE(s && s->velocity);
     BOOST_CHECK(s->vertical_source == VerticalSource::reported);
     // At (0,0) up is +x.
-    BOOST_CHECK_CLOSE(s->velocity->x, 5.08, 1e-6);
+    BOOST_CHECK_CLOSE(s->velocity->x, 1000.0 * 0.3048 / 60.0, 1e-9);
 }
 
 BOOST_AUTO_TEST_CASE(vertical_derived_same_rung_only)
@@ -308,8 +309,10 @@ BOOST_AUTO_TEST_CASE(vertical_derived_same_rung_only)
     Track b = mk(1, 1000, kM100North, 0);
     b.alt_geom_ft = 10000 + 328; // ~ +100 m... 328 ft = 99.97 m
     auto s = tr.update(b);
-    BOOST_REQUIRE(s);
+    BOOST_REQUIRE(s && s->velocity);
     BOOST_CHECK(s->vertical_source == VerticalSource::derived);
+    // Climbing ~99.97 m in 1 s: up is +x at (0,0).
+    BOOST_CHECK_CLOSE(s->velocity->x, 328 * 0.3048, 1e-2);
     // Different rung (baro after geom): not derived.
     Track c = mk(1, 2000, 2 * kM100North, 0);
     c.alt_geom_ft.reset();
@@ -690,4 +693,93 @@ BOOST_AUTO_TEST_CASE(older_update_does_not_overwrite)
     BOOST_REQUIRE(s && s->velocity);
     BOOST_CHECK(s->velocity_source == VelocitySource::derived);
     BOOST_CHECK_CLOSE(s->velocity->z, 100.0, 0.5);
+}
+
+BOOST_AUTO_TEST_CASE(take_drop_then_recreate_applies_in_order)
+{
+    EcefTracker tr(pull());
+    tr.update(mk(1, 0));
+    tr.takeChanges();
+    tr.drop(idOf(1));
+    tr.update(mk(1, 1000));
+    const auto c = tr.takeChanges();
+    BOOST_REQUIRE_EQUAL(c.dropped.size(), 1u);
+    BOOST_REQUIRE_EQUAL(c.updated.size(), 1u);
+    BOOST_CHECK(c.updated[0].is_new);
+    // A consumer mirroring the tracker applies dropped first, then updated.
+    std::vector<TrackId> live{idOf(1)};
+    for (const auto& d : c.dropped)
+        live.erase(std::remove(live.begin(), live.end(), d.first), live.end());
+    for (const auto& u : c.updated)
+        live.push_back(u.state.id);
+    BOOST_CHECK_EQUAL(live.size(), 1u);
+    BOOST_CHECK(tr.get(idOf(1)));
+}
+
+BOOST_AUTO_TEST_CASE(keyframe_keeps_derived_velocity)
+{
+    Options o;
+    o.derive_velocity = true;
+    EcefTracker tr(o);
+    tr.update(mk(1, 0, 0, 0));
+    Track b = mk(1, 1000, kM100North, 0);
+    b.alt_geom_ft = 10000 + 328;
+    const auto first = tr.update(b);
+    BOOST_REQUIRE(first && first->velocity);
+    BOOST_REQUIRE(first->velocity_source == VelocitySource::derived);
+    Track k = b;
+    k.keyframe = true;
+    const auto s = tr.update(k);
+    BOOST_REQUIRE(s && s->velocity);
+    BOOST_CHECK(s->velocity_source == VelocitySource::derived);
+    BOOST_CHECK(s->vertical_source == VerticalSource::derived);
+    BOOST_CHECK_EQUAL(s->velocity->z, first->velocity->z);
+    BOOST_CHECK(tr.get(idOf(1))->velocity_source == VelocitySource::derived);
+}
+
+BOOST_AUTO_TEST_CASE(slow_target_derives_after_several_fixes)
+{
+    Options o;
+    o.derive_velocity = true; // 50 m separation, ~10 m/s, 1 s cues
+    EcefTracker tr(o);
+    int firstDerived = 0;
+    for (int i = 0; i < 10 && !firstDerived; ++i) {
+        const auto s = tr.update(mk(1, i * 1000, i * kM100North * 0.101, 0)); // 10.1 m/s
+        BOOST_REQUIRE(s);
+        if (s->velocity_source == VelocitySource::derived) {
+            firstDerived = i + 1;
+            BOOST_CHECK_CLOSE(s->velocity->z, 10.1, 1.0);
+        }
+    }
+    BOOST_CHECK_GT(firstDerived, 1);
+    BOOST_CHECK_LE(firstDerived, 6);
+}
+
+BOOST_AUTO_TEST_CASE(anchor_resets_after_max_fix_age)
+{
+    Options o;
+    o.derive_velocity = true;
+    EcefTracker tr(o);
+    tr.update(mk(1, 0, 0, 0));
+    // 100 m away but 11 s later: too old, no derivation; the anchor becomes this fix.
+    BOOST_CHECK(tr.update(mk(1, 11000, kM100North, 0))->velocity_source == VelocitySource::none);
+    // 100 m further 1 s later derives from the new anchor, not the first fix.
+    const auto s = tr.update(mk(1, 12000, 2 * kM100North, 0));
+    BOOST_REQUIRE(s && s->velocity);
+    BOOST_CHECK(s->velocity_source == VelocitySource::derived);
+    BOOST_CHECK_CLOSE(s->velocity->z, 100.0, 0.5);
+}
+
+BOOST_AUTO_TEST_CASE(derived_velocity_across_dateline)
+{
+    Options o;
+    o.derive_velocity = true;
+    EcefTracker tr(o);
+    tr.update(mk(1, 0, 0, 179.9995));
+    const auto s = tr.update(mk(1, 1000, 0, -179.9995)); // ~111 m eastbound across the line
+    BOOST_REQUIRE(s && s->velocity);
+    BOOST_CHECK(s->velocity_source == VelocitySource::derived);
+    // At lon 180 east is -y.
+    BOOST_CHECK_CLOSE(-s->velocity->y, 111.3, 1.0);
+    BOOST_CHECK_SMALL(s->velocity->x, 0.5);
 }

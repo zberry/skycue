@@ -815,7 +815,6 @@ add_test(NAME config_cli
     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skycue_example_old.conf ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(config_cli PROPERTIES TIMEOUT 60)
 
-# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 add_executable(test_ecef test_ecef.cpp)
 target_link_libraries(test_ecef PRIVATE skycue::skycue Boost::unit_test_framework)
 target_compile_definitions(test_ecef PRIVATE BOOST_TEST_DYN_LINK)
@@ -823,4 +822,5 @@ skycue_set_warnings(test_ecef)
 add_test(NAME ecef COMMAND test_ecef)
 set_tests_properties(ecef PROPERTIES TIMEOUT 60)
 
+# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

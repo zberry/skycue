@@ -118,22 +118,17 @@ coverage, range, signal and rates over time
 
 ## How it fits beside your receiver
 
-```
-RTL-SDR 978 MHz -> dump978-fa --raw--> readsb <- RTL-SDR 1090 MHz
-                       |                 |
-                       | raw UAT         | JSON
-                       v                 v
-                       +---------> skycued ---> cue clients (TCP / UDP)
-                                         \---> recordings
-```
+![Data flow: source programs feed seven input kinds; the hub copies raw bytes to raw outputs and hands frames to the decoders; one engine filters and paces tracks to the cue stream, the web page, the recorder and statistics](docs/images/data-flow.svg)
 
-skycue is a client of readsb (also inside ultrafeeder, or behind PiAware's
-dump1090-fa through a second, network-only readsb) and of dump978-fa. It
-connects to the JSON port and the raw UAT port they can serve, and never
-feeds a network, restarts or reconfigures them. The one option you turn on
-per setup is in [docs/installing.md](docs/installing.md#3-turn-on-the-decoder-output-skycue-reads),
+skycue is a client of the decoders you already run and never feeds a
+network, restarts or reconfigures them. readsb (also inside ultrafeeder)
+serves it JSON or Beast frames; dump1090-fa under PiAware, dump1090-mutability
+and Beast hardware serve Beast frames; dump978-fa serves raw UAT lines; a
+pingStation 3 serves JSON or ASTERIX. Every input can be a TCP client, a TCP
+server or a UDP receiver, and skycued can serve any input's bytes on again
+as a hub. The one option you turn on per setup is in
+[docs/installing.md](docs/installing.md#3-turn-on-the-decoder-output-skycue-reads),
 and `skycued --check-inputs` tells you whether skycue can reach the decoders.
-A pingStation 3 is another input, added in the web page or the inputs file.
 
 ## Requirements
 

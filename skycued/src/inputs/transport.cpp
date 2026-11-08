@@ -66,7 +66,7 @@ std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer)
 
 void installNetLogSink()
 {
-    net::setLogSink([](net::LogLevel level, const std::string& msg) {
+    net::setLogSink([](net::LogLevel level, const std::string& name, const std::string& msg) {
         LogLevel l = LogLevel::debug;
         switch (level) {
         case net::LogLevel::debug: l = LogLevel::debug; break;
@@ -75,7 +75,7 @@ void installNetLogSink()
         case net::LogLevel::error: l = LogLevel::error; break;
         }
         if (logEnabled(l))
-            logWrite(l, "net: " + msg);
+            logWrite(l, name.empty() ? msg : name + ": " + msg);
     });
 }
 

@@ -16,7 +16,7 @@ namespace net = skycue::net;
 struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
     Impl(asio::io_context& io_, std::string bind, uint16_t port, const std::string& peer,
          std::chrono::milliseconds rebind_delay)
-        : io(io_), filtered(!peer.empty())
+        : io(io_)
     {
         parsePeerFilter(peer);  // the same error text as the other transports
         net::ListenOptions o;
@@ -31,10 +31,8 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
 
     asio::io_context& io;
     std::shared_ptr<net::Listener> listener;
-    const bool filtered;
     std::map<uint64_t, asio::ip::address> remotes;  // stream -> source address
     std::size_t live = 0;                          // open peers
-    uint64_t rejected_seen = 0;
     std::string lib_error_seen;
 
     void wire()
@@ -45,7 +43,10 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
             if (!self || self->stopping)
                 return;
             if (self->on_data)
-                self->on_data(TransportData{data, n, stream, self->remotes[stream]});
+                {
+                const auto it = self->remotes.find(stream);
+                self->on_data(TransportData{data, n, stream, it == self->remotes.end() ? asio::ip::address() : it->second});
+            }
         });
         listener->onPeer([weak](uint64_t stream, bool up, const asio::ip::tcp::endpoint& who) {
             auto self = weak.lock();
@@ -91,14 +92,6 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
             last_error = c.last_error.compare(0, listen_on.size(), listen_on) == 0
                              ? "bind " + c.last_error.substr(listen_on.size())
                              : c.last_error;
-        }
-        if (c.rejected_peer > rejected_seen) {
-            rejected_seen = c.rejected_peer;
-            // The library counts both causes in one counter; the cap is the
-            // cause when it is full, the peer filter otherwise.
-            last_error = filtered && c.peers < kMaxPeers
-                             ? "refused a connection (not the configured peer)"
-                             : "refused a connection: already " + std::to_string(kMaxPeers) + " peers";
         }
     }
 

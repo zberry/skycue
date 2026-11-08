@@ -21,6 +21,7 @@ struct LineClient::Impl {
         net::TcpOptions opts;
         opts.keepalive = false;
         opts.nodelay = false;
+        opts.name = name;
         dialer = net::Dialer::create(io, host, port, opts);
     }
 
@@ -51,7 +52,11 @@ struct LineClient::Impl {
             if (up) {
                 LOG_INFO(me->name << ": connected to " << me->host << ":" << me->port);
             } else {
-                LOG_INFO(me->name << ": connection closed (" << me->dialer->counters().last_error << ")");
+                // The library's reason reads "read: End of file"; the message was always the bare error text.
+                std::string why = me->dialer->counters().last_error;
+                if (why.compare(0, 6, "read: ") == 0)
+                    why.erase(0, 6);
+                LOG_INFO(me->name << ": connection closed (" << why << ")");
             }
             if (me->on_conn)
                 me->on_conn(up);

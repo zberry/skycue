@@ -18,6 +18,8 @@ struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Imp
         o.chunk_bytes = kChunkBytes;
         boost::system::error_code ec;
         remote = asio::ip::make_address(host, ec);  // unspecified when the host is a name
+        where = host + ":" + std::to_string(port);
+        resolve_prefix = "resolve " + host + ": ";
         dialer = net::Dialer::create(io, std::move(host), port, o);
     }
 
@@ -25,6 +27,7 @@ struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Imp
     asio::ip::address remote;
     uint64_t stream = 0;  // the connection that is up (or was last)
     std::string lib_error_seen;
+    std::string where, resolve_prefix;
 
     void wire()
     {
@@ -65,8 +68,20 @@ struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Imp
         // Sticky, as it always was: a later success does not clear it.
         if (!c.last_error.empty() && c.last_error != lib_error_seen) {
             lib_error_seen = c.last_error;
-            last_error = c.last_error;
+            last_error = oldWording(c.last_error);
         }
+    }
+
+    // The library's reasons in the words this transport has always used:
+    // "resolve host:port: ...", "connect host:port: ...", "disconnected from host:port: ...".
+    std::string oldWording(const std::string& e) const
+    {
+        if (e.compare(0, resolve_prefix.size(), resolve_prefix) == 0)
+            return "resolve " + where + ": " + e.substr(resolve_prefix.size());
+        for (const char* p : {"read: ", "write: "})
+            if (e.compare(0, std::char_traits<char>::length(p), p) == 0)
+                return "disconnected from " + where + ": " + e.substr(std::char_traits<char>::length(p));
+        return e;
     }
 
     void shutdown()

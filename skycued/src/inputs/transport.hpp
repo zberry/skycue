@@ -87,7 +87,8 @@ protected:
 // Throws std::invalid_argument when it is not an IP address.
 std::optional<boost::asio::ip::address> parsePeerFilter(const std::string& peer);
 
-// Routes the network library's log messages ("net: ...") to skycued's logger.
+// Routes the network library's log messages to skycued's logger, prefixed
+// "name: " when the component has a name.
 // Call once, before any transport or line client starts.
 void installNetLogSink();
 

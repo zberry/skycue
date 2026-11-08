@@ -160,7 +160,9 @@ if [ -z "$map" ] || [ ${#around[@]} = 1 ]; then
   [ -n "$map" ] || map=$cfg_map_dir
   [ -n "$map" ] || die "paths.map_dir is not set in $config; pass --map-dir"
   if [ ${#around[@]} = 1 ]; then
-    [ -n "$cfg_lat" ] && [ -n "$cfg_lon" ] ||
+    # Unset: empty, or both 0 (the shipped file's placeholder, a point in the ocean).
+    zero='^[+-]?0*(\.0*)?$'
+    { [ -n "$cfg_lat" ] && [ -n "$cfg_lon" ] && ! { [[ $cfg_lat =~ $zero ]] && [[ $cfg_lon =~ $zero ]]; }; } ||
       die "receiver.lat and receiver.lon are not set in $config; set them, or pass --around LAT LON RADIUS_NM"
     around=("$cfg_lat" "$cfg_lon" "${around[0]}")
   fi

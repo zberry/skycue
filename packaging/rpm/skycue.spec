@@ -113,6 +113,7 @@ skycue_convert_one() {
         chown --reference="$old" "$tmp" 2>/dev/null || true
         chmod --reference="$old" "$tmp" 2>/dev/null || true
         mv -f "$tmp" "$new"
+        cat "$tmp.err" >&2 || true
         rm -f "$tmp.err"
         mv -f "$old" "$old.converted"
         echo "skycue: converted $old to $new (the old file is now $old.converted)"

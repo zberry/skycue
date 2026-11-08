@@ -18,7 +18,7 @@ SKYCUE_GDAL_IMAGE=ghcr.io/osgeo/gdal:ubuntu-small-3.9.3
 # TOML, see packaging/skycue.toml.example) for the keys asked for, each
 # assigned to its shell variable: load_config "$f" map_dir=paths.map_dir.
 # Nothing in the file is expanded or executed. Tables, "basic strings" without
-# escapes, 'literal strings', numbers, true/false, arrays (skipped) and #
+# escapes, 'literal strings', numbers, true/false, arrays (skipped, also over several lines) and #
 # comments are read; a malformed line, or a key given twice, calls die with
 # the file and line. Keys not asked for are left to skycued, which checks them.
 load_config() {
@@ -31,6 +31,8 @@ load_config() {
   local re_squote="^'([^']*)'[[:space:]]*(#.*)?\$"
   local re_plain='^([A-Za-z0-9_.+-]+)[[:space:]]*(#.*)?$'
   local re_array='^\['
+  # A string, a char that is no quote, bracket or #; up to the closing bracket.
+  local re_close='^(("[^"]*")|('"'"'[^'"'"']*'"'"')|[^]"'"'"'#])*\]'
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
     line=${line%$'\r'}
@@ -44,6 +46,17 @@ load_config() {
     elif [[ $val =~ $re_plain ]]; then
       val=${BASH_REMATCH[1]}
     elif [[ $val =~ $re_array ]]; then
+      # An array is skipped; one that runs over several lines up to its ]. The
+      # value is empty either way (no key these scripts need is an array).
+      if ! [[ ${val#\[} =~ $re_close ]]; then
+        local open_line=$n
+        while :; do
+          IFS= read -r line || [ -n "$line" ] || die "$file:$open_line: unterminated array for $key"
+          n=$((n + 1))
+          line=${line%$'\r'}
+          [[ $line =~ $re_close ]] && break
+        done
+      fi
       val=""
     else
       die "$file:$n: malformed value for $key (a quoted string, a number or true/false; no \$, \` or \\)"

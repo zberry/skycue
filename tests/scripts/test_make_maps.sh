@@ -338,4 +338,39 @@ run "$GDAL:$tmp/sk" --config "$conf" --around 100 --dry-run
 unset STUB_SK_FAIL
 [ $rc -eq 2 ] && grep -q 'boom' "$tmp/err" && [ "$(grep -c . "$tmp/calls")" = 0 ] || fail "failing skycued: exit $rc"
 
+# 12. The shipped placeholder position (both 0.0) is no position: --around N
+# refuses with the message naming the keys, in both the fallback reader and
+# the dumped values; a real one-sided zero (the equator) is a position.
+for pos in "0.0 0.0" "0 0" "-0.0 0.00"; do
+  set -- $pos
+  printf '%s\n' '[paths]' "map_dir = \"$maps\"" '[receiver]' "lat = $1" "lon = $2" > "$tmp/zero.toml"
+  run "$GDAL" --config "$tmp/zero.toml" --around 100 --dry-run
+  [ $rc -eq 2 ] && grep -q receiver.lat "$tmp/err" && grep -q receiver.lon "$tmp/err" && [ "$(grep -c . "$tmp/calls")" = 0 ] ||
+    fail "fallback, position $pos: exit $rc, want 2 naming receiver.lat and receiver.lon"
+done
+printf '%s\n' '[paths]' "map_dir = \"$maps\"" '[receiver]' 'lat = 0.0' 'lon = 10.5' > "$tmp/equator.toml"
+run "$GDAL" --config "$tmp/equator.toml" --around 100 --dry-run
+[ $rc -eq 0 ] || fail "fallback, lat 0.0 lon 10.5: exit $rc"
+for dumped in "''|''" "0|0" "0.0|0.0"; do
+  cat > "$tmp/sk/skycued" <<STUB
+#!/bin/sh
+printf "SKYCUE_PATHS_MAP_DIR='%s'\nSKYCUE_RECEIVER_LAT='%s'\nSKYCUE_RECEIVER_LON='%s'\n" "$maps" "${dumped%|*}" "${dumped#*|}"
+STUB
+  run "$GDAL:$tmp/sk" --config "$conf" --around 100 --dry-run
+  [ $rc -eq 2 ] && grep -q receiver.lat "$tmp/err" && [ "$(grep -c . "$tmp/calls")" = 0 ] ||
+    fail "skycued on PATH, dumped position $dumped: exit $rc, want 2"
+done
+
+# 13. The fallback reader skips an array over several lines up to its ], then
+# reads on; an unterminated one stops with the line it opened on.
+printf '%s\n' '[cues]' 'udp_targets = [' '  "a:1",  # first' '  "b:2", ] # ] in a comment' \
+  'tcp_connect = ["x:1", "y#]:2"]' '[paths]' "map_dir = \"$maps\"" '[receiver]' 'lat = 38.9' 'lon = -77.0' > "$tmp/multi.toml"
+run "$GDAL" --config "$tmp/multi.toml" --around 100 --dry-run
+[ $rc -eq 0 ] || fail "multi-line array: exit $rc"
+read -r _ bbox _ <<<"$(call make-tiles.sh 2)"
+inside "$bbox" 38.9 -77.0 || fail "multi-line array: bbox $bbox is not around the position after it"
+printf '%s\n' '[paths]' "map_dir = \"$maps\"" '[cues]' 'udp_targets = [' '  "a:1",' > "$tmp/open.toml"
+run "$GDAL" --config "$tmp/open.toml" --around 100 --dry-run
+[ $rc -eq 2 ] && grep -q 'open.toml:4' "$tmp/err" && grep -q 'unterminated' "$tmp/err" || fail "unterminated array: exit $rc"
+
 echo "PASS test_make_maps"

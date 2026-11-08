@@ -57,7 +57,9 @@ check_converted() {   # NAME ROOT
   [ -e "$r/var/lib/skycue/skycue.overrides.conf" ] && fail "$n: overrides.conf still there"
   grep -q 'max_range_nm *= *90' "$r/var/lib/skycue/skycue.overrides.toml" || fail "$n: overrides.toml lacks max_range_nm = 90"
   [ "$(wc -l <"$work/out")" = 2 ] || { cat "$work/out" "$work/err"; fail "$n: want one line per converted file"; }
-  [ ! -s "$work/err" ] || { cat "$work/err"; fail "$n: stderr on a good conversion"; }
+  # The converter's notice (the comment lines not carried over) is shown, nothing else.
+  grep -q 'comment lines of .*skycue.conf not carried over' "$work/err" || { cat "$work/err"; fail "$n: the dropped-comments notice is missing"; }
+  [ "$(wc -l <"$work/err")" = 1 ] || { cat "$work/err"; fail "$n: more than the notice on stderr"; }
 }
 check_untouched_conf() {  # NAME ROOT: the conf stays, the toml is as it was
   local n=$1 r=$2

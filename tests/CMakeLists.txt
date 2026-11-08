@@ -267,7 +267,7 @@ foreach(_t engine_api recording_independence runtime_config web_config check_inp
   set_tests_properties(${_t} PROPERTIES TIMEOUT 60)
 endforeach()
 
-# test_check_inputs runs skycued --check-inputs for the TRACK_DECODER lines.
+# test_check_inputs runs skycued --check-inputs for the inputs.decoder lines.
 add_dependencies(test_check_inputs skycued)
 target_compile_definitions(test_check_inputs PRIVATE SKYCUED_EXE="$<TARGET_FILE:skycued>")
 
@@ -715,7 +715,7 @@ add_test(NAME geom_eval COMMAND test_geom_eval)
 set_tests_properties(geom_eval PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
 # skycued's own decoder against readsb, live: the 120 s capture replayed at speed 1
-# through a beast_raw input under TRACK_DECODER=skycued, compared with the committed
+# through a beast_raw input under inputs.decoder = "skycued", compared with the committed
 # golden and, with SKYCUE_READSB set, a fresh readsb run. Skips without fixtures/raw.
 add_test(NAME decode_differential
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential.sh
@@ -773,7 +773,7 @@ target_include_directories(test_ping_decode PRIVATE ${PROJECT_SOURCE_DIR}/net/te
 add_test(NAME ping_decode COMMAND test_ping_decode)
 set_tests_properties(ping_decode PROPERTIES TIMEOUT 120)
 
-# UatRawInput with the 978 decoder on (TRACK_DECODER=skycued): the dump978 sample and the
+# UatRawInput with the 978 decoder on (inputs.decoder = "skycued"): the dump978 sample and the
 # Stratux log through a real input, the counters and the double-feed warning.
 add_executable(test_uat_raw_decode test_uat_raw_decode.cpp)
 target_link_libraries(test_uat_raw_decode PRIVATE skycued_core Boost::unit_test_framework Threads::Threads ZLIB::ZLIB)
@@ -785,7 +785,7 @@ add_test(NAME uat_raw_decode COMMAND test_uat_raw_decode)
 set_tests_properties(uat_raw_decode PROPERTIES TIMEOUT 120)
 
 # skycued's own UAT decoder against dump978-fa, live: the 439-downlink sample replayed at speed 1
-# (about 2 minutes), then the Stratux captures, through a uat_raw input under TRACK_DECODER=skycued, compared per address with
+# (about 2 minutes), then the Stratux captures, through a uat_raw input under inputs.decoder = "skycued", compared per address with
 # the committed golden and, with SKYCUE_DUMP978 set, a fresh dump978-fa run. Skips without fixtures.
 add_test(NAME decode_differential_uat
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential_uat.sh

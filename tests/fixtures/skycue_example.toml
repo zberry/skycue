@@ -10,7 +10,8 @@
 # Any key can be overridden for one run: --set inputs.readsb.host=10.0.0.2 on
 # skycued's command line, or SKYCUE_INPUTS_READSB_HOST=10.0.0.2 in its
 # environment. Precedence, lowest first: built-in defaults, this file,
-# skycue.overrides.toml (written by skycued, see [paths]), environment, --set.
+# skycue.overrides.toml (written by skycued, see [paths]), environment, --set,
+# then the flags --readsb-host, --dump978-host, --no-uat and --no-readsb.
 # A key you leave out keeps the default shown here.
 
 [receiver]

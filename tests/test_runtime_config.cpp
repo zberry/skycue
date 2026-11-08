@@ -235,7 +235,7 @@ BOOST_AUTO_TEST_CASE(apply_ui_writes_overlay_and_engine)
     BOOST_TEST(!has(json, "max_range_nm"));
     BOOST_TEST(has(json, "\"c0ffee\""));
     BOOST_TEST(!exists(f.path("skycue.runtime.json.tmp")));
-    BOOST_TEST(readAll(f.conf) == conf_text);  // only promote writes skycue.conf
+    BOOST_TEST(readAll(f.conf) == conf_text);  // only promote writes skycue.toml
     BOOST_TEST(has(f.sent(), "ui: max_range_nm=150 min_elevation_deg=5"));
 
     // A remove cancels the add (and vice versa): the overlay holds no delta.
@@ -815,7 +815,7 @@ BOOST_AUTO_TEST_CASE(watch_applies_overrides_edit_live)
     writeFile(state + "/skycue.overrides.toml", "[filters]\nmin_elevation_deg = 4\n[web]\nport = 81\n");
     BOOST_TEST(f.waitFor([&] { return has(err.text(), "web.port cannot be set in skycue.overrides.toml"); }, 4000ms));
     BOOST_TEST(f.filters().min_elevation_deg == 3.0);
-    // Deleted: skycue.conf's value applies again.
+    // Deleted: skycue.toml's value applies again.
     ::unlink((state + "/skycue.overrides.toml").c_str());
     BOOST_TEST(f.waitFor([&] { return f.filters().min_elevation_deg == 1.0; }, 4000ms));
 }

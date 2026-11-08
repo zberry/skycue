@@ -123,7 +123,7 @@ and `nac_p` appear in the golden more often than in the decoder's output.
 - Used by `tests/test_decode_uat_golden.cpp` (ctest `decode_uat_golden`).
 - Also used by `tests/test_decode_differential_uat.sh` (ctest `decode_differential_uat`),
   the live end-to-end twin: skycue-rawplay replays `uat-sample.txt.gz` at speed 1 into
-  skycued (`TRACK_DECODER=skycued`, a `uat_raw` input), the recorded received stream is
+  skycued (`inputs.decoder = "skycued"`, a `uat_raw` input), the recorded received stream is
   reduced per address (`reduce_received.py --uat`), the golden the same way
   (`--uat-golden`; positions more than 300 NM from the test's receiver, one aircraft, are left
   out because the decoder rejects them), and `compare_tracks.py --uat` compares. With

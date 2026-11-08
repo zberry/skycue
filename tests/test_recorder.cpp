@@ -4,7 +4,9 @@
 #include "json_lite.hpp"
 #include "readsb_json_source.hpp"
 #include "recorder.hpp"
+#include "geom_altitude.hpp"
 #include "replay_source.hpp"
+#include "track_table.hpp"
 #include "time_util.hpp"
 
 #include <skycue/types.hpp>
@@ -985,6 +987,50 @@ BOOST_AUTO_TEST_CASE(recorder_received_jsonl_has_diff_and_replays_identically)
     BOOST_TEST((old->alt_baro_ft == plain.alt_baro_ft));
     // A file with the key replays to the same record it was written from.
     BOOST_TEST(skycued::formatIso8601Ms(back->received_time) == skycued::formatIso8601Ms(obs.received_time));
+}
+
+BOOST_AUTO_TEST_CASE(replay_reproduces_estimates)
+{
+    // Live: a baro carried 40 s (the decoder's measurement time) beside a fresh difference.
+    // The recording keeps the ages; the replay restores the times, so resolveGeomAltitude
+    // gives the same source and value as the live observation did.
+    TempDir tmp;
+    const auto t0 = roundMs(sys_clock::now());
+    TrackObservation o = minimalObservation(t0);
+    o.alt_baro_ft = 30000;
+    o.alt_baro_time = t0 - 40s;
+    o.geom_minus_baro_ft = 500;
+    o.geom_minus_baro_time = t0 - 20s;
+    o.alt_geom_ft = 30500;
+    o.alt_geom_time = t0 - 20s;
+    const std::string path = recordObservations(tmp.path, {o});
+    {
+        std::ifstream in(path);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        BOOST_TEST(text.find("\"alt_baro_age_s\":40") != std::string::npos);
+        BOOST_TEST(text.find("\"geom_minus_baro_age_s\":20") != std::string::npos);
+    }
+    boost::asio::io_context io;
+    ReplaySource replay(io, path, 0);
+    std::vector<TrackObservation> got;
+    replay.onObservation([&](const TrackObservation& x) { got.push_back(x); });
+    replay.start();
+    io.run();
+    BOOST_REQUIRE_EQUAL(got.size(), 1u);
+    BOOST_REQUIRE(got[0].alt_baro_time && got[0].alt_geom_time && got[0].geom_minus_baro_time);
+    BOOST_TEST((*got[0].alt_baro_time == t0 - 40s));
+    BOOST_TEST((*got[0].alt_geom_time == t0 - 20s));
+    BOOST_TEST((*got[0].geom_minus_baro_time == t0 - 20s));
+
+    const auto resolve = [&](const TrackObservation& x) {
+        skycued::TrackTable table;
+        skycued::TrackState& st = table.apply(x);
+        skycued::learnGeomDiff(st.geom, x);
+        return skycued::resolveGeomAltitude(st, x.received_time, std::nullopt);
+    };
+    const auto live = resolve(o), replayed = resolve(got[0]);
+    BOOST_TEST((live.source == replayed.source));
+    BOOST_TEST((live.alt_geom_ft == replayed.alt_geom_ft));
 }
 
 BOOST_AUTO_TEST_CASE(csv_headers_unchanged)

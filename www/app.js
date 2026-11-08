@@ -1614,6 +1614,7 @@
       if (t.alt_geom_source !== 'estimated') return text;
       // "est." and the uncertainty as small muted text; the text content is formatGeomAlt's.
       var m = /^(.*) est\.(?: (±.*))?$/.exec(text);
+      if (!m) return text;
       var age = typeof t.alt_geom_age_s === 'number' ? 'estimate, ' + t.alt_geom_age_s.toFixed(1) + ' s old' : 'estimate';
       return { text: text, html: esc(m[1]) + ' <small class="est">est.</small>' +
         (m[2] ? ' <small class="est" title="' + esc(age) + '">' + esc(m[2]) + '</small>' : '') };

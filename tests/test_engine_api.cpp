@@ -1026,6 +1026,13 @@ BOOST_AUTO_TEST_CASE(snapshot_geom_and_fit_stats_for_a_reported_track)
     fx.t.call([&] {
         src->connection(true);
         src->emit(o);
+        for (uint32_t a = 1; a < 3; ++a) {  // the median fallback needs 3 aircraft
+            TrackObservation p = nearbyObservation(0x402001 + a, 0);
+            p.alt_geom_ft = 5400;
+            p.received_time = o.received_time + std::chrono::seconds(6 * a);  // past the fit's 5 s cache
+            p.position_time = p.received_time;
+            src->emit(p);
+        }
     });
     const Snapshot s = fx.t.call([&] { return fx.engine->snapshot(); });
     const TrackSnapshot* t = find(s, icao(0x402001));
@@ -1033,9 +1040,9 @@ BOOST_AUTO_TEST_CASE(snapshot_geom_and_fit_stats_for_a_reported_track)
     BOOST_TEST((t->geom.source == skycued::GeomSource::reported));
     BOOST_TEST((t->track.alt_geom_ft == std::optional<int32_t>(5400)));
     BOOST_TEST(!t->track.alt_geom_uncertainty_ft.has_value());
-    BOOST_TEST(s.stats.altitude_fit.valid);  // one aircraft: the median fallback, not a line
+    BOOST_TEST(s.stats.altitude_fit.valid);  // three aircraft: the median fallback, not a line
     BOOST_TEST(!s.stats.altitude_fit.linear);
-    BOOST_TEST(s.stats.altitude_fit.aircraft == 1u);
+    BOOST_TEST(s.stats.altitude_fit.aircraft == 3u);
     BOOST_TEST(s.stats.altitude_fit.b == 0.0);
 }
 
@@ -1057,11 +1064,18 @@ BOOST_AUTO_TEST_CASE(api_stats_altitude_fit_reaches_the_endpoint)
     a.fx->t.call([&] {
         a.src->connection(true);
         a.src->emit(o);
+        for (uint32_t k = 1; k < 3; ++k) {  // the median fallback needs 3 aircraft
+            TrackObservation p = nearbyObservation(0xABC002 + k, 0);
+            p.alt_geom_ft = (p.alt_baro_ft ? *p.alt_baro_ft : 0) + 200;
+            p.received_time = o.received_time + std::chrono::seconds(6 * k);  // past the fit's 5 s cache
+            p.position_time = p.received_time;
+            a.src->emit(p);
+        }
     });
     auto fit = parsed(a.get("/api/stats").body).getObject("altitude_fit");
     BOOST_REQUIRE(fit);
     BOOST_TEST(fit->getString("valid").value_or("") == "true");
     BOOST_TEST(fit->has("linear"));
-    BOOST_TEST(fit->getDouble("aircraft").value_or(0) == 1.0);
+    BOOST_TEST(fit->getDouble("aircraft").value_or(0) == 3.0);
     BOOST_TEST(fit->getDouble("a").value_or(0) == 200.0);
 }

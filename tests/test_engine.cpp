@@ -1156,6 +1156,59 @@ BOOST_AUTO_TEST_CASE(fit_learns_from_other_aircraft)
     BOOST_TEST(st.altitude_fit.samples >= 20u);
 }
 
+BOOST_AUTO_TEST_CASE(carried_diff_is_one_fit_sample)
+{
+    // Three aircraft, each sending 12 observations that carry one difference with its own
+    // time: one fit sample per aircraft, however often the difference returns.
+    FakeSource* src = nullptr;
+    EngineFx fx(geomConfig(), fakeSource(src));
+    const Tp t0 = hoursAgo();
+    fx.t.call([&] {
+        src->connection(true);
+        for (int i = 0; i < 12; ++i)
+            for (uint32_t a = 0; a < 3; ++a) {
+                TrackObservation o = geomObs(0x310000 + a, t0 + std::chrono::milliseconds(100 * i), 30000 + 10 * i, false,
+                                             0.01 * a);
+                o.geom_minus_baro_ft = 400 + 50 * static_cast<int32_t>(a);
+                o.geom_minus_baro_time = t0;
+                src->emit(o);
+            }
+        // The fit is cached for 5 s of the data clock: a later observation refreshes it.
+        src->emit(geomObs(0x310009, t0 + 10s, 30000, false, 0.09));
+    });
+    const auto st = fx.stats();
+    BOOST_TEST(st.altitude_fit.valid);
+    BOOST_TEST(st.altitude_fit.aircraft == 3u);
+    BOOST_TEST(st.altitude_fit.samples == 3u);
+}
+
+BOOST_AUTO_TEST_CASE(uncertainty_clamped_at_65535)
+{
+    // Three aircraft whose differences are 100000 ft apart give a median fit with a p90 far
+    // above the u16 of the wire; makeTrack clamps it.
+    FakeSource* src = nullptr;
+    EngineFx fx(geomConfig(), fakeSource(src));
+    const TrackId id{0x401099, AddressType::icao};
+    const Tp t0 = hoursAgo();
+    fx.t.call([&] {
+        src->connection(true);
+        for (uint32_t a = 0; a < 3; ++a) {
+            TrackObservation o = geomObs(0x320000 + a, t0, 30000, false, 0.01 * a);
+            o.geom_minus_baro_ft = static_cast<int32_t>(100000 * a);
+            o.geom_minus_baro_time = t0;
+            src->emit(o);
+        }
+        src->emit(geomObs(id.address, t0 + 10s, 30000, false, 0.05));  // baro only, after the 5 s fit cache
+    });
+    const auto snap = fx.t.call([&] { return fx.engine->snapshot(); });
+    const auto* t = findTrack(snap, id);
+    BOOST_REQUIRE(t != nullptr);
+    BOOST_TEST((t->geom.source == skycued::GeomSource::estimated));
+    BOOST_TEST(*t->geom.uncertainty_ft > 65535);
+    BOOST_REQUIRE(t->track.alt_geom_uncertainty_ft.has_value());
+    BOOST_TEST(*t->track.alt_geom_uncertainty_ft == 65535);
+}
+
 BOOST_AUTO_TEST_CASE(tisb_target_gets_estimate)
 {
     FakeSource* src = nullptr;

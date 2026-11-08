@@ -18,7 +18,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <cstdint>
 #include <cctype>
 #include <chrono>
 #include <map>
@@ -187,8 +186,8 @@ void putGeom(JsonWriter& w, const GeomResult& g)
             addOpt(w, "alt_geom_uncertainty_ft", g.uncertainty_ft);
         if (g.age_s && std::isfinite(*g.age_s))
             w.addRaw("alt_geom_age_s", oneDecimal(*g.age_s));
+        addOpt(w, "geom_minus_baro_ft", g.geom_minus_baro_ft);
     }
-    addOpt(w, "geom_minus_baro_ft", g.geom_minus_baro_ft);
 }
 
 void putTrack(JsonWriter& w, const TrackSnapshot& ts)

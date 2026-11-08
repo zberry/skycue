@@ -277,9 +277,9 @@ void Engine::handleObservation(const TrackObservation& obs)
     if (table_.lastApplySuppressedPosition())
         ++rebroadcast_suppressed_;
     // A difference counts whoever sent it, rebroadcast copies included (only their
-    // positions are set aside). The fit key is the address: one point per aircraft.
+    // positions are set aside). The fit key is the address type and address: one point per aircraft.
     if (const auto diff = learnGeomDiff(state.geom, obs); diff && obs.alt_baro_ft)
-        altitude_fit_.add(state.id.address, state.geom.diff_time, *obs.alt_baro_ft, *diff);
+        altitude_fit_.add((static_cast<uint64_t>(state.id.type) << 32) | state.id.address, state.geom.diff_time, *obs.alt_baro_ft, *diff);
     process(obs, state, steady::now(), obs.lat.has_value() && !table_.lastApplySuppressedPosition());
 }
 

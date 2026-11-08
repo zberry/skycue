@@ -26,9 +26,12 @@ struct TrackObservation {
     // 1090 TC19 velocity message.
     std::optional<int32_t> geom_minus_baro_ft;
     // When each altitude was measured; absent: at received_time. Carried values of the
-    // 1090 decoder (up to 60 s old) set them. When geom_minus_baro_ft and alt_geom_ft are
-    // both present, alt_geom_time is the difference's time.
+    // 1090 decoder (up to 60 s old) set them.
     std::optional<std::chrono::system_clock::time_point> alt_baro_time, alt_geom_time;
+    // When geom_minus_baro_ft was measured; absent: at received_time. The 1090 decoder sets
+    // it to the TC19's time whenever it emits a difference, so a carried difference ages
+    // and enters the fit once; other sources leave it absent.
+    std::optional<std::chrono::system_clock::time_point> geom_minus_baro_time;
     std::optional<float> gs_kt, track_deg, baro_rate_fpm, geom_rate_fpm;
     std::optional<std::string> callsign, squawk, registration, emergency, category;
     std::optional<uint8_t> nic, nac_p;

@@ -646,6 +646,33 @@ BOOST_AUTO_TEST_CASE(decoder_on_emits_observations_and_still_publishes)
         BOOST_REQUIRE_EQUAL(rig.obsAt(i).input_id, "dec");
 }
 
+BOOST_AUTO_TEST_CASE(avr_lines_with_decoder_emit_observations)
+{
+    DecRig rig;
+    const uint16_t port = freeTcpPort();
+    rig.runInput(std::make_unique<BeastRawInput>(
+        rig.t.io, defOf(beastDef("avdec", "tcp_listen", port, R"(,"format":"avr")")), RecordOptions{}, decodeOn()));
+    asio::io_context cio;
+    tcp::socket c = connectWhenListening(cio, port);
+    const auto avr = [](const st::Bytes& b) {
+        static const char* hex = "0123456789ABCDEF";
+        std::string line = "*";
+        for (uint8_t v : b) {
+            line += hex[v >> 4];
+            line += hex[v & 15];
+        }
+        return line + ";\n";
+    };
+    writeAll(c, avr(posFrame(0xABC123, kNear, false)) + avr(posFrame(0xABC123, kNear, true)));
+    BOOST_REQUIRE(eventually([&] { return rig.obsCount() >= 1; }));
+    const auto o = rig.obsAt(0);
+    BOOST_TEST(o.id.address == 0xABC123u);
+    BOOST_TEST(o.lat.has_value());
+    BOOST_TEST(o.input_id == "avdec");
+    BOOST_TEST(rig.state().counters.decoder_observations >= 1u);
+    BOOST_TEST(rig.state().counters.rejected == 0u);
+}
+
 BOOST_AUTO_TEST_CASE(counters_in_state_json)
 {
     const std::string bin = fixtureBytes();

@@ -177,9 +177,9 @@ BOOST_AUTO_TEST_CASE(own_diff_after_60s)
     r = f.at(kT0 + seconds(70));
     BOOST_CHECK_EQUAL(*r.alt_geom_ft, 34000 + 500 + 108);
 
-    // The median fallback has b = 0 and the own difference then takes no slope term.
+    // Under the median fallback (b = 0) the own difference still takes the default slope.
     r = f.at(kT0 + seconds(70), makeFit(300, 0, 80, false));
-    BOOST_CHECK_EQUAL(*r.alt_geom_ft, 34500);
+    BOOST_CHECK_EQUAL(*r.alt_geom_ft, 34000 + 500 + 108);
 }
 
 BOOST_AUTO_TEST_CASE(own_diff_uncertainty_ramps_125_to_325)
@@ -235,7 +235,85 @@ BOOST_AUTO_TEST_CASE(fit_with_median_fallback)
     f.feed(baroObs(kT0, 20000));
     const auto r = f.at(kT0, makeFit(420, 0, 90, false));
     BOOST_CHECK_EQUAL(*r.alt_geom_ft, 20420);
-    BOOST_CHECK_EQUAL(*r.uncertainty_ft, 100);
+    BOOST_CHECK_EQUAL(*r.uncertainty_ft, 600);
+}
+
+BOOST_AUTO_TEST_CASE(median_fallback_uncertainty_floor_600)
+{
+    Fixture f;
+    f.feed(baroObs(kT0, 20000));
+    BOOST_CHECK_EQUAL(*f.at(kT0, makeFit(420, 0, 30, false)).uncertainty_ft, 600);
+    BOOST_CHECK_EQUAL(*f.at(kT0, makeFit(420, 0, 600, false)).uncertainty_ft, 600);
+    BOOST_CHECK_EQUAL(*f.at(kT0, makeFit(420, 0, 610, false)).uncertainty_ft, 625);  // p90 rounded up to 25
+}
+
+BOOST_AUTO_TEST_CASE(reported_kept_when_nothing_better)
+{
+    // A newer baro, no difference of its own, no fit: a reported value <= 60 s old stays.
+    Fixture f;
+    TrackObservation g = obsAt(kT0);
+    g.alt_geom_ft = 30500;
+    f.feed(g);
+    f.feed(baroObs(kT0 + seconds(5), 30200));
+    auto r = f.at(kT0 + seconds(6));
+    BOOST_CHECK(r.source == GeomSource::reported);
+    BOOST_CHECK_EQUAL(*r.alt_geom_ft, 30500);
+    // Older than 60 s: gone.
+    f.feed(baroObs(kT0 + seconds(65), 30200));
+    BOOST_CHECK(f.at(kT0 + seconds(66)).source == GeomSource::none);
+}
+
+BOOST_AUTO_TEST_CASE(carried_diff_is_one_fit_sample)
+{
+    // 12 observations carrying one difference (its own time, a baro paired with it at first):
+    // only the first yields a fit sample; the repeats are not new samples (same time, no new pair).
+    Fixture f;
+    int samples = 0;
+    for (int i = 0; i < 12; ++i) {
+        TrackObservation o = obsAt(kT0 + seconds(20 + i));
+        o.alt_baro_ft = 30000 + 10 * i;
+        o.alt_baro_time = kT0 + seconds(i == 0 ? 0 : 20 + i);
+        o.geom_minus_baro_ft = 500;
+        o.geom_minus_baro_time = kT0;
+        if (f.feed(o))
+            ++samples;
+    }
+    BOOST_CHECK_EQUAL(samples, 1);  // the first pairs with its baro; the carried repeats, 20 s on, do not
+    TrackObservation first = obsAt(kT0);
+    first.alt_baro_ft = 30000;
+    first.geom_minus_baro_ft = 500;
+    Fixture g;
+    BOOST_CHECK(g.feed(first).has_value());
+    for (int i = 1; i < 12; ++i) {
+        TrackObservation o = obsAt(kT0 + milliseconds(100 * i));
+        o.alt_baro_ft = 30000 + 10 * i;
+        o.geom_minus_baro_ft = 500;
+        o.geom_minus_baro_time = kT0;
+        // The same difference time returns with a baro paired within 2 s: the history keeps
+        // one difference; as a fit sample the engine's 5 s bucket takes only the first.
+        g.feed(o);
+    }
+    AltitudeFit fit;
+    for (int i = 0; i < 12; ++i)
+        fit.add(1, g.st().geom.diff_time, 30000 + 10 * i, 500);
+    BOOST_CHECK_EQUAL(fit.sampleCount(), 1u);
+}
+
+BOOST_AUTO_TEST_CASE(same_diff_unpaired_keeps_earlier_baro_at_diff)
+{
+    Fixture f;
+    TrackObservation first = obsAt(kT0);
+    first.alt_baro_ft = 30000;
+    first.geom_minus_baro_ft = 500;
+    f.feed(first);
+    TrackObservation again = obsAt(kT0 + seconds(30));
+    again.alt_baro_ft = 31000;
+    again.alt_baro_time = kT0 + seconds(30);
+    again.geom_minus_baro_ft = 500;
+    again.geom_minus_baro_time = kT0;
+    BOOST_CHECK(!f.feed(again).has_value());
+    BOOST_REQUIRE(f.st().geom.baro_at_diff_ft);
+    BOOST_CHECK_EQUAL(*f.st().geom.baro_at_diff_ft, 30000);
 }
 
 BOOST_AUTO_TEST_CASE(no_fit_no_estimate)

@@ -82,7 +82,7 @@ double residual(const Line& l, const Point& p) { return p.diff - (l.a + l.b * p.
 
 AltitudeFit::AltitudeFit(AltitudeFitConfig cfg) : cfg_(cfg) {}
 
-void AltitudeFit::add(uint32_t aircraft_key, Clock::time_point t, int32_t baro_ft,
+void AltitudeFit::add(uint64_t aircraft_key, Clock::time_point t, int32_t baro_ft,
                       int32_t diff_ft) {
     auto& q = samples_[aircraft_key];
     // Keep the deque in time order (it is small), so a wall clock that stepped
@@ -157,7 +157,7 @@ std::optional<FitResult> AltitudeFit::fit(Clock::time_point now) {
         std::sort(res.begin(), res.end());
         const auto rank = static_cast<std::size_t>(std::ceil(0.9 * static_cast<double>(res.size())));
         r.p90_ft = res[std::max<std::size_t>(rank, 1) - 1];
-        out = r;
+        if (r.linear || r.aircraft >= cfg_.min_median_aircraft) out = r;
     }
     cache_valid_ = true;
     cache_at_ = now;

@@ -696,7 +696,7 @@ target_compile_definitions(test_geom_eval PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_geom_eval)
 add_test(NAME geom_eval COMMAND test_geom_eval)
-set_tests_properties(geom_eval PROPERTIES TIMEOUT 120)
+set_tests_properties(geom_eval PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
 # skycued's own decoder against readsb, live: the 120 s capture replayed at speed 1
 # through a beast_raw input under TRACK_DECODER=skycued, compared with the committed

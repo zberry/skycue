@@ -74,7 +74,14 @@ sk=$!; bg_pids+=("$sk")
 api_up() { curl -fs -o /dev/null "http://127.0.0.1:$api_port/api/outputs"; }
 wait_for 15 api_up || fail "skycued API did not come up"
 t0=$(date +%s)
-wait_for 200 bash -c "grep -q 'done:' '$tmp/play.log'" || fail "rawplay did not finish"
+# rawplay finished, or one of the two died first (checked on every poll)
+played() {
+  grep -q 'done:' "$tmp/play.log" && return 0
+  kill -0 "$play" 2>/dev/null || fail "rawplay exited before it finished"
+  kill -0 "$sk" 2>/dev/null || fail "skycued died while the capture played"
+  return 1
+}
+wait_for 200 played || fail "rawplay did not finish"
 t1=$(date +%s)
 echo "run (a): capture played in $((t1 - t0)) s"
 rcv() { find "$tmp/rec" -name 'received-*.jsonl' | head -n 1; }
@@ -84,7 +91,9 @@ stable() { local a b; a=$(nlines); sleep 2; b=$(nlines); [ "$a" -gt 0 ] && [ "$a
 wait_for 30 stable || fail "received recording did not settle (lines $(nlines))"
 kill -0 "$sk" 2>/dev/null || fail "skycued died"
 kill "$sk" 2>/dev/null; wait "$sk" 2>/dev/null
-bg_pids=("${bg_pids[@]/$sk}")
+keep=()
+for p in "${bg_pids[@]}"; do [ "$p" != "$sk" ] && keep+=("$p"); done
+bg_pids=("${keep[@]}")
 [ -n "$(rcv)" ] || fail "no received-*.jsonl under RECORD_DIR"
 python3 -I "$fixtures/reduce_received.py" "$(rcv)" "$tmp/ours.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
   || fail "reduce_received.py failed"

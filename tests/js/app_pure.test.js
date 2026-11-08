@@ -79,6 +79,7 @@ test('formatGeomAlt_reported', () => {
 test('formatGeomAlt_estimated_shows_est_and_plusminus', () => {
   assert.strictEqual(P.formatGeomAlt({ alt_geom_ft: 12300, alt_geom_source: 'estimated', alt_geom_uncertainty_ft: 240 }), '12,300 ft est. ±250');
   assert.strictEqual(P.formatGeomAlt({ alt_geom_ft: 12300, alt_geom_source: 'estimated', alt_geom_uncertainty_ft: 130 }), '12,300 ft est. ±150');
+  assert.strictEqual(P.formatGeomAlt({ alt_geom_ft: 12300, alt_geom_source: 'estimated', alt_geom_uncertainty_ft: 10 }), '12,300 ft est. ±50');
 });
 test('formatGeomAlt_absent', () => {
   assert.strictEqual(P.formatGeomAlt({}), '—');

@@ -352,6 +352,30 @@ bool getRebroadcast(const JsonObject& j, const char* k, Obs& o)
     return true;
 }
 
+// A measurement time is written as its age at arrival (received_time minus the time, one
+// decimal; omitted when absent or zero) and read back as received_time minus the age.
+template <std::optional<std::chrono::system_clock::time_point> Obs::*M>
+void putAge(const Obs& o, Record& r, const char* k)
+{
+    if (!(o.*M))
+        return;
+    const double s = std::round(std::chrono::duration<double>(o.received_time - *(o.*M)).count() * 10.0) / 10.0;
+    if (s != 0.0)
+        r.push_back(realField(k, s));
+}
+template <std::optional<std::chrono::system_clock::time_point> Obs::*M>
+bool getAge(const JsonObject& j, const char* k, Obs& o)
+{
+    if (!j.has(k))
+        return true;  // measured at arrival, or an older recording
+    auto v = j.getDouble(k);
+    if (!v || !std::isfinite(*v) || std::fabs(*v) > 1e7)
+        return false;
+    o.*M = o.received_time - std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                                 std::chrono::duration<double>(*v));
+    return true;
+}
+
 struct ObsKey {
     const char* key;
     bool csv;  // also a column of the received CSV, in table order before uplink_hex
@@ -384,6 +408,10 @@ const ObsKey kObsKeys[] = {
     {"rssi", true, putReal<&Obs::rssi>, getReal<&Obs::rssi>},
     {"geom_minus_baro_ft", false, putInt<int32_t, &Obs::geom_minus_baro_ft>,
      getInt<int32_t, &Obs::geom_minus_baro_ft>},  // JSONL only; absent in older recordings
+    // Measurement ages (JSONL only): a replay reproduces the live altitude estimates.
+    {"alt_baro_age_s", false, putAge<&Obs::alt_baro_time>, getAge<&Obs::alt_baro_time>},
+    {"alt_geom_age_s", false, putAge<&Obs::alt_geom_time>, getAge<&Obs::alt_geom_time>},
+    {"geom_minus_baro_age_s", false, putAge<&Obs::geom_minus_baro_time>, getAge<&Obs::geom_minus_baro_time>},
     {"raw", false, putRaw, getRaw},
     {"rebroadcast", false, putRebroadcast, getRebroadcast},  // JSONL only; absent means false
     {"input", false, putInput, getInput},  // the received CSV's last column (receivedColumns)

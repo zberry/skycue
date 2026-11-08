@@ -12,7 +12,7 @@
 //
 // Both print one line per window / lag: n, median absolute error, p90, max in
 // ft and m. Capture and fixtures are fetched by scripts/fixtures/fetch-test-captures.sh;
-// the test skips when they are absent.
+// the test skips (exit 77) when they are absent.
 #define BOOST_TEST_MODULE geom_eval
 #include <boost/test/unit_test.hpp>
 
@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -68,12 +69,13 @@ struct Collector {
     std::map<uint32_t, std::vector<Sample>> by_aircraft;
     void operator()(const TrackObservation& o)
     {
-        if (!o.geom_minus_baro_ft || !o.alt_baro_ft || !o.alt_geom_time || !o.alt_baro_time) return;
+        // Lone-difference observations count: the difference carries its own time.
+        if (!o.geom_minus_baro_ft || !o.alt_baro_ft || !o.geom_minus_baro_time || !o.alt_baro_time) return;
         if (o.on_ground.value_or(false)) return;
-        if (std::fabs(secs(*o.alt_geom_time, *o.alt_baro_time)) > 2.0) return;
+        if (std::fabs(secs(*o.geom_minus_baro_time, *o.alt_baro_time)) > 2.0) return;
         auto& v = by_aircraft[o.id.address];
-        if (!v.empty() && v.back().t >= *o.alt_geom_time) return;
-        v.push_back({*o.alt_geom_time, *o.alt_baro_ft, *o.geom_minus_baro_ft});
+        if (!v.empty() && v.back().t >= *o.geom_minus_baro_time) return;
+        v.push_back({*o.geom_minus_baro_time, *o.alt_baro_ft, *o.geom_minus_baro_ft});
     }
 };
 
@@ -116,7 +118,7 @@ BOOST_AUTO_TEST_CASE(geom_eval_leave_one_out_120s)
     const std::string csv = kFixtures + "/raw/modes-120s.csv.gz";
     if (!std::ifstream(csv).good()) {
         std::cout << "SKIP: raw/modes-120s.csv.gz is missing (scripts/fixtures/fetch-test-captures.sh fetches the capture)\n";
-        return;
+        std::exit(77);  // ctest SKIP_RETURN_CODE
     }
     ModesDecoder dec(DecoderConfig{}, "geom-eval");
     Collector col;
@@ -183,7 +185,7 @@ BOOST_AUTO_TEST_CASE(geom_eval_own_diff_hold_opensky)
     std::sort(dirs.begin(), dirs.end());
     if (dirs.empty()) {
         std::cout << "SKIP: opensky/ is missing (scripts/fixtures/fetch-test-captures.sh fetches and unpacks it)\n";
-        return;
+        std::exit(77);  // ctest SKIP_RETURN_CODE
     }
 
     struct Frame {

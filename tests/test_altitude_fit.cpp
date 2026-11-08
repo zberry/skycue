@@ -90,6 +90,16 @@ BOOST_AUTO_TEST_CASE(needs_5_aircraft_and_20_samples) {
         BOOST_TEST(!r->linear);
         BOOST_TEST(r->b == 0.0);
     }
+    {  // the median fallback needs 3 distinct aircraft
+        AltitudeFit two;
+        fill(two, 2, 10);
+        BOOST_TEST(!two.fit(kT0 + seconds(60)).has_value());
+        AltitudeFit three;
+        fill(three, 3, 10);
+        const auto r = three.fit(kT0 + seconds(60));
+        BOOST_REQUIRE(r);
+        BOOST_TEST(!r->linear);
+    }
     {
         AltitudeFit fit;
         fill(fit, 5, 4);
@@ -191,10 +201,12 @@ BOOST_AUTO_TEST_CASE(sample_clock_backwards_is_stored) {
     BOOST_TEST(fit.sampleCount() == 2u);
     fit.add(1, kT0 + seconds(60), 30000, 900);
     BOOST_TEST(fit.sampleCount() == 3u);
+    fit.add(2, kT0 + seconds(60), 31000, 900);  // two more aircraft: the median needs 3
+    fit.add(3, kT0 + seconds(60), 32000, 900);
     const auto r = fit.fit(kT0 + seconds(70));  // `now` earlier than the newest sample
     BOOST_REQUIRE(r);
     BOOST_TEST(r->a == 900.0);
-    BOOST_TEST(r->samples == 3u);
+    BOOST_TEST(r->samples == 5u);
     BOOST_TEST((r->newest == kT0 + seconds(100)));
 }
 
@@ -202,11 +214,14 @@ BOOST_AUTO_TEST_CASE(samples_from_the_future_pruned) {
     AltitudeFit fit;
     fit.add(1, kT0 + seconds(1000), 30000, 5000);  // a forward jump, then the clock stepped back
     fit.add(2, kT0 + seconds(10), 30000, 900);
+    fit.add(3, kT0 + seconds(10), 31000, 900);
+    fit.add(4, kT0 + seconds(10), 32000, 900);
+    fit.add(5, kT0 + seconds(10), 33000, 900);
     const auto r = fit.fit(kT0 + seconds(20));
     BOOST_REQUIRE(r);
-    BOOST_TEST(r->aircraft == 1u);
+    BOOST_TEST(r->aircraft == 4u);
     BOOST_TEST(r->a == 900.0);
-    BOOST_TEST(fit.sampleCount() == 1u);
+    BOOST_TEST(fit.sampleCount() == 4u);
 }
 
 BOOST_AUTO_TEST_CASE(fit_cached_5s) {
@@ -224,4 +239,17 @@ BOOST_AUTO_TEST_CASE(fit_cached_5s) {
     BOOST_REQUIRE(later);
     BOOST_TEST(later->samples == first->samples + 1u);
     BOOST_TEST((later->newest == kT0 + seconds(31)));
+}
+
+BOOST_AUTO_TEST_CASE(tisb_and_icao_same_address_separate) {
+    // The engine keys the fit by address type and address; the same 24 bits from an ICAO
+    // transponder and from a TIS-B copy are two aircraft here.
+    auto key = [](uint64_t type, uint32_t addr) { return (type << 32) | addr; };
+    AltitudeFit fit;
+    fit.add(key(0, 0xABC123), kT0, 30000, 900);
+    fit.add(key(2, 0xABC123), kT0, 20000, 900);
+    fit.add(key(0, 0x111111), kT0, 25000, 900);
+    const auto r = fit.fit(kT0 + seconds(10));
+    BOOST_REQUIRE(r);
+    BOOST_TEST(r->aircraft == 3u);
 }

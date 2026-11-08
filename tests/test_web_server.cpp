@@ -939,6 +939,9 @@ BOOST_AUTO_TEST_CASE(track_json_no_geom_has_no_new_keys)
     const std::string body = skycued::webapi::trackJson(ts);
     for (const char* k : {"alt_geom_source", "alt_geom_uncertainty_ft", "alt_geom_age_s", "geom_minus_baro_ft"})
         BOOST_TEST(body.find(k) == std::string::npos, k);
+    // A difference known to the track, but no geometric altitude (source none): no key either.
+    ts.geom.geom_minus_baro_ft = 250;
+    BOOST_TEST(skycued::webapi::trackJson(ts).find("geom_minus_baro_ft") == std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(stats_altitude_fit_valid_and_absent)

@@ -159,7 +159,7 @@
     var s = thousands(t.alt_geom_ft) + ' ft';
     if (t.alt_geom_source !== 'estimated') return s;
     s += ' est.';
-    if (typeof t.alt_geom_uncertainty_ft === 'number') s += ' ±' + thousands(Math.round(t.alt_geom_uncertainty_ft / 50) * 50);
+    if (typeof t.alt_geom_uncertainty_ft === 'number') s += ' ±' + thousands(Math.max(50, Math.round(t.alt_geom_uncertainty_ft / 50) * 50));
     return s;
   }
   function formatNum(v, digits, unit) {

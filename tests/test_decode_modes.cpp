@@ -491,9 +491,27 @@ BOOST_AUTO_TEST_CASE(newer_tc19_with_stale_baro_keeps_times_consistent) {
     r.feed(df17(kAddr, velocity(100, 0, 0, true, 350)), 12.0);  // baro 11.5 s old: no re-derive
     r.feed(air(kP0, false, 10000), 12.5);
     const auto& o = r.obs.back();
-    BOOST_REQUIRE(o.geom_minus_baro_ft && o.alt_geom_ft && o.alt_geom_time);
+    // The newer difference supersedes the derived value: it is emitted alone, with its own time.
+    BOOST_REQUIRE(o.geom_minus_baro_ft && o.geom_minus_baro_time);
     BOOST_CHECK_EQUAL(*o.geom_minus_baro_ft, 350);
-    BOOST_CHECK(*o.alt_geom_time == at(12.0));  // the newer difference's time
+    BOOST_CHECK(*o.geom_minus_baro_time == at(12.0));
+    BOOST_CHECK(!o.alt_geom_ft);
+    BOOST_CHECK(!o.alt_geom_time);
+}
+
+BOOST_AUTO_TEST_CASE(lone_tc19_diff_keeps_its_time) {
+    Rig r;
+    r.feed(air(kP0, false, 10000), 0.0);
+    r.feed(air(kP0, true, 10000), 0.5);
+    r.feed(df17(kAddr, velocity(100, 0, 0, true, 300)), 1.0);
+    // 20 s on, a new identity emits an observation that carries the difference.
+    r.feed(df17(kAddr, identification(4, 3, "TEST1")), 20.9);
+    r.feed(df17(kAddr, identification(4, 3, "TEST2")), 21.0);
+    const auto& o = r.obs.back();
+    BOOST_REQUIRE(o.geom_minus_baro_ft && o.geom_minus_baro_time);
+    BOOST_CHECK_EQUAL(*o.geom_minus_baro_ft, 300);
+    BOOST_CHECK(*o.geom_minus_baro_time == at(1.0));
+    BOOST_CHECK(o.received_time - *o.geom_minus_baro_time >= std::chrono::seconds(19));
 }
 
 BOOST_AUTO_TEST_CASE(carried_value_keeps_its_own_time) {

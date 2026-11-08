@@ -47,7 +47,9 @@ def load(path):
 
 def shift(kind, src, dst):
     rows = load(src)
-    for i, hexid in enumerate(sorted(rows)):
+    # Every 20th address that has a position: shifting unpositioned rows would change nothing.
+    positioned = [h for h in sorted(rows) if "last" in rows[h]]
+    for i, hexid in enumerate(positioned):
         if i % 20:
             continue
         r = rows[hexid]
@@ -132,12 +134,14 @@ def compare(ours, theirs):
                 good += 1
             else:
                 print("%s differs: %s ours %s theirs %s" % (f, h, ov, tv))
-        r = good / n if n else 1.0
+        r = good / n if n else 0.0
         need = MIN_BY_FIELD.get(f, DYN_MIN)
         print("%s: %d of %d agree (%.2f %%, need %.0f %%)" % (f, good, n, 100 * r, 100 * need))
         if f in NOTE_BY_FIELD and good < n:
             print("  classification: %s" % NOTE_BY_FIELD[f])
-        ok &= r >= need
+        if n == 0:
+            print("  FAIL: no comparable rows for %s (a vacuous pass is not a pass)" % f)
+        ok &= n > 0 and r >= need
     print("observation counts (report only): positions ours %d theirs %d; addresses ours %d theirs %d" % (
         sum(r.get("positions", 0) for r in ours.values()), sum(r.get("positions", 0) for r in theirs.values()),
         len(ours), len(theirs)))

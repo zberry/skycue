@@ -47,8 +47,8 @@ GDAL=$tmp/gdal:$tmp/tools
 BARE=$tmp/tools
 
 maps=$tmp/maps
-conf=$tmp/skycue.conf
-printf '%s\n' '# test config' "MAP_DIR=$maps" 'RECEIVER_LAT=38.9' 'RECEIVER_LON=-77.0' > "$conf"
+conf=$tmp/skycue.toml
+printf '%s\n' '# test config' '[paths]' "map_dir = \"$maps\"" '[receiver]' 'lat = 38.9' 'lon = -77.0' > "$conf"
 if [ "$(id -u)" = 0 ]; then cache=/var/cache/skycue; else cache=$tmp/xdg/skycue; fi
 
 run() { # run PATH ARGS...: exit status in $rc; stdout, stderr, stub calls in $tmp/{out,err,calls}
@@ -148,29 +148,30 @@ read -r _ bbox _ <<<"$(call make-tiles.sh 2)"
 awk -v b="$bbox" 'BEGIN { split(b, a, ","); exit !(a[1] >= -180 && a[3] <= 180 && a[2] >= -85 && a[4] <= 85 && a[1] < a[3] && a[2] < a[4]) }' ||
   fail "--around 84 179.5 300: bbox $bbox not clamped"
 
-# 4. MAP_DIR: --map-dir, else the config's last assignment (quotes removed),
+# 4. paths.map_dir: --map-dir, else the config's value (quotes removed),
 # else exit 2 naming it. The receiver position likewise.
-printf '%s\n' 'RECEIVER_LAT=38.9' 'RECEIVER_LON=-77.0' > "$tmp/nomap.conf"
-run "$GDAL" --config "$tmp/nomap.conf" --preset conus --dry-run
+printf '%s\n' '[receiver]' 'lat = 38.9' 'lon = -77.0' > "$tmp/nomap.toml"
+run "$GDAL" --config "$tmp/nomap.toml" --preset conus --dry-run
 [ $rc -eq 2 ] || fail "no MAP_DIR: exit $rc, want 2"
-grep -q 'MAP_DIR' "$tmp/err" && grep -q -- '--map-dir' "$tmp/err" || fail "no MAP_DIR: stderr does not name MAP_DIR and --map-dir"
+grep -q 'paths.map_dir' "$tmp/err" && grep -q -- '--map-dir' "$tmp/err" || fail "no MAP_DIR: stderr does not name paths.map_dir and --map-dir"
 [ -s "$tmp/calls" ] && fail "no MAP_DIR: called a helper"
-run "$GDAL" --config "$tmp/nomap.conf" --map-dir "$tmp/m2" --preset conus --dry-run
+run "$GDAL" --config "$tmp/nomap.toml" --map-dir "$tmp/m2" --preset conus --dry-run
 [ $rc -eq 0 ] && grep -q -- "--out $tmp/m2/tiles " "$tmp/calls" || fail "--map-dir: not used"
-printf '%s\n' 'MAP_DIR=/nonexistent/one' "MAP_DIR=\"$tmp/m3\"" > "$tmp/twice.conf"
-run "$GDAL" --config "$tmp/twice.conf" --preset conus --dry-run
-[ $rc -eq 0 ] && grep -q -- "--out $tmp/m3/overlays " "$tmp/calls" || fail "MAP_DIR: the last, unquoted assignment is not used"
-printf '%s\n' "MAP_DIR=$maps" 'RECEIVER_LAT=' > "$tmp/nopos.conf"
-run "$GDAL" --config "$tmp/nopos.conf" --around 100 --dry-run
-[ $rc -eq 2 ] && grep -q RECEIVER_LAT "$tmp/err" && grep -q RECEIVER_LON "$tmp/err" ||
-  fail "--around without a position: exit $rc, want 2 naming RECEIVER_LAT and RECEIVER_LON"
-run "$GDAL" --config "$tmp/nopos.conf" --around 10 20 30 --dry-run
+# TOML has no last-wins: a key given twice is an error naming the line.
+printf '%s\n' '[paths]' 'map_dir = "/nonexistent/one"' "map_dir = \"$tmp/m3\"" > "$tmp/twice.toml"
+run "$GDAL" --config "$tmp/twice.toml" --preset conus --dry-run
+[ $rc -eq 2 ] && grep -q "$tmp/twice.toml:3" "$tmp/err" || fail "MAP_DIR given twice: exit $rc, want 2 naming the line"
+printf '%s\n' '[paths]' "map_dir = \"$maps\"" > "$tmp/nopos.toml"
+run "$GDAL" --config "$tmp/nopos.toml" --around 100 --dry-run
+[ $rc -eq 2 ] && grep -q receiver.lat "$tmp/err" && grep -q receiver.lon "$tmp/err" ||
+  fail "--around without a position: exit $rc, want 2 naming receiver.lat and receiver.lon"
+run "$GDAL" --config "$tmp/nopos.toml" --around 10 20 30 --dry-run
 [ $rc -eq 0 ] || fail "--around LAT LON R with no position in the config: exit $rc"
-printf '%s\n' "MAP_DIR=\$HOME/maps" > "$tmp/bad.conf"
-run "$GDAL" --config "$tmp/bad.conf" --preset conus --dry-run
-[ $rc -eq 2 ] && grep -q "$tmp/bad.conf:1" "$tmp/err" || fail "malformed config: exit $rc, want 2 naming the line"
-run "$GDAL" --config "$tmp/missing.conf" --preset conus --dry-run
-[ $rc -eq 2 ] && grep -q "$tmp/missing.conf" "$tmp/err" || fail "missing config: exit $rc, want 2"
+printf '%s\n' 'map_dir = $HOME/maps' > "$tmp/bad.toml"
+run "$GDAL" --config "$tmp/bad.toml" --preset conus --dry-run
+[ $rc -eq 2 ] && grep -q "$tmp/bad.toml:1" "$tmp/err" || fail "malformed config: exit $rc, want 2 naming the line"
+run "$GDAL" --config "$tmp/missing.toml" --preset conus --dry-run
+[ $rc -eq 2 ] && grep -q "$tmp/missing.toml" "$tmp/err" || fail "missing config: exit $rc, want 2"
 
 # 5. No GDAL and no container engine, a real run: exit 3 naming both routes.
 run "$BARE" --config "$conf" --preset conus
@@ -208,11 +209,11 @@ if [ "$(id -u)" = 0 ]; then
   echo "SKIP: running as root (unwritable map dir)"
 else
   mkdir -p "$tmp/ro"
-  printf '%s\n' "MAP_DIR=$tmp/ro/maps" 'RECEIVER_LAT=38.9' 'RECEIVER_LON=-77.0' > "$tmp/ro.conf"
+  printf '%s\n' '[paths]' "map_dir = \"$tmp/ro/maps\"" '[receiver]' 'lat = 38.9' 'lon = -77.0' > "$tmp/ro.toml"
   chmod 0555 "$tmp/ro"
   for p in "$GDAL" "$BARE"; do
     for dry in "" --dry-run; do
-      run "$p" --config "$tmp/ro.conf" --preset conus $dry
+      run "$p" --config "$tmp/ro.toml" --preset conus $dry
       [ $rc -eq 1 ] || fail "unwritable map dir (PATH $p $dry): exit $rc, want 1"
       grep -q "cannot write $tmp/ro" "$tmp/err" || fail "unwritable map dir: stderr lacks 'cannot write'"
       [ -s "$tmp/calls" ] && fail "unwritable map dir: called a helper"

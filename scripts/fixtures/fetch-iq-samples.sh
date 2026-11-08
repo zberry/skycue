@@ -77,11 +77,12 @@ print_command() {
 
 Run readsb on it in place of an SDR (real time, 18.2 s):
   readsb --device-type ifile --ifile $out --iformat UC8 --throttle ...
-The receiver position (readsb's --lat/--lon and RECEIVER_LAT/RECEIVER_LON in
-skycue.conf) must be near Porto, or readsb cannot place the aircraft and the
+The receiver position (readsb's --lat/--lon and receiver.lat/receiver.lon in
+skycue.toml) must be near Porto, or readsb cannot place the aircraft and the
 range filter drops them, e.g.
-  RECEIVER_LAT=41.15
-  RECEIVER_LON=-8.61
+  [receiver]
+  lat = 41.15
+  lon = -8.61
 EOF
 }
 

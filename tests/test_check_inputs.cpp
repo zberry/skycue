@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include "check_inputs.hpp"
+#include "conf_support.hpp"
 #include "engine_test_support.hpp"
 
 #include <boost/asio/io_context.hpp>
@@ -23,6 +24,8 @@ namespace asio = boost::asio;
 using asio::ip::tcp;
 
 namespace {
+
+using skycue_test::tomlConf;
 
 uint16_t closedPort()
 {
@@ -140,9 +143,9 @@ std::string runCheck(const std::string& conf, const std::string& inputs, int& st
     char dir[] = "/tmp/skycue-check-XXXXXX";
     BOOST_REQUIRE(mkdtemp(dir) != nullptr);
     const std::string d = dir;
-    std::ofstream(d + "/c.conf") << conf;
+    std::ofstream(d + "/c.toml") << conf;
     std::ofstream(d + "/i.json") << inputs;
-    const std::string cmd = std::string(SKYCUED_EXE) + " --config " + d + "/c.conf --inputs-file " + d +
+    const std::string cmd = std::string(SKYCUED_EXE) + " --config " + d + "/c.toml --inputs-file " + d +
                             "/i.json " + flags + " --check-inputs 2>&1";
     std::string out;
     FILE* p = popen(cmd.c_str(), "r");
@@ -151,7 +154,7 @@ std::string runCheck(const std::string& conf, const std::string& inputs, int& st
     while (fgets(buf, sizeof buf, p))
         out += buf;
     status = pclose(p);
-    std::remove((d + "/c.conf").c_str());
+    std::remove((d + "/c.toml").c_str());
     std::remove((d + "/i.json").c_str());
     rmdir(d.c_str());
     return out;
@@ -172,9 +175,11 @@ BOOST_AUTO_TEST_CASE(check_inputs_skycued_probes_beast_port_and_warns)
     const uint16_t beast = closedPort();
     const std::string inputs =
         R"({"version":1,"inputs":[{"id":"rs2","type":"readsb","host":"127.0.0.1","port":)" + std::to_string(closedPort()) + "}]}";
-    const std::string common = "RECEIVER_LAT=51.5\nRECEIVER_LON=-0.12\n";
+    const std::string common = tomlConf({{"receiver.lat", "51.5"}});
     int status = 0;
-    const std::string sky = runCheck(common + "TRACK_DECODER=skycued\nREADSB_BEAST_PORT=" + std::to_string(beast) + "\n",
+    const std::string sky = runCheck(tomlConf({{"receiver.lat", "51.5"},
+                                               {"inputs.decoder", "\"skycued\""},
+                                               {"inputs.readsb.beast_port", std::to_string(beast)}}),
                                      inputs, status);
     BOOST_TEST(countLines(sky, "WARN: TRACK_DECODER=skycued: input 'rs2' (readsb JSON) and input 'readsb' (beast_raw)") == 1u, sky);
     BOOST_TEST(sky.find("readsb 127.0.0.1:" + std::to_string(beast) + ": ") != std::string::npos, sky);
@@ -188,8 +193,9 @@ BOOST_AUTO_TEST_CASE(check_inputs_skycued_probes_beast_port_and_warns)
 
 BOOST_AUTO_TEST_CASE(check_inputs_skycued_warns_for_readsb_json_with_uat_raw)
 {
-    const std::string common = "RECEIVER_LAT=51.5\nRECEIVER_LON=-0.12\nTRACK_DECODER=skycued\nREADSB_BEAST_PORT=" +
-                               std::to_string(closedPort()) + "\n";
+    const std::string common = tomlConf({{"receiver.lat", "51.5"},
+                                         {"inputs.decoder", "\"skycued\""},
+                                         {"inputs.readsb.beast_port", std::to_string(closedPort())}});
     const std::string rs = R"({"id":"rs2","type":"readsb","host":"127.0.0.1","port":)" + std::to_string(closedPort()) + "}";
     const std::string uat = R"({"id":"u1","type":"uat_raw","transport":"udp","bind":"127.0.0.1","port":)" +
                             std::to_string(closedPort()) + "}";
@@ -206,6 +212,6 @@ BOOST_AUTO_TEST_CASE(check_inputs_skycued_warns_for_readsb_json_with_uat_raw)
     BOOST_TEST(countLines(c, "input 'rs2' (readsb JSON) and input 'dump978' (dump978)") == 1u, c);
     // Under the default decoder there is no WARN at all.
     int def = 0;
-    const std::string d = runCheck("RECEIVER_LAT=51.5\nRECEIVER_LON=-0.12\n", R"({"version":2,"inputs":[)" + rs + "," + uat + "]}", def);
+    const std::string d = runCheck(tomlConf({{"receiver.lat", "51.5"}}), R"({"version":2,"inputs":[)" + rs + "," + uat + "]}", def);
     BOOST_TEST(d.find("TRACK_DECODER") == std::string::npos, d);
 }

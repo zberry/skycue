@@ -3,13 +3,14 @@
 // The stubbed daemon fuzz_web and fuzz_ws answer API requests with: an
 // Engine with no recorders and no inputs, its InputManager in replay mode
 // (so every /api/inputs write is a 409 and no listener is ever opened), a
-// Forwarder that is never started, a RuntimeConfig on a skycue.conf of its
+// Forwarder that is never started, a RuntimeConfig on a skycue.toml of its
 // own and a DaemonInfo for GET /api/config. Header-only.
 //
 // The files live in a fresh directory under $SKYCUE_FUZZ_WORK/<target>/
 // (scripts/dev/run-fuzz.sh exports it), or, for a hand run without it, under
 // std::filesystem::temp_directory_path(); it is removed at exit.
 
+#include "conf_support.hpp"
 #include "config.hpp"
 #include "engine.hpp"
 #include "forwarder.hpp"
@@ -58,7 +59,7 @@ struct ApiStub {
     std::unique_ptr<skycued::RuntimeConfig> runtime;
 
     ApiStub(boost::asio::io_context& io_context, std::string directory)
-        : io(io_context), dir(std::move(directory)), conf(dir + "/skycue.conf"), www(dir + "/www")
+        : io(io_context), dir(std::move(directory)), conf(dir + "/skycue.toml"), www(dir + "/www")
     {
         daemon.version = "fuzz";
         daemon.config_path = conf;
@@ -75,7 +76,7 @@ struct ApiStub {
     }
 
     // Back to the starting state: every file the last requests wrote (the
-    // overlay, a rewritten skycue.conf, list files) removed, skycue.conf
+    // overlay, a rewritten skycue.toml, list files) removed, skycue.toml
     // written afresh and the Engine and RuntimeConfig built again on it.
     void reset()
     {
@@ -92,7 +93,7 @@ struct ApiStub {
         for (const auto& p : entries)
             fs::remove_all(p, ec);
         fs::create_directories(www);
-        std::ofstream(conf) << "RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\nWEB_PORT=0\nCUE_TCP_PORT=0\n";
+        std::ofstream(conf) << skycue_test::tomlConf({{"receiver.lat", "38.9"}, {"receiver.lon", "-77.0"}, {"web.port", "0"}, {"cues.tcp_port", "0"}});
 
         skycued::ForwarderConfig fc;
         fc.tcp_listen_ephemeral = true;

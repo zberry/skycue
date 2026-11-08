@@ -43,12 +43,16 @@ json_port=$(free_port udp)
 replay_port=$(free_port udp)
 listen_port=$(free_port tcp)
 mkdir -p "$tmp/rec"
-cat > "$tmp/skycue.conf" <<EOF
-RECEIVER_LAT=38.9
-RECEIVER_LON=-77.0
-CUE_TCP_PORT=0
-WEB_PORT=$web_port
-RECORD_DIR=$tmp/rec
+cat > "$tmp/skycue.toml" <<EOF
+[receiver]
+lat = 38.9
+lon = -77.0
+[cues]
+tcp_port = 0
+[web]
+port = $web_port
+[recording]
+dir = "$tmp/rec"
 EOF
 cat > "$tmp/inputs.json" <<EOF
 {"version":1,
@@ -58,7 +62,7 @@ cat > "$tmp/inputs.json" <<EOF
   {"id":"replayed","type":"pingstation_cat021","transport":"udp","bind":"127.0.0.1","port":$replay_port}
  ]}
 EOF
-"$skycued" --no-readsb --no-uat --inputs-file "$tmp/inputs.json" --config "$tmp/skycue.conf" \
+"$skycued" --no-readsb --no-uat --inputs-file "$tmp/inputs.json" --config "$tmp/skycue.toml" \
   >"$tmp/skycued.log" 2>&1 &
 bg_pids+=($!)
 base="http://127.0.0.1:$web_port"

@@ -109,12 +109,16 @@ tcp_port=$(free_port); uat_port=$(free_port); mc_port=$(free_port udp)
 group="239.255.$((RANDOM % 200 + 20)).$((RANDOM % 200 + 20))"
 base="http://127.0.0.1:$api_port"
 mkdir -p "$tmp/rec"
-cat > "$tmp/skycue.conf" <<EOF
-RECEIVER_LAT=38.9
-RECEIVER_LON=-77.0
-CUE_TCP_PORT=$cue_port
-WEB_PORT=$api_port
-RECORD_DIR=$tmp/rec
+cat > "$tmp/skycue.toml" <<EOF
+[receiver]
+lat = 38.9
+lon = -77.0
+[cues]
+tcp_port = $cue_port
+[web]
+port = $api_port
+[recording]
+dir = "$tmp/rec"
 EOF
 cat > "$tmp/hub.inputs.json" <<EOF
 {"version":2,
@@ -129,7 +133,7 @@ cat > "$tmp/hub.inputs.json" <<EOF
  "builtin":{}}
 EOF
 
-"$skycued" --no-readsb --no-uat --config "$tmp/skycue.conf" --inputs-file "$tmp/hub.inputs.json" \
+"$skycued" --no-readsb --no-uat --config "$tmp/skycue.toml" --inputs-file "$tmp/hub.inputs.json" \
   >"$tmp/skycued.log" 2>&1 &
 sk=$!; bg_pids+=("$sk")
 api_up() { curl -fs -o "$tmp/outputs.json" "$base/api/outputs"; }
@@ -190,7 +194,7 @@ echo "ok hub_counters_match"
 # --check-inputs dials every tcp_connect input once: the same file with the
 # beast_raw input pointed at the running daemon's TCP output, which accepts.
 sed "s/\"port\":$raw_port/\"port\":$tcp_port/" "$tmp/hub.inputs.json" > "$tmp/check.inputs.json"
-"$skycued" --no-readsb --no-uat --config "$tmp/skycue.conf" --inputs-file "$tmp/check.inputs.json" \
+"$skycued" --no-readsb --no-uat --config "$tmp/skycue.toml" --inputs-file "$tmp/check.inputs.json" \
   --check-inputs >"$tmp/check.out" 2>&1 || { cat "$tmp/check.out"; fail "hub_check_inputs_still_passes: exit $?"; }
 grep -q "lab 127.0.0.1:$tcp_port: connected" "$tmp/check.out" || { cat "$tmp/check.out"; fail "hub_check_inputs_still_passes: no connected line"; }
 echo "ok hub_check_inputs_still_passes"

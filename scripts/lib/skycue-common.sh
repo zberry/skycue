@@ -8,38 +8,46 @@
 # --container); each takes another image as --container IMAGE.
 SKYCUE_GDAL_IMAGE=ghcr.io/osgeo/gdal:ubuntu-small-3.9.3
 
-# load_config FILE [KEY...]: read FILE in the config grammar (see
-# packaging/skycue.conf.example): KEY=value, KEY="value" or KEY='value' lines,
-# blank lines and # comments. Nothing in the file is expanded or executed;
-# a later assignment of a key wins. Without KEYs, every key is assigned to
-# the shell variable of its name and must be one of $KNOWN_KEYS (the
-# caller's list). With KEYs, only those are assigned and other keys are
-# left alone (skycued checks them); every line is still checked.
+# load_config FILE VAR=table.key...: read FILE (skycue.toml: a strict subset of
+# TOML, see packaging/skycue.toml.example) for the keys asked for, each
+# assigned to its shell variable: load_config "$f" MAP_DIR=paths.map_dir.
+# Nothing in the file is expanded or executed. Tables, "basic strings" without
+# escapes, 'literal strings', numbers, true/false, arrays (skipped) and #
+# comments are read; a malformed line, or a key given twice, calls die with
+# the file and line. Keys not asked for are left to skycued, which checks them.
 load_config() {
-  local file=$1 line n=0 key val
+  local file=$1 line n=0 table="" spec var key val seen=" "
   shift
   local re_blank='^[[:space:]]*(#.*)?$'
-  local re_assign='^([A-Z][A-Z0-9_]*)=(.*)$'
-  local re_plain='^[A-Za-z0-9_.,:/+@%=-]*$'
-  local re_dquote='^"([^"$`\\]*)"$'
-  local re_squote="^'([^']*)'\$"
-  local known want=""
-  if [ $# -gt 0 ]; then want=" $* "; else known=" ${KNOWN_KEYS//$'\n'/ } "; fi
+  local re_table='^[[:space:]]*\[([A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*)\][[:space:]]*(#.*)?$'
+  local re_assign='^[[:space:]]*([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*(.*)$'
+  local re_dquote='^"([^"\\]*)"[[:space:]]*(#.*)?$'
+  local re_squote="^'([^']*)'[[:space:]]*(#.*)?\$"
+  local re_plain='^([A-Za-z0-9_.+-]+)[[:space:]]*(#.*)?$'
+  local re_array='^\['
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
+    line=${line%$'\r'}
     [[ $line =~ $re_blank ]] && continue
-    [[ $line =~ $re_assign ]] || die "$file:$n: malformed line (want KEY=value, KEY=\"value\" or KEY='value')"
+    if [[ $line =~ $re_table ]]; then table=${BASH_REMATCH[1]}; continue; fi
+    [[ $line =~ $re_assign ]] || die "$file:$n: malformed line (want [table] or key = value)"
     key=${BASH_REMATCH[1]} val=${BASH_REMATCH[2]}
+    [ -n "$table" ] && key=$table.$key
     if [[ $val =~ $re_dquote || $val =~ $re_squote ]]; then
       val=${BASH_REMATCH[1]}
-    elif ! [[ $val =~ $re_plain ]]; then
-      die "$file:$n: malformed value for $key (quote it; no \$, \`, \\ or nested quotes)"
-    fi
-    if [ -n "$want" ]; then
-      [[ $want == *" $key "* ]] || continue
+    elif [[ $val =~ $re_plain ]]; then
+      val=${BASH_REMATCH[1]}
+    elif [[ $val =~ $re_array ]]; then
+      val=""
     else
-      [[ $known == *" $key "* ]] || die "unknown key $key in $file"
+      die "$file:$n: malformed value for $key (a quoted string, a number or true/false; no \$, \` or \\)"
     fi
-    printf -v "$key" '%s' "$val"
+    [[ $seen == *" $key "* ]] && die "$file:$n: $key is given twice"
+    seen+="$key "
+    for spec in "$@"; do
+      [ "${spec#*=}" = "$key" ] || continue
+      var=${spec%%=*}
+      printf -v "$var" '%s' "$val"
+    done
   done < "$file"
 }

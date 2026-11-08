@@ -41,8 +41,8 @@ directory); extra arguments go to `playwright test`, e.g. `--grep
 range_change --project desktop-1920`. Every daemon it started is stopped
 however it ends, including on SIGINT, SIGTERM or SIGHUP.
 
-`run.sh` writes a temporary `skycue.conf` with free `WEB_PORT` and
-`CUE_TCP_PORT`, starts skycued with `--replay ... --replay-speed 1
+`run.sh` writes a temporary `skycue.toml` with free `web.port` and
+`cues.tcp_port`, starts skycued with `--replay ... --replay-speed 1
 --replay-loop --www-dir <www-stage>`, exports `SKYCUE_BASE_URL`,
 `SKYCUE_CONF_PATH`, `SKYCUE_START_CMD` and `SKYCUE_PID_FILE` (the reconnect
 case kills skycued and starts it again with that command), runs `npx
@@ -85,7 +85,7 @@ For the Receiver tab cases it starts one more skycued, `--no-readsb
    (an invalid value is marked); Enter on 20 sends one `PUT /api/filters`,
    shrinks the range ring, and the marker colours agree with `/api/state`.
 6. `save_baseline_confirms_and_clears_overlay`: Save as baseline asks for
-   confirmation, clears the overlay and writes `MAX_RANGE_NM` to the conf.
+   confirmation, clears the overlay and writes `filters.max_range_nm` to the conf.
 7. `reconnect_after_restart_converges`: kill and restart skycued; the
    banner appears and clears, the markers come back from the new snapshot
    and a marker skycued does not know is gone.

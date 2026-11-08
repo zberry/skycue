@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The live differential of skycued's own decoder against readsb on the 120 s Mode S
 # capture. Run (a): skycue-rawplay plays the capture once at speed 1 as Beast frames;
-# skycued (TRACK_DECODER=skycued, a beast_raw input; the config requires a receiver position, which becomes the decoder's reference) decodes
+# skycued (inputs.decoder = "skycued", a beast_raw input; the config requires a receiver position, which becomes the decoder's reference) decodes
 # it and records the received stream as JSONL; reduce_received.py reduces that to
 # the shape of the golden. Run (b), only when SKYCUE_READSB names a readsb
 # executable: gen_raw_golden.sh makes a fresh golden from the same capture. Ours is
@@ -49,14 +49,19 @@ fi
 # ---- run (a): skycued decodes the capture --------------------------------------
 raw_port=$(free_port); cue_port=$(free_port); api_port=$(free_port)
 mkdir -p "$tmp/rec"
-cat > "$tmp/skycue.conf" <<EOF
-RECEIVER_LAT=51.7
-RECEIVER_LON=4.1
-TRACK_DECODER=skycued
-CUE_TCP_PORT=$cue_port
-WEB_PORT=$api_port
-RECORD_DIR=$tmp/rec
-RECORD_FORMATS=jsonl
+cat > "$tmp/skycue.toml" <<EOF
+[receiver]
+lat = 51.7
+lon = 4.1
+[inputs]
+decoder = "skycued"
+[cues]
+tcp_port = $cue_port
+[web]
+port = $api_port
+[recording]
+dir = "$tmp/rec"
+formats = ["jsonl"]
 EOF
 cat > "$tmp/diff.inputs.json" <<EOF
 {"version":2,
@@ -68,7 +73,7 @@ cat > "$tmp/diff.inputs.json" <<EOF
 EOF
 "$rawplay" --1090-listen "$raw_port" --wait-clients 1 --speed 1 "$csv" >"$tmp/play.log" 2>&1 &
 play=$!; bg_pids+=("$play")
-"$skycued" --no-readsb --no-uat --config "$tmp/skycue.conf" --inputs-file "$tmp/diff.inputs.json" \
+"$skycued" --no-readsb --no-uat --config "$tmp/skycue.toml" --inputs-file "$tmp/diff.inputs.json" \
   >"$tmp/skycued.log" 2>&1 &
 sk=$!; bg_pids+=("$sk")
 api_up() { curl -fs -o /dev/null "http://127.0.0.1:$api_port/api/outputs"; }

@@ -194,32 +194,36 @@ wait_port() {
 # --- the instances -----------------------------------------------------------
 conf() {  # conf FILE WEB_PORT CUE_PORT
   cat > "$1" <<EOF
-RECEIVER_LAT=38.9
-RECEIVER_LON=-77.0
-WEB_PORT=$2
-CUE_TCP_PORT=$3
-MAX_RANGE_NM=150
-MIN_ELEVATION_DEG=0
-TRAIL_SECONDS=120
+[receiver]
+lat = 38.9
+lon = -77.0
+[web]
+port = $2
+trail_seconds = 120
+[cues]
+tcp_port = $3
+[filters]
+max_range_nm = 150
+min_elevation_deg = 0
 EOF
 }
 
-# WEB_PORT=0 and CUE_TCP_PORT=0 turn the listeners off, so each gets a free
+# web.port = 0 and cues.tcp_port = 0 turn the listeners off, so each gets a free
 # ephemeral port here; the daemon's own log line is still what the clients use.
 for inst in A B; do
   wp=$(free_port tcp) && cp=$(free_port tcp) || fail "no free port for $inst"
   mkdir -p "$work/$inst" || fail "work dir for $inst"
-  conf "$work/$inst/skycue.conf" "$wp" "$cp"
+  conf "$work/$inst/skycue.toml" "$wp" "$cp"
 done
 
 ps_port=$(free_port udp) || fail "no free UDP port for the pingstation input"
 printf '{"version":1,"inputs":[{"id":"ps-sim","name":"pingsim","type":"pingstation_json","bind":"127.0.0.1","port":%s}]}\n' \
   "$ps_port" > "$work/B/inputs.json"
 
-"$skycued" --replay "$fisb_rec" --replay-loop --config "$work/A/skycue.conf" --www-dir "$www" \
+"$skycued" --replay "$fisb_rec" --replay-loop --config "$work/A/skycue.toml" --www-dir "$www" \
   </dev/null >"$out/A.log" 2>&1 &
 record A $!
-"$skycued" --no-readsb --no-uat --inputs-file "$work/B/inputs.json" --config "$work/B/skycue.conf" \
+"$skycued" --no-readsb --no-uat --inputs-file "$work/B/inputs.json" --config "$work/B/skycue.toml" \
   --www-dir "$www" </dev/null >"$out/B.log" 2>&1 &
 record B $!
 

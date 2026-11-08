@@ -1,7 +1,7 @@
 // libFuzzer harness: the parsers of the operator's files, all on text in
 // memory (no file is read or written). Mode byte (fuzz_util.hpp splitMode),
 // then the payload:
-//   0  parseConfigText (skycue.conf, config.hpp) and toml_lite::parse
+//   0  parseConfigText (skycue.toml, config.hpp) and toml_lite::parse
 //      (skycue.toml, toml_lite.hpp); a document that parses has formatValue of
 //      each value read back equal
 //   1  parseInputsFile (skycue.inputs.json, inputs/inputs_file.hpp); a file

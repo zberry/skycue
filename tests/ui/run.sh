@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ctest ui_playwright: the Playwright suite (ui.spec.js) in headless Chromium
 # against a skycued replaying the readsb JSON fixture in real time, on
-# ephemeral web/cue ports with a temporary skycue.conf, and two more for the
+# ephemeral web/cue ports with a temporary skycue.toml, and two more for the
 # FIS-B cases, each replaying a received recording with uplinks unpaced:
 # fisb/received-with-uplinks.jsonl (2015: text, NOTAMs) and
 # fisb/received-tg30.jsonl (2020: NEXRAD, rasters). Dev machines only:
@@ -86,24 +86,37 @@ free_port() {
 }
 web_port=$(free_port)
 cue_port=$(free_port)
-cat > "$tmp/skycue.conf" <<EOF
-RECEIVER_LAT=38.9
-RECEIVER_LON=-77.0
-CUE_TCP_PORT=$cue_port
-WEB_PORT=$web_port
-MAX_RANGE_NM=150
-MIN_ELEVATION_DEG=0
-TRAIL_SECONDS=120
-STATS_FILE=
-EOF
-# STATS_FILE empty: the statistics live in memory only, so the reconnect
+# write_conf FILE WEB_PORT CUE_PORT STATS_FILE [EXTRA_TABLES [EXTRA_CUES_LINES]]: the one
+# conf shape every skycued here uses; EXTRA_TABLES is whole [tables] (not
+# [cues]), EXTRA_CUES_LINES are further keys of [cues].
+write_conf() {
+  cat > "$1" <<EOC
+[receiver]
+lat = 38.9
+lon = -77.0
+[cues]
+tcp_port = $3
+$6
+[web]
+port = $2
+trail_seconds = 120
+[filters]
+max_range_nm = 150
+min_elevation_deg = 0
+[stats]
+file = "$4"
+$5
+EOC
+}
+write_conf "$tmp/skycue.toml" "$web_port" "$cue_port" ""
+# stats.file empty: the statistics live in memory only, so the reconnect
 # case's restart starts them again with the replay's clock (a ledger
 # reloaded from a file is ahead of that clock, and the Stats view's
 # "aircraft in range" reads 0 until the replay catches up).
 
 # The spec restarts skycued (reconnect case) with this same command; `exec`
 # keeps the PID the one of skycued itself, written to $pidfile.
-start_cmd="echo \$\$ > '$pidfile'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/skycue.conf' --www-dir '$www' >>'$tmp/skycued.log' 2>&1"
+start_cmd="echo \$\$ > '$pidfile'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/skycue.toml' --www-dir '$www' >>'$tmp/skycued.log' 2>&1"
 bash -c "$start_cmd" &
 base="http://127.0.0.1:$web_port"
 up=0
@@ -123,15 +136,19 @@ done
 start_fisb() {
   local name=$1 rec=$2 lat=$3 lon=$4 port i
   port=$(free_port)
-  cat > "$tmp/$name.conf" <<EOC
-RECEIVER_LAT=$lat
-RECEIVER_LON=$lon
-CUE_TCP_PORT=0
-WEB_PORT=$port
-MAX_RANGE_NM=150
-MIN_ELEVATION_DEG=0
+  cat > "$tmp/$name.toml" <<EOC
+[receiver]
+lat = $lat
+lon = $lon
+[cues]
+tcp_port = 0
+[web]
+port = $port
+[filters]
+max_range_nm = 150
+min_elevation_deg = 0
 EOC
-  bash -c "echo \$\$ > '$tmp/$name.pid'; exec '$skycued' --replay '$rec' --replay-speed 0 --config '$tmp/$name.conf' --www-dir '$www' >>'$tmp/$name.log' 2>&1" </dev/null >/dev/null 2>&1 &
+  bash -c "echo \$\$ > '$tmp/$name.pid'; exec '$skycued' --replay '$rec' --replay-speed 0 --config '$tmp/$name.toml' --www-dir '$www' >>'$tmp/$name.log' 2>&1" </dev/null >/dev/null 2>&1 &
   for (( i=0; i<100; i++ )); do
     python3 -I -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)' \
       "http://127.0.0.1:$port/api/stats" 2>/dev/null && { echo "http://127.0.0.1:$port"; return 0; }
@@ -225,8 +242,8 @@ EOP
 printf '%s\n' '{"minZoom":0,"maxZoom":6,"bbox":[-180,-85,180,85],"regions":[{"name":"coarse","bbox":[-180,-85,180,85],"minZoom":0,"maxZoom":2},{"name":"spot","bbox":[-75.9375,30,-73.125,45],"minZoom":6,"maxZoom":6}]}' \
   > "$tiles_www/tiles/meta.json"
 tiles_port=$(free_port)
-sed -e "s/^WEB_PORT=.*/WEB_PORT=$tiles_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/tiles.conf"
-bash -c "echo \$\$ > '$tmp/fisb-tiles.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/tiles.conf' --www-dir '$tiles_www' >>'$tmp/tiles.log' 2>&1" </dev/null >/dev/null 2>&1 &
+write_conf "$tmp/tiles.toml" "$tiles_port" 0 ""
+bash -c "echo \$\$ > '$tmp/fisb-tiles.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/tiles.toml' --www-dir '$tiles_www' >>'$tmp/tiles.log' 2>&1" </dev/null >/dev/null 2>&1 &
 tiles_base="http://127.0.0.1:$tiles_port"
 up=0
 for (( i=0; i<100; i++ )); do
@@ -246,8 +263,8 @@ for f in "$tiles_www"/*; do
 done
 cp "$tiles_www/overlays/meta.json" "$tiles_www/overlays/admin0.json" "$ov_www/overlays/" || fail "overlays-only fixture"
 ov_port=$(free_port)
-sed -e "s/^WEB_PORT=.*/WEB_PORT=$ov_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/overlays.conf"
-bash -c "echo \$\$ > '$tmp/fisb-overlays.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/overlays.conf' --www-dir '$ov_www' >>'$tmp/overlays.log' 2>&1" </dev/null >/dev/null 2>&1 &
+write_conf "$tmp/overlays.toml" "$ov_port" 0 ""
+bash -c "echo \$\$ > '$tmp/fisb-overlays.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/overlays.toml' --www-dir '$ov_www' >>'$tmp/overlays.log' 2>&1" </dev/null >/dev/null 2>&1 &
 ov_base="http://127.0.0.1:$ov_port"
 up=0
 for (( i=0; i<100; i++ )); do
@@ -260,18 +277,18 @@ done
 # (pingstation_json on a free UDP port), and skycue-pingsim sending to it.
 rx_port=$(free_port)
 ps_port=$(python3 -I -c 'import socket; s = socket.socket(type=socket.SOCK_DGRAM); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-mkdir -p "$tmp/rx-record" || fail "receivers RECORD_DIR"
-sed -e "s/^WEB_PORT=.*/WEB_PORT=$rx_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/receivers.conf"
-echo "RECORD_DIR=$tmp/rx-record" >> "$tmp/receivers.conf"
+mkdir -p "$tmp/rx-record" || fail "receivers recording directory"
 # One cue destination, so the Outputs section has a built-in cue output (cue-udp-1)
 # to list; nothing listens there.
-echo "CUE_UDP_TARGETS=127.0.0.1:$(python3 -I -c 'import socket; s = socket.socket(type=socket.SOCK_DGRAM); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')" >> "$tmp/receivers.conf"
+rx_udp_port=$(python3 -I -c 'import socket; s = socket.socket(type=socket.SOCK_DGRAM); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+write_conf "$tmp/receivers.toml" "$rx_port" 0 "" "[recording]
+dir = \"$tmp/rx-record\"" "udp_targets = [\"127.0.0.1:$rx_udp_port\"]"
 # One beast tcp_listen output on a free port (the specs read it from
 # SKYCUE_RX_OUTPUT_PORT); it makes the file a version 2 one.
 rx_out_port=$(free_port)
 printf '{"version":2,"inputs":[{"id":"ps-sim","name":"pingsim","type":"pingstation_json","bind":"127.0.0.1","port":%s}],"outputs":[{"id":"beast-out","name":"Beast out","kind":"beast","transport":"tcp_listen","bind":"127.0.0.1","port":%s}]}\n' \
   "$ps_port" "$rx_out_port" > "$tmp/receivers.inputs.json"
-bash -c "echo \$\$ > '$tmp/receivers.pid'; exec '$skycued' --config '$tmp/receivers.conf' --no-readsb --no-uat --inputs-file '$tmp/receivers.inputs.json' --www-dir '$www' >>'$tmp/receivers.log' 2>&1" </dev/null >/dev/null 2>&1 &
+bash -c "echo \$\$ > '$tmp/receivers.pid'; exec '$skycued' --config '$tmp/receivers.toml' --no-readsb --no-uat --inputs-file '$tmp/receivers.inputs.json' --www-dir '$www' >>'$tmp/receivers.log' 2>&1" </dev/null >/dev/null 2>&1 &
 rx_base="http://127.0.0.1:$rx_port"
 up=0
 for (( i=0; i<100; i++ )); do
@@ -286,10 +303,8 @@ bash -c "echo \$\$ > '$tmp/pingsim.pid'; exec '$pingsim' --udp '127.0.0.1:$ps_po
 # a-restart case: the spec stops it and starts it again with this command
 # (the replay's clock then starts over behind the reloaded series).
 st_port=$(free_port)
-sed -e "s/^WEB_PORT=.*/WEB_PORT=$st_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" -e "s/^STATS_FILE=.*/STATS_FILE=stats.json/" \
-  "$tmp/skycue.conf" > "$tmp/stats.conf"
-echo "STATS_SAVE_S=10" >> "$tmp/stats.conf"
-st_start_cmd="echo \$\$ > '$tmp/stats.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 20 --replay-loop --config '$tmp/stats.conf' --www-dir '$www' >>'$tmp/stats.log' 2>&1"
+write_conf "$tmp/stats.toml" "$st_port" 0 "stats.json" "save_s = 10"
+st_start_cmd="echo \$\$ > '$tmp/stats.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 20 --replay-loop --config '$tmp/stats.toml' --www-dir '$www' >>'$tmp/stats.log' 2>&1"
 bash -c "$st_start_cmd" </dev/null >/dev/null 2>&1 &
 st_base="http://127.0.0.1:$st_port"
 up=0
@@ -302,7 +317,7 @@ done
 out_dir=$(dirname "$www")/ui-test-results
 rm -rf "$out_dir"
 export SKYCUE_BASE_URL="$base"
-export SKYCUE_CONF_PATH="$tmp/skycue.conf"
+export SKYCUE_CONF_PATH="$tmp/skycue.toml"
 export SKYCUE_START_CMD="$start_cmd"
 export SKYCUE_PID_FILE="$pidfile"
 [ -n "$fisb_base" ] && export SKYCUE_FISB_URL="$fisb_base"

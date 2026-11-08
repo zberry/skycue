@@ -40,13 +40,16 @@ for f in "$skycued" "$replay" "$www/index.html" "$www/app.js" "$www/app_pure.js"
 done
 
 web_port=$(free_port)
-cat > "$tmp/skycue.conf" <<EOF
-RECEIVER_LAT=38.9
-RECEIVER_LON=-77.0
-CUE_TCP_PORT=0
-WEB_PORT=$web_port
+cat > "$tmp/skycue.toml" <<EOF
+[receiver]
+lat = 38.9
+lon = -77.0
+[cues]
+tcp_port = 0
+[web]
+port = $web_port
 EOF
-"$skycued" --replay "$replay" --replay-speed 1 --replay-loop --config "$tmp/skycue.conf" \
+"$skycued" --replay "$replay" --replay-speed 1 --replay-loop --config "$tmp/skycue.toml" \
   --www-dir "$www" >"$tmp/skycued.log" 2>&1 &
 pid=$!
 base="http://127.0.0.1:$web_port"

@@ -4,7 +4,7 @@
 # headers and the CMake package config always; with SKYCUE_INSTALL_SYSTEM_FILES
 # also the map scripts with their front bin/skycue-make-maps (which must find
 # them and run them, --dry-run, on the map dir it is given), the config (the
-# example, or with SKYCUE_PACKAGE_CONFIG the packaged skycue.conf) and the
+# example, or with SKYCUE_PACKAGE_CONFIG the packaged skycue.toml) and the
 # skycued unit, whose ExecStart names this build's own bindir and sysconfdir;
 # without it none of those (a parent build's layout). Nothing is installed outside the prefix except the config
 # and the unit, and no map tiles or overlays are installed at all.
@@ -44,9 +44,9 @@ done
 
 case $unitdir in /*) unit=$unitdir/skycued.service ;; *) unit=$prefix/$unitdir/skycued.service ;; esac
 if is_on "$package_config"; then
-  conf=$sysconfdir/skycue/skycue.conf other=$sysconfdir/skycue/skycue.conf.example
+  conf=$sysconfdir/skycue/skycue.toml other=$sysconfdir/skycue/skycue.toml.example
 else
-  conf=$sysconfdir/skycue/skycue.conf.example other=$sysconfdir/skycue/skycue.conf
+  conf=$sysconfdir/skycue/skycue.toml.example other=$sysconfdir/skycue/skycue.toml
 fi
 scripts=share/skycue/scripts
 
@@ -68,17 +68,17 @@ if is_on "$system_files"; then
   [ -e "$work/maps" ] && fail "installed skycue-make-maps --dry-run created the map dir"
   [ -f "$root$conf" ] || fail "not installed: $conf"
   [ -e "$root$other" ] && fail "installed $other as well as $conf"
-  grep -q '^RECEIVER_LAT=$' "$root$conf" || fail "$conf has no empty RECEIVER_LAT="
+  grep -Eq '^lat = 0\.0( |$)' "$root$conf" || fail "$conf has no lat = 0.0"
   if is_on "$package_config"; then
-    grep -qx 'STATE_DIR=/var/lib/skycue' "$root$conf" || fail "$conf is not the packaged config"
+    grep -qx 'state_dir = "/var/lib/skycue"' "$root$conf" || fail "$conf is not the packaged config"
   else
-    cmp -s "$root$conf" "$(dirname "$0")/../packaging/skycue.conf.example" \
+    cmp -s "$root$conf" "$(dirname "$0")/../packaging/skycue.toml.example" \
       || fail "$conf is not the example as it is in etc/"
   fi
   [ -f "$root$unit" ] || fail "not installed: $unit"
   u=$root$unit
   grep -q '@' "$u" && fail "$unit has an unexpanded @VAR@: $(grep '@' "$u")"
-  exec_want="ExecStart=$bindir/skycued --config $sysconfdir/skycue/skycue.conf"
+  exec_want="ExecStart=$bindir/skycued --config $sysconfdir/skycue/skycue.toml"
   [ "$(grep '^ExecStart=' "$u")" = "$exec_want" ] \
     || fail "$unit: $(grep '^ExecStart=' "$u"), want $exec_want"
   case $bindir$sysconfdir in *//*|*/./*|*/../*) fail "unnormalised path in $exec_want" ;; esac
@@ -98,7 +98,7 @@ else
   for f in "$conf" "$other" "$unit"; do
     [ -e "$root$f" ] && fail "SKYCUE_INSTALL_SYSTEM_FILES=OFF installed $f"
   done
-  [ -n "$(cd "$root" && find . -name 'skycued.service' -o -name 'skycue.conf*')" ] \
+  [ -n "$(cd "$root" && find . -name 'skycued.service' -o -name 'skycue.toml*')" ] \
     && fail "SKYCUE_INSTALL_SYSTEM_FILES=OFF installed a unit or config"
   allowed_outside=()
 fi

@@ -93,8 +93,8 @@ n=$(grep -c '^(skipped: receiver position unknown; pass --lat/--lon or --config)
 "$stats" --json "$sample" | python3 -I -c 'import json,sys; d=json.load(sys.stdin)
 assert d["range_histogram"] is None and d["elevation_histogram"] is None and d["azimuth"] is None
 assert d["altitude_histogram"] is not None' || fail "(e) --json without receiver"
-printf 'RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\n' >"$tmp/rx.conf"
-"$stats" --config "$tmp/rx.conf" "$sample" >"$tmp/e2.out" 2>&1 || { cat "$tmp/e2.out"; fail "(e2) exit"; }
+printf '[receiver]\nlat = 38.9\nlon = -77.0\n' >"$tmp/rx.toml"
+"$stats" --config "$tmp/rx.toml" "$sample" >"$tmp/e2.out" 2>&1 || { cat "$tmp/e2.out"; fail "(e2) exit"; }
 grep -q '^Receiver: 38.900000, -77.000000 (from --config' "$tmp/e2.out" || { cat "$tmp/e2.out"; fail "(e2) receiver"; }
 diff <(grep -v '^Receiver:' "$tmp/a.out") <(grep -v '^Receiver:' "$tmp/e2.out") >/dev/null ||
   { diff "$tmp/a.out" "$tmp/e2.out"; fail "(e2) --config report differs from --lat/--lon"; }
@@ -108,17 +108,21 @@ diff <(grep -v '^Receiver:' "$tmp/a.out") <(grep -v '^Receiver:' "$tmp/e2.out") 
 [ "$rc" -eq 1 ] || fail "(f) missing file: exit $rc, want 1"
 
 # ---- (g) recordings from a real skycued ----------------------------------------
-# TRACK_TIMEOUT_S=1: once the replay ends the tracks drop (source_lost) quickly.
-cat >"$tmp/skycue.conf" <<EOF
-RECEIVER_LAT=38.9
-RECEIVER_LON=-77.0
-CUE_TCP_PORT=0
-WEB_PORT=0
-RECORD_DIR=$tmp/rec
-RECORD_FORMATS=jsonl
-TRACK_TIMEOUT_S=1
+# cues.track_timeout_s = 1: once the replay ends the tracks drop (source_lost) quickly.
+cat >"$tmp/skycue.toml" <<EOF
+[receiver]
+lat = 38.9
+lon = -77.0
+[cues]
+tcp_port = 0
+track_timeout_s = 1
+[web]
+port = 0
+[recording]
+dir = "$tmp/rec"
+formats = ["jsonl"]
 EOF
-"$skycued" --replay "$sample" --replay-speed 50 --config "$tmp/skycue.conf" >"$tmp/skycued.log" 2>&1 &
+"$skycued" --replay "$sample" --replay-speed 50 --config "$tmp/skycue.toml" >"$tmp/skycued.log" 2>&1 &
 pid=$!
 bg_pids+=($pid)
 slow_sleep 5

@@ -1,6 +1,7 @@
 #define BOOST_TEST_MODULE skycued_engine_api
 #include <boost/test/unit_test.hpp>
 
+#include "conf_support.hpp"
 #include "engine_events.hpp"
 #include "engine_test_support.hpp"
 #include "filters.hpp"
@@ -553,9 +554,9 @@ struct ApiFx {
 
     explicit ApiFx(bool replaying = false)
     {
-        conf = tmp.path + "/skycue.conf";
+        conf = tmp.path + "/skycue.toml";
         inputs_file = tmp.path + "/skycue.inputs.json";
-        std::ofstream(conf) << "RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\nTRACK_TIMEOUT_S=5\n";
+        std::ofstream(conf) << skycue_test::tomlConf({{"receiver.lat", "38.9"}, {"receiver.lon", "-77.0"}, {"cues.track_timeout_s", "5"}});
         std::function<std::unique_ptr<InputManager>(asio::io_context&)> make = [this, replaying](
                                                                                    asio::io_context& io) {
             auto s = std::make_unique<FakeSource>();

@@ -5,6 +5,7 @@
 // (docs/web-api.md "FIS-B"), over an Engine replaying
 // fixtures/fisb/received-with-uplinks.jsonl (2015 uplinks) unpaced.
 
+#include "conf_support.hpp"
 #include "engine_test_support.hpp"
 #include "restricted_fixtures.hpp"
 
@@ -199,13 +200,16 @@ struct FisbWebFx {
 
     explicit FisbWebFx(const FisbWebOptions& o = FisbWebOptions())
     {
-        const std::string conf = tmp.path + "/skycue.conf";
+        const std::string conf = tmp.path + "/skycue.toml";
         const std::string www = tmp.path + "/www";
         ::mkdir(www.c_str(), 0755);
         writeFile(www + "/index.html", "<!doctype html><title>t</title>\n");
-        writeFile(conf, std::string("RECEIVER_LAT=38.9\nRECEIVER_LON=-77.0\nRECEIVER_ALT_M=100\n"
-                                    "ANTENNA_HEIGHT_M=5\nTRACK_TIMEOUT_S=5\nFISB_ENABLE=") +
-                            (o.fisb ? "yes" : "no") + "\n");
+        writeFile(conf, skycue_test::tomlConf({{"receiver.lat", "38.9"},
+                                               {"receiver.lon", "-77.0"},
+                                               {"receiver.alt_m", "100"},
+                                               {"receiver.antenna_height_m", "5"},
+                                               {"cues.track_timeout_s", "5"},
+                                               {"fisb.enable", o.fisb ? "true" : "false"}}));
         const Config cfg = skycued::parseConfigFile(conf);
         t.call([&] {
             ForwarderConfig fc;

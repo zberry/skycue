@@ -4,7 +4,7 @@
 # --timeout, and against a python peer that sends hand-made frames: heartbeats,
 # a malformed TrackUpdate (BAD), a drop for an unknown track, then a hang-up
 # (CONN down, LOCAL-DROP), with only frame lines counting towards --count;
-# and --tcp-listen with a second skycued that has no listener (CUE_TCP_PORT=0)
+# and --tcp-listen with a second skycued that has no listener (cues.tcp_port = 0)
 # and connects out to the dump (CUE_TCP_CONNECT).
 # usage: test_dump.sh SKYCUED SKYCUE_DUMP FIXTURE_DIR
 set -u
@@ -33,16 +33,19 @@ for f in "$skycued" "$dump" "$replay"; do [ -e "$f" ] || fail "$f missing"; done
 
 tcp_port=$(free_port tcp)
 udp_port=$(free_port udp)
-# KEYFRAME_INTERVAL_S=2: UDP targets get a Hello before every keyframe burst.
-cat > "$tmp/skycue.conf" <<EOF
-RECEIVER_LAT=38.9
-RECEIVER_LON=-77.0
-CUE_TCP_PORT=$tcp_port
-WEB_PORT=0
-CUE_UDP_TARGETS=127.0.0.1:$udp_port
-KEYFRAME_INTERVAL_S=2
+# cues.keyframe_interval_s = 2: UDP targets get a Hello before every keyframe burst.
+cat > "$tmp/skycue.toml" <<EOF
+[receiver]
+lat = 38.9
+lon = -77.0
+[cues]
+tcp_port = $tcp_port
+udp_targets = ["127.0.0.1:$udp_port"]
+keyframe_interval_s = 2
+[web]
+port = 0
 EOF
-"$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue.conf" \
+"$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue.toml" \
   >"$tmp/skycued.log" 2>&1 &
 bg_pids+=($!)
 
@@ -189,17 +192,20 @@ assert all("counted" not in x for x in o[1:9])' < "$tmp/e3.out" || { cat "$tmp/e
 
 # ---- (f) --tcp-listen: a skycued with no listener connects out to the dump -----
 listen_port=$(free_port tcp)
-cat > "$tmp/skycue-out.conf" <<EOF
-RECEIVER_LAT=38.9
-RECEIVER_LON=-77.0
-CUE_TCP_PORT=0
-WEB_PORT=0
-CUE_TCP_CONNECT=127.0.0.1:$listen_port
-KEYFRAME_INTERVAL_S=2
+cat > "$tmp/skycue-out.toml" <<EOF
+[receiver]
+lat = 38.9
+lon = -77.0
+[cues]
+tcp_port = 0
+tcp_connect = ["127.0.0.1:$listen_port"]
+keyframe_interval_s = 2
+[web]
+port = 0
 EOF
 timeout $((30*slowf)) "$dump" --tcp-listen "127.0.0.1:$listen_port" --count 10 --timeout $((15*slowf)) >"$tmp/f.out" 2>"$tmp/f.err" &
 dump_pid=$!
-"$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue-out.conf" \
+"$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue-out.toml" \
   >"$tmp/skycued-out.log" 2>&1 &
 bg_pids+=($!)
 wait "$dump_pid"

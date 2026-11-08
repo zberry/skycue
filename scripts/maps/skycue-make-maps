@@ -3,27 +3,27 @@
 #                  (--preset conus|europe|world | --around RADIUS_NM | --around LAT LON RADIUS_NM
 #                   | --bbox W,S,E,N --zoom MINZ-MAXZ)
 # skycue-make-maps [--config FILE] [--map-dir DIR] --list
-# Bakes the web map's tiles and overlays into the MAP_DIR skycued serves
-# them from (<MAP_DIR>/tiles, <MAP_DIR>/overlays), with make-tiles.sh and
+# Bakes the web map's tiles and overlays into the map dir (paths.map_dir) skycued serves
+# them from (<map dir>/tiles, <map dir>/overlays), with make-tiles.sh and
 # make-overlays.sh. Run it on a machine with network access: it downloads
 # the Natural Earth data (about 310 MB) once into the cache.
 # Runs add up, as docs/make-tiles.md describes: each run first makes sure
 # the coarse whole-world base region (global, zoom 0-5) is there, baking it
-# only when <MAP_DIR>/tiles/meta.json has no region named global, then bakes
+# only when <map dir>/tiles/meta.json has no region named global, then bakes
 # the region asked for at finer zooms, merged into the same directory:
 #   --preset conus     the contiguous US, zoom 6-8
 #   --preset europe    Europe, zoom 6-8
 #   --preset world     the base region alone
-#   --around RADIUS_NM            the receiver (RECEIVER_LAT, RECEIVER_LON in
+#   --around RADIUS_NM            the receiver (receiver.lat, receiver.lon in
 #                                 the config) out to RADIUS_NM, zoom 6-9
 #   --around LAT LON RADIUS_NM    the same around another point
 #   --bbox W,S,E,N --zoom MINZ-MAXZ  any box and zoom range (region "bbox")
 # then the overlays (borders, cities; about 1 MB). Each region keeps its name
 # in meta.json; running the same one again replaces only its entry there
 # (see docs/make-tiles.md for re-cutting).
-#   --config FILE       the skycue config (default /etc/skycue/skycue.conf),
-#                       for MAP_DIR and the receiver position
-#   --map-dir DIR       the map directory instead of the config's MAP_DIR
+#   --config FILE       the skycue config (default /etc/skycue/skycue.toml),
+#                       for paths.map_dir and the receiver position
+#   --map-dir DIR       the map directory instead of the config's paths.map_dir
 #   --cache DIR         where the downloads are kept (default /var/cache/skycue
 #                       as root, else ${XDG_CACHE_HOME:-~/.cache}/skycue)
 #   --container [IMAGE] run GDAL from a container image with podman or docker
@@ -72,7 +72,7 @@ done
 # shellcheck source=../lib/skycue-common.sh
 . "$common" # load_config, SKYCUE_GDAL_IMAGE
 
-config=/etc/skycue/skycue.conf
+config=/etc/skycue/skycue.toml
 map= cache= image= owner= mode= preset= bbox= zoom=
 container=0 dry=0 list=0
 around=()
@@ -147,12 +147,12 @@ if [ -n "$owner" ]; then id -u "$owner" >/dev/null 2>&1 || bad "no user '$owner'
 if [ -z "$map" ] || [ ${#around[@]} = 1 ]; then
   [ -f "$config" ] && [ -r "$config" ] || die "cannot read $config (pass --config FILE, or --map-dir DIR)"
   MAP_DIR= RECEIVER_LAT= RECEIVER_LON=
-  load_config "$config" MAP_DIR RECEIVER_LAT RECEIVER_LON
+  load_config "$config" MAP_DIR=paths.map_dir RECEIVER_LAT=receiver.lat RECEIVER_LON=receiver.lon
   [ -n "$map" ] || map=$MAP_DIR
-  [ -n "$map" ] || die "MAP_DIR is not set in $config; pass --map-dir"
+  [ -n "$map" ] || die "paths.map_dir is not set in $config; pass --map-dir"
   if [ ${#around[@]} = 1 ]; then
     [ -n "$RECEIVER_LAT" ] && [ -n "$RECEIVER_LON" ] ||
-      die "RECEIVER_LAT and RECEIVER_LON are not set in $config; set them, or pass --around LAT LON RADIUS_NM"
+      die "receiver.lat and receiver.lon are not set in $config; set them, or pass --around LAT LON RADIUS_NM"
     around=("$RECEIVER_LAT" "$RECEIVER_LON" "${around[0]}")
   fi
 fi
@@ -228,7 +228,7 @@ real=$map
 if [ -d "$map" ]; then
   real=$(cd "$map" 2>/dev/null && pwd -P) || die "cannot enter the map dir $map (no search permission)"
 fi
-[ "$real" != / ] || die "refusing --map-dir / (MAP_DIR must be a directory of its own, such as /var/lib/skycue/maps)"
+[ "$real" != / ] || die "refusing --map-dir / (paths.map_dir must be a directory of its own, such as /var/lib/skycue/maps)"
 # No symlink where the bake writes: run as root, it would write (and chown)
 # wherever the link points, and the map dir may belong to the daemon's user.
 # Leading directories (such as a linked /var/lib) are not checked.

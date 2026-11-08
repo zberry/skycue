@@ -21,7 +21,7 @@ t=$tmp/a/skycue-$v.tar.gz
 [ -f "$t" ] || { echo "FAIL: no $t"; exit 1; }
 cmp -s "$t" "$tmp/b/skycue-$v.tar.gz" || { echo "FAIL: not reproducible"; exit 1; }
 list=$(tar -tzf "$t")
-for want in "skycue-$v/CMakeLists.txt" "skycue-$v/cmake/web-sources.cmake" "skycue-$v/packaging/skycue.conf.example" \
+for want in "skycue-$v/CMakeLists.txt" "skycue-$v/cmake/web-sources.cmake" "skycue-$v/packaging/skycue.toml.example" \
             "skycue-$v/sources/leaflet-1.9.4.tgz" "skycue-$v/sources/echarts-5.6.0.tgz"; do
   grep -qx "$want" <<<"$list" || { echo "FAIL: $want missing"; exit 1; }
 done

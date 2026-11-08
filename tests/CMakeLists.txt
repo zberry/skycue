@@ -745,4 +745,12 @@ add_test(NAME uat_raw_decode COMMAND test_uat_raw_decode)
 set_tests_properties(uat_raw_decode PROPERTIES TIMEOUT 120)
 
 
+add_executable(test_toml_lite test_toml_lite.cpp)
+target_link_libraries(test_toml_lite PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_toml_lite PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_toml_lite)
+add_test(NAME toml_lite COMMAND test_toml_lite)
+set_tests_properties(toml_lite PROPERTIES TIMEOUT 60)
+
 skycue_scale_test_timeouts()

@@ -1,7 +1,9 @@
 // libFuzzer harness: the parsers of the operator's files, all on text in
 // memory (no file is read or written). Mode byte (fuzz_util.hpp splitMode),
 // then the payload:
-//   0  parseConfigText (skycue.conf, config.hpp)
+//   0  parseConfigText (skycue.conf, config.hpp) and toml_lite::parse
+//      (skycue.toml, toml_lite.hpp); a document that parses has formatValue of
+//      each value read back equal
 //   1  parseInputsFile (skycue.inputs.json, inputs/inputs_file.hpp); a file
 //      that parses comes back equal through inputsFileJson
 //   2  parseOverlay (skycue.runtime.json, runtime_config.hpp); an overlay that
@@ -22,12 +24,15 @@
 #include "inputs/input_def.hpp"
 #include "inputs/inputs_file.hpp"
 #include "runtime_config.hpp"
+#include "toml_lite.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <variant>
 
 namespace {
 
@@ -36,6 +41,19 @@ void configText(const std::string& payload)
     try {
         (void)skycued::parseConfigText(payload, "fuzz");
     } catch (const skycued::ConfigError&) {
+    }
+    skycued::toml_lite::Document doc;
+    try {
+        doc = skycued::toml_lite::parse(payload, "fuzz");
+    } catch (const skycued::toml_lite::Error&) {
+        return;
+    }
+    for (const auto& kv : doc.entries) {
+        const auto& v = kv.second.value;
+        if (const auto* d = std::get_if<double>(&v); d && !std::isfinite(*d))
+            continue;  // the parser never gives one; formatValue would refuse it
+        const auto back = skycued::toml_lite::parse("k = " + skycued::toml_lite::formatValue(v) + "\n", "fuzz");
+        FUZZ_CHECK(back.entries.at("k").value == v);
     }
 }
 

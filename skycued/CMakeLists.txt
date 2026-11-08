@@ -85,6 +85,7 @@ add_library(skycued_core STATIC
   src/stats_report.cpp
   src/stats_store.cpp
   src/stats_store_json.cpp
+  src/toml_lite.cpp
   src/track_table.cpp
   src/web_api.cpp
   src/web_config.cpp

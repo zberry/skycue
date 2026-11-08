@@ -490,8 +490,12 @@ void RuntimeConfig::load()
 
 FilterConfig RuntimeConfig::effectiveFilters() const
 {
-    return FilterConfig{overlay_.max_range_nm.value_or(running_.max_range_nm),
-                        overlay_.min_elevation_deg.value_or(running_.min_elevation_deg)};
+    // A value pinned by the environment or --set stays; the overlay never applies above it.
+    const bool pin_range = !pinnedBy("filters.max_range_nm").empty(),
+               pin_elev = !pinnedBy("filters.min_elevation_deg").empty();
+    return FilterConfig{pin_range ? running_.max_range_nm : overlay_.max_range_nm.value_or(running_.max_range_nm),
+                        pin_elev ? running_.min_elevation_deg
+                                 : overlay_.min_elevation_deg.value_or(running_.min_elevation_deg)};
 }
 
 IdList RuntimeConfig::effectiveList(ListKind kind) const
@@ -608,8 +612,21 @@ void RuntimeConfig::writeOverlay(const Overlay& overlay)
     writeFile(overlay_watch_, overlayJson(overlay));
 }
 
+std::string RuntimeConfig::pinnedBy(const std::string& key) const
+{
+    for (const auto& s : running_.sources)
+        if (s.key == key && (s.source == "env" || s.source == "--set"))
+            return s.source == "env" ? "env" : "set";
+    return "";
+}
+
 void RuntimeConfig::applyUi(const Overlay& delta, const std::string& origin)
 {
+    for (const auto& [key, touched] :
+         {std::pair<const char*, bool>{"filters.max_range_nm", delta.max_range_nm || delta.clear_max_range_nm},
+          {"filters.min_elevation_deg", delta.min_elevation_deg || delta.clear_min_elevation_deg}})
+        if (touched && !pinnedBy(key).empty())
+            throw PinnedKeyError(key, pinnedBy(key));
     checkFilters(delta.max_range_nm, delta.min_elevation_deg);
     if ((delta.clear_max_range_nm && delta.max_range_nm) || (delta.clear_min_elevation_deg && delta.min_elevation_deg))
         throw std::invalid_argument("a filter value cannot be both set and cleared");

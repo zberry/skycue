@@ -1027,10 +1027,11 @@ BOOST_AUTO_TEST_CASE(put_filters_applies_and_drops)
     BOOST_TEST(filtered_after >= 1u);
 
     // Save as baseline: into skycue.overrides.toml, overlay gone.
+    const std::string conf_before = readAll(f.conf);
     const Reply s = request(f.port, http::verb::post, "/api/filters/save-baseline");
     BOOST_TEST(s.status == 200u);
     BOOST_TEST(s.body == "{\"ok\":true,\"unsaved\":\"\"}");
-    BOOST_TEST(!has(readAll(f.conf), "max_range_nm = 20"));  // the main file is never written
+    BOOST_TEST(readAll(f.conf) == conf_before);  // the main file is never written
     BOOST_TEST(has(readAll(f.tmp.path + "/skycue.overrides.toml"), "[filters]\nmax_range_nm = 20.0\n"));
     BOOST_TEST(!exists(f.tmp.path + "/skycue.runtime.json"));
     BOOST_TEST(get(f.port, "/api/filters").body == "{\"max_range_nm\":20,\"min_elevation_deg\":0,\"overlay_active\":false}");

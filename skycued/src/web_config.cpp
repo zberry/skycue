@@ -88,8 +88,9 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
             layer[src.key] = src.source == "env" ? "env" : "set";
     std::vector<std::string> keys;
     for (const auto& key : knownConfigKeys()) {
-        const bool from_overlay = (key == "filters.max_range_nm" && overlay.max_range_nm.has_value()) ||
-                                  (key == "filters.min_elevation_deg" && overlay.min_elevation_deg.has_value());
+        const bool from_overlay = layer.find(key) == layer.end() &&
+                                  ((key == "filters.max_range_nm" && overlay.max_range_nm.has_value()) ||
+                                   (key == "filters.min_elevation_deg" && overlay.min_elevation_deg.has_value()));
         const auto flag = info.cli_overrides.find(key);
         const auto pinned = layer.find(key);
         std::string value, source;

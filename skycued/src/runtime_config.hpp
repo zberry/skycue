@@ -57,12 +57,25 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace skycued {
 
 class Engine;
+
+// A live edit of a filter key that the environment or --set sets.
+struct PinnedKeyError : std::runtime_error {
+    PinnedKeyError(const std::string& key_, const std::string& source_)
+        : std::runtime_error(key_ + " is set by " + (source_ == "env" ? "the environment" : "--set") +
+                             " and cannot be changed here"),
+          key(key_), source(source_)
+    {
+    }
+    std::string key;
+    std::string source;  // "env" or "set"
+};
 
 // The overlay's content: list deltas are relative to the list files.
 struct Overlay {
@@ -130,7 +143,13 @@ public:
     // Throws std::invalid_argument, changing nothing, for a bad entry (naming
     // it), a filter value out of range, or a value both set and cleared; std::runtime_error when the file
     // cannot be written (nothing changes then either).
+    // Throws PinnedKeyError, changing nothing, when `delta` sets or clears a
+    // filter value that the environment or --set pins (the overlay never
+    // applies above a pin).
     void applyUi(const Overlay& delta, const std::string& origin);
+
+    // "env" or "set" when that layer sets the (dotted) `key`, else "".
+    std::string pinnedBy(const std::string& key) const;
 
     // Writes the overlay into the baseline: filters.max_range_nm and
     // filters.min_elevation_deg into skycue.overrides.toml (written whole,

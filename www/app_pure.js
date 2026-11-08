@@ -360,6 +360,17 @@
     'recording.formats': 'strs', 'recording.raw': 'bool', 'recording.max_gb': 'num',
     'fisb.enable': 'bool', 'fisb.experimental': 'bool', 'stats.aircraft_max': 'num', 'stats.save_s': 'num'};
 
+  // The filter fields (max_range_nm, min_elevation_deg) that the environment or
+  // --set pins, from /api/config's keys: {field: 'env'|'set'}.
+  function pinnedFilters(keys) {
+    var out = {};
+    (keys || []).forEach(function (k) {
+      var m = /^filters\.(max_range_nm|min_elevation_deg)$/.exec(k.key);
+      if (m && (k.source === 'env' || k.source === 'set')) out[m[1]] = k.source;
+    });
+    return out;
+  }
+
   // The label of a /api/config source: --set is "set" in the JSON.
   function configSourceLabel(source) { return source === 'set' ? '--set' : source; }
 
@@ -2086,7 +2097,7 @@
     CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
     filterHistoryRows: filterHistoryRows,
     CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText, tomlValue: tomlValue,
-    configSourceLabel: configSourceLabel,
+    configSourceLabel: configSourceLabel, pinnedFilters: pinnedFilters,
     daemonModeText: daemonModeText, daemonLocationsText: daemonLocationsText,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,

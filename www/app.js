@@ -1712,7 +1712,26 @@
   // ---- filters, lists, baseline -------------------------------------------------
   var FILTER_INPUTS = { max_range_nm: 'max-range', min_elevation_deg: 'min-elevation' };
 
+  // A filter that the environment or --set pins cannot be edited: its input
+  // and reset button are disabled and say why (GET /api/config has the source).
+  var pinsLoaded = false;
+  function showFilterPins(keys) {
+    var pins = P.pinnedFilters(keys);
+    Object.keys(FILTER_INPUTS).forEach(function (k) {
+      var why = pins[k] ? 'Set by ' + (pins[k] === 'env' ? 'the environment (SKYCUE_*)' : '--set') + '; cannot be changed here' : '';
+      var btn = document.querySelector('button[data-reset="' + k + '"]');
+      $(FILTER_INPUTS[k]).disabled = !!pins[k];
+      $(FILTER_INPUTS[k]).title = why;
+      if (btn) { btn.disabled = !!pins[k]; btn.title = why || 'Back to the saved value'; }
+    });
+  }
+  function loadFilterPins() {
+    pinsLoaded = true;
+    request('GET', 'api/config').then(function (c) { showFilterPins(c.keys || []); }, function () { pinsLoaded = false; });
+  }
+
   function applyFilters(f) {
+    if (!pinsLoaded) loadFilterPins();
     cfg.filters = f;
     Object.keys(FILTER_INPUTS).forEach(function (k) {
       if (editing[k]) return; // the user's uncommitted edit wins
@@ -3357,6 +3376,7 @@
       showMsg($('config-msg'), '');
       renderConfigDaemon(c.daemon || {});
       renderConfigGroups(c.keys || []);
+      showFilterPins(c.keys || []);
       $('config-copy').disabled = false;
     }).catch(function (e) {
       if (seq === config.seq) showMsg($('config-msg'), 'Could not load the configuration: ' + e.message, true);

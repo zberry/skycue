@@ -910,8 +910,10 @@ BOOST_AUTO_TEST_CASE(promote_without_state_dir_writes_the_overrides_file_beside_
 
 BOOST_AUTO_TEST_CASE(save_baseline_readonly_dir_names_state_dir)
 {
-    if (::geteuid() == 0)
-        return;  // root writes anywhere
+    if (::geteuid() == 0) {
+        BOOST_TEST_MESSAGE("skipped: running as root, which writes to a read-only directory");
+        return;
+    }
     RtFx f(headConf({{"filters.max_range_nm", "150"}}));
     f.start();
     Overlay d;
@@ -931,6 +933,33 @@ BOOST_AUTO_TEST_CASE(save_baseline_readonly_dir_names_state_dir)
     BOOST_TEST(!exists(f.path("skycue.overrides.toml")));
     BOOST_TEST(f.overlay().max_range_nm.value_or(0) == 90.0);  // stays in the overlay
     BOOST_TEST(f.filters().max_range_nm == 90.0);
+}
+
+BOOST_AUTO_TEST_CASE(runtime_overlay_does_not_override_pin)
+{
+    RtFx f(headConf({{"filters.max_range_nm", "150"}, {"filters.min_elevation_deg", "1"}}));
+    // An overlay left on disk that sets both keys; --set pins the range only.
+    writeFile(f.path("skycue.runtime.json"),
+              "{\"version\":1,\"filters\":{\"max_range_nm\":30,\"min_elevation_deg\":6}}\n");
+    f.fx = std::make_unique<EngineFx>(skycued::parseConfigFile(f.conf, "", {"filters.max_range_nm=88"}), fakeSource(f.src),
+                                      10s, f.rec);
+    f.fx->t.call([&] {
+        f.rc = std::make_unique<RuntimeConfig>(f.fx->t.io, f.conf, *f.fx->engine);
+        f.rc->setLayers({"filters.max_range_nm=88"}, {});
+        f.rc->load();
+    });
+    BOOST_TEST(f.filters().max_range_nm == 88.0);    // the pin, not the overlay's 30
+    BOOST_TEST(f.filters().min_elevation_deg == 6.0);  // not pinned: the overlay applies
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().max_range_nm; }) == 88.0);
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->pinnedBy("filters.max_range_nm"); }) == "set");
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->pinnedBy("filters.min_elevation_deg"); }) == "");
+    Overlay d;
+    d.max_range_nm = 20;
+    BOOST_CHECK_THROW(f.applyUi(d), skycued::PinnedKeyError);
+    Overlay c;
+    c.clear_max_range_nm = true;
+    BOOST_CHECK_THROW(f.applyUi(c), skycued::PinnedKeyError);
+    BOOST_TEST(f.filters().max_range_nm == 88.0);
 }
 
 BOOST_AUTO_TEST_CASE(watcher_warns_pinned_by_set)

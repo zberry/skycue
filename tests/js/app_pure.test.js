@@ -1078,6 +1078,14 @@ test('config_text', () => {
   assert.ok(t.includes('# web.trail_seconds: env, restart\ntrail_seconds = 300\n'));
   assert.ok(t.includes('# stats.save_s: --set, restart\nsave_s = 60\n'));
 });
+test('pinned filters disable their controls', () => {
+  const keys = [{ key: 'filters.max_range_nm', source: 'set' }, { key: 'filters.min_elevation_deg', source: 'env' },
+    { key: 'web.port', source: 'env' }];
+  assert.deepStrictEqual(P.pinnedFilters(keys), { max_range_nm: 'set', min_elevation_deg: 'env' });
+  assert.deepStrictEqual(P.pinnedFilters([{ key: 'filters.max_range_nm', source: 'runtime' },
+    { key: 'filters.min_elevation_deg', source: 'overrides' }]), {});
+  assert.deepStrictEqual(P.pinnedFilters(undefined), {});
+});
 test('config panel shows dotted keys and env/--set sources', () => {
   // The keys come as the API gives them: dotted, with the sources conf, overrides, runtime, flag, env, set.
   const keys = ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.trail_seconds', 'stats.save_s', 'web.port'].map((k) => ({ key: k, value: '1', source: 'conf', restart: false }));

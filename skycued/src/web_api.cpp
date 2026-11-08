@@ -247,6 +247,8 @@ template <class Ok> ApiResponse apply(RuntimeConfig& rc, const Overlay& delta, O
 {
     try {
         rc.applyUi(delta, "ui");
+    } catch (const PinnedKeyError& e) {
+        return json(409, JsonWriter().add("error", std::string(e.what())).add("key", e.key).add("source", e.source).str());
     } catch (const std::invalid_argument& e) {
         return error(400, e.what());
     } catch (const ConfigError& e) {

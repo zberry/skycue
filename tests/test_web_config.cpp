@@ -244,6 +244,25 @@ BOOST_AUTO_TEST_CASE(overlay_source_after_put)
     BOOST_TEST(daemon->getBool("overlay_active").value_or(false) == true);
 }
 
+BOOST_AUTO_TEST_CASE(api_filters_pinned_key_409)
+{
+    ConfigFx f(nullptr, {"filters.max_range_nm=88"}, {{"SKYCUE_FILTERS_MIN_ELEVATION_DEG", "2"}});
+    auto r = request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":20}");
+    BOOST_TEST(r.status == 409u, r.body);
+    auto body = parsed(r.body);
+    BOOST_TEST(body.getString("key").value_or("") == "filters.max_range_nm");
+    BOOST_TEST(body.getString("source").value_or("") == "set");
+    BOOST_TEST(body.getString("error").value_or("").find("filters.max_range_nm") != std::string::npos);
+    r = request(f.port, http::verb::put, "/api/filters", "{\"min_elevation_deg\":5}");
+    BOOST_TEST(r.status == 409u, r.body);
+    BOOST_TEST(parsed(r.body).getString("source").value_or("") == "env");
+    r = request(f.port, http::verb::put, "/api/filters", "{\"min_elevation_deg\":null}");
+    BOOST_TEST(r.status == 409u, r.body);
+    // Nothing changed, and the running values are the pins'.
+    r = request(f.port, http::verb::get, "/api/filters");
+    BOOST_TEST(r.body == "{\"max_range_nm\":88,\"min_elevation_deg\":2,\"overlay_active\":false}", r.body);
+}
+
 BOOST_AUTO_TEST_CASE(api_config_dotted_keys_and_sources)
 {
     // One key from each source: conf, overrides, env, --set, flag, runtime, and a default.

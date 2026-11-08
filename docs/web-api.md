@@ -61,7 +61,9 @@ There is no authentication; see [Security](#security).
   - `404`: no such API path (JSON), input or file (plain text).
   - `405`: wrong method; the `Allow` header lists the right ones.
   - `413`: a request body over 64 KiB (the connection is then closed).
-  - `409`: an input id that is taken, or any input change while skycued
+  - `409`: `PUT /api/filters` for a filter key that the environment or
+    `--set` pins (`{"error": ..., "key": "filters.max_range_nm", "source":
+    "env"|"set"}`; the page disables that control); an input id that is taken, or any input change while skycued
     replays a recording ([Inputs](#inputs)).
   - `415`: a `PUT`/`POST` without `Content-Type: application/json`
     ([Security](#security)).
@@ -249,7 +251,7 @@ restarts: all but `filters.max_range_nm`, `filters.min_elevation_deg`,
 `filters.allow_list_file` and `filters.block_list_file`, which apply at
 once. Other methods: 405 with `Allow: GET`.
 
-`GET /api/tiles-available` reads the map directory (`MAP_DIR` when it is
+`GET /api/tiles-available` reads the map directory (`paths.map_dir` when it is
 set, else the www directory; `www/` below): when `www/tiles/meta.json` exists (written by
 the tile preparation script) its `minZoom`/`maxZoom` are passed through;
 otherwise the zoom directories `www/tiles/<z>/` that exist give the range;
@@ -259,8 +261,8 @@ is readable and a JSON object; the page fetches that file only then.
 
 ### Map tiles
 
-Tiles are optional static files under `www/tiles/` (or `MAP_DIR/tiles/`
-when `MAP_DIR` is set; `/overlays/` likewise), laid out
+Tiles are optional static files under `www/tiles/` (or `paths.map_dir/tiles/`
+when `paths.map_dir` is set; `/overlays/` likewise), laid out
 `tiles/{z}/{x}/{y}.png` (XYZ scheme, Web Mercator, 256 px), served like any
 other file (with `Cache-Control: max-age=86400`). `scripts/maps/make-tiles.sh`
 makes them from Natural Earth and writes `tiles/meta.json`:
@@ -316,7 +318,7 @@ transparent part is not blank. URLs that 404 are remembered for 60 s. See
 - `trail_seconds` is `TRAIL_SECONDS`.
 - `fisb`: the [FIS-B status object](#get-apifisbstatus), the same as
   `GET /api/fisb/status` (counts and mosaic heads, never a mosaic's
-  blocks). With `FISB_ENABLE=no` it has `"enabled": false` and zeros.
+  blocks). With `fisb.enable = false` it has `"enabled": false` and zeros.
 - `inputs`: every input with its state, as `GET /api/inputs` lists them
   ([Inputs](#inputs)).
 
@@ -799,13 +801,13 @@ baseline first and edit afterwards.
 ## FIS-B
 
 skycued decodes the FIS-B uplinks (UAT 978 MHz ground broadcasts) that
-dump978 passes it, or that a replayed recording holds (`FISB_ENABLE=yes`,
+dump978 passes it, or that a replayed recording holds (`fisb.enable = true`,
 the default), into a store of current products: text reports, NOTAMs and
 advisories with their shapes (TWGO), NEXRAD mosaics and the other raster
 layers. The routes below read that store; the WebSocket carries what
 changes. Every FIS-B route is `GET` only (any other method: `405` with
 `Allow: GET`); an unknown `/api/fisb/...` path is `404`; a bad query value
-is `400` with the usual `{"error": ...}`. With `FISB_ENABLE=no` every route
+is `400` with the usual `{"error": ...}`. With `fisb.enable = false` every route
 answers as for an empty store (`radar`/`raster`: `404`).
 
 The record bodies are the ones the fisb recording stream writes

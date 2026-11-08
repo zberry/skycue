@@ -281,6 +281,17 @@ BOOST_AUTO_TEST_CASE(format_value_roundtrip)
     BOOST_CHECK_THROW(formatValue(Value(std::in_place_type<double>, INFINITY)), std::invalid_argument);
 }
 
+BOOST_AUTO_TEST_CASE(unicode_escape_as_the_page_writes_it)
+{
+    // The Config tab's copy writes control characters as \uXXXX and leaves other
+    // characters as they are; both read back.
+    const Document d = parse("k = \"caf\\u00E9 \\u0001\\u007F \\u20AC\"\nj = \"caf\xC3\xA9\"\n", "t");
+    BOOST_CHECK_EQUAL(str(d, "k"), "caf\xC3\xA9 \x01\x7F \xE2\x82\xAC");
+    BOOST_CHECK_EQUAL(str(d, "j"), "caf\xC3\xA9");
+    const std::string text = formatValue(Value(std::string("caf\xC3\xA9 \x01 \xE2\x82\xAC")));
+    BOOST_CHECK_EQUAL(str(parse("k = " + text + "\n", "t"), "k"), "caf\xC3\xA9 \x01 \xE2\x82\xAC");
+}
+
 BOOST_AUTO_TEST_CASE(design_example_file_parses)
 {
     std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/skycue_example.toml", std::ios::binary);

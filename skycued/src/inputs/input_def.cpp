@@ -18,7 +18,8 @@ constexpr int64_t kMinStatusInterval = 5, kMaxStatusInterval = 3600;
 const char* const kKeys[] = {"id",      "name", "type", "enabled",           "transport", "bind",
                              "host",    "port", "peer", "edition",           "sac",       "sic",
                              "status_url",      "status_interval_s",         "time_mode", "capture",
-                             "group",   "interface",    "format"};
+                             "group",   "interface",    "format",
+                             "ref_lat", "ref_lon"};
 const char* const kReservedIds[] = {"readsb", "dump978", "replay"};
 const char* const kEditions[] = {"2.2", "2.3", "2.4", "2.5", "2.6", "2.7"};
 
@@ -258,6 +259,10 @@ std::string notApplicable(const std::string& key, InputType type, InputTransport
         return transport == InputTransport::udp ? "" : key + " applies to udp only";
     if (key == "format")
         return type == InputType::beast_raw ? "" : "format applies to beast_raw only";
+    if (key == "ref_lat" || key == "ref_lon")
+        return type == InputType::beast_raw || type == InputType::uat_raw
+                   ? ""
+                   : key + " applies to beast_raw and uat_raw only";
     if (key == "capture")
         return takesCapture(type) ? ""
                                   : "capture applies to beast_raw, uat_raw, pingstation_json and pingstation_cat021 only";
@@ -325,7 +330,8 @@ bool InputDef::operator==(const InputDef& o) const
            bind == o.bind && host == o.host && port == o.port && edition == o.edition && sac == o.sac &&
            sic == o.sic && status_url == o.status_url && status_interval_s == o.status_interval_s &&
            time_mode == o.time_mode && capture == o.capture && peer == o.peer && builtin == o.builtin &&
-           group == o.group && iface == o.iface && format == o.format;
+           group == o.group && iface == o.iface && format == o.format && ref_lat == o.ref_lat &&
+           ref_lon == o.ref_lon;
 }
 
 InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
@@ -451,6 +457,21 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
         if (d.format != "beast" && d.format != "avr")
             fail("format must be beast or avr");
     }
+    // The reference position for decoding (spec 8.1): both or neither.
+    const bool has_lat = o.has("ref_lat") && !isNull(o, "ref_lat");
+    const bool has_lon = o.has("ref_lon") && !isNull(o, "ref_lon");
+    if (has_lat != has_lon)
+        fail("ref_lat and ref_lon must be set together");
+    if (has_lat) {
+        const auto lat = o.getDouble("ref_lat");
+        if (!lat || *lat < -90 || *lat > 90)
+            fail("ref_lat must be a number from -90 to 90");
+        const auto lon = o.getDouble("ref_lon");
+        if (!lon || *lon < -180 || *lon > 180)
+            fail("ref_lon must be a number from -180 to 180");
+        d.ref_lat = lat;
+        d.ref_lon = lon;
+    }
     return d;
 }
 
@@ -476,6 +497,8 @@ std::string inputDefJson(const InputDef& d)
     }
     if (d.type == InputType::beast_raw)
         w.add("format", d.format);
+    if (d.ref_lat && d.ref_lon)
+        w.addExact("ref_lat", *d.ref_lat).addExact("ref_lon", *d.ref_lon);
     if (d.type == InputType::pingstation_cat021) {
         w.add("edition", d.edition);
         appendOptionalOctet(w, "sac", d.sac);

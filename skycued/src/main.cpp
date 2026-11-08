@@ -11,6 +11,7 @@
 #include "engine.hpp"
 #include "forwarder.hpp"
 #include "hub/hub.hpp"
+#include "inputs/beast_raw_input.hpp"
 #include "inputs/input_manager.hpp"
 #include "inputs/inputs_file.hpp"
 #include "inputs/source_input.hpp"
@@ -95,6 +96,7 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
 {
     bool readsb_on = check_readsb, dump978_on = check_dump978;
     std::vector<InputDef> user;
+    std::vector<OutputDef> outputs;
     std::vector<std::string> warnings;
     std::string text;
     if (!inputs_path.empty()) {
@@ -123,6 +125,7 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
                 if (d != file.builtin_enabled.end())
                     dump978_on = dump978_on && d->second;
                 user = file.inputs;
+                outputs = file.outputs;
             } catch (const std::exception& e) {
                 std::cerr << "skycued: " << inputs_path << ": " << e.what() << "\n";
                 return 2;
@@ -130,8 +133,9 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
         }
     }
     std::vector<InputCheck> checks;
+    const InputDef readsb_def = builtinReadsbDef(config, readsb_host);
     if (readsb_on)
-        checks.push_back({"readsb", readsb_host, config.readsb_json_port});
+        checks.push_back({"readsb", readsb_def.host, readsb_def.port});
     if (dump978_on)
         checks.push_back({"dump978", dump978_host, config.dump978_raw_port});
     std::vector<std::string> unchecked;
@@ -142,6 +146,14 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
             checks.push_back({d.id, d.host, d.port});
         else
             unchecked.push_back(d.id + ": not checked (listens on " + d.bind + ":" + std::to_string(d.port) + ")");
+    }
+    if (config.track_decoder == "skycued") {
+        std::vector<InputDef> all;
+        if (readsb_on)
+            all.push_back(readsb_def);
+        all.insert(all.end(), user.begin(), user.end());
+        for (auto& warning : decoderWarnings(all, outputs))
+            warnings.push_back(std::move(warning));
     }
     for (const auto& warning : warnings)
         std::cout << "WARN: " << warning << "\n";
@@ -333,6 +345,9 @@ int run(int argc, char** argv)
     mc.record_raw = config.record_raw;
     mc.record_max_bytes = gigabytesToBytes(config.record_max_gb);
     mc.replaying = replaying;
+    mc.decode_raw = config.track_decoder == "skycued";
+    if (mc.decode_raw)
+        mc.receiver_ref = std::make_pair(config.receiver_lat, config.receiver_lon);
     // An output may not take a port the daemon serves itself.
     if (config.cue_tcp_port != 0)
         mc.reserved_ports.push_back({"tcp", config.cue_tcp_port, "the cue stream (CUE_TCP_PORT)"});
@@ -366,12 +381,18 @@ int run(int argc, char** argv)
                 std::make_unique<ReplayObservationSource>(io, replay_path, replay_speed, vm.count("replay-loop") > 0)));
         } else {
             if (!vm.count("no-readsb")) {
-                const uint16_t port = config.readsb_json_port;
-                inputs->addBuiltin(std::make_unique<SourceInput>(
-                    builtin("readsb", InputType::readsb, readsb_host, port),
-                    SourceInput::SourceFactory([&io, readsb_host, port]() -> std::unique_ptr<ObservationSource> {
-                        return std::make_unique<ReadsbJsonSource>(io, readsb_host, port);
-                    })));
+                if (mc.decode_raw) {
+                    inputs->addBuiltin(std::make_unique<BeastRawInput>(
+                        io, builtinReadsbDef(config, readsb_host),
+                        RecordOptions{mc.record_dir, mc.record_raw, mc.record_max_bytes}));
+                } else {
+                    const uint16_t port = config.readsb_json_port;
+                    inputs->addBuiltin(std::make_unique<SourceInput>(
+                        builtin("readsb", InputType::readsb, readsb_host, port),
+                        SourceInput::SourceFactory([&io, readsb_host, port]() -> std::unique_ptr<ObservationSource> {
+                            return std::make_unique<ReadsbJsonSource>(io, readsb_host, port);
+                        })));
+                }
             }
             if (use_dump978)
                 inputs->addBuiltin(std::make_unique<UatRawInput>(

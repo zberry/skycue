@@ -22,7 +22,7 @@ std::string inputV2Key(const JsonObject& e)
     const auto type = e.getString("type");
     if (type && (*type == "beast_raw" || *type == "uat_raw"))
         return *type;
-    for (const char* key : {"group", "interface", "format"})
+    for (const char* key : {"group", "interface", "format", "ref_lat", "ref_lon"})
         if (e.has(key))
             return key;
     if (type && e.has("transport") && (*type == "readsb" || *type == "dump978" || *type == "pingstation_json"))
@@ -33,7 +33,8 @@ std::string inputV2Key(const JsonObject& e)
 // Whether writing `d` needs a version 2 file.
 bool inputNeedsV2(const InputDef& d)
 {
-    if (d.type == InputType::beast_raw || d.type == InputType::uat_raw || !d.group.empty())
+    if (d.type == InputType::beast_raw || d.type == InputType::uat_raw || !d.group.empty() ||
+        d.ref_lat || d.ref_lon)
         return true;
     const InputTransport v1 =
         d.type == InputType::pingstation_json ? InputTransport::udp : InputTransport::tcp_connect;
@@ -270,6 +271,33 @@ std::vector<std::string> validateInputSet(const std::vector<InputDef>& inputs, c
                            (is_input ? "input '" : "output '") + name + "' of this daemon " +
                            (is_input ? "listens on" : "serves"));
     }
+    return warnings;
+}
+
+std::vector<std::string> decoderWarnings(const std::vector<InputDef>& inputs, const std::vector<OutputDef>& outputs)
+{
+    std::vector<std::string> warnings;
+    const InputDef* beast = nullptr;
+    for (const InputDef& d : inputs)
+        if (d.enabled && d.type == InputType::beast_raw && (!beast || (d.builtin && !beast->builtin)))
+            beast = &d;
+    bool json_input = false;
+    for (const InputDef& d : inputs) {
+        if (!d.enabled || d.type != InputType::readsb)
+            continue;
+        json_input = true;
+        if (beast)
+            warnings.push_back("TRACK_DECODER=skycued: input '" + d.id + "' (readsb JSON) and input '" + beast->id +
+                               "' (beast_raw) both feed the track table, so aircraft are counted twice; disable one");
+    }
+    if (!json_input)
+        for (const OutputDef& o : outputs)
+            if (o.enabled && o.kind == OutputKind::json) {
+                warnings.push_back(
+                    "TRACK_DECODER=skycued: the json output '" + o.id +
+                    "' carries nothing, since no readsb JSON input is enabled; it stays defined and enabled");
+                break;
+            }
     return warnings;
 }
 

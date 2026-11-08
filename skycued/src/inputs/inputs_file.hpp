@@ -9,7 +9,7 @@
 //
 // Version 2 adds "outputs":[{definition}, ...] (after "inputs"), the input
 // types beast_raw and uat_raw, a transport on every input type, the keys
-// group, interface and format, and the cue stream's ids (cue-tcp,
+// group, interface, format, ref_lat and ref_lon, and the cue stream's ids (cue-tcp,
 // cue-connect-N, cue-udp-N) in "builtin". A file is written as version 2 only
 // when it holds some of that; otherwise as version 1, in the v1 shape. A
 // version 1 header over version 2 content is an error naming the key.
@@ -79,5 +79,12 @@ struct ReservedPort {
 std::vector<std::string> validateInputSet(const std::vector<InputDef>& inputs,
                                           const std::vector<OutputDef>& outputs = {},
                                           const std::vector<ReservedPort>& reserved = {});
+
+// The WARN texts that only apply under TRACK_DECODER=skycued, over the whole
+// input set (built-ins included): a readsb-type input beside an enabled
+// beast_raw input feeds every aircraft twice (one text per such readsb input,
+// naming both ids), and an enabled json output with no enabled readsb-type
+// input carries nothing.
+std::vector<std::string> decoderWarnings(const std::vector<InputDef>& inputs, const std::vector<OutputDef>& outputs);
 
 }  // namespace skycued

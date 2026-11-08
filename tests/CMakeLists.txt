@@ -252,6 +252,10 @@ foreach(_t engine_api recording_independence runtime_config web_config check_inp
   set_tests_properties(${_t} PROPERTIES TIMEOUT 60)
 endforeach()
 
+# test_check_inputs runs skycued --check-inputs for the TRACK_DECODER lines.
+add_dependencies(test_check_inputs skycued)
+target_compile_definitions(test_check_inputs PRIVATE SKYCUED_EXE="$<TARGET_FILE:skycued>")
+
 # skycue-dump against a skycued replaying the readsb JSON fixture, TCP and UDP.
 add_test(NAME dump
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_dump.sh

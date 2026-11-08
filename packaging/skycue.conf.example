@@ -33,6 +33,20 @@ ANTENNA_HEIGHT_M=0
 DUMP978_RAW_PORT=30978
 # TCP port where readsb serves JSON position output (skycued reads it).
 READSB_JSON_PORT=30047
+# Where the aircraft tracks come from.
+# readsb (default): readsb's JSON position output (READSB_JSON_PORT).
+# skycued: skycued decodes readsb's Beast output itself (READSB_BEAST_PORT);
+# the built-in readsb input keeps its id but becomes a beast_raw input to
+# 127.0.0.1:READSB_BEAST_PORT, and READSB_HOST is not used for it. The
+# built-in dump978 input is unchanged. A readsb-type input of your own beside
+# it feeds every aircraft twice, and skycued logs a WARN. The json output
+# carries nothing in this mode (it logs a WARN when no readsb JSON input
+# remains). A beast_raw or uat_raw input decodes with its own ref_lat and
+# ref_lon (inputs file), else RECEIVER_LAT and RECEIVER_LON.
+TRACK_DECODER=readsb
+# TCP port where readsb serves Beast output (skycued connects to it when
+# TRACK_DECODER=skycued; 1..65535, default 30005).
+READSB_BEAST_PORT=30005
 # Host skycued reads READSB_JSON_PORT on (not empty; default 127.0.0.1, this
 # machine). Set it when readsb runs on another machine.
 # A --readsb-host on skycued's command line overrides it.

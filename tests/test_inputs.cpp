@@ -7,6 +7,8 @@
 #include "engine_test_support.hpp"
 #include "file_util.hpp"
 #include "inputs/input.hpp"
+#include "config.hpp"
+#include "inputs/beast_raw_input.hpp"
 #include "inputs/input_def.hpp"
 #include "inputs/input_manager.hpp"
 #include "inputs/inputs_file.hpp"
@@ -1755,4 +1757,142 @@ BOOST_AUTO_TEST_CASE(builtin_dump978_stays_enabled_when_the_file_does_not_disabl
             }
         }
     }
+}
+
+// TRACK_DECODER: the built-in readsb.
+BOOST_AUTO_TEST_CASE(builtin_readsb_becomes_beast_raw)
+{
+    skycued::Config c;
+    InputDef d = skycued::builtinReadsbDef(c, "192.0.2.9");
+    BOOST_TEST(d.id == "readsb");
+    BOOST_TEST((d.type == InputType::readsb));
+    BOOST_TEST(d.host == "192.0.2.9");
+    BOOST_TEST(d.port == 30047);
+    c.track_decoder = "skycued";
+    d = skycued::builtinReadsbDef(c, "192.0.2.9");
+    BOOST_TEST(d.id == "readsb");
+    BOOST_TEST((d.type == InputType::beast_raw));
+    BOOST_TEST((d.transport == skycued::InputTransport::tcp_connect));
+    BOOST_TEST(d.host == "127.0.0.1");
+    BOOST_TEST(d.port == 30005);
+    BOOST_TEST(d.format == "beast");
+    c.readsb_beast_port = 31005;
+    BOOST_TEST(skycued::builtinReadsbDef(c, "h").port == 31005);
+
+    // Registered as a built-in it keeps its id and its enabled state.
+    IoThread t;
+    TempDir tmp;
+    auto cfg = fileConfig(tmp);
+    handWrite(cfg.inputs_file, fileWith({}, {}, {{"readsb", false}}));
+    Mgr m(t, cfg, [&](InputManager& im) { im.addBuiltin(std::make_unique<skycued::BeastRawInput>(t.io, d)); });
+    const auto e = m.find("readsb");
+    BOOST_REQUIRE(e.has_value());
+    BOOST_TEST((e->def.type == InputType::beast_raw));
+    BOOST_TEST(e->def.builtin);
+    BOOST_TEST(!e->def.enabled);
+}
+
+BOOST_AUTO_TEST_CASE(input_reference_is_own_else_receiver_else_none)
+{
+    InputManagerConfig cfg;
+    InputDef d;
+    d.type = InputType::beast_raw;
+    BOOST_TEST(!skycued::inputReference(d, cfg).has_value());
+    cfg.receiver_ref = std::make_pair(51.5, -0.125);
+    BOOST_TEST((*skycued::inputReference(d, cfg) == std::make_pair(51.5, -0.125)));
+    d.ref_lat = 10.0;
+    d.ref_lon = 20.0;
+    BOOST_TEST((*skycued::inputReference(d, cfg) == std::make_pair(10.0, 20.0)));
+}
+
+BOOST_AUTO_TEST_CASE(skycued_with_readsb_input_warns)
+{
+    IoThread t;
+    TempDir tmp, logs;
+    skycued::Config c;
+    c.track_decoder = "skycued";
+    auto cfg = fileConfig(tmp);
+    cfg.decode_raw = true;
+    InputDef rs;
+    rs.id = "rs2";
+    rs.type = InputType::readsb;
+    rs.host = "192.0.2.1";
+    rs.port = 30047;
+    handWrite(cfg.inputs_file, fileWith({rs}, {}));
+    std::string log;
+    {
+        StderrCapture cap(logs.path + "/stderr");
+        Mgr m(t, cfg, [&](InputManager& im) {
+            im.addBuiltin(std::make_unique<skycued::BeastRawInput>(t.io, skycued::builtinReadsbDef(c, "h")));
+        });
+        log = cap.text();
+    }
+    BOOST_TEST(countOf(log, "both feed the track table") == 1u, log);
+    BOOST_TEST(contains(log, "WARN"), log);
+    BOOST_TEST(contains(log, "'rs2'"), log);
+    BOOST_TEST(contains(log, "'readsb'"), log);
+
+    // The pure function: nothing without a user readsb input, nothing for a disabled one.
+    InputDef b = skycued::builtinReadsbDef(c, "h");
+    BOOST_TEST(skycued::decoderWarnings({b}, {}).empty());
+    rs.enabled = false;
+    BOOST_TEST(skycued::decoderWarnings({b, rs}, {}).empty());
+    rs.enabled = true;
+    const auto w = skycued::decoderWarnings({b, rs}, {});
+    BOOST_REQUIRE(w.size() == 1u);
+    BOOST_TEST(contains(w[0], "'rs2'"));
+    BOOST_TEST(contains(w[0], "'readsb'"));
+
+    // Under TRACK_DECODER=readsb the manager adds none of this.
+    IoThread t2;
+    TempDir tmp2, logs2;
+    auto cfg2 = fileConfig(tmp2);
+    handWrite(cfg2.inputs_file, fileWith({rs}, {}));
+    FakeHub hub;
+    std::string log2;
+    {
+        StderrCapture cap(logs2.path + "/stderr");
+        Mgr m(t2, cfg2, [&](InputManager& im) { im.addBuiltin(fakeReadsb(hub)); });
+        log2 = cap.text();
+    }
+    BOOST_TEST(!contains(log2, "TRACK_DECODER"), log2);
+}
+
+BOOST_AUTO_TEST_CASE(json_output_idle_under_skycued_warns)
+{
+    IoThread t;
+    TempDir tmp, logs;
+    skycued::Config c;
+    c.track_decoder = "skycued";
+    auto cfg = fileConfig(tmp);
+    cfg.decode_raw = true;
+    const OutputDef js = outputOf(R"({"id":"js","kind":"json","transport":"tcp_listen","bind":"127.0.0.1","port":)" +
+                                  std::to_string(freeTcpPort()) + "}");
+    handWrite(cfg.inputs_file, fileWith({}, {js}));
+    std::string log;
+    {
+        StderrCapture cap(logs.path + "/stderr");
+        Mgr m(t, cfg, [&](InputManager& im) {
+            im.addBuiltin(std::make_unique<skycued::BeastRawInput>(t.io, skycued::builtinReadsbDef(c, "h")));
+        });
+        log = cap.text();
+        // Defined and enabled all the same.
+        const auto outs = m.on([](InputManager& im) { return im.outputs(); });
+        BOOST_REQUIRE(outs.size() == 1u);
+        BOOST_TEST(outs[0].enabled);
+    }
+    BOOST_TEST(countOf(log, "the json output 'js' carries nothing") == 1u, log);
+
+    InputDef b = skycued::builtinReadsbDef(c, "h");
+    BOOST_TEST(skycued::decoderWarnings({b}, {js}).size() == 1u);
+    OutputDef off = js;
+    off.enabled = false;
+    BOOST_TEST(skycued::decoderWarnings({b}, {off}).empty());
+    OutputDef beast = js;
+    beast.kind = skycued::OutputKind::beast;
+    BOOST_TEST(skycued::decoderWarnings({b}, {beast}).empty());
+    InputDef rs;
+    rs.id = "rs2";
+    rs.type = InputType::readsb;
+    BOOST_TEST(skycued::decoderWarnings({rs}, {js}).empty());  // a readsb JSON input feeds it
 }

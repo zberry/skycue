@@ -701,6 +701,8 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     b.dump978_raw_port = 1;
     b.dump978_json_port = 2;
     b.readsb_json_port = 3;
+    b.readsb_beast_port = 31005;
+    b.track_decoder = "skycued";
     b.web_port = 4;
     b.cue_tcp_port = 5;
     b.cue_tcp_connect_targets = {{"h", 1}};

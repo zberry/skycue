@@ -27,6 +27,7 @@ const std::vector<std::string>& knownConfigKeys()
         "RECEIVER_LAT",    "RECEIVER_LON",      "RECEIVER_ALT_M",    "ANTENNA_HEIGHT_M",
         "SDR_1090_SERIAL", "SDR_978_SERIAL",    "GAIN_1090",         "GAIN_978",
         "DUMP978_RAW_PORT", "DUMP978_JSON_PORT", "READSB_JSON_PORT",
+        "READSB_BEAST_PORT", "TRACK_DECODER",
         "READSB_HOST",     "DUMP978_HOST",      "DUMP978_ENABLE",    "WEB_PORT",
         "CUE_TCP_PORT",    "CUE_TCP_CONNECT",   "CUE_UDP_TARGETS",   "RECORD_DIR",
         "RECORD_FORMATS",
@@ -288,6 +289,10 @@ Config convertEntries(const std::map<std::string, Entry>& entries, const std::st
     conv.port("DUMP978_RAW_PORT", c.dump978_raw_port);
     conv.port("DUMP978_JSON_PORT", c.dump978_json_port);
     conv.port("READSB_JSON_PORT", c.readsb_json_port);
+    conv.port("READSB_BEAST_PORT", c.readsb_beast_port);
+    conv.str("TRACK_DECODER", c.track_decoder);
+    if (c.track_decoder != "readsb" && c.track_decoder != "skycued")
+        conv.fail("TRACK_DECODER", "TRACK_DECODER must be readsb or skycued, got '" + c.track_decoder + "'");
     conv.port("WEB_PORT", c.web_port, true);
     conv.port("CUE_TCP_PORT", c.cue_tcp_port, true);
     conv.str("RECORD_DIR", c.record_dir);
@@ -460,6 +465,8 @@ std::string configValueText(const Config& c, const std::string& key)
         {"DUMP978_RAW_PORT", [](const Config& x) { return std::to_string(x.dump978_raw_port); }},
         {"DUMP978_JSON_PORT", [](const Config& x) { return std::to_string(x.dump978_json_port); }},
         {"READSB_JSON_PORT", [](const Config& x) { return std::to_string(x.readsb_json_port); }},
+        {"READSB_BEAST_PORT", [](const Config& x) { return std::to_string(x.readsb_beast_port); }},
+        {"TRACK_DECODER", [](const Config& x) { return x.track_decoder; }},
         {"READSB_HOST", [](const Config& x) { return x.readsb_host; }},
         {"DUMP978_HOST", [](const Config& x) { return x.dump978_host; }},
         {"DUMP978_ENABLE", [](const Config& x) { return yesNo(x.dump978_enable); }},

@@ -835,3 +835,41 @@ BOOST_AUTO_TEST_CASE(main_file_valid_only_with_its_overrides_is_read)
         BOOST_TEST(std::string(e.what()).rfind(conf + ":3: malformed line", 0) == 0u, e.what());
     }
 }
+
+BOOST_AUTO_TEST_CASE(track_decoder_defaults_readsb)
+{
+    Config c = parseConfigText(kLatLon, "t");
+    BOOST_TEST(c.track_decoder == "readsb");
+    BOOST_TEST(c.readsb_beast_port == 30005);
+    c = parseConfigText(std::string(kLatLon) + "TRACK_DECODER=skycued\n", "t");
+    BOOST_TEST(c.track_decoder == "skycued");
+    BOOST_TEST(skycued::configValueText(c, "TRACK_DECODER") == "skycued");
+    BOOST_TEST(skycued::configValueText(c, "READSB_BEAST_PORT") == "30005");
+}
+
+BOOST_AUTO_TEST_CASE(track_decoder_rejects_other_value)
+{
+    const auto e = expectError(std::string(kLatLon) + "TRACK_DECODER=dump1090\n");
+    const std::string what = e.what();
+    BOOST_TEST(what.find("TRACK_DECODER") != std::string::npos);
+    BOOST_TEST(what.find("readsb") != std::string::npos);
+    BOOST_TEST(what.find("skycued") != std::string::npos);
+    BOOST_TEST(what.find("dump1090") != std::string::npos);
+    expectError(std::string(kLatLon) + "TRACK_DECODER=\n");
+}
+
+BOOST_AUTO_TEST_CASE(readsb_beast_port_default_30005_and_range)
+{
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "READSB_BEAST_PORT=31005\n", "t").readsb_beast_port == 31005);
+    for (const char* bad : {"0", "65536", "-1", "x"})
+        expectError(std::string(kLatLon) + "READSB_BEAST_PORT=" + bad + "\n");
+}
+
+BOOST_AUTO_TEST_CASE(example_conf_documents_keys)
+{
+    const std::string text = readExample();
+    BOOST_TEST(text.find("\nTRACK_DECODER=readsb\n") != std::string::npos);
+    BOOST_TEST(text.find("\nREADSB_BEAST_PORT=30005\n") != std::string::npos);
+    BOOST_TEST(text.find("ref_lat") != std::string::npos);
+    BOOST_TEST(text.find("json output") != std::string::npos);
+}

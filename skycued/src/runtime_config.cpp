@@ -227,6 +227,8 @@ constexpr RestartKey kRestartKeys[] = {
     SKYCUED_RESTART_KEY("DUMP978_RAW_PORT", dump978_raw_port),
     SKYCUED_RESTART_KEY("DUMP978_JSON_PORT", dump978_json_port),
     SKYCUED_RESTART_KEY("READSB_JSON_PORT", readsb_json_port),
+    SKYCUED_RESTART_KEY("READSB_BEAST_PORT", readsb_beast_port),
+    SKYCUED_RESTART_KEY("TRACK_DECODER", track_decoder),
     SKYCUED_RESTART_KEY("READSB_HOST", readsb_host),
     SKYCUED_RESTART_KEY("DUMP978_HOST", dump978_host),
     SKYCUED_RESTART_KEY("DUMP978_ENABLE", dump978_enable),

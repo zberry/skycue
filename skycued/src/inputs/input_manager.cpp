@@ -1,5 +1,6 @@
 #include "inputs/input_manager.hpp"
 
+#include "config.hpp"
 #include "file_util.hpp"
 #include "inputs/beast_raw_input.hpp"
 #include "inputs/inputs_file.hpp"
@@ -97,6 +98,31 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
         break;
     }
     throw std::invalid_argument(std::string("makeInput: no input for type ") + inputTypeName(def.type));
+}
+
+std::optional<std::pair<double, double>> inputReference(const InputDef& def, const InputManagerConfig& config)
+{
+    if (def.ref_lat && def.ref_lon)
+        return std::make_pair(*def.ref_lat, *def.ref_lon);
+    return config.receiver_ref;
+}
+
+InputDef builtinReadsbDef(const Config& config, const std::string& host)
+{
+    InputDef d;
+    d.id = "readsb";
+    if (config.track_decoder == "skycued") {
+        d.type = InputType::beast_raw;
+        d.transport = InputTransport::tcp_connect;
+        d.host = "127.0.0.1";
+        d.port = config.readsb_beast_port;
+        d.format = "beast";
+    } else {
+        d.type = InputType::readsb;
+        d.host = host;
+        d.port = config.readsb_json_port;
+    }
+    return d;
 }
 
 InputManager::InputManager(boost::asio::io_context& io, InputManagerConfig config)
@@ -407,6 +433,9 @@ void InputManager::checkSet(const std::vector<InputDef>& user, const std::vector
         all.push_back(slots_[i].def);
     all.insert(all.end(), user.begin(), user.end());
     auto warnings = validateInputSet(all, outputs, config_.reserved_ports);
+    if (config_.decode_raw)
+        for (auto& w : decoderWarnings(all, outputs))
+            warnings.push_back(std::move(w));
     // A text is logged when it was not in the previous set, so a repeated write does not repeat it.
     for (const auto& warning : warnings)
         if (!last_warnings_.count(warning))

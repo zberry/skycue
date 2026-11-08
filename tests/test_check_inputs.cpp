@@ -7,7 +7,12 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
 #include <chrono>
+#include <fstream>
 #include <functional>
 #include <string>
 #include <thread>
@@ -125,4 +130,58 @@ BOOST_AUTO_TEST_CASE(check_inputs_error_wording)
     BOOST_REQUIRE(r.size() == 2u);
     BOOST_TEST(r[0].error == "Connection refused");
     BOOST_TEST(r[1].error.rfind("cannot resolve host: ", 0) == 0u, "got: " << r[1].error);
+}
+
+namespace {
+
+// Runs skycued --check-inputs on `conf` and `inputs`; returns stdout and the exit status.
+std::string runCheck(const std::string& conf, const std::string& inputs, int& status)
+{
+    char dir[] = "/tmp/skycue-check-XXXXXX";
+    BOOST_REQUIRE(mkdtemp(dir) != nullptr);
+    const std::string d = dir;
+    std::ofstream(d + "/c.conf") << conf;
+    std::ofstream(d + "/i.json") << inputs;
+    const std::string cmd = std::string(SKYCUED_EXE) + " --config " + d + "/c.conf --inputs-file " + d +
+                            "/i.json --no-uat --check-inputs 2>&1";
+    std::string out;
+    FILE* p = popen(cmd.c_str(), "r");
+    BOOST_REQUIRE(p != nullptr);
+    char buf[512];
+    while (fgets(buf, sizeof buf, p))
+        out += buf;
+    status = pclose(p);
+    std::remove((d + "/c.conf").c_str());
+    std::remove((d + "/i.json").c_str());
+    rmdir(d.c_str());
+    return out;
+}
+
+size_t countLines(const std::string& text, const std::string& needle)
+{
+    size_t n = 0;
+    for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1))
+        ++n;
+    return n;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(check_inputs_skycued_probes_beast_port_and_warns)
+{
+    const uint16_t beast = closedPort();
+    const std::string inputs =
+        R"({"version":1,"inputs":[{"id":"rs2","type":"readsb","host":"127.0.0.1","port":)" + std::to_string(closedPort()) + "}]}";
+    const std::string common = "RECEIVER_LAT=51.5\nRECEIVER_LON=-0.12\n";
+    int status = 0;
+    const std::string sky = runCheck(common + "TRACK_DECODER=skycued\nREADSB_BEAST_PORT=" + std::to_string(beast) + "\n",
+                                     inputs, status);
+    BOOST_TEST(countLines(sky, "WARN: TRACK_DECODER=skycued: input 'rs2' (readsb JSON) and input 'readsb' (beast_raw)") == 1u, sky);
+    BOOST_TEST(sky.find("readsb 127.0.0.1:" + std::to_string(beast) + ": ") != std::string::npos, sky);
+    BOOST_TEST((WIFEXITED(status) && WEXITSTATUS(status) == 1));  // nothing listens: unchanged rule
+
+    // The default decoder: no WARN, the JSON port probed.
+    const std::string def = runCheck(common, inputs, status);
+    BOOST_TEST(def.find("TRACK_DECODER") == std::string::npos, def);
+    BOOST_TEST(def.find("readsb 127.0.0.1:30047: ") != std::string::npos, def);
 }

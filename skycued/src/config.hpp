@@ -16,7 +16,7 @@ namespace skycued {
 struct Config {
     double receiver_lat = NAN, receiver_lon = NAN, receiver_alt_m = 0, antenna_height_m = 0;
     uint16_t dump978_raw_port = 30978, dump978_json_port = 30979, readsb_json_port = 30047,
-             web_port = 8080, cue_tcp_port = 30500;  // cue_tcp_port 0: no listener
+             readsb_beast_port = 30005, web_port = 8080, cue_tcp_port = 30500;  // cue_tcp_port 0: no listener
     std::vector<std::pair<std::string, uint16_t>> cue_tcp_connect_targets;  // from "host:port host:port"
     std::vector<std::pair<std::string, uint16_t>> cue_udp_targets;  // from "host:port host:port"
     std::string record_dir;
@@ -26,6 +26,9 @@ struct Config {
     bool record_raw = false;
     // READSB_HOST, DUMP978_HOST: where skycued finds the decoders' ports;
     // DUMP978_ENABLE=no: no 978 MHz decoder to connect to.
+    // TRACK_DECODER: "readsb" (default) takes tracks from readsb's JSON output;
+    // "skycued" decodes readsb's Beast output (READSB_BEAST_PORT) itself.
+    std::string track_decoder = "readsb";
     std::string readsb_host = "127.0.0.1", dump978_host = "127.0.0.1";
     bool dump978_enable = true;
     double max_range_nm = 150, min_elevation_deg = 0;

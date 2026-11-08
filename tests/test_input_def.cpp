@@ -1055,3 +1055,44 @@ BOOST_AUTO_TEST_CASE(builtin_cue_ids_v2_only)
     BOOST_TEST(contains(inputsFileErr(R"({"version":1,"builtin":{"cue-udp-1":{"enabled":true}}})"),
                         "'cue-udp-1' needs inputs file version 2"));
 }
+
+BOOST_AUTO_TEST_CASE(ref_lat_without_ref_lon_rejected)
+{
+    const std::string base = R"("id":"x","type":"beast_raw","host":"h","port":4000)";
+    BOOST_TEST(!def(base).ref_lat);
+    BOOST_TEST(err(base + R"(,"ref_lat":51.5)") == "ref_lat and ref_lon must be set together");
+    BOOST_TEST(err(base + R"(,"ref_lon":-0.1)") == "ref_lat and ref_lon must be set together");
+    BOOST_TEST(ok(base + R"(,"ref_lat":null,"ref_lon":null)"));
+    const InputDef d = def(base + R"(,"ref_lat":51.5,"ref_lon":-0.125)");
+    BOOST_REQUIRE(d.ref_lat && d.ref_lon);
+    BOOST_TEST(*d.ref_lat == 51.5);
+    BOOST_TEST(*d.ref_lon == -0.125);
+    // Round trip, and only beast_raw and uat_raw take them.
+    const InputDef back = def(inputDefJson(d).substr(1, inputDefJson(d).size() - 2));
+    BOOST_TEST((back == d));
+    BOOST_TEST(def(R"("id":"u","type":"uat_raw","host":"h","port":1,"ref_lat":1,"ref_lon":2)").ref_lon.has_value());
+    BOOST_TEST(err(std::string(kReadsb) + R"(,"ref_lat":1,"ref_lon":2)") == "ref_lat applies to beast_raw and uat_raw only");
+}
+
+BOOST_AUTO_TEST_CASE(ref_range_checked)
+{
+    const std::string base = R"("id":"x","type":"beast_raw","host":"h","port":4000)";
+    BOOST_TEST(ok(base + R"(,"ref_lat":-90,"ref_lon":180)"));
+    BOOST_TEST(ok(base + R"(,"ref_lat":90,"ref_lon":-180)"));
+    BOOST_TEST(err(base + R"(,"ref_lat":90.5,"ref_lon":0)") == "ref_lat must be a number from -90 to 90");
+    BOOST_TEST(err(base + R"(,"ref_lat":0,"ref_lon":-180.5)") == "ref_lon must be a number from -180 to 180");
+    BOOST_TEST(err(base + R"(,"ref_lat":"north","ref_lon":0)") == "ref_lat must be a number from -90 to 90");
+}
+
+BOOST_AUTO_TEST_CASE(ref_keys_are_version_2_keys)
+{
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"inputs":[{"id":"u","type":"readsb","host":"h","port":1,)"
+                                      R"("ref_lat":1,"ref_lon":2}]})"),
+                        "'ref_lat' needs inputs file version 2"));
+    InputsFile f;
+    f.version = 2;
+    f.inputs.push_back(def(R"("id":"b","type":"beast_raw","host":"h","port":4000,"ref_lat":51.5,"ref_lon":-0.125)"));
+    const std::string text = inputsFileJson(f);
+    BOOST_TEST(contains(text, "\"ref_lat\""), text);
+    BOOST_TEST((parseInputsFile(text).inputs == f.inputs));
+}

@@ -232,6 +232,8 @@ Each of `--beast` and `--uat` takes `HOST:PORT` (or the same as
 `tcp://HOST:PORT`), which connects and reconnects with a backoff from 0.5 s to
 10 s, or `udp://BIND:PORT`, which binds that address and port and records the
 datagrams that arrive (for UAT, the lines in them).
+UAT lines longer than 64 KiB are dropped whole (they used to be truncated),
+and every `\r` in a line is stripped, not only a trailing one.
 
 `skycue-rawplay` plays them back into a network-only readsb, so the decoder
 interprets them again:
@@ -269,7 +271,11 @@ leaves later, playback waits for one again. A client that stops reading costs
 only itself: when 1 MiB is queued for it, further data for that client is
 dropped, and the number of bytes dropped is printed at the end
 (`... 0 reconnects, 0 bytes dropped (slow clients)`). With `--speed 0` nothing
-is dropped: playback waits for the slowest client.
+is dropped: playback waits for the slowest client, so at `--speed 0` a client
+that connects and never reads stalls playback, and the exit, for good.
+What is dropped is always whole frames or whole lines: rawplay only hands the
+listener complete Beast frames and complete UAT lines, so a client never sees
+a record cut in the middle.
 
 ## IQ files
 

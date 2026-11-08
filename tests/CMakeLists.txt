@@ -713,5 +713,12 @@ target_compile_definitions(test_decode_uat_frame PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_decode_uat_frame)
 add_test(NAME decode_uat_frame COMMAND test_decode_uat_frame)
 
+# UatDecoder: observations, range check, geometric altitude.
+add_executable(test_decode_uat test_decode_uat.cpp)
+target_link_libraries(test_decode_uat PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_uat PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_decode_uat)
+add_test(NAME decode_uat COMMAND test_decode_uat)
+
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

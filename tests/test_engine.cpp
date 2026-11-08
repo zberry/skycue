@@ -1010,14 +1010,14 @@ TrackObservation geomObs(uint32_t address, Tp t, int32_t baro, bool with_geom, d
     return o;
 }
 
-// Six aircraft 6000 ft apart, each reporting four paired baro+geom altitudes 5 s
+// Six aircraft 6000 ft apart, each reporting four paired baro+geom altitudes 6 s
 // apart (24 samples, 6 aircraft, 30000 ft of span). Returns the time of the last.
 Tp seedFit(FakeSource& src, Tp t0)
 {
     Tp last = t0;
     for (int k = 0; k < 4; ++k)
         for (int i = 0; i < 6; ++i) {
-            last = t0 + std::chrono::seconds(5 * k);
+            last = t0 + std::chrono::seconds(6 * k);
             src.emit(geomObs(0x300000 + static_cast<uint32_t>(i), last, 12000 + 6000 * i, true, 0.01 * i));
         }
     return last;
@@ -1140,7 +1140,7 @@ BOOST_AUTO_TEST_CASE(fit_learns_from_other_aircraft)
         log.attach(*fx.engine);
         src->connection(true);
         const Tp last = seedFit(*src, t0);
-        src->emit(geomObs(id.address, last + 1s, 33000, false, 0.02));  // baro only
+        src->emit(geomObs(id.address, last + 10s, 33000, false, 0.02));  // baro only, past the 5 s fit cache of the seed
     });
     const auto snap = fx.t.call([&] { return fx.engine->snapshot(); });
     const auto* t = findTrack(snap, id);
@@ -1220,7 +1220,7 @@ BOOST_AUTO_TEST_CASE(tisb_target_gets_estimate)
         log.attach(*fx.engine);
         src->connection(true);
         const Tp last = seedFit(*src, t0);
-        TrackObservation o = geomObs(id.address, last + 1s, 25000, false, 0.03);
+        TrackObservation o = geomObs(id.address, last + 10s, 25000, false, 0.03);
         o.id = id;
         o.source = skycue::Source::tisb;
         o.rebroadcast = true;
@@ -1292,7 +1292,7 @@ BOOST_AUTO_TEST_CASE(estimate_does_not_touch_received_recording)
             log.attach(*fx.engine);
             src->connection(true);
             const Tp last = seedFit(*src, t0);
-            src->emit(geomObs(id.address, last + 1s, 33000, false, 0.02));
+            src->emit(geomObs(id.address, last + 10s, 33000, false, 0.02));
         });
         fx.t.call([&] {
             const auto* last = log.last(id);

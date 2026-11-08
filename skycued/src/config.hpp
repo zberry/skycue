@@ -69,6 +69,8 @@ struct Config {
 
     // false (skycue-stats): receiver.lat and receiver.lon may be missing or 0.0.
     bool position_required = true;
+    // receiver.lat and receiver.lon are both assigned and not both 0.0.
+    bool receiver_position_set = false;
     // The main file as named for errors (its path for parseConfigFile): the
     // overrides file sits in paths.state_dir, else in this file's directory.
     std::string conf_path;

@@ -190,7 +190,8 @@ The output is `packaging/skycue.toml.example` with your values filled in, so
 its comments are the example's; the comments you wrote are not carried over,
 and stderr says how many lines that was. A `skycue.overrides.conf` converts to
 a `skycue.overrides.toml`. An unknown key or a malformed line exits with
-status 2 and names the line. `--convert-conf` is a one-time aid and goes in a later release.
+status 2 and names the line. `--convert-conf` is a one-time aid and goes in a
+later release.
 
 ### Where the files are
 

@@ -190,10 +190,37 @@ BOOST_AUTO_TEST_CASE(every_old_key_has_a_new_one)
     }
 }
 
+BOOST_AUTO_TEST_CASE(float_keys_are_floats_and_integer_keys_integers)
+{
+    const std::string out = convertOldConf(std::string(kLatLon) + "MAX_RANGE_NM=150\nMIN_INTERVAL_S=1\nWEB_PORT=8080\n", "t");
+    BOOST_TEST(contains(out, "max_range_nm = 150.0"));
+    BOOST_TEST(contains(out, "min_interval_s = 1.0"));
+    BOOST_TEST(contains(out, "port = 8080 "));
+}
+
+BOOST_AUTO_TEST_CASE(unknown_key_named_is_the_first_in_the_file)
+{
+    ConfigError e = expectError("ZZZ=1\nAAA=2\n");
+    BOOST_TEST(e.line == 1);
+    BOOST_TEST(contains(e.what(), "ZZZ"));
+}
+
+BOOST_AUTO_TEST_CASE(crlf_line_rejected_with_line_number)
+{
+    ConfigError e = expectError("RECEIVER_LAT=1\nRECEIVER_LON=2\r\n");
+    BOOST_TEST(e.line == 2);
+    BOOST_TEST(contains(e.what(), "test.conf:2:"));
+    BOOST_TEST(contains(e.what(), "malformed"));
+    e = expectError("RECEIVER_LAT=1\nRECEIVER_LON=2\nRECORD_DIR=\"/x\"\r\n");
+    BOOST_TEST(e.line == 3);
+    // A CR-only blank line or a comment ending in CR is still a blank/comment line.
+    BOOST_TEST(converted("# comment\r\n\r\nRECEIVER_LAT=1\nRECEIVER_LON=2\n").receiver_lat == 1.0);
+}
+
 BOOST_AUTO_TEST_CASE(an_old_overrides_file_converts_to_an_overrides_file)
 {
     const std::string out = convertOldConf("MAX_RANGE_NM=90\nALLOW_LIST_FILE=a.txt\n", "o.conf");
-    BOOST_TEST(contains(out, "[filters]\nmax_range_nm = 90\nallow_list_file = \"a.txt\"\n"));
+    BOOST_TEST(contains(out, "[filters]\nmax_range_nm = 90.0\nallow_list_file = \"a.txt\"\n"));
     BOOST_TEST(!contains(out, "[receiver]"));
     // Any other key makes it a main file.
     BOOST_TEST(contains(convertOldConf("MAX_RANGE_NM=90\nWEB_PORT=9000\n", "o.conf"), "[receiver]"));

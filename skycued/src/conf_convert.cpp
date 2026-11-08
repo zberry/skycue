@@ -131,13 +131,6 @@ std::string literal(const Mapping& m, const legacy::Assignment& a, const std::st
             return "";  // the shipped template leaves the position empty
         if (!parseDouble(v, d))
             fail(name, a.line, std::string(m.old_key) + " must be a number, got '" + v + "'");
-        // A whole number stays one ("150"): a float key takes an integer literal.
-        const size_t digits = v.front() == '-' ? 1 : 0;
-        if (v.size() > digits && v.size() < 16 && (v[digits] != '0' || v.size() == digits + 1) &&
-            std::all_of(v.begin() + static_cast<std::ptrdiff_t>(digits), v.end(),
-                        [](char c) { return c >= '0' && c <= '9'; }) &&
-            v != "-0")
-            return v;
         return toml_lite::formatValue(d);
     }
     }
@@ -172,8 +165,13 @@ std::string convertOldConf(const std::string& old_text, const std::string& name,
 {
     const auto assignments = legacy::parseConf(old_text, name);
     std::map<std::string, legacy::Assignment> last;  // old key -> its last assignment
-    for (const auto& a : assignments)
+    for (const auto& a : assignments) {  // the first unknown key in file order is the one named
+        const bool known = std::any_of(mappings().begin(), mappings().end(),
+                                       [&](const Mapping& x) { return a.key == x.old_key; });
+        if (!known)
+            fail(name, a.line, "unknown key " + a.key);
         last[a.key] = a;
+    }
 
     // old key -> literal; the dotted keys it lands on
     std::map<std::string, std::string> values;  // dotted key -> TOML literal

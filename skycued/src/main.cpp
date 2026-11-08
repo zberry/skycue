@@ -113,7 +113,11 @@ std::string dumpEnv(const Config& config)
 {
     std::string out;
     for (const auto& key : knownConfigKeys())
-        out += envNameOf(key) + "=" + shellQuote(configValueText(config, key)) + "\n";
+{
+        // An unset position (possible here only) is an empty value, not "nan".
+        const bool unset = (key == "receiver.lat" || key == "receiver.lon") && !std::isfinite(key == "receiver.lat" ? config.receiver_lat : config.receiver_lon);
+        out += envNameOf(key) + "=" + shellQuote(unset ? std::string() : configValueText(config, key)) + "\n";
+    }
     return out;
 }
 
@@ -338,7 +342,8 @@ int run(int argc, char** argv)
     const auto env = environmentOverrides();
     Config config;
     try {
-        config = loadConfig(config_path, set_args, env);
+        // --dump-env also serves tools that need no receiver position (the map scripts).
+        config = loadConfig(config_path, set_args, env, vm.count("dump-env") == 0);
     } catch (const ConfigError& e) {
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;

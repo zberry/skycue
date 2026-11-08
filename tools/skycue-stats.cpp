@@ -160,9 +160,7 @@ int main(int argc, char** argv)
         try {
             const Config config = loadConfig(config_path, {}, environmentOverrides(), false);
             options.rx_alt_m = config.receiver_alt_m + config.antenna_height_m;
-            // Unset (NAN) or the example's 0.0 / 0.0: no position.
-            if (std::isfinite(config.receiver_lat) && std::isfinite(config.receiver_lon) &&
-                !(config.receiver_lat == 0.0 && config.receiver_lon == 0.0)) {
+            if (config.receiver_position_set) {
                 options.rx_lat = config.receiver_lat;
                 options.rx_lon = config.receiver_lon;
                 options.receiver_from = "--config";

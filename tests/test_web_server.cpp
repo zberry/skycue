@@ -1641,6 +1641,20 @@ BOOST_AUTO_TEST_CASE(dump978_enable_no_creates_no_uat_input)
     BOOST_TEST(d.terminate() == 0);
 }
 
+BOOST_AUTO_TEST_CASE(readsb_enable_false_in_the_file_creates_no_readsb_input)
+{
+    TempDir tmp;
+    const std::string conf = tmp.path + "/skycue.toml";
+    writeFile(conf, headConf({{"cues.tcp_port", "0"}, {"inputs.readsb.enable", "false"}, {"inputs.dump978.enable", "false"}}));
+    Spawned d(spawnServing(conf, {}, tmp.path + "/log"));
+    const pt::ptree config = d.json("/api/config");
+    BOOST_TEST(config.get<bool>("daemon.readsb") == false);
+    BOOST_TEST(configKey(config, "inputs.readsb.enable").get<std::string>("source") == "conf");
+    const auto ids = inputIds(d.json("/api/state"));
+    BOOST_TEST(std::count(ids.begin(), ids.end(), "readsb") == 0);
+    BOOST_TEST(d.terminate() == 0);
+}
+
 BOOST_AUTO_TEST_CASE(dump978_enabled_by_default)  // the counterpart: today's behaviour
 {
     TempDir tmp;

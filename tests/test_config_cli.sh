@@ -54,15 +54,20 @@ dump_env_shell_roundtrip() {
 }
 
 dump_env_error_exit2_empty_stdout() {
-  printf '[receiver]\nlat = 0.0\nlon = 0.0\n' >"$tmp/zero.toml"
   printf '[receiver]\nlat = 38.9\nlon = -77.0\nbogus = 1\n' >"$tmp/bogus.toml"
-  for case in "zero.toml" "bogus.toml" "missing.toml"; do
+  for case in "bogus.toml" "missing.toml"; do
     "$skycued" --config "$tmp/$case" --dump-env >"$tmp/out" 2>"$tmp/err"; rc=$?
     [ "$rc" = 2 ] || fail "$case: exit $rc"
     [ ! -s "$tmp/out" ] || fail "$case: stdout not empty"
     [ -s "$tmp/err" ] || fail "$case: no message"
   done
   base >"$tmp/ok.toml"
+  # No receiver position is no error for --dump-env (the map scripts need none): it dumps empty values.
+  printf '[web]\nport = 0\n' >"$tmp/nopos.toml"
+  out=$("$skycued" --config "$tmp/nopos.toml" --dump-env) || fail "no position: exit $?"
+  [ "$(value SKYCUE_RECEIVER_LAT <<<"$out")" = "" ] && grep -qx "SKYCUE_RECEIVER_LON=''" <<<"$out" || fail "no position: $out"
+  # The daemon itself still requires it.
+  "$skycued" --config "$tmp/nopos.toml" --check-inputs >/dev/null 2>&1; [ $? = 2 ] || fail "check-inputs without a position"
   "$skycued" --config "$tmp/ok.toml" --set nope=1 --dump-env >"$tmp/out" 2>"$tmp/err"; rc=$?
   [ "$rc" = 2 ] && [ ! -s "$tmp/out" ] && grep -q nope "$tmp/err" || fail "--set unknown key: $rc"
   "$skycued" --config "$tmp/ok.toml" --set web.port=notanumber --dump-env >"$tmp/out" 2>"$tmp/err"; rc=$?
@@ -149,7 +154,7 @@ convert_conf_overrides_style() {
   printf '# saved\nMAX_RANGE_NM=90\nBLOCK_LIST_FILE=block.txt\n' >"$tmp/o.conf"
   "$skycued" --convert-conf "$tmp/o.conf" >"$tmp/o.toml" 2>/dev/null || fail "exit $?"
   [ "$(grep -c '' "$tmp/o.toml")" -le 8 ] || fail "not an overrides-style file"
-  grep -q '^\[filters\]$' "$tmp/o.toml" && grep -qx 'max_range_nm = 90' "$tmp/o.toml" &&
+  grep -q '^\[filters\]$' "$tmp/o.toml" && grep -qx 'max_range_nm = 90.0' "$tmp/o.toml" &&
     grep -qx 'block_list_file = "block.txt"' "$tmp/o.toml" || { cat "$tmp/o.toml"; fail "keys missing"; }
   grep -q 'receiver' "$tmp/o.toml" && fail "main-file keys in an overrides file"
   # It is a valid overrides file: it sits beside a main file and takes effect.

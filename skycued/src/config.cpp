@@ -433,6 +433,8 @@ Config convertEntries(const Entries& entries, const std::string& name, bool posi
     conv.num("receiver.lon", c.receiver_lon, -180, 180);
     if (position_required && c.receiver_lat == 0.0 && c.receiver_lon == 0.0)
         conv.fail("receiver.lat", "receiver.lat and receiver.lon are both 0.0: set the receiver's position");
+    c.receiver_position_set = conv.find("receiver.lat") && conv.find("receiver.lon") &&
+                              !(c.receiver_lat == 0.0 && c.receiver_lon == 0.0);
     conv.num("receiver.alt_m", c.receiver_alt_m);
     conv.num("receiver.antenna_height_m", c.antenna_height_m);
     conv.port("inputs.dump978.raw_port", c.dump978_raw_port);

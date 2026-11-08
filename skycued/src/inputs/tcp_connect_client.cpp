@@ -10,12 +10,13 @@ namespace asio = boost::asio;
 namespace net = skycue::net;
 
 struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Impl> {
-    Impl(asio::io_context& io, std::string host, uint16_t port)
+    Impl(asio::io_context& io, std::string host, uint16_t port, std::string name)
     {
         net::TcpOptions o;
         o.keepalive = true;
         o.nodelay = false;  // this side only reads
         o.chunk_bytes = kChunkBytes;
+        o.name = std::move(name);
         boost::system::error_code ec;
         remote = asio::ip::make_address(host, ec);  // unspecified when the host is a name
         where = host + ":" + std::to_string(port);
@@ -94,8 +95,8 @@ struct TcpConnectClient::Impl : TransportState, std::enable_shared_from_this<Imp
     }
 };
 
-TcpConnectClient::TcpConnectClient(asio::io_context& io, std::string host, uint16_t port)
-    : impl_(std::make_shared<Impl>(io, std::move(host), port))
+TcpConnectClient::TcpConnectClient(asio::io_context& io, std::string host, uint16_t port, std::string name)
+    : impl_(std::make_shared<Impl>(io, std::move(host), port, std::move(name)))
 {
     state_ = impl_;
     impl_->wire();

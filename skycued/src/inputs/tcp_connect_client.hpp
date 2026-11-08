@@ -22,7 +22,8 @@ class TcpConnectClient : public Transport {
 public:
     static constexpr std::size_t kChunkBytes = 16384;
 
-    TcpConnectClient(boost::asio::io_context& io, std::string host, uint16_t port);
+    TcpConnectClient(boost::asio::io_context& io, std::string host, uint16_t port,
+                     std::string name = {});  // name: the log prefix (the input id)
     ~TcpConnectClient() override;
 
     void start() override;

@@ -85,10 +85,10 @@ std::unique_ptr<Transport> makeTransport(boost::asio::io_context& io, const Inpu
     if (!json && def.type != InputType::pingstation_cat021)
         throw std::invalid_argument(std::string("no transport for input type ") + inputTypeName(def.type));
     if (json || def.transport == InputTransport::udp)
-        return std::make_unique<UdpListener>(io, def.bind, def.port, def.peer);
+        return std::make_unique<UdpListener>(io, def.bind, def.port, def.peer, std::chrono::seconds(5), def.id);
     if (def.transport == InputTransport::tcp_connect)
-        return std::make_unique<TcpConnectClient>(io, def.host, def.port);
-    return std::make_unique<TcpListener>(io, def.bind, def.port, def.peer);
+        return std::make_unique<TcpConnectClient>(io, def.host, def.port, def.id);
+    return std::make_unique<TcpListener>(io, def.bind, def.port, def.peer, std::chrono::seconds(5), def.id);
 }
 
 }  // namespace skycued

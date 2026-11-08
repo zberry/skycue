@@ -266,7 +266,8 @@ void Dialer::lost(uint64_t gen, const std::string& why)
             log(LogLevel::debug, m.opts.name, why + retrying);
         else
             log(LogLevel::warn, m.opts.name,
-                m.host + ":" + std::to_string(m.port) + ": " + why + retrying +
+                (why.find(m.host) == std::string::npos ? m.host + ":" + std::to_string(m.port) + ": " : std::string()) +
+                    why + retrying +
                     " (further failures logged at debug level)");
         std::weak_ptr<Dialer> weak = shared_from_this();
         m.retry.after(delay, [weak] {

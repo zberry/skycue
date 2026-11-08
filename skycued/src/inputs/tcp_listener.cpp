@@ -15,7 +15,7 @@ namespace net = skycue::net;
 
 struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
     Impl(asio::io_context& io_, std::string bind, uint16_t port, const std::string& peer,
-         std::chrono::milliseconds rebind_delay)
+         std::chrono::milliseconds rebind_delay, std::string name)
         : io(io_)
     {
         parsePeerFilter(peer);  // the same error text as the other transports
@@ -25,6 +25,7 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
         o.tcp.chunk_bytes = kChunkBytes;
         o.max_peers = kMaxPeers;
         o.peer = peer;
+        o.tcp.name = std::move(name);
         o.rebind_delay = rebind_delay;
         listener = net::Listener::create(io_, std::move(bind), port, std::move(o));
     }
@@ -108,8 +109,8 @@ struct TcpListener::Impl : TransportState, std::enable_shared_from_this<Impl> {
 };
 
 TcpListener::TcpListener(asio::io_context& io, std::string bind, uint16_t port, const std::string& peer,
-                         std::chrono::milliseconds rebind_delay)
-    : impl_(std::make_shared<Impl>(io, std::move(bind), port, peer, rebind_delay))
+                         std::chrono::milliseconds rebind_delay, std::string name)
+    : impl_(std::make_shared<Impl>(io, std::move(bind), port, peer, rebind_delay, std::move(name)))
 {
     state_ = impl_;
     impl_->wire();

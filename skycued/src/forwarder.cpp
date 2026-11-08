@@ -139,9 +139,10 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
     steady::time_point next_keyframe{}, last_broadcast{}, drain_deadline{};
     uint64_t frames_sent = 0;
 
-    skycue::net::TcpOptions tcpOptions() const
+    skycue::net::TcpOptions tcpOptions(const std::string& id) const
     {
         skycue::net::TcpOptions o; // keepalive and nodelay on
+        o.name = id;
         o.send_cap = cfg.max_client_queue_bytes;
         return o;
     }
@@ -196,7 +197,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         const auto& e = d.d.endpoint;
         if (e.transport == Transport::tcp_listen) {
             skycue::net::ListenOptions lo;
-            lo.tcp = tcpOptions();
+            lo.tcp = tcpOptions(d.d.id);
             lo.max_peers = kMaxPeers;
             lo.peer = e.peer;
             lo.fail_fast = d.d.builtin;
@@ -213,14 +214,14 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
             if (!d.d.builtin)
                 LOG_INFO("forwarder: TCP listener " << d.name());
         } else if (e.transport == Transport::tcp_connect) {
-            d.dial = skycue::net::Dialer::create(io, e.host, e.port, tcpOptions());
+            d.dial = skycue::net::Dialer::create(io, e.host, e.port, tcpOptions(d.d.id));
             // Attached before start(): the Fanout's peer-up runs inside the
             // connect handler, so the Hello is queued before anything published later.
             fanout.attach(d.dial);
             LOG_INFO("forwarder: TCP target " << d.name());
             d.dial->start();
         } else {
-            d.udp = skycue::net::UdpSender::create(io, skycue::kHeaderSize + skycue::kMaxUdpPayload);
+            d.udp = skycue::net::UdpSender::create(io, skycue::kHeaderSize + skycue::kMaxUdpPayload, d.d.id);
             skycue::net::UdpTarget t;
             t.host = e.group.empty() ? e.host : e.group;
             t.port = e.port;

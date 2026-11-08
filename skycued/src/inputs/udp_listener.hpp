@@ -24,7 +24,8 @@ public:
     static constexpr std::size_t kBufferBytes = 65537;
 
     UdpListener(boost::asio::io_context& io, std::string bind, uint16_t port, const std::string& peer,
-                std::chrono::milliseconds rebind_delay = std::chrono::seconds(5));
+                std::chrono::milliseconds rebind_delay = std::chrono::seconds(5),
+                std::string name = {});  // name: the log prefix (the input id)
     ~UdpListener() override;
 
     void start() override;

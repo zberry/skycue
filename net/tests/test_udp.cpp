@@ -7,6 +7,7 @@
 #include "skycue/net/udp_sender.hpp"
 
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <sys/socket.h>
 
 #include <atomic>
@@ -228,6 +229,56 @@ BOOST_AUTO_TEST_CASE(udp_state_callback_across_a_rebind)
     BOOST_CHECK_EQUAL(r->receiveBufferBytes(), 0);
     BOOST_CHECK(holds([&] { std::lock_guard<std::mutex> l(m); return states == std::vector<bool>{true}; },
                       slow(milliseconds(100)))); // stop() is silent
+}
+
+// Makes the receiver's socket fail the way a real one can: with IP_RECVERR
+// set, an ICMP port-unreachable for a datagram sent from the socket itself is
+// reported by the next receive as ECONNREFUSED, which the receiver treats as a loss.
+void provokeReceiveError(int fd)
+{
+    int on = 1;
+    BOOST_REQUIRE_EQUAL(::setsockopt(fd, IPPROTO_IP, IP_RECVERR, &on, sizeof on), 0);
+    // Nothing listens on the port of a socket that was just closed.
+    asio::io_context io;
+    udp::socket probe(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const udp::endpoint dead = probe.local_endpoint();
+    probe.close();
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = htons(dead.port());
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    const char byte = 'x';
+    BOOST_REQUIRE_EQUAL(::sendto(fd, &byte, 1, 0, reinterpret_cast<const sockaddr*>(&to), sizeof to), 1);
+}
+
+BOOST_AUTO_TEST_CASE(udp_state_callback_bind_loss_rebind)
+{
+    IoThread t;
+    auto got = std::make_shared<Got>();
+    UdpReceiveOptions o;
+    o.rebind_delay = milliseconds(50);
+    std::mutex m;
+    std::vector<bool> states;
+    auto r = t.call([&] {
+        auto x = UdpReceiver::create(t.io, "127.0.0.1", 0, o);
+        hook(*x, got);
+        x->onState([&](bool up) {
+            std::lock_guard<std::mutex> l(m);
+            states.push_back(up);
+        });
+        x->start();
+        return x;
+    });
+    auto seen = [&] { std::lock_guard<std::mutex> l(m); return states; };
+    BOOST_REQUIRE(eventually([&] { return seen().size() == 1; }));
+    const int fd = t.call([&] { return r->nativeHandleForTest(); });
+    BOOST_REQUIRE(fd >= 0);
+    provokeReceiveError(fd);
+    BOOST_REQUIRE(eventually([&] { return seen().size() == 3; }, slow(milliseconds(2000))));
+    BOOST_CHECK((seen() == std::vector<bool>{true, false, true}));
+    BOOST_CHECK(r->bound());
+    t.call([&] { r->stop(); return 0; });
+    BOOST_CHECK(holds([&] { return seen().size() == 3; }, slow(milliseconds(100))));
 }
 
 BOOST_AUTO_TEST_CASE(udp_multicast_join_and_receive_on_loopback)

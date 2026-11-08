@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <vector>
 
 namespace skycued {
@@ -84,10 +85,14 @@ AltitudeFit::AltitudeFit(AltitudeFitConfig cfg) : cfg_(cfg) {}
 void AltitudeFit::add(uint32_t aircraft_key, Clock::time_point t, int32_t baro_ft,
                       int32_t diff_ft) {
     auto& q = samples_[aircraft_key];
-    // One sample per bucket; a time not after the newest stored one (a clock
-    // that stepped back) is ignored.
-    if (!q.empty() && (t < q.back().t || t - q.back().t < cfg_.bucket)) return;
-    q.push_back({t, baro_ft, diff_ft});
+    // Keep the deque in time order (it is small), so a wall clock that stepped
+    // back still stores samples. One sample per bucket: a time closer than
+    // `bucket` to a neighbour is dropped.
+    auto pos = std::upper_bound(q.begin(), q.end(), t,
+                                [](Clock::time_point v, const Sample& s) { return v < s.t; });
+    if (pos != q.begin() && t - std::prev(pos)->t < cfg_.bucket) return;
+    if (pos != q.end() && pos->t - t < cfg_.bucket) return;
+    q.insert(pos, {t, baro_ft, diff_ft});
     if (q.size() > kMaxPerAircraft) q.pop_front();
 }
 
@@ -104,7 +109,11 @@ std::optional<FitResult> AltitudeFit::fit(Clock::time_point now) {
     std::vector<Point> pts;
     for (auto it = samples_.begin(); it != samples_.end();) {
         auto& q = it->second;
-        while (!q.empty() && q.front().t < cutoff) q.pop_front();
+        // Stale: older than the window, or from beyond `now` by more than the
+        // window (a forward clock jump that was stepped back afterwards).
+        q.erase(std::remove_if(q.begin(), q.end(),
+                               [&](const Sample& s) { return s.t < cutoff || s.t > now + cfg_.window; }),
+                q.end());
         if (q.empty()) {
             it = samples_.erase(it);
             continue;

@@ -153,7 +153,7 @@ BOOST_AUTO_TEST_CASE(window_ages_out) {
         BOOST_REQUIRE(r);
         BOOST_TEST(r->samples == 8u);
         BOOST_TEST((r->newest == kT0 + seconds(100)));
-        BOOST_TEST(r->a >= 300.0);  // only the later cohort (offset +200) remains
+        BOOST_TEST(std::fabs(r->a - 725.0) <= 60.0);  // median of the later cohort only
     }
     AltitudeFit fit;
     fit.add(1, kT0, 30000, 900);
@@ -182,16 +182,31 @@ BOOST_AUTO_TEST_CASE(two_outliers_of_twelve) {
     BOOST_TEST(std::fabs(r->b - kB) <= 0.1 * kB);
 }
 
-BOOST_AUTO_TEST_CASE(sample_clock_backwards_ignored_not_crash) {
+BOOST_AUTO_TEST_CASE(sample_clock_backwards_is_stored) {
     AltitudeFit fit;
     fit.add(1, kT0 + seconds(100), 30000, 900);
-    fit.add(1, kT0 + seconds(50), 30000, 5000);  // older than the newest stored
-    fit.add(1, kT0 + seconds(99), 30000, 5000);
-    BOOST_TEST(fit.sampleCount() == 1u);
-    const auto r = fit.fit(kT0 + seconds(60));  // `now` earlier than the sample: age never negative
+    fit.add(1, kT0 + seconds(50), 30000, 900);  // older than the newest stored: kept, in order
+    BOOST_TEST(fit.sampleCount() == 2u);
+    fit.add(1, kT0 + seconds(52), 30000, 900);  // inside the bucket of a neighbour: dropped
+    BOOST_TEST(fit.sampleCount() == 2u);
+    fit.add(1, kT0 + seconds(60), 30000, 900);
+    BOOST_TEST(fit.sampleCount() == 3u);
+    const auto r = fit.fit(kT0 + seconds(70));  // `now` earlier than the newest sample
     BOOST_REQUIRE(r);
     BOOST_TEST(r->a == 900.0);
+    BOOST_TEST(r->samples == 3u);
     BOOST_TEST((r->newest == kT0 + seconds(100)));
+}
+
+BOOST_AUTO_TEST_CASE(samples_from_the_future_pruned) {
+    AltitudeFit fit;
+    fit.add(1, kT0 + seconds(1000), 30000, 5000);  // a forward jump, then the clock stepped back
+    fit.add(2, kT0 + seconds(10), 30000, 900);
+    const auto r = fit.fit(kT0 + seconds(20));
+    BOOST_REQUIRE(r);
+    BOOST_TEST(r->aircraft == 1u);
+    BOOST_TEST(r->a == 900.0);
+    BOOST_TEST(fit.sampleCount() == 1u);
 }
 
 BOOST_AUTO_TEST_CASE(fit_cached_5s) {
@@ -199,14 +214,14 @@ BOOST_AUTO_TEST_CASE(fit_cached_5s) {
     fill(fit, 8, 4);
     const auto first = fit.fit(kT0 + seconds(30));
     BOOST_REQUIRE(first);
-    // A wild new aircraft would change the fit, but not within 5 s of the last computation.
-    fit.add(99, kT0 + seconds(31), 3000, 9000);
+    // An in-band sample for an existing aircraft changes `newest` and `samples`.
+    fit.add(1, kT0 + seconds(31), 3000 + 40, static_cast<int>(kA + kB * 3040));
     const auto cached = fit.fit(kT0 + seconds(34));
     BOOST_REQUIRE(cached);
-    BOOST_TEST(cached->a == first->a);
-    BOOST_TEST(cached->aircraft == first->aircraft);
+    BOOST_TEST(cached->samples == first->samples);
+    BOOST_TEST((cached->newest == first->newest));
     const auto later = fit.fit(kT0 + seconds(36));
     BOOST_REQUIRE(later);
-    BOOST_TEST(later->aircraft + 0u != 0u);
-    BOOST_TEST(fit.sampleCount() == 8u * 4u + 1u);
+    BOOST_TEST(later->samples == first->samples + 1u);
+    BOOST_TEST((later->newest == kT0 + seconds(31)));
 }

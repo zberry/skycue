@@ -12,18 +12,20 @@
 //     32-54 latitude (23 bits), 55-78 longitude (24 bits), both x 360/2^24
 //     79 altitude type (0 barometric, 1 geometric), 80-91 altitude (12 bits)
 //     92-95 NIC, 96-97 A/G state (0 airborne, 1 airborne supersonic, 2 ground)
-//     airborne: 98 N/S sign (1 = south), 99-108 N/S (10 bits), 109 E/W sign
-//       (1 = west), 110-119 E/W (10 bits), 120 vertical-rate source (1 =
-//       geometric), 121 sign (1 = down), 122-130 vertical rate (9 bits)
-//     ground:   98-108 speed (11 bits), 109-110 track type (1 = true track; 0 n/a, 2 magnetic heading, 3 true
-//       heading give no track; golden-arbitrated (Task 5a)),
-//       111-119 track/heading (9 bits, x 360/512)
+//     airborne: 99 N/S sign (1 = south), 100-109 N/S (10 bits), 110 E/W sign
+//       (1 = west), 111-120 E/W (10 bits), 121 vertical-rate source (1 =
+//       barometric, 0 = geometric), 122 sign (1 = down), 123-131 vertical rate
+//       (9 bits); bit 98 unused (confirmed against the dump978-fa golden)
+//     ground:   99-109 speed (11 bits), 110-111 track type (1 = true track; 0 n/a,
+//       2 magnetic heading, 3 true heading give no track), 112-120 track/heading
+//       (9 bits, x 360/512); placed by analogy with the airborne block, the golden
+//       has no ground frame, so these are not confirmed
 //   mode status   bytes 17-28 (types 1 and 3): emitter category + eight base-40
 //     characters in three 16-bit groups (bits 136-183), emergency (3 bits at
-//     184), NACp (4 bits at 200), CSID (bit 213)
+//     184), NACp (4 bits at 200), CSID (bit 214: 1 = call sign, 0 = squawk)
 //   AUX SV        bytes 29-33 (types 1, 2, 5, 6): bits 232-243 secondary altitude
-// Every field is cited next to its constant in uat_frame.cpp; the ones marked
-// "golden-arbitrated" are fixed by the dump978-fa golden comparison (plan Task 5).
+// Every field is cited next to its constant in uat_frame.cpp; the dump978-fa
+// golden comparison (tests/test_decode_uat_golden.cpp) settled the ones that say so.
 
 #include <cstdint>
 #include <optional>
@@ -86,7 +88,7 @@ struct StateVector {
 };
 
 struct ModeStatus {
-    std::string emitter_category;  // "A0".."D7" from value / 8, % 8; empty when 0 (no info)
+    std::string emitter_category;  // "A0".."D7" from value / 8, % 8; 32..39 empty
     std::optional<std::string> callsign;  // CSID 1
     std::optional<std::string> squawk;    // CSID 0 and four octal digits
     std::optional<std::string> emergency; // 0..6 as decoder spec §5.3

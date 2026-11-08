@@ -20,7 +20,7 @@ uint32_t bitsAt(const std::vector<uint8_t>& b, unsigned first, unsigned count)
 }
 
 // Layout constants: public UAT ADS-B description (RTCA DO-282B / FAA UAT ADS-B
-// message summary) unless marked golden-arbitrated (Task 5a).
+// message summary) unless the comment says otherwise; the golden comparison is tests/test_decode_uat_golden.cpp.
 constexpr double kAngleLsb = 360.0 / 16777216.0;  // lat/lon LSB, 360/2^24 (DO-282B SV)
 constexpr unsigned kLatBit = 32, kLatLen = 23;    // DO-282B SV
 constexpr unsigned kLonBit = 55, kLonLen = 24;    // DO-282B SV
@@ -28,18 +28,25 @@ constexpr unsigned kAltTypeBit = 79;              // DO-282B SV
 constexpr unsigned kAltBit = 80, kAltLen = 12;    // DO-282B SV
 constexpr unsigned kNicBit = 92, kNicLen = 4;     // DO-282B SV
 constexpr unsigned kAgBit = 96;                   // DO-282B SV, 2 bits
-constexpr unsigned kNsSignBit = 98;               // DO-282B SV airborne velocity
-constexpr unsigned kNsBit = 99, kEwSignBit = 109, kEwBit = 110, kVelLen = 10;
-constexpr unsigned kVrSrcBit = 120, kVrSignBit = 121, kVrBit = 122, kVrLen = 9;
-constexpr unsigned kGndSpeedBit = 98, kGndSpeedLen = 11;  // DO-282B SV surface
+// Airborne velocity block, bits 99-131; bit 98 is not part of it (confirmed
+// against the dump978-fa golden: velocity and vertical rate agree on all 439 frames).
+constexpr unsigned kNsSignBit = 99;
+constexpr unsigned kNsBit = 100, kEwSignBit = 110, kEwBit = 111, kVelLen = 10;
+// Vertical-rate source bit: 1 = barometric, 0 = geometric (confirmed against the golden).
+constexpr unsigned kVrSrcBit = 121, kVrSignBit = 122, kVrBit = 123, kVrLen = 9;
+// Surface block, placed in the same bits 99-120 as the airborne velocity (22 bits,
+// one field after another). Inferred from the airborne shift: the golden has no
+// ground frame, so these are not confirmed.
+constexpr unsigned kGndSpeedBit = 99, kGndSpeedLen = 11;
 // Track/heading type: 0 n/a, 1 true track, 2 magnetic heading, 3 true heading;
-// only 1 is a track. golden-arbitrated (Task 5a)
+// only 1 is a track (a deliberate ruling). The code values are not confirmed:
+// the golden has no ground frame.
 constexpr uint32_t kGndTypeTrack = 1;
-constexpr unsigned kGndTypeBit = 109, kGndTrackBit = 111, kGndTrackLen = 9;
+constexpr unsigned kGndTypeBit = 110, kGndTrackBit = 112, kGndTrackLen = 9;
 constexpr unsigned kMsBit = 136;                  // DO-282B MS: byte 17
-constexpr unsigned kEmergencyBit = 184;           // golden-arbitrated (Task 5a)
-constexpr unsigned kNacpBit = 200;                // golden-arbitrated (Task 5a)
-constexpr unsigned kCsidBit = 213;                // golden-arbitrated (Task 5a)
+constexpr unsigned kEmergencyBit = 184;           // consistent with the golden (every frame is "none"); the field after it, MOPS version, matches at 187
+constexpr unsigned kNacpBit = 200;                // confirmed against the dump978-fa golden
+constexpr unsigned kCsidBit = 214;                // set for call signs, clear for squawks (golden); was 213
 constexpr unsigned kAuxBit = 232;                 // DO-282B AUX SV: byte 29
 
 int hexVal(char c)
@@ -209,7 +216,7 @@ StateVector decodeStateVector(const UatFrame& f)
         if (vr != 0) {
             const int32_t mag = (static_cast<int32_t>(vr) - 1) * 64;
             sv.vrate_fpm = bitsAt(b, kVrSignBit, 1) ? -mag : mag;
-            sv.vrate_geometric = bitsAt(b, kVrSrcBit, 1) != 0;
+            sv.vrate_geometric = bitsAt(b, kVrSrcBit, 1) == 0;
         }
     } else if (sv.ag == StateVector::Ag::ground) {
         const uint32_t sp = bitsAt(b, kGndSpeedBit, kGndSpeedLen);
@@ -229,27 +236,35 @@ std::optional<ModeStatus> decodeModeStatus(const UatFrame& f)
     ModeStatus ms;
     const uint32_t g1 = bitsAt(b, kMsBit, 16), g2 = bitsAt(b, kMsBit + 16, 16), g3 = bitsAt(b, kMsBit + 32, 16);
     const unsigned cat = g1 / 1600;
-    if (cat >= 1 && cat <= 31) {  // sets A-D; 32..39 unmapped: golden-arbitrated (Task 5a)
+    // Sets A-D, 0 = "A0" (no information, as the golden prints it and as the 1090 decoder does);
+    // 32..39 stay unmapped (the golden has only A0-A2, so the code points are not confirmed).
+    if (cat <= 31) {
         ms.emitter_category = std::string(1, "ABCD"[cat / 8]);
         ms.emitter_category += static_cast<char>('0' + cat % 8);
     }
     bool ok = g1 < 64000 && g2 < 64000 && g3 < 64000;
-    std::string cs;
     if (ok) {
         const unsigned idx[8] = {(g1 % 1600) / 40, g1 % 40, g2 / 1600, (g2 % 1600) / 40,
                                  g2 % 40,          g3 / 1600, (g3 % 1600) / 40, g3 % 40};
-        for (unsigned v : idx)
-            cs += base40(v, ok);
-    }
-    if (ok) {
-        while (!cs.empty() && cs.back() == ' ')
-            cs.pop_back();
-        if (!cs.empty()) {
-            if (bitsAt(b, kCsidBit, 1)) {
+        if (bitsAt(b, kCsidBit, 1)) {
+            std::string cs;
+            for (unsigned v : idx)
+                cs += base40(v, ok);
+            while (ok && !cs.empty() && cs.back() == ' ')
+                cs.pop_back();
+            if (ok && !cs.empty())
                 ms.callsign = cs;
-            } else if (cs.size() == 4 && cs.find_first_not_of("01234567") == std::string::npos) {
-                ms.squawk = cs;
-            }
+        } else {
+            // A squawk is four octal digits; the other four symbols are padding, which is
+            // symbol 37 in the golden (a space, 36, is accepted too).
+            std::string sq;
+            for (unsigned i = 0; i < 4; ++i)
+                sq += idx[i] < 8 ? static_cast<char>('0' + idx[i]) : '?';
+            bool pad = true;
+            for (unsigned i = 4; i < 8; ++i)
+                pad = pad && idx[i] >= 36;
+            if (pad && sq.find('?') == std::string::npos)
+                ms.squawk = sq;
         }
     }
     static const char* const names[] = {"none", "general", "medical", "minimum_fuel",

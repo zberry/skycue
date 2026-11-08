@@ -164,7 +164,6 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
         } else {
             if (!ks.first_pos) ks.first_pos = p;
             accepted = p;  // every accepted in-range fix is new, even a repeat: position_time must advance
-            ks.last_pos = p;
         }
     }
 

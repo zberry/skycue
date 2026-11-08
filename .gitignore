@@ -27,6 +27,7 @@ skycue.runtime.json.rejected
 # upstream commits and SHA-256 values), never committed once removed.
 /tests/fixtures/raw/*
 !/tests/fixtures/raw/modes-120s.golden.jsonl.gz
+!/tests/fixtures/raw/uat-sample.golden.jsonl.gz
 /tests/fixtures/fisb/tg30.978
 /tests/fixtures/fisb/received-with-uplinks.jsonl
 /tests/fixtures/fisb/received-tg30.jsonl

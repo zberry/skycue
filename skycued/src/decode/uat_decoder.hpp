@@ -32,7 +32,6 @@ struct UatKeyState {
     TimePoint last_seen{};
     std::list<StateKey>::iterator lru;
 
-    std::optional<cpr::Position> last_pos;   // last accepted position (a repeat is not "new")
     std::optional<cpr::Position> first_pos;  // anchor of the range check without a reference
 
     Timed<std::string> callsign, category, squawk, emergency;

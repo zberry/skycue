@@ -306,7 +306,7 @@ BOOST_AUTO_TEST_CASE(vrate_sign_source_and_64fpm)
 
 BOOST_AUTO_TEST_CASE(emitter_category_letters)
 {
-    const struct { unsigned v; const char* s; } cases[] = {{0, ""}, {1, "A1"}, {9, "B1"}, {17, "C1"}, {25, "D1"}, {31, "D7"}, {39, ""}};
+    const struct { unsigned v; const char* s; } cases[] = {{0, "A0"}, {1, "A1"}, {9, "B1"}, {17, "C1"}, {25, "D1"}, {31, "D7"}, {39, ""}};
     for (const auto& c : cases) {
         UatSpec s;
         s.type = 1;
@@ -450,4 +450,17 @@ BOOST_AUTO_TEST_CASE(parse_line_rs_not_integer_ignored)
     const auto f = parseDownlinkLine(toHex(encodeUat(UatSpec{})) + ";rs=1e30");
     BOOST_REQUIRE(f);
     BOOST_TEST(!f->rs_errors);
+}
+
+BOOST_AUTO_TEST_CASE(csid0_squawk_with_filler_symbols)
+{
+    // A frame as dump978-fa demodulated it from the sample: flight plan id "0322", the
+    // other four symbols 37 (the golden prints flightplan_id 0322 for it).
+    const auto f = parseDownlinkLine("08a66ef1353ae55263ac04f9117c2ba03f0c830cf5ed2d0bbaa4c0a0000590000000;");
+    BOOST_REQUIRE(f);
+    const auto ms = decodeModeStatus(*f);
+    BOOST_REQUIRE(ms);
+    BOOST_REQUIRE(ms->squawk);
+    BOOST_TEST(*ms->squawk == "0322");
+    BOOST_TEST(!ms->callsign);
 }

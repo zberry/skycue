@@ -99,6 +99,25 @@ and `nac_p` appear in the golden more often than in the decoder's output.
   First line: `-00a66ef135445d525a0c0519119021204800;`.
 - sha256: `86248797f4334a134ccf4349dabf800a7054d698828b88838dc7950a99f9ae24`
 
+## raw/uat-sample.golden.jsonl.gz
+
+- Made by `gen_uat_golden.sh DUMP978 IQGEN SAMPLE_GZ OUT_GZ` from the downlink
+  lines of `uat-sample.txt.gz`: `skycue-iqgen uat` modulates them to a temporary
+  CU8 file (deleted on exit, about 80 KB per frame), dump978-fa (FlightAware
+  fork, the superbuild's pinned version) demodulates it with `--raw-stdout
+  --json-stdout`, and `gen_uat_golden.py` pairs each raw line with the JSON
+  object of the same `received_at`. Both binaries are arguments; nothing in the
+  repository knows where they live. The script fails on a JSON key it does not
+  know and on more than 5 % of downlinks without JSON.
+- Content: one object per downlink (439 of 439 paired), keys `hex`, `address`,
+  `qualifier`, `ag`, `lat`, `lon`, `alt_baro`, `alt_geom`, `gs`, `track`,
+  `vrate`, `vrate_src`, `callsign`, `squawk` (dump978-fa's `flightplan_id`),
+  `category`, `emergency`, `nic`, `nac_p`; keys the tool did not print are absent.
+- Coverage: every frame is airborne; qualifiers `adsb_icao`, `tisb_icao`,
+  `tisb_trackfile`; emitter categories A0-A2; emergency always `none`. Ground
+  frames, headings and categories above A2 are therefore not covered.
+- Used by `tests/test_decode_uat_golden.cpp` (ctest `decode_uat_golden`).
+
 ## raw/stratux-uat-2015.log.gz
 
 - Origin: https://github.com/cyoung/stratux, file

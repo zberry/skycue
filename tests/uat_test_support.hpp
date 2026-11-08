@@ -89,20 +89,20 @@ inline Bytes encodeUat(const UatSpec& s)
     if (s.ag == 0 || s.ag == 1) {
         const int div = s.ag == 1 ? 4 : 1;
         if (s.ns_kt && s.ew_kt) {
-            put(b, 98, 1, *s.ns_kt < 0);
-            put(b, 99, 10, static_cast<uint32_t>(std::abs(*s.ns_kt) / div + 1));
-            put(b, 109, 1, *s.ew_kt < 0);
-            put(b, 110, 10, static_cast<uint32_t>(std::abs(*s.ew_kt) / div + 1));
+            put(b, 99, 1, *s.ns_kt < 0);
+            put(b, 100, 10, static_cast<uint32_t>(std::abs(*s.ns_kt) / div + 1));
+            put(b, 110, 1, *s.ew_kt < 0);
+            put(b, 111, 10, static_cast<uint32_t>(std::abs(*s.ew_kt) / div + 1));
         }
         if (s.vrate_fpm) {
-            put(b, 120, 1, s.vrate_geometric);
-            put(b, 121, 1, *s.vrate_fpm < 0);
-            put(b, 122, 9, static_cast<uint32_t>(std::abs(*s.vrate_fpm) / 64 + 1));
+            put(b, 121, 1, !s.vrate_geometric);  // 1 = barometric (golden)
+            put(b, 122, 1, *s.vrate_fpm < 0);
+            put(b, 123, 9, static_cast<uint32_t>(std::abs(*s.vrate_fpm) / 64 + 1));
         }
     } else if (s.ag == 2) {
-        put(b, 98, 11, s.ground_speed_kt ? static_cast<uint32_t>(*s.ground_speed_kt + 1) : 0u);
-        put(b, 109, 2, s.track_type);
-        put(b, 111, 9, static_cast<uint32_t>(std::llround(s.track_deg * 512.0 / 360.0)) & 0x1FFu);
+        put(b, 99, 11, s.ground_speed_kt ? static_cast<uint32_t>(*s.ground_speed_kt + 1) : 0u);
+        put(b, 110, 2, s.track_type);
+        put(b, 112, 9, static_cast<uint32_t>(std::llround(s.track_deg * 512.0 / 360.0)) & 0x1FFu);
     }
     if (s.type == 1 || s.type == 3) {
         std::string c = s.call;
@@ -115,7 +115,7 @@ inline Bytes encodeUat(const UatSpec& s)
         put(b, 168, 16, v[5] * 1600 + v[6] * 40 + v[7]);
         put(b, 184, 3, s.emergency);
         put(b, 200, 4, s.nacp);
-        put(b, 213, 1, s.csid);
+        put(b, 214, 1, s.csid);
     }
     if (s.type == 1 || s.type == 2 || s.type == 5 || s.type == 6)
         put(b, 232, 12, altRaw(s.aux_alt_ft));

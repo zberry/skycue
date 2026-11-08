@@ -25,7 +25,7 @@ sinks out, all handled on one io thread.
 | `listener.hpp` | `Listener`: a TCP server for many peers. Stream ids 1, 2, 3, ... never reused; per-peer send queue with a byte cap (over the cap the peer is closed); optional single permitted source address; rebinds after a failure. |
 | `udp_receiver.hpp` | `UdpReceiver`: datagrams from a unicast port or a multicast group; closes and retries after a bind, join or receive error. |
 | `udp_sender.hpp` | `UdpSender`: one datagram per buffer to every target, unicast or multicast; non-blocking, a datagram the kernel cannot take is dropped and counted. A host name that resolves to several addresses is sent to at one only: the first IPv4 address, else the first (logged at debug). |
-| `fanout.hpp` | `Fanout`: owns a dynamic set of listeners, dialers and UDP senders and delivers one `Buf` to all of them. A slow or absent destination drops on its own; `publish()` never blocks. A greeting hook runs when a TCP peer connects. Construct it with `Fanout()`; the older `Fanout(io_context&)` still works and ignores its argument. |
+| `fanout.hpp` | `Fanout`: owns a dynamic set of listeners, dialers and UDP senders and delivers one `Buf` to all of them. A slow or absent destination drops on its own; `publish()` never blocks. Peer-up and peer-down hooks carry a Fanout-wide peer id and, for peer-up, the remote address and a send-to-that-peer function; `peerInfo(id)` gives that peer's send-side stats. Construct it with `Fanout()`; the older `Fanout(io_context&)` still works and ignores its argument. |
 | `log.hpp` | The process-wide log sink (below). |
 
 ## Endpoint fields
@@ -87,14 +87,17 @@ or `udp 239.1.1.5:4001 via 192.0.2.10 ttl 4`; IPv6 addresses are in brackets.
 - Counters are monotonic across `stop()` and `start()`; only `peers` resets.
   `Fanout::counters()` sums `messages_out`, `bytes_out`, `dropped` and `peers`
   only.
-- `Fanout` peer events: peers that already exist when a listener is attached
-  get no peer-up, and the peers of a detached or stopped listener get no
-  peer-down, so a host that keeps per-stream state must clear it when it
-  detaches or stops a listener.
-- `Fanout` holds destinations by `shared_ptr` and does not start or stop them.
-  Register peer events through `Fanout::onPeerUp` and `onPeerDown`, not
-  through `Listener::onPeer`, and detach listeners before destroying the
-  `Fanout`.
+- `Fanout` peer events: it takes over `Listener::onPeer` and `Dialer::onConnection` of every attached
+  destination, so register peer events through `Fanout::onPeerUp` and `onPeerDown` only. Peer ids are unique
+  across the Fanout. Destinations that are already connected when attached get no peer-up, and the peers of a
+  detached or stopped destination get no peer-down, so a host that keeps per-peer state must clear it when it
+  detaches or stops a destination. Peer-up runs synchronously in the accept or connect handler (before any later
+  `publish` can reach that peer); peer-down is posted.
+- `Fanout` holds destinations by `shared_ptr` and does not start or stop them. Detach destinations before
+  destroying the `Fanout`.
+- `Listener::peerStats(stream)`, `Dialer::peerStats()` and `Fanout::peerInfo(id)` report bytes and messages
+  written and bytes still queued for one connection (`PeerStats`); a connection that is gone has none. A host
+  that wants to flush before stopping waits for `queued_bytes == 0` on the peers it still sees.
 
 ## Multicast on one port
 

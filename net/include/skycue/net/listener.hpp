@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace skycue::net {
@@ -51,6 +52,8 @@ public:
     void send(uint64_t stream, const Buf& b); // per-peer queue; over the cap the peer is closed (dropped++); an empty Buf is dropped (dropped++)
     void sendAll(const Buf& b); // an empty Buf is dropped and counted once per peer
     std::size_t peers() const;
+    // Send-side stats of one peer; empty when the stream is not (or no longer) connected.
+    std::optional<PeerStats> peerStats(uint64_t stream) const;
     const Counters& counters() const; // read on the io thread only
 
 private:

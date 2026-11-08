@@ -93,6 +93,14 @@ void Listener::onPeer(std::function<void(uint64_t, bool, const tcp::endpoint&)> 
 bool Listener::listening() const { return impl_->up.load(); }
 uint16_t Listener::localPort() const { return impl_->bound_port.load(); }
 std::size_t Listener::peers() const { return impl_->sessions.size(); }
+std::optional<PeerStats> Listener::peerStats(uint64_t stream) const
+{
+    const auto it = impl_->sessions.find(stream);
+    if (it == impl_->sessions.end())
+        return std::nullopt;
+    const WriteQueue& q = it->second->wq;
+    return PeerStats{q.bytesWritten(), q.messagesWritten(), q.queuedBytes()};
+}
 const Counters& Listener::counters() const
 {
     auto& m = *impl_;

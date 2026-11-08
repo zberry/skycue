@@ -15,4 +15,11 @@ struct Counters {
     std::string last_error;
 };
 
+// What one TCP connection reports about its send side. `queued_bytes` is what
+// has been accepted for sending and not yet written (zero when everything
+// handed over has gone out).
+struct PeerStats {
+    uint64_t bytes_written = 0, messages_written = 0, queued_bytes = 0;
+};
+
 } // namespace skycue::net

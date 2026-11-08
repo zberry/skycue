@@ -47,6 +47,10 @@ public:
     bool connected() const;
     void send(const Buf& b); // queued; dropped and counted when not connected or empty (see buffer.hpp)
     const Counters& counters() const; // read on the io thread only
+    // Send-side stats of the current connection (zeros when not connected).
+    PeerStats peerStats() const;
+    // The remote address of the current or latest connection; a default endpoint before the first.
+    boost::asio::ip::tcp::endpoint peerEndpoint() const;
     uint64_t attempts() const;         // diagnostic: attempts started; io thread only
 
 private:

@@ -342,7 +342,9 @@ BOOST_AUTO_TEST_CASE(fanout_peer_up_hook_can_greet)
     auto downs = std::make_shared<std::atomic<int>>(0);
     t.call([&] {
         f.attach(l);
-        f.onPeerUp([](const std::function<void(Buf)>& to) { to(makeBuf(std::string_view("hello\n"))); });
+        f.onPeerUp([](uint64_t, const tcp::endpoint&, const std::function<void(const Buf&)>& to) {
+            to(makeBuf(std::string_view("hello\n")));
+        });
         f.onPeerDown([downs](uint64_t) { ++*downs; });
     });
     {
@@ -360,6 +362,101 @@ BOOST_AUTO_TEST_CASE(fanout_peer_up_hook_can_greet)
     BOOST_REQUIRE(eventually([&] { return t.call([&] { return l->peers(); }) == 1; }));
     BOOST_CHECK_EQUAL(d.read(1, milliseconds(200)), "");
     t.call([&] { l->stop(); });
+}
+
+BOOST_AUTO_TEST_CASE(fanout_peer_ids_unique_and_peer_info)
+{
+    IoThread t;
+    auto l1 = startListener(t);
+    auto l2 = startListener(t);
+    BOOST_REQUIRE(eventually([&] { return l1->listening() && l2->listening(); }));
+    auto sink = std::make_shared<Sink>();
+    auto srv = t.call([&] { return Server::create(t.io, 0, sink); });
+    TcpOptions to;
+    to.min_backoff = milliseconds(20);
+    to.max_backoff = milliseconds(50);
+    auto d = t.call([&] { return Dialer::create(t.io, "127.0.0.1", srv->port(), to); });
+
+    Fanout f(t.io);
+    struct Seen {
+        std::mutex m;
+        std::vector<uint64_t> ups, downs;
+        std::vector<uint16_t> ports;
+    };
+    auto seen = std::make_shared<Seen>();
+    t.call([&] {
+        f.attach(l1);
+        f.attach(l2);
+        f.attach(d);
+        f.onPeerUp([seen](uint64_t id, const tcp::endpoint& who, const std::function<void(const Buf&)>& send) {
+            send(makeBuf(std::string_view("hi;")));
+            std::lock_guard<std::mutex> lk(seen->m);
+            seen->ups.push_back(id);
+            seen->ports.push_back(who.port());
+        });
+        f.onPeerDown([seen](uint64_t id) {
+            std::lock_guard<std::mutex> lk(seen->m);
+            seen->downs.push_back(id);
+        });
+        d->start();
+    });
+    auto count = [&] {
+        std::lock_guard<std::mutex> lk(seen->m);
+        return seen->ups.size();
+    };
+    BOOST_REQUIRE(eventually([&] { return count() == 1; })); // the dialer: ups[0]
+    Client a, b;
+    a.connect(l1->localPort());
+    BOOST_REQUIRE(eventually([&] { return count() == 2; })); // ups[1]
+    b.connect(l2->localPort());                              // ups[2]; both clients are stream 1 of their listener
+    BOOST_REQUIRE(eventually([&] { return count() == 3; }));
+    std::vector<uint64_t> ups;
+    {
+        std::lock_guard<std::mutex> lk(seen->m);
+        ups = seen->ups;
+        BOOST_CHECK(ups[0] != ups[1] && ups[1] != ups[2] && ups[0] != ups[2]);
+        BOOST_CHECK_EQUAL(seen->ports[0], srv->port()); // the dialer's peer is the server
+    }
+    BOOST_CHECK_EQUAL(a.read(3, slow(std::chrono::seconds(2))), "hi;");
+    BOOST_REQUIRE(eventually([&] { return sink->size() == 3; }));
+
+    t.call([&] { f.publish(makeBuf(std::string_view("0123456789"))); });
+    BOOST_REQUIRE(eventually([&] {
+        return t.call([&] {
+            for (uint64_t id : ups) {
+                const auto i = f.peerInfo(id);
+                if (!i || i->stats.bytes_written != 13 || i->stats.queued_bytes != 0)
+                    return false;
+            }
+            return true;
+        });
+    }));
+    t.call([&] {
+        BOOST_CHECK(f.peerInfo(ups[0])->dialled);
+        BOOST_CHECK(!f.peerInfo(ups[1])->dialled);
+        BOOST_CHECK(!f.peerInfo(9999));
+    });
+
+    // A closing client and a dropped dialer connection both give peer-down.
+    a.s.close();
+    BOOST_REQUIRE(eventually([&] {
+        std::lock_guard<std::mutex> lk(seen->m);
+        return seen->downs.size() == 1 && seen->downs[0] == ups[1];
+    }));
+    BOOST_CHECK(!t.call([&] { return f.peerInfo(ups[1]); }));
+    t.call([&] { srv->stop(); });
+    BOOST_REQUIRE(eventually([&] {
+        std::lock_guard<std::mutex> lk(seen->m);
+        return seen->downs.size() == 2 && seen->downs[1] == ups[0];
+    }));
+    t.call([&] {
+        f.detach(l1);
+        f.detach(l2);
+        f.detach(d);
+        l1->stop();
+        l2->stop();
+        d->stop();
+    });
 }
 
 BOOST_AUTO_TEST_CASE(default_constructor)

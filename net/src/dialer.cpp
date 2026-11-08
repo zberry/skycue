@@ -52,6 +52,7 @@ struct Dialer::Impl {
     bool failed_before = false; // a failure since the last success was already logged at warn
     std::atomic<bool> up{false};
     std::unique_ptr<WriteQueue> wq; // exists while connected
+    tcp::endpoint remote;           // of the current or latest connection
 };
 
 std::shared_ptr<Dialer> Dialer::create(asio::io_context& io, std::string host, uint16_t port, TcpOptions o)
@@ -83,6 +84,12 @@ const Counters& Dialer::counters() const
     m.counters.messages_out = m.closed_messages_out + (m.wq ? m.wq->messagesWritten() : 0);
     return m.counters;
 }
+PeerStats Dialer::peerStats() const
+{
+    const auto& wq = impl_->wq;
+    return wq ? PeerStats{wq->bytesWritten(), wq->messagesWritten(), wq->queuedBytes()} : PeerStats{};
+}
+tcp::endpoint Dialer::peerEndpoint() const { return impl_->remote; }
 uint64_t Dialer::attempts() const { return impl_->attempts; }
 
 void Dialer::start()
@@ -217,6 +224,12 @@ void Dialer::connected(uint64_t gen, const std::shared_ptr<tcp::socket>& sock)
             if (auto self = weak.lock())
                 self->lost(gen, std::string("write: ") + wec.message());
         });
+    }
+    {
+        boost::system::error_code rec;
+        const auto ep = sock->remote_endpoint(rec);
+        if (!rec)
+            st.remote = ep;
     }
     st.up = true;
     log(LogLevel::info, "connected to " + st.host + ":" + std::to_string(st.port));

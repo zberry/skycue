@@ -166,6 +166,23 @@ BOOST_AUTO_TEST_CASE(dialer_send_reaches_server)
     t.call([&] { d->stop(); srv->stopAll(); });
 }
 
+BOOST_AUTO_TEST_CASE(dialer_peer_stats_and_endpoint)
+{
+    test::IoThread t;
+    auto srv = t.call([&] { return TestServer::create(t.io); });
+    auto d = Dialer::create(t.io, "127.0.0.1", srv->port());
+    BOOST_TEST(t.call([&] { return d->peerStats().bytes_written; }) == 0u);
+    t.call([&] { d->start(); });
+    BOOST_REQUIRE(test::eventually([&] { return d->connected(); }));
+    BOOST_TEST(t.call([&] { return d->peerEndpoint().port(); }) == srv->port());
+    t.call([&] { d->send(makeBuf("ping\n")); });
+    BOOST_REQUIRE(test::eventually([&] {
+        const auto st = t.call([&] { return d->peerStats(); });
+        return st.bytes_written == 5 && st.messages_written == 1 && st.queued_bytes == 0;
+    }));
+    t.call([&] { d->stop(); srv->stopAll(); });
+}
+
 BOOST_AUTO_TEST_CASE(dialer_reconnects_with_backoff)
 {
     test::IoThread t;

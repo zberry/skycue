@@ -169,6 +169,30 @@ BOOST_AUTO_TEST_CASE(tcp_listen_counts_peers_and_streams)
     t.call([&] { l->stop(); });
 }
 
+BOOST_AUTO_TEST_CASE(tcp_listen_peer_stats)
+{
+    IoThread t;
+    auto rec = std::make_shared<Rec>();
+    auto l = startListener(t, freeTcpPort(), {}, rec);
+    BOOST_REQUIRE(eventually([&] { return l->listening(); }));
+    BOOST_CHECK(!t.call([&] { return l->peerStats(1); }));
+    Client c;
+    c.connect(loopback(l->localPort()));
+    BOOST_REQUIRE(eventually([&] { return rec->peerEvents() == 1; }));
+    t.call([&] {
+        l->send(1, makeBuf("abc"));
+        l->send(1, makeBuf("de"));
+    });
+    BOOST_REQUIRE(eventually([&] {
+        const auto st = t.call([&] { return l->peerStats(1); });
+        return st && st->bytes_written == 5 && st->messages_written == 2 && st->queued_bytes == 0;
+    }));
+    c.s.close();
+    BOOST_REQUIRE(eventually([&] { return rec->peerEvents() == 2; }));
+    BOOST_CHECK(!t.call([&] { return l->peerStats(1); }));
+    t.call([&] { l->stop(); });
+}
+
 BOOST_AUTO_TEST_CASE(tcp_listen_peer_cap)
 {
     IoThread t;

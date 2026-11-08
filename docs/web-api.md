@@ -335,6 +335,8 @@ The stats object:
 | `tcp_clients`, `udp_targets` | forwarder destinations now |
 | `recorder_dropped_received`, `recorder_dropped_sent` | records the recorders had to drop |
 | `web_clients` | WebSocket clients connected now |
+| `decoder` | only when some input decodes ([`TRACK_DECODER=skycued`](operating.md#decoding-in-skycued)): `{"frames","crc_fail","crc_fixed","decoded","observations","evicted","keys","rebroadcast_suppressed"}`, summed over the decoding inputs; `keys` is the aircraft the decoders hold now (a gauge), `rebroadcast_suppressed` is the engine's counter above |
+| `altitude_fit` | the fit behind estimated geometric altitudes ([Geometric altitude](operating.md#geometric-altitude)): `{"valid":false}` when there is none, else `{"valid":true,"linear":true,"a":120.5,"b":0.0125,"samples":42,"aircraft":7,"p90_ft":88.5,"age_s":3.5}`: the difference in feet is `a + b` times the barometric altitude, `linear` false (and `b` 0) for the median fallback, `samples` and `aircraft` the data in the 120 s window, `p90_ft` the 90th percentile of the residuals, `age_s` the age of the newest sample. Recomputed at most every 5 s |
 | `inputs` | `[{"id", "connected", "messages", "observations", "uplinks", "rejected"}]`: every input's live counters (the full state is in [Inputs](#inputs)), in the order of `GET /api/inputs` |
 
 A track object:
@@ -345,7 +347,11 @@ A track object:
 | `addr_type` | `icao`, `non_icao`, `tisb_trackfile`, `other` |
 | `source` | `adsb_1090`, `uat_978`, `tisb`, `adsr`, `mlat`, `other` |
 | `lat`, `lon`, `position_time` | only when the track has a position |
-| `alt_baro_ft`, `alt_geom_ft`, `gs_kt`, `track_deg`, `vr_fpm` | when known |
+| `alt_baro_ft`, `alt_geom_ft`, `gs_kt`, `track_deg`, `vr_fpm` | when known; `alt_geom_ft` may be an estimate (next four rows) |
+| `alt_geom_source` | `reported` or `estimated`; present only when the track has a geometric altitude (a track without one has none of these four keys) (see [Geometric altitude](operating.md#geometric-altitude)) |
+| `alt_geom_uncertainty_ft` | only when `alt_geom_source` is `estimated`: the stated error, feet (75 for an own difference under 60 s old, 125 to 325 for an older one, the fit's 90th percentile in steps of 25 and at least 100 for a fit) |
+| `alt_geom_age_s` | age of the data the geometric altitude rests on, seconds, one decimal, never negative |
+| `geom_minus_baro_ft` | geometric minus barometric altitude, feet, signed; also present on a reported track when the difference is known |
 | `callsign`, `squawk`, `registration`, `nic`, `nac_p` | when known |
 | `on_ground`, `alt_is_geom` | booleans |
 | `range_nm`, `elevation_deg` | from the receiver; left out when they cannot be computed |
@@ -414,6 +420,8 @@ with either is a `400`. `state`:
 | `clock_offset_s` | the newest device timestamp (after the `gps` correction) minus its arrival time; absent when unknown |
 | `status_fail_streak` | status polls failed in a row |
 | `last_error` | the latest transport, parse or status error, `""` when none |
+| `frames`, `crc_fail`, `crc_fixed`, `ap_unconfirmed`, `no_position`, `cpr_pending`, `cpr_rejected`, `decoded`, `unmapped`, `unknown_type`, `evicted`, `decoder_observations` | the 1090 decoder's counters of a `beast_raw` input under [`TRACK_DECODER=skycued`](operating.md#decoding-in-skycued): frames fed to it, failed the CRC, repaired by the CRC, address-parity frames (DF 0, 4, 16, 20) not confirmed within 60 s (not used), position messages with no position information, messages waiting for the other half of a CPR pair, CPR positions rejected, frames decoded, messages decoded but carrying no field we use, frames of a type that is not decoded, aircraft forgotten after 300 s idle (or the oldest when the table is full), observations produced (the same as `observations`). Present for every input, 0 when it does not decode |
+| `mlat_skipped`, `modeac_skipped`, `other_skipped` | Beast frames that are not Mode S: MLAT-timestamped frames, Mode A/C frames, anything else; they are counted, not decoded |
 | `connects`, `bytes`, `messages`, `observations`, `uplinks`, `rejected` | connections made, bytes received, messages decoded (a readsb or dump978 line, a JSON datagram, a CAT021 record), track observations and FIS-B uplinks passed on, data that could not be used |
 | `records_skipped`, `sac_sic_mismatch`, `nogo_records` | CAT021 records skipped (simulated, test or RAB records, records without an address, blocks cut short by a length error), with another SAC/SIC than configured, with the NOGO bit set |
 | `clock_rejects` | device timestamps more than 10 s from arrival, replaced by the arrival time |

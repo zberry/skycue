@@ -67,10 +67,15 @@ fields whose presence bit is set are present.
 | 7     | registration      | string | 1+n, n ≤ 16 |
 | 8     | nic               | u8     | 1     |
 | 9     | nac_p             | u8     | 1     |
-| 10–15 | reserved          |        |       |
+| 10    | alt_geom_uncertainty_ft | u16 | 2   |
+| 11–15 | reserved          |        |       |
 
-A TrackUpdate with every field present and maximum-length strings is 79 payload
-bytes (87 with the header).
+`alt_geom_uncertainty_ft` is present only when `alt_geom_ft` is an estimate
+(see [Geometric altitude](operating.md#geometric-altitude)); a reported
+altitude has no bit 10. The value saturates at 65535.
+
+A TrackUpdate with every field present and maximum-length strings is 81 payload
+bytes (89 with the header).
 
 Encoders truncate strings longer than the limits above. Decoders reject a
 string whose length byte exceeds its limit.
@@ -123,6 +128,14 @@ A sender emits a Heartbeat whenever it has sent nothing else for its Hello's
 `heartbeat_interval_ms`, so a live stream is never silent for longer than
 that. See [Liveness](#liveness).
 
+## Revisions
+
+- **1.1** (additive; the header version stays 1): presence bit 10,
+  `alt_geom_uncertainty_ft`. A receiver of 1.0 reads bits 0–9, stops at bit 10
+  as for any unknown bit, and sees an estimated altitude as a plain
+  `alt_geom_ft`.
+- **1.0**: bits 0–9.
+
 ## Forward compatibility
 
 - **Version.** A receiver rejects a header whose version is not one it
@@ -132,7 +145,7 @@ that. See [Liveness](#liveness).
 - **Trailing payload bytes** beyond the fields a receiver knows are ignored.
   Later versions may append fields to any frame type.
 - **Unknown presence bits.** If a TrackUpdate has a presence bit set that the
-  receiver does not know (bits 10–15 in version 1), the receiver stops reading
+  receiver does not know (bits 11–15 in version 1.1, bits 10–15 for a receiver of 1.0), the receiver stops reading
   optional fields at that bit and keeps the fields it has already read. Because
   fields are packed in bit order and the reserved bits are above every known
   bit, all known fields come before any unknown one.

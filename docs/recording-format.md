@@ -191,6 +191,7 @@ lines above).
 | `nic` | integer | navigation integrity category, 0-255 |
 | `nac_p` | integer | navigation accuracy (position), 0-255 |
 | `rssi` | number | signal level, dBFS |
+| `geom_minus_baro_ft` | integer | signed difference geometric minus barometric altitude, feet, when the input reported both within 2 s (JSONL only; absent when unknown; replays as recorded) |
 | `raw` | string | the original input line (JSONL only): the readsb JSON line; for a pingStation JSON input the datagram text, on the first observation of a datagram only (a `{"aircraft":[...]}` datagram with several aircraft is recorded once, the other observations have no `raw`); for a CAT021 input `cat021:` and the record's bytes as hex |
 | `rebroadcast` | boolean | a rebroadcast copy (TIS-B, ADS-R); present only when true (JSONL only) |
 | `input` | string | id of the input that produced the observation; absent when not known |
@@ -240,6 +241,8 @@ or `ui: block += a1b2c3`, written before the drops and updates the change causes
 | `registration` | string | update, keyframe | tail number |
 | `nic` | integer | update, keyframe | navigation integrity category |
 | `nac_p` | integer | update, keyframe | navigation accuracy (position) |
+| `alt_geom_source` | string | update, keyframe | `reported` or `estimated`; only with `alt_geom_ft` (JSONL only) |
+| `alt_geom_uncertainty_ft` | integer | update, keyframe | stated error of an estimated `alt_geom_ft`, feet; only when `estimated` (JSONL only) |
 | `keyframe` | boolean | update, keyframe | the frame's keyframe flag |
 | `drop_reason` | string | drop | why the track was dropped |
 | `note` | string | filter_change | description of the change |
@@ -269,7 +272,10 @@ from the block's NW corner), so a 1000-block CONUS mosaic is typically a few ten
 RFC 4180: comma-separated, one header line, a field containing `,`, `"` or a line break
 is quoted with `"` and its `"` doubled. Absent values are empty; booleans are `0`/`1`;
 other values are written as in JSONL. The columns are the JSONL keys, minus the
-JSONL-only ones (`emergency`, `category`, `raw`).
+JSONL-only ones (`emergency`, `category`, `raw`, `geom_minus_baro_ft`, `alt_geom_source`,
+`alt_geom_uncertainty_ft`); the CSV headers are unchanged. The received stream keeps what
+the input said; an estimated altitude appears only in the sent stream, where `alt_geom_source`
+says so. Older files without the new keys replay as before.
 
 Received stream header (the `uplink_hex` column is set only on `uat_uplink` rows; `input`
 is last, so the columns before it keep their positions):

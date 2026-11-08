@@ -718,6 +718,31 @@ the end and equal to the capture file in `RECORD_DIR`, the `beast` output's
 and skycued's RSS and fd count pass the rule below for the run's window. The
 same shape runs in under a minute as the ctest `hub` (`tests/test_hub.sh`).
 
+### Decoder soak
+
+`soak.sh` does not start the decoder either; for a release that changes the
+1090 decoder or the track table, run it by hand for 1 hour, then 4 hours, the
+way `soak.sh` samples an instance. The source is the 120 s capture from
+`scripts/fixtures/fetch-test-captures.sh`, played over and over:
+
+1. `skycue-rawplay --1090-listen PORT --loop --speed 5` on the capture.
+2. A skycued with `TRACK_DECODER=skycued`, `READSB_BEAST_PORT=PORT`,
+   `--no-uat`, a web port and the test receiver position (not the
+   capture's region; give the input `ref_lat` and `ref_lon` of the capture, see
+   [operating.md](operating.md#raw-capture-and-replay)), with the same WebSocket and cue clients
+   as an instance of `soak.sh`.
+3. Every minute, RSS and fd count (`/proc`), `GET /api/stats` (`decoder`,
+   `altitude_fit`) and `GET /api/inputs`.
+
+It passes when, after the first 10 minutes: RSS grows less than 5 %
+(the rule below on that window); `decoder.keys` never exceeds the decoder's
+limit of 20,000 and in this replay stays at the capture's aircraft count;
+the `evicted` rate is steady; the `crc_fail` share of `frames` is constant
+(the loop replays the same frames, so any drift is a bug); the
+`observations` rate does not drift by more than 10 % between the first and
+last hour; and `altitude_fit.samples` stays bounded (it covers a 120 s
+window, so it has an upper limit, not a trend).
+
 ### The pass rule
 
 `tests/soak/soak_eval.py CSV [--growth 0.05] [--fd-tolerance 2]`, per

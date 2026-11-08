@@ -38,6 +38,10 @@ Download the `.deb`, the `.rpm` or the source tarball from the
   machine: a small network-only readsb converts the Beast stream to the JSON
   output skycue reads. The installing guide has a ready unit file for it
   ([PiAware](docs/installing.md#piaware-dump1090-fa)).
+- **readsb's Beast port, decoded by skycued itself** (`TRACK_DECODER=skycued`,
+  optional): skycued decodes the Mode S frames, and estimates the geometric
+  altitude that many aircraft never report. See
+  [Decoding in skycued](docs/operating.md#decoding-in-skycued).
 - **dump978-fa**, through its raw UAT port (30978): the 978 MHz frames and
   the FIS-B weather uplinks (USA).
 - **pingStation 3** receivers (uAvionix's small networked ADS-B/UAT

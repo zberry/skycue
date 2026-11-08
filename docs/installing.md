@@ -66,6 +66,12 @@ READSB_HOST=127.0.0.1
 DUMP978_ENABLE=no
 ```
 
+To let skycued decode the 1090 MHz frames itself instead of reading readsb's
+JSON, add `TRACK_DECODER=skycued` and, when readsb's Beast output is not on
+port 30005, `READSB_BEAST_PORT`. Both are optional (defaults `readsb` and
+30005) and take effect at a restart; see
+[Decoding in skycued](operating.md#decoding-in-skycued).
+
 `RECEIVER_ALT_M` and `ANTENNA_HEIGHT_M` sharpen the elevation angles;
 `MAX_RANGE_NM` and `MIN_ELEVATION_DEG` set what is forwarded. Every key is
 described in the file and in [operating.md](operating.md#config-keys-that-matter).

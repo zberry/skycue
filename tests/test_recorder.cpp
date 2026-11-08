@@ -25,7 +25,6 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
-#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1002,12 +1001,10 @@ BOOST_AUTO_TEST_CASE(doc_lists_every_key)
     std::ifstream in(std::string(SKYCUE_DOCS_DIR) + "/recording-format.md");
     BOOST_REQUIRE(in);
     std::string doc((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    // The geometric-altitude keys are documented by the docs task (Task 12), which removes this list.
-    const std::set<std::string> undocumented{"geom_minus_baro_ft", "alt_geom_source", "alt_geom_uncertainty_ft"};
     for (const auto& key : skycued::recording::observationKeys())
-        BOOST_TEST((undocumented.count(key) != 0u || doc.find("| `" + key + "` |") != std::string::npos), key);
+        BOOST_TEST(doc.find("| `" + key + "` |") != std::string::npos, key);
     for (const auto& key : skycued::recording::sentKeys())
-        BOOST_TEST((undocumented.count(key) != 0u || doc.find("| `" + key + "` |") != std::string::npos), key);
+        BOOST_TEST(doc.find("| `" + key + "` |") != std::string::npos, key);
     BOOST_TEST(doc.find(kReceivedHeader) != std::string::npos);
     BOOST_TEST(doc.find(kSentHeader) != std::string::npos);
 }

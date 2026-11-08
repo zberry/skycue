@@ -132,6 +132,8 @@ shared with other tooling.
 | `RECEIVER_ALT_M`, `ANTENNA_HEIGHT_M` | skycued | antenna altitude for elevation angles |
 | `READSB_JSON_PORT`, `DUMP978_RAW_PORT` | skycued | where skycued reads from |
 | `READSB_HOST` | skycued | host of the readsb JSON port (default `127.0.0.1`, not empty) (`--readsb-host` overrides it) |
+| `TRACK_DECODER` | skycued | `readsb` (default) or `skycued`: who decodes the 1090 MHz frames, see [Decoding in skycued](#decoding-in-skycued); a change needs a restart |
+| `READSB_BEAST_PORT` | skycued | the Beast port of the 1090 MHz decoder on this machine, 1 to 65535 (default 30005); read only under `TRACK_DECODER=skycued`; a change needs a restart |
 | `DUMP978_HOST` | skycued | host of the dump978-fa raw port (default `127.0.0.1`, not empty) (`--dump978-host` overrides it) |
 | `DUMP978_ENABLE` | skycued | `no`: there is no 978 MHz decoder, skycued neither connects to one nor expects UAT input (as `--no-uat`, which overrides it); default `yes` |
 | `STATE_DIR` | skycued | absolute directory for skycued's files; a relative `INPUTS_FILE`, `LOCATIONS_FILE`, `STATS_FILE`, `ALLOW_LIST_FILE` or `BLOCK_LIST_FILE` is taken from it, and it holds the runtime overlay `skycue.runtime.json` and the `skycue.overrides.conf` that save as baseline writes instead of rewriting `skycue.conf` (see [web-api.md](web-api.md#save-as-baseline)); empty (default): the places next to the config (next to `skycue.conf`; the list files from the working directory) |
@@ -223,6 +225,109 @@ logs about a connection:
   and with `TCP_NODELAY` off (unlike skycued). Their reconnect lines carry the
   reason: `connect <host>:<port>: <address>: <why>; retrying in <N> ms`.
   `skycue-pingsim` serves one client at a time.
+
+## Decoding in skycued
+
+By default readsb decodes the 1090 MHz frames and skycued reads its JSON
+(`TRACK_DECODER=readsb`). With
+
+```ini
+TRACK_DECODER=skycued
+READSB_BEAST_PORT=30005
+```
+
+skycued decodes the Mode S frames itself. The built-in `readsb` input stops
+reading the JSON port and becomes a `beast_raw` input that dials
+`127.0.0.1:READSB_BEAST_PORT` (`READSB_HOST` and `READSB_JSON_PORT` are not
+used for it), so the decoder you run must serve Beast output on that port;
+the track table, filters, cues, recordings and web page work as before. The
+decoder also runs on any other `beast_raw` input you add, and with it on
+every such input produces observations. What changes:
+
+- **Position reference.** A `beast_raw` input may carry `ref_lat` and
+  `ref_lon` (both or neither; a `beast_raw` or `uat_raw` input only) for its
+  decoder's range check; without them it uses `RECEIVER_LAT` and
+  `RECEIVER_LON`. Setting them makes the inputs file version 2.
+- **UAT is not tracked under `skycued` yet.** dump978-fa still feeds its
+  FIS-B weather and uplink counts, but UAT aircraft reach the track table
+  only through readsb's JSON, which this mode does not read.
+- **The `json` output carries nothing.** It is built from readsb's JSON
+  input; with that input gone it stays defined and enabled but idle.
+- **Leftover readsb inputs double-feed.** An enabled input of type `readsb`
+  (JSON) next to an enabled `beast_raw` input counts every aircraft twice.
+  skycued logs a WARN once per change and `--check-inputs` prints it:
+
+  ```
+  WARN: TRACK_DECODER=skycued: input 'ps-extra' (readsb JSON) and input 'readsb' (beast_raw) both feed the track table, so aircraft are counted twice; disable one
+  WARN: TRACK_DECODER=skycued: the json output 'json' carries nothing, since no readsb JSON input is enabled; it stays defined and enabled
+  ```
+
+  Disable one of the two inputs. Under `skycued`, `--check-inputs` probes
+  `127.0.0.1:READSB_BEAST_PORT` and prints it as the `readsb` line.
+  Under `readsb` nothing changes.
+- **Counters.** A decoding input shows the decoder's counters in
+  [`GET /api/inputs`](web-api.md#inputs), and `GET /api/stats` gets a
+  `decoder` object ([the stats object](web-api.md#the-state-object)).
+- **Replay.** Play a capture to the decoder with
+  `skycue-rawplay --1090-listen PORT` and point `READSB_BEAST_PORT` (or a
+  `beast_raw` input) at it; see [Raw capture and replay](#raw-capture-and-replay).
+
+The default keeps readsb's own decoding and its JSON. The decoder follows the
+public Mode S layouts and was compared with readsb on the same capture;
+Comm-B vertical rates (BDS 6,0) are not decoded yet, so the barometric
+vertical rate of a few aircraft can differ from readsb's in interrogated
+airspace (the comparison accepts 95 % agreement on that one value, and measured
+about 97 % on the 120 s capture).
+
+## Geometric altitude
+
+Receivers differ in what they send: many aircraft report a barometric
+altitude all the time and a geometric (GNSS) altitude rarely or never. For
+the elevation filter, the cues and the page, skycued fills the gap with an
+estimate, under every `TRACK_DECODER`.
+
+- **Reported.** A geometric altitude the aircraft sent less than 60 s ago, and
+  no newer barometric altitude by more than 2 s since. The track carries
+  `"alt_geom_source":"reported"` and is exactly what it was before.
+- **Estimated.** Otherwise, with a barometric altitude under 10 s old and the
+  aircraft not on the ground:
+  1. if the aircraft's own difference between geometric and barometric
+     altitude (from TC 9-18 and 20-22 messages, or a reported
+     `alt_geom`) is at most 300 s old, estimate the barometric altitude plus
+     that difference, corrected by a slope for the altitude change since;
+  2. else, with a fit over other aircraft (below), the barometric altitude
+     plus the fit's difference at that altitude;
+  3. else no estimate: the track simply has no geometric altitude.
+  The fit is made of the differences aircraft reported in the last 120 s: a
+  straight line in barometric altitude when at least 5 distinct aircraft and
+  20 samples are in the window, else their median. It is visible as
+  `altitude_fit` in `GET /api/stats`.
+- **No made-up numbers.** There is no estimate without a barometric altitude
+  under 10 s old, none on the ground, and none when there is neither an own
+  difference nor any other aircraft's difference in the window. With fewer than
+  5 aircraft or 20 samples in the window the fit is the median of the
+  differences, not a line, and its stated uncertainty is large; read
+  `altitude_fit.aircraft` in `GET /api/stats` for how many it rests on.
+- **Where it shows.** Tracks carry `alt_geom_source`, `alt_geom_uncertainty_ft`
+  (estimates only), `alt_geom_age_s` and `geom_minus_baro_ft`
+  ([web-api.md](web-api.md#the-state-object)). The page's aircraft box reads
+  `12,300 ft est. ±250` for an estimate and has rows for the source,
+  uncertainty, age and the difference. Cue clients see an estimate as an
+  ordinary `alt_geom_ft` plus the uncertainty ([protocol.md](protocol.md#trackupdate-type-2)).
+  Recordings keep what the input said: the received stream never holds an
+  estimate.
+- **How good it is** (the `geom_eval` test, which prints these numbers).
+  Against other aircraft on the 120 s capture (241 aircraft, 5,219
+  samples), the error of a 60 s or 120 s fit is about 165 ft at the 90th
+  percentile (about 75 ft median, at most about 310 ft); a plain median of
+  the others is about 550 to 575 ft. Held from the aircraft's own difference
+  (five recorded flights, about 35,000 samples), the 90th percentile is about
+  52 ft after 60 s and about 185 ft after 300 s; rare maxima reach about
+  2,000 ft in a climb or descent. The uncertainty on the wire is stated
+  conservatively: 75 ft for an own difference under 60 s old, growing from
+  125 ft at 60 s to 325 ft at 300 s, and for a fit its 90th percentile rounded
+  up to 25 ft (at least 100 ft). Treat an estimate as good to a few hundred
+  feet, not a measurement.
 
 ## Replaying a JSONL recording
 

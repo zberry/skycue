@@ -655,3 +655,39 @@ BOOST_AUTO_TEST_CASE(tracker_threads_smoke)
     BOOST_CHECK_EQUAL(news, 10u);
     BOOST_CHECK_EQUAL(tr.size(), 10u);
 }
+
+BOOST_AUTO_TEST_CASE(nacp_12_and_above_falls_through)
+{
+    Track t = mk();
+    t.nac_p = 12;
+    t.nic = 8;
+    auto s = toEcef(t);
+    BOOST_CHECK(s->error_source == ErrorSource::nic);
+    t.nic.reset();
+    s = toEcef(t);
+    BOOST_CHECK(s->error_source == ErrorSource::default_);
+}
+
+BOOST_AUTO_TEST_CASE(older_update_does_not_overwrite)
+{
+    Options o = pull();
+    o.derive_velocity = true;
+    EcefTracker tr(o);
+    int n = 0;
+    tr.onState([&](const EcefState&) { ++n; });
+    tr.update(mk(1, 10000, 0, 0));
+    tr.takeChanges();
+    const auto r = tr.update(mk(1, 5000, kM100North * 50, 0));
+    BOOST_REQUIRE(r);
+    BOOST_CHECK(r->time == at(5000)); // still returned
+    BOOST_CHECK(tr.get(idOf(1))->time == at(10000));
+    BOOST_CHECK_EQUAL(n, 1);
+    BOOST_CHECK(tr.takeChanges().updated.empty());
+    // A repeat of the stored time is still silent; t=11 s derives from t=10 s.
+    tr.update(mk(1, 10000, 0, 0));
+    BOOST_CHECK_EQUAL(n, 1);
+    const auto s = tr.update(mk(1, 11000, kM100North, 0));
+    BOOST_REQUIRE(s && s->velocity);
+    BOOST_CHECK(s->velocity_source == VelocitySource::derived);
+    BOOST_CHECK_CLOSE(s->velocity->z, 100.0, 0.5);
+}

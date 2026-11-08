@@ -294,6 +294,8 @@ std::optional<EcefState> EcefTracker::update(const Track& t)
             return std::nullopt;
         out = c->state;
         const bool existed = it != impl_->tracks.end();
+        if (existed && out.time < it->second.state.time)
+            return out; // older than the stored state: returned only, nothing stored or notified
         const bool advanced = !existed || out.time > it->second.state.time;
         Impl::Entry e{out, t.lat_deg, t.lon_deg, c->h_m, std::chrono::steady_clock::now()};
         if (existed)

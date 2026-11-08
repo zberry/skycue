@@ -53,7 +53,7 @@ struct LineClient::Impl {
                 LOG_INFO(me->name << ": connected to " << me->host << ":" << me->port);
             } else {
                 // The library's reason reads "read: End of file"; the message was always the bare error text.
-                std::string why = me->dialer->counters().last_error;
+                std::string why = me->dialer->downInfo().why;
                 if (why.compare(0, 6, "read: ") == 0)
                     why.erase(0, 6);
                 LOG_INFO(me->name << ": connection closed (" << why << ")");

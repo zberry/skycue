@@ -103,7 +103,9 @@ public:
     {
         if (mode_ == Mode::tcp_listen) {
             net::ListenOptions o;
-            o.max_peers = 1;  // one client at a time
+            o.max_peers = 1;  // one client at a time, as before (a second one is refused, not queued)
+            o.tcp.keepalive = false;
+            o.tcp.nodelay = false;
             o.fail_fast = true;
             listener_ = net::Listener::create(io_, bind.to_string(), listen_port, o);
             listener_->onPeer([this](uint64_t stream, bool up, const tcp::endpoint& who) {
@@ -147,15 +149,18 @@ public:
         }
         if (mode_ == Mode::tcp) {
             net::TcpOptions t;
+            t.keepalive = false;  // plain sockets, as this tool always used
+            t.nodelay = false;
             dialer_ = net::Dialer::create(io_, to_.host, static_cast<uint16_t>(std::stoi(to_.port)), t);
             dialer_->onConnection([this](bool up) {
                 if (up) {
                     LOG_INFO("connected to " << to_.host << ":" << to_.port);
                 } else {
-                    LOG_WARN("connection lost; reconnecting");
+                    LOG_WARN("connection lost (" << dialer_->downInfo().why << "); reconnecting");
                     ++lost_;
                 }
             });
+            dialer_->onFailure([](const std::string& why) { LOG_WARN(why << "; retrying"); });
             dialer_->start();
             while (!dialer_->connected())
                 pumpFor(std::chrono::milliseconds(20));

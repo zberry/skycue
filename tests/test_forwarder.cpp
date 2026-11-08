@@ -1023,3 +1023,45 @@ BOOST_AUTO_TEST_CASE(forwarder_shutdown_not_held_up_by_a_cut_off_client)
     for (const auto& d : ev.drops)
         BOOST_TEST(static_cast<int>(d.second) == static_cast<int>(DropReason::shutdown));
 }
+
+// stop() first, then the cap trips: the shutdown drops themselves pass a
+// stalled client's queue cap, so it is cut off during the drain. The shutdown
+// then finishes at once instead of waiting out the drain limit (2 s).
+BOOST_AUTO_TEST_CASE(forwarder_shutdown_cut_off_during_the_drain_does_not_hold_it_up)
+{
+    constexpr uint32_t kDrops = 60000; // at least 13 bytes each: far over the cap below
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.max_client_queue_bytes = 256 * 1024;
+    auto tracks = std::make_shared<std::atomic<uint32_t>>(3);
+    Fx fx(cfg, [tracks] { return mkTracks(tracks->load()); });
+
+    RawTcp stalled(fx.port(), 4096); // never read
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+
+    // Fill its kernel buffers until nothing more is written to it, so the
+    // drops cannot be swallowed by them (the queue stays far under the cap).
+    auto written = [&] { return fx.tcpClients().at(0).bytes_sent; };
+    uint64_t last = 0;
+    int same = 0;
+    for (int i = 0; i < 4000 && same < 3; ++i) {
+        fx.t.call([&] {
+            for (uint32_t k = 0; k < 100; ++k)
+                fx.fwd->sendUpdate(mkTrack(1 + k % 3, false));
+        });
+        std::this_thread::sleep_for(5ms);
+        const uint64_t now = written();
+        same = now == last ? same + 1 : 0;
+        last = now;
+        BOOST_REQUIRE_EQUAL(fx.clients(), 1u); // not cut off yet
+    }
+    BOOST_REQUIRE_EQUAL(same, 3);
+
+    tracks->store(kDrops);
+    const auto t0 = steady::now();
+    fx.stop();
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 0; }));
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - t0);
+    BOOST_TEST_MESSAGE("shutdown with a client cut off during the drain in " << took.count() << " ms");
+    BOOST_TEST((took < slow(1500ms)));
+}

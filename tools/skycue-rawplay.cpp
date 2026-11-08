@@ -231,15 +231,18 @@ public:
         io_.call([this] {
             net::TcpOptions t;
             t.name = name_;
+            t.keepalive = false;  // plain sockets, as this tool always used
+            t.nodelay = false;
             dialer_ = net::Dialer::create(io_.context(), to_.host, static_cast<uint16_t>(std::stoi(to_.port)), t);
             dialer_->onConnection([this](bool up) {
                 if (up) {
                     LOG_INFO(name_ << ": connected to " << to_.host << ":" << to_.port);
                 } else {
-                    LOG_WARN(name_ << ": connection lost; reconnecting");
+                    LOG_WARN(name_ << ": connection lost (" << dialer_->downInfo().why << "); reconnecting");
                     ++lost_;
                 }
             });
+            dialer_->onFailure([this](const std::string& why) { LOG_WARN(name_ << ": " << why << "; retrying"); });
         });
     }
     ~DialOut() override { shutdown(); }
@@ -317,6 +320,8 @@ public:
             net::ListenOptions o;
             o.tcp.name = name_;
             o.tcp.send_cap = 4 * kBacklog;  // above the backlog plus a chunk: our own limit comes first
+            o.tcp.keepalive = false;
+            o.tcp.nodelay = false;
             o.max_peers = 64;
             o.fail_fast = true;
             listener_ = net::Listener::create(io_.context(), "127.0.0.1", port, o);

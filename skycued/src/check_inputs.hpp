@@ -27,6 +27,9 @@ struct InputCheckResult {
 // reported as timed out and abandoned (its resources are left to the process,
 // so call this a bounded number of times), but it keeps running until libc's
 // resolver gives up.
+// The library's log sink must not be installed while this runs (main.cpp
+// skips the sink setup for --check-inputs): a Dialer's connect failures would
+// otherwise be logged as well as reported in the results.
 std::vector<InputCheckResult> checkInputs(const std::vector<InputCheck>& inputs,
                                           std::chrono::milliseconds timeout);
 

@@ -186,6 +186,40 @@ which runs as the `skycue` user with only `/var/lib/skycue` writable,
 never rewrites it. To make a saved value part of `skycue.conf` again, copy
 it there and delete the line from `skycue.overrides.conf`.
 
+### Connection logging
+
+skycued dials the decoders (readsb, dump978), any pingStation input and the
+cue targets, and listens for the rest, through one network library. What it
+logs about a connection:
+
+- **A connect that fails** logs one WARN per outage, then DEBUG for the
+  following attempts until a connection succeeds:
+  `<input>: connect <host>:<port>: <address>: <why>; retrying in <N> ms
+  (further failures logged at debug level)`. A failed name lookup reads
+  `resolve <host>: <why>` in the same place. This format is the same for every
+  dialled connection (inputs and cue targets); earlier releases worded each
+  one a little differently.
+- **A connection that was up and is lost** is logged by skycued itself, at
+  INFO (`<input>: connection closed (<why>)`; for a cue target or client,
+  `forwarder: TCP target|client <peer> disconnected (N left)`, or the error
+  text when the connection was reset, or a WARN when a client was cut off for
+  falling more than the queue limit behind, or INFO `closed for shutdown` for
+  each one at stop). The network library's own line for the loss is DEBUG. The
+  first failed attempt after the loss is the WARN above.
+- **A connect gives up on an address after 10 s.** Earlier releases waited as
+  long as the kernel did (typically about two minutes) for readsb, dump978,
+  pingStation and cue dials; a decoder behind a very slow link may now need
+  the connection retried.
+- **A listening input whose port cannot be bound** (a `tcp_listen` pingStation
+  input) logs a WARN the first time the bind fails and DEBUG for the retries.
+  Earlier releases logged nothing for it (the reason showed only in the
+  input's status); the WARN is intended.
+- **Accept failures and UDP send failures** are logged at DEBUG by the
+  library; the cue UDP targets that cannot be set up at start are an ERROR
+  (`forwarder: UDP target <host:port> skipped: <why>`), and a frame too large
+  for a datagram is an ERROR (`forwarder: frame of N bytes too large for UDP,
+  not sent`).
+
 ## Replaying a JSONL recording
 
 ```sh

@@ -4,12 +4,12 @@
 // This file keeps the protocol (Hello, keyframe bursts, heartbeats, shutdown
 // drops) and the session list the Cues tab reads.
 //
-//
-// Peer events come from the Fanout (onPeerUp/onPeerDown/peerInfo); the Forwarder
-// never touches a Listener's or Dialer's own handlers. Log lines about
-// connection failures (a dial that is refused, a bind that fails and is
-// retried) now come from the library through the net log sink, once per
-// outage, not from this file.
+// Peer events come from the Fanout (onPeerUp/onPeerDown/peerInfo/closePeer); the
+// Forwarder never touches a Listener's or Dialer's own handlers. It words the
+// per-connection lines itself (connected, disconnected, reset, over the queue
+// cap, closed for shutdown). Log lines about connection failures (a dial that
+// is refused, a bind that fails and is retried) come from the library through
+// the net log sink, once per outage.
 
 #include "forwarder.hpp"
 
@@ -27,6 +27,8 @@
 #include <algorithm>
 #include <map>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace skycued {
 
@@ -66,7 +68,9 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
     {
         fanout.onPeerUp([this](uint64_t peer, const boost::asio::ip::tcp::endpoint& who,
                                const std::function<void(const Buf&)>& send) { peerUp(peer, who, send); });
-        fanout.onPeerDown([this](uint64_t peer) { peerDown(peer); });
+        fanout.onPeerDown([this](uint64_t peer, skycue::net::DownReason reason, const std::string& why) {
+            peerDown(peer, reason, why);
+        });
         if (cfg.tcp_listen_ephemeral || cfg.tcp_port != 0) {
             skycue::net::Endpoint e;
             e.transport = Transport::tcp_listen;
@@ -99,7 +103,6 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         std::shared_ptr<skycue::net::Listener> lis;
         std::shared_ptr<skycue::net::Dialer> dial;
         std::shared_ptr<skycue::net::UdpSender> udp;
-        uint64_t dropped_seen = 0;
 
         std::string name() const
         {
@@ -109,7 +112,6 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
             return (e.host.empty() ? e.group : e.host) + ":" + std::to_string(e.port);
         }
         const void* source() const { return lis ? static_cast<const void*>(lis.get()) : static_cast<const void*>(dial.get()); }
-        const skycue::net::Counters& counters() const { return lis ? lis->counters() : dial->counters(); }
     };
 
     // One open TCP connection, accepted or dialled.
@@ -128,7 +130,6 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
     skycue::net::Fanout fanout;
     std::vector<std::shared_ptr<Dest>> dests;
     std::map<uint64_t, Session> sessions;
-    uint64_t next_session_id = 1;
 
     asio::steady_timer keyframe_timer{io};
     asio::steady_timer heartbeat_timer{io};
@@ -230,7 +231,11 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
             t.loopback = e.loopback;
             d.udp->addTarget(t);
             if (d.udp->start() == 0) {
-                LOG_ERROR("forwarder: UDP target " << d.name() << " skipped");
+                // last_error reads "target <host:port>: <reason>"
+                std::string why = d.udp->counters().last_error;
+                if (why.compare(0, 7, "target ") == 0 && why.find(": ") != std::string::npos)
+                    why.erase(0, why.find(": ") + 2);
+                LOG_ERROR("forwarder: UDP target " << d.name() << " skipped" << (why.empty() ? "" : ": " + why));
                 d.udp.reset();
                 return;
             }
@@ -283,8 +288,13 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
 
     void peerUp(uint64_t peer, const boost::asio::ip::tcp::endpoint& who, const std::function<void(const Buf&)>& send)
     {
-        if (dead || stopping)
+        if (dead)
             return;
+        if (stopping) {
+            // Accepted or redialled while draining: not greeted, closed at once.
+            fanout.closePeer(peer);
+            return;
+        }
         const auto info = fanout.peerInfo(peer);
         if (!info)
             return;
@@ -301,27 +311,35 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         greet(peer, send);
     }
 
-    void peerDown(uint64_t peer)
+    void peerDown(uint64_t peer, skycue::net::DownReason reason, std::string why)
     {
         const auto it = sessions.find(peer);
         if (it == sessions.end())
             return;
         const std::string name = it->second.peer;
-        const bool target = it->second.dialled;
-        Dest* d = destOf(it->second.source);
+        const char* kind = it->second.dialled ? "TCP target " : "TCP client ";
         sessions.erase(it);
-        bool over_cap = false;
-        if (d) {
-            const uint64_t dropped = d->lis ? d->lis->counters().dropped : d->dial->counters().dropped;
-            over_cap = dropped > d->dropped_seen;
-            d->dropped_seen = dropped;
-        }
-        const char* kind = target ? "TCP target " : "TCP client ";
-        if (over_cap)
+        using skycue::net::DownReason;
+        switch (reason) {
+        case DownReason::over_cap:
             LOG_WARN("forwarder: " << kind << name << " closed: outbound queue exceeded " << cfg.max_client_queue_bytes
                                    << " bytes");
-        else
+            break;
+        case DownReason::shutdown:
+            LOG_INFO("forwarder: " << kind << name << " closed for shutdown (" << sessions.size() << " left)");
+            break;
+        case DownReason::error:
+            // The library's "read: Connection reset by peer" / "write: Broken pipe" in the old words.
+            if (why.compare(0, 6, "read: ") == 0)
+                why.erase(0, 6);
+            else if (why.compare(0, 7, "write: ") == 0)
+                why.replace(0, 7, "write failed: ");
+            LOG_INFO("forwarder: " << kind << name << " " << why << " (" << sessions.size() << " left)");
+            break;
+        case DownReason::closed:
             LOG_INFO("forwarder: " << kind << name << " disconnected (" << sessions.size() << " left)");
+            break;
+        }
         drainCheck();
     }
 
@@ -346,6 +364,8 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         frames_sent += sessions.size();
         if (b->size() <= skycue::kHeaderSize + skycue::kMaxUdpPayload)
             frames_sent += udpTargetCount();
+        else if (udpTargetCount() != 0)
+            LOG_ERROR("forwarder: frame of " << b->size() << " bytes too large for UDP, not sent");
         fanout.publish(b);
     }
 
@@ -500,28 +520,25 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         drainCheck();
     }
 
-    // True when no live TCP peer has bytes left in its queue. A peer that was
-    // cut off is gone from the Fanout and counts as drained.
-    bool drained() const
-    {
-        for (const auto& kv : sessions) {
-            const auto info = fanout.peerInfo(kv.first);
-            if (info && info->stats.queued_bytes != 0)
-                return false;
-        }
-        return true;
-    }
-
-    // While stopping: closes everything once the queues are written or the
-    // limit has passed, else looks again shortly.
+    // While stopping: closes each TCP peer as soon as its queue is written
+    // (a peer that was cut off counts as drained); finishes when none is left
+    // or the limit has passed, else looks again shortly.
     void drainCheck()
     {
         if (!stopping || dead || !started)
             return;
-        if (sessions.empty() || drained() || steady::now() >= drain_deadline) {
+        if (sessions.empty() || steady::now() >= drain_deadline) {
             closeAll();
             return;
         }
+        std::vector<uint64_t> drained;
+        for (const auto& kv : sessions) {
+            const auto info = fanout.peerInfo(kv.first);
+            if (!info || info->stats.queued_bytes == 0)
+                drained.push_back(kv.first);
+        }
+        for (const uint64_t id : drained)
+            fanout.closePeer(id); // its peer-down (posted) logs and calls drainCheck again
         const unsigned gen = ++drain_gen;
         auto self = shared_from_this();
         drain_timer.expires_after(kDrainPoll);

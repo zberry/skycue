@@ -288,6 +288,17 @@ target_include_directories(test_web_server PRIVATE ${PROJECT_SOURCE_DIR}/net/tes
 add_test(NAME web_server COMMAND test_web_server)
 set_tests_properties(web_server PROPERTIES TIMEOUT 120)
 
+# /api/outputs, the cue clients' output field and the WebSocket outputs item
+# over an Engine with a Hub and the cue Forwarder.
+add_executable(test_web_outputs test_web_outputs.cpp)
+target_link_libraries(test_web_outputs PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_web_outputs PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_web_outputs)
+target_include_directories(test_web_outputs PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
+add_test(NAME web_outputs COMMAND test_web_outputs)
+set_tests_properties(web_outputs PROPERTIES TIMEOUT 120)
+
 # The FIS-B routes and WebSocket items over a replay of the uplink fixture.
 add_executable(test_fisb_web test_fisb_web.cpp)
 target_link_libraries(test_fisb_web PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)

@@ -14,7 +14,9 @@
 #include "inputs/ping_json_input.hpp"
 #include "inputs/source_input.hpp"
 #include "inputs/uat_raw_input.hpp"
+#include "hub/hub.hpp"
 #include "json_lite.hpp"
+#include "outputs/output_def.hpp"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -1314,4 +1316,359 @@ BOOST_AUTO_TEST_CASE(any_track_input_connected_ignores_dump978_and_disabled)
     BOOST_REQUIRE(eventually([&] { return m.state("dump978").counters.messages == 2; }));
     BOOST_TEST(m.state("dump978").counters.uplinks == 1u);
     BOOST_TEST(m.state("dump978").counters.bytes == 14u);
+}
+
+// ---------------------------------------------------------------- outputs
+
+namespace {
+
+using skycued::Hub;
+using skycued::OutputDef;
+
+OutputDef outputOf(const std::string& json)
+{
+    const auto o = skycued::JsonObject::parse(json);
+    BOOST_REQUIRE(o.has_value());
+    return skycued::parseOutputDef(*o);
+}
+
+OutputDef beastOut(const std::string& id, uint16_t port, const std::string& extra = "")
+{
+    return outputOf(R"({"id":")" + id + R"(","kind":"beast","transport":"tcp_listen","bind":"127.0.0.1","port":)" +
+                    std::to_string(port) + extra + "}");
+}
+
+std::string fileWith(const std::vector<InputDef>& inputs, const std::vector<OutputDef>& outputs,
+                     const std::map<std::string, bool>& builtin = {})
+{
+    InputsFile f;
+    f.version = 2;
+    f.inputs = inputs;
+    f.outputs = outputs;
+    f.builtin_enabled = builtin;
+    return skycued::inputsFileJson(f);
+}
+
+// A Hub on the manager's io thread, fed the way main.cpp feeds it.
+struct HubWire {
+    std::unique_ptr<Hub> hub;
+    std::atomic<int> callbacks{0};
+
+    HubWire(Mgr& m, IoThread& t)
+    {
+        t.call([&] { hub = std::make_unique<Hub>(t.io); });
+        m.on([&](InputManager& im) {
+            im.onOutputsChanged([this](const std::vector<OutputDef>& defs, const std::map<std::string, bool>& b) {
+                ++callbacks;
+                hub->apply(defs, b);
+            });
+            hub->apply(im.outputs(), im.outputBuiltinStates());
+            return 0;
+        });
+    }
+    ~HubWire() = default;
+    std::optional<skycued::OutputState> find(Mgr& m, const std::string& id)
+    {
+        return m.on([&](InputManager&) { return hub->find(id); });
+    }
+};
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(outputs_crud_persist_version_2)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    HubWire w(m, t);
+    const uint16_t port = freeTcpPort();
+    const OutputDef o = beastOut("bo", port, R"(,"name":"Beast out")");
+    const OutputDef made = m.on([&](InputManager& im) { return im.createOutput(o); });
+    BOOST_TEST((made == o));
+    auto file = skycued::parseInputsFile(readAll(cfg.inputs_file));
+    BOOST_TEST(file.version == 2);
+    BOOST_REQUIRE_EQUAL(file.outputs.size(), 1u);
+    BOOST_TEST((file.outputs[0] == o));
+    BOOST_TEST(w.callbacks.load() == 1);
+    BOOST_REQUIRE(eventually([&] {
+        const auto s = w.find(m, "bo");
+        return s && s->up;
+    }));
+
+    // A second output; ids are unique per kind of thing, outputs keep file order.
+    BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.createOutput(o); }), InputConflict);
+    const OutputDef j = outputOf(R"({"id":"js","kind":"json","transport":"udp","host":"192.0.2.9","port":4000})");
+    m.on([&](InputManager& im) { return im.createOutput(j); });
+    file = skycued::parseInputsFile(readAll(cfg.inputs_file));
+    BOOST_REQUIRE_EQUAL(file.outputs.size(), 2u);
+    BOOST_TEST(file.outputs[1].id == "js");
+
+    // Replace, disable, enable, remove.
+    const OutputDef moved = beastOut("bo", freeTcpPort(), R"(,"name":"Moved")");
+    m.on([&](InputManager& im) { return im.replaceOutput("bo", moved); });
+    BOOST_TEST((skycued::parseInputsFile(readAll(cfg.inputs_file)).outputs[0] == moved));
+    BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.replaceOutput("bo", beastOut("other", 5000)); }),
+                      InputDefError);
+    BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.replaceOutput("nope", moved); }), skycued::InputNotFound);
+    m.on([](InputManager& im) { im.setOutputEnabled("bo", false); return 0; });
+    BOOST_TEST(!skycued::parseInputsFile(readAll(cfg.inputs_file)).outputs[0].enabled);
+    BOOST_TEST(!w.find(m, "bo")->up);
+    m.on([](InputManager& im) { im.setOutputEnabled("bo", true); return 0; });
+    BOOST_REQUIRE(eventually([&] { return w.find(m, "bo")->up; }));
+    BOOST_CHECK_THROW(m.on([](InputManager& im) { im.removeOutput("nope"); return 0; }), skycued::InputNotFound);
+    m.on([](InputManager& im) { im.removeOutput("bo"); return 0; });
+    BOOST_TEST(!w.find(m, "bo").has_value());
+    BOOST_TEST(skycued::parseInputsFile(readAll(cfg.inputs_file)).outputs.size() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(last_output_removed_rewrites_v1)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    m.on([&](InputManager& im) { return im.create(psJson("ps", freeUdpPort())); });
+    BOOST_TEST(skycued::parseInputsFile(readAll(cfg.inputs_file)).version == 1);
+    m.on([&](InputManager& im) { return im.createOutput(beastOut("bo", freeTcpPort())); });
+    BOOST_TEST(skycued::parseInputsFile(readAll(cfg.inputs_file)).version == 2);
+    m.on([](InputManager& im) { im.removeOutput("bo"); return 0; });
+    const std::string text = readAll(cfg.inputs_file);
+    BOOST_TEST(skycued::parseInputsFile(text).version == 1);
+    BOOST_TEST(text.find("outputs") == std::string::npos, text);
+    BOOST_TEST(text.find("\"version\": 1") != std::string::npos, text);
+}
+
+BOOST_AUTO_TEST_CASE(hand_edit_adds_output_applied_by_id)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    HubWire w(m, t);
+    const uint16_t a = freeTcpPort(), b = freeTcpPort();
+    handWrite(cfg.inputs_file, fileWith({}, {beastOut("bo", a)}));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] {
+        const auto s = w.find(m, "bo");
+        return s && s->up;
+    }));
+    {
+        tcp::socket client = connectWhenListening(t.io, a);  // t.io is not run on this thread: only a connect
+        BOOST_REQUIRE(eventually([&] { return w.find(m, "bo")->counters.peers == 1; }));
+    }
+    // Same id, another port and a second output: matched by id, the first rebinds.
+    handWrite(cfg.inputs_file, fileWith({}, {beastOut("bo", b), beastOut("two", freeTcpPort())}));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return w.find(m, "two").has_value(); }));
+    BOOST_REQUIRE(eventually([&] { return w.find(m, "bo")->def.port == b && w.find(m, "bo")->up; }));
+    BOOST_TEST(m.on([](InputManager& im) { return im.outputs().size(); }) == 2u);
+    // Removing one by hand stops it.
+    handWrite(cfg.inputs_file, fileWith({}, {beastOut("two", w.find(m, "two")->def.port)}));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return !w.find(m, "bo").has_value(); }));
+    BOOST_TEST(w.find(m, "two")->up);
+}
+
+BOOST_AUTO_TEST_CASE(hand_edit_back_to_v1_rejected_and_outputs_keep_running)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    HubWire w(m, t);
+    const uint16_t in_port = freeUdpPort();
+    m.on([&](InputManager& im) { return im.create(psJson("ps", in_port)); });
+    const uint16_t port = freeTcpPort();
+    const OutputDef o = beastOut("bo", port);
+    m.on([&](InputManager& im) { return im.createOutput(o); });
+    BOOST_REQUIRE(eventually([&] { return w.find(m, "bo")->up && m.state("ps").connected; }));
+
+    std::string text = readAll(cfg.inputs_file);
+    const auto at = text.find("\"version\": 2");
+    BOOST_REQUIRE(at != std::string::npos);
+    text.replace(at, 12, "\"version\": 1");
+    handWrite(cfg.inputs_file, text);
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return exists(cfg.inputs_file + ".rejected"); }));
+    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_TEST(w.find(m, "bo")->up);
+    BOOST_TEST((w.find(m, "bo")->def == o));
+    BOOST_TEST(m.state("ps").connected);
+    BOOST_TEST(m.state("ps").counters.connects == 1u);
+    BOOST_TEST(m.on([](InputManager& im) { return im.outputs().size(); }) == 1u);
+    tcp::socket client = connectWhenListening(t.io, port);  // still serving
+}
+
+BOOST_AUTO_TEST_CASE(invalid_output_edit_renamed_rejected)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    HubWire w(m, t);
+    const uint16_t port = freeTcpPort();
+    m.on([&](InputManager& im) { return im.createOutput(beastOut("bo", port)); });
+    BOOST_REQUIRE(eventually([&] { return w.find(m, "bo")->up; }));
+    const std::string bad = R"({"version":2,"outputs":[{"id":"bo","kind":"beast","transport":"tcp_listen","port":0}]})";
+    handWrite(cfg.inputs_file, bad);
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return exists(cfg.inputs_file + ".rejected"); }));
+    BOOST_TEST(readAll(cfg.inputs_file + ".rejected") == bad);
+    BOOST_TEST(w.find(m, "bo")->up);
+    BOOST_TEST(w.find(m, "bo")->def.port == port);
+    // A later API write puts a good file back.
+    m.on([&](InputManager& im) { return im.createOutput(beastOut("two", freeTcpPort())); });
+    BOOST_TEST(skycued::parseInputsFile(readAll(cfg.inputs_file)).outputs.size() == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(output_on_v1_input_port_rejected_input_untouched)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    HubWire w(m, t);
+    const uint16_t port = freeTcpPort();
+    m.on([&](InputManager& im) { return im.create(cat021("cat", "tcp_listen", port)); });
+    tcp::socket probe = connectWhenListening(t.io, port);
+    try {
+        m.on([&](InputManager& im) { return im.createOutput(beastOut("bo", port)); });
+        BOOST_FAIL("output on an input's port");
+    } catch (const InputDefError& e) {
+        BOOST_TEST(std::string(e.what()) == "port " + std::to_string(port) + "/tcp is already used by input cat");
+    }
+    BOOST_TEST(m.on([](InputManager& im) { return im.outputs().size(); }) == 0u);
+    BOOST_TEST(skycued::parseInputsFile(readAll(cfg.inputs_file)).version == 1);
+
+    // The same clash made by hand rejects the whole file; the input keeps running.
+    const uint16_t other = freeTcpPort();
+    const std::string clash = fileWith({cat021("cat", "tcp_listen", port), cat021("new", "tcp_listen", other)},
+                                       {beastOut("bo", port)});
+    handWrite(cfg.inputs_file, clash);
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return exists(cfg.inputs_file + ".rejected"); }));
+    BOOST_TEST(m.ids() == std::vector<std::string>{"cat"});
+    BOOST_TEST(!w.find(m, "bo").has_value());
+    tcp::socket client = connectWhenListening(t.io, port);  // the input still accepts
+}
+
+BOOST_AUTO_TEST_CASE(output_on_cue_port_rejected)
+{
+    IoThread t;
+    TempDir tmp;
+    auto cfg = fileConfig(tmp);
+    const uint16_t cue = freeTcpPort(), web = freeTcpPort();
+    cfg.reserved_ports = {{"tcp", cue, "the cue stream (CUE_TCP_PORT)"}, {"tcp", web, "the web server (WEB_PORT)"}};
+    Mgr m(t, cfg);
+    try {
+        m.on([&](InputManager& im) { return im.createOutput(beastOut("bo", cue)); });
+        BOOST_FAIL("output on the cue port");
+    } catch (const InputDefError& e) {
+        BOOST_TEST(std::string(e.what()) ==
+                   "port " + std::to_string(cue) + "/tcp is already used by the cue stream (CUE_TCP_PORT)");
+    }
+    BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.createOutput(beastOut("bw", web)); }), InputDefError);
+    BOOST_TEST(!exists(cfg.inputs_file));
+    // A disabled output on the cue port is not a clash.
+    m.on([&](InputManager& im) { return im.createOutput(beastOut("off", cue, R"(,"enabled":false)")); });
+}
+
+BOOST_AUTO_TEST_CASE(replace_output_with_same_definition_changes_nothing)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    HubWire w(m, t);
+    const OutputDef o = beastOut("bo", freeTcpPort(), R"(,"name":"Out")");
+    m.on([&](InputManager& im) { return im.createOutput(o); });
+    const auto stamp = skycued::FileStamp::of(cfg.inputs_file);
+    const int callbacks = w.callbacks.load();
+    const OutputDef again = m.on([&](InputManager& im) { return im.replaceOutput("bo", o); });
+    BOOST_TEST((again == o));
+    m.on([](InputManager& im) { im.setOutputEnabled("bo", true); return 0; });  // already enabled
+    BOOST_TEST((skycued::FileStamp::of(cfg.inputs_file) == stamp));
+    BOOST_TEST(w.callbacks.load() == callbacks);
+}
+
+BOOST_AUTO_TEST_CASE(outputs_not_started_and_writes_409_while_replaying)
+{
+    IoThread t;
+    TempDir tmp;
+    auto cfg = fileConfig(tmp);
+    cfg.replaying = true;
+    const uint16_t port = freeTcpPort();
+    handWrite(cfg.inputs_file, fileWith({}, {beastOut("bo", port)}));
+    FakeHub hub;
+    Mgr m(t, cfg, [&](InputManager& im) { im.addBuiltin(fakeReadsb(hub)); });
+    HubWire w(m, t);
+    BOOST_TEST(m.on([](InputManager& im) { return im.outputs().size(); }) == 0u);
+    BOOST_TEST(!w.find(m, "bo").has_value());
+    BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.createOutput(beastOut("two", freeTcpPort())); }),
+                      InputConflict);
+    BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.replaceOutput("bo", beastOut("bo", port)); }),
+                      InputConflict);
+    BOOST_CHECK_THROW(m.on([](InputManager& im) { im.setOutputEnabled("bo", false); return 0; }), InputConflict);
+    BOOST_CHECK_THROW(m.on([](InputManager& im) { im.removeOutput("bo"); return 0; }), InputConflict);
+    BOOST_TEST(w.callbacks.load() == 0);
+    // Nothing listens on the port.
+    asio::io_context io;
+    boost::system::error_code ec;
+    tcp::socket s(io);
+    s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port), ec);
+    BOOST_TEST(!!ec);
+}
+
+BOOST_AUTO_TEST_CASE(warn_logged_for_loopback_output_to_own_port)
+{
+    IoThread t;
+    TempDir tmp, logs;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    const uint16_t port = freeTcpPort();
+    m.on([&](InputManager& im) { return im.create(cat021("cat", "tcp_listen", port)); });
+    std::string log;
+    {
+        StderrCapture cap(logs.path + "/stderr");
+        m.on([&](InputManager& im) {
+            return im.createOutput(outputOf(R"({"id":"loop","kind":"beast","transport":"tcp_connect","host":"127.0.0.1","port":)" +
+                                            std::to_string(port) + "}"));
+        });
+        log = cap.text();
+    }
+    BOOST_TEST(contains(log, "WARN"), log);
+    BOOST_TEST(contains(log, "output 'loop' sends to 127.0.0.1:" + std::to_string(port)), log);
+    BOOST_TEST(contains(log, "input 'cat'"), log);
+    // The write still succeeded.
+    BOOST_TEST(m.on([](InputManager& im) { return im.outputs().size(); }) == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(builtin_cue_outputs_only_enable_and_disable)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    HubWire w(m, t);
+    m.on([](InputManager& im) { im.setBuiltinOutputIds({"cue-tcp", "cue-udp-1"}); return 0; });
+    BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.replaceOutput("cue-tcp", beastOut("x", 5000)); }),
+                      InputForbidden);
+    BOOST_CHECK_THROW(m.on([](InputManager& im) { im.removeOutput("cue-udp-1"); return 0; }), InputForbidden);
+    BOOST_CHECK_THROW(m.on([](InputManager& im) { im.setOutputEnabled("cue-udp-9", false); return 0; }),
+                      skycued::InputNotFound);
+    OutputDef reserved = beastOut("x", 5000);
+    reserved.id = "cue-tcp";
+    BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.createOutput(reserved); }), InputDefError);
+    BOOST_TEST(!exists(cfg.inputs_file));
+
+    m.on([](InputManager& im) { im.setOutputEnabled("cue-tcp", false); return 0; });
+    auto file = skycued::parseInputsFile(readAll(cfg.inputs_file));
+    BOOST_TEST(file.version == 2);
+    BOOST_TEST(file.builtin_enabled.at("cue-tcp") == false);
+    BOOST_TEST(w.callbacks.load() == 1);
+    const auto states = m.on([](InputManager& im) { return im.outputBuiltinStates(); });
+    BOOST_TEST(states.size() == 1u);
+    BOOST_TEST(states.at("cue-tcp") == false);
+    m.on([](InputManager& im) { im.setOutputEnabled("cue-tcp", false); return 0; });  // no change
+    BOOST_TEST(w.callbacks.load() == 1);
+
+    // A hand edit that flips it back is applied.
+    handWrite(cfg.inputs_file, fileWith({}, {}, {{"cue-tcp", true}}));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return w.callbacks.load() == 2; }));
+    BOOST_TEST(m.on([](InputManager& im) { return im.outputBuiltinStates(); }).at("cue-tcp") == true);
 }

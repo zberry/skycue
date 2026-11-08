@@ -17,9 +17,11 @@
 #include <cstdint>
 #include <functional>
 #include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -1064,4 +1066,104 @@ BOOST_AUTO_TEST_CASE(forwarder_shutdown_cut_off_during_the_drain_does_not_hold_i
     const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - t0);
     BOOST_TEST_MESSAGE("shutdown with a client cut off during the drain in " << took.count() << " ms");
     BOOST_TEST((took < slow(1500ms)));
+}
+
+BOOST_AUTO_TEST_CASE(sessions_carry_output_id)
+{
+    RawUdp builtin_udp;
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.heartbeat_interval = 10s;
+    cfg.udp_targets = {{"127.0.0.1", builtin_udp.port()}};
+    Fx fx(cfg, [] { return mkTracks(1); });
+
+    RawTcp builtin(fx.port());
+    const uint16_t lport = freeTcpPort();
+    fx.t.call([&] {
+        fx.fwd->addDestination(destination("extra-listen", skycue::net::Transport::tcp_listen, "127.0.0.1", lport));
+    });
+    RawUdp extra_udp;
+    fx.t.call([&] {
+        fx.fwd->addDestination(destination("extra-udp", skycue::net::Transport::udp, "127.0.0.1", extra_udp.port()));
+    });
+    RawTcp extra(lport);
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 2; }));
+
+    std::map<std::string, int> by_output;
+    for (const auto& c : fx.tcpClients())
+        ++by_output[c.output];
+    BOOST_TEST(by_output["cue-tcp"] == 1);
+    BOOST_TEST(by_output["extra-listen"] == 1);
+    BOOST_TEST(by_output.size() == 2u);
+    std::set<std::string> udp_ids;
+    for (const auto& t : fx.udpTargets())
+        udp_ids.insert(t.output);
+    BOOST_TEST((udp_ids == std::set<std::string>{"cue-udp-1", "extra-udp"}));
+}
+
+BOOST_AUTO_TEST_CASE(destination_stats_per_id)
+{
+    ForwarderConfig cfg;
+    cfg.keyframe_interval = 10s;
+    cfg.heartbeat_interval = 10s;
+    Fx fx(cfg);
+    const uint16_t lport = freeTcpPort();
+    fx.t.call([&] {
+        fx.fwd->addDestination(destination("extra-listen", skycue::net::Transport::tcp_listen, "127.0.0.1", lport));
+    });
+    RawUdp udp_raw;
+    fx.t.call([&] {
+        fx.fwd->addDestination(destination("extra-udp", skycue::net::Transport::udp, "127.0.0.1", udp_raw.port()));
+    });
+    RawTcp raw(lport);
+    BOOST_REQUIRE(waitUntil([&] { return fx.clients() == 1; }));
+    for (uint32_t i = 0; i < 3; ++i)
+        fx.update(mkTrack(0x300 + i, false));
+
+    auto stats = [&](const std::string& id) {
+        return fx.t.call([&] { return fx.fwd->destinationStats(id); });
+    };
+    BOOST_REQUIRE(waitUntil([&] {
+        const auto s = stats("extra-listen");
+        return s && s->messages >= 4;  // Hello + 3 updates to the one peer
+    }));
+    const auto listen = stats("extra-listen");
+    BOOST_REQUIRE(listen);
+    BOOST_TEST(listen->up);
+    BOOST_TEST(listen->peers == 1u);
+    BOOST_TEST(listen->bytes > 0u);
+    BOOST_TEST(listen->last_error.empty());
+    const auto builtin = stats("cue-tcp");  // no peers: its own counters stay at zero
+    BOOST_REQUIRE(builtin);
+    BOOST_TEST(builtin->up);
+    BOOST_TEST(builtin->peers == 0u);
+    BOOST_TEST(builtin->messages == 0u);
+    BOOST_REQUIRE(waitUntil([&] {
+        const auto s = stats("extra-udp");
+        return s && s->messages >= 4;
+    }));
+    const auto udp_stats = stats("extra-udp");
+    BOOST_TEST(udp_stats->up);
+    BOOST_TEST(udp_stats->peers == 0u);
+
+    // A UDP target that cannot start is listed down with the reason.
+    skycue::net::Endpoint bad;
+    bad.transport = skycue::net::Transport::udp;
+    bad.group = "239.255.42.9";
+    bad.iface = "192.0.2.77";
+    bad.port = 40999;
+    fx.t.call([&] { fx.fwd->addDestination(skycued::ForwarderDestination{"bad-mcast", bad, false}); });
+    const auto down = stats("bad-mcast");
+    BOOST_REQUIRE(down);
+    if (!down->up)  // a host may accept the address; then there is nothing to check
+        BOOST_TEST(!down->last_error.empty());
+}
+
+BOOST_AUTO_TEST_CASE(destination_stats_unknown_id_is_nullopt)
+{
+    ForwarderConfig cfg;
+    Fx fx(cfg);
+    BOOST_TEST(!fx.t.call([&] { return fx.fwd->destinationStats("no-such-id"); }).has_value());
+    fx.t.call([&] { fx.fwd->removeDestination("cue-tcp"); });
+    BOOST_TEST(!fx.t.call([&] { return fx.fwd->destinationStats("cue-tcp"); }).has_value());
 }

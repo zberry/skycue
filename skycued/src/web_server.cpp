@@ -5,6 +5,7 @@
 #include "runtime_config.hpp"
 #include "web_api.hpp"
 #include "web_inputs.hpp"
+#include "web_outputs.hpp"
 #include "web_stats.hpp"
 
 // Boost.Beast as of Boost 1.66 (the oldest supported): http::async_read with
@@ -650,7 +651,7 @@ void WebServer::Impl::onEvent(const EngineEvent& ev)
         return;
     Item item{ev.kind, webapi::eventJson(ev)};
     if (item.json.empty() && ev.kind != EventKind::filters_changed && ev.kind != EventKind::lists_changed &&
-        ev.kind != EventKind::inputs_changed)
+        ev.kind != EventKind::inputs_changed && ev.kind != EventKind::outputs_changed)
         return;
     enqueue(std::move(item));
 }
@@ -685,7 +686,7 @@ void WebServer::Impl::flush()
     // One inputs item per batch, at the place of the last change: the earlier
     // ones stay "" and are left out (a client that joined in between has the
     // earlier changes in its snapshot and still gets the last one).
-    size_t last_inputs = pending.size();
+    size_t last_inputs = pending.size(), last_outputs = pending.size();
     for (size_t i = 0; i < pending.size(); ++i) {
         auto& item = pending[i];
         if (item.kind == EventKind::filters_changed)
@@ -694,9 +695,13 @@ void WebServer::Impl::flush()
             item.json = webapi::listsJson(engine, runtime, "lists");
         else if (item.kind == EventKind::inputs_changed)
             last_inputs = i;
+        else if (item.kind == EventKind::outputs_changed)
+            last_outputs = i;
     }
     if (last_inputs < pending.size())
         pending[last_inputs].json = webapi::inputsJson(engine.inputs(), "inputs");
+    if (last_outputs < pending.size() && engine.hub())
+        pending[last_outputs].json = webapi::outputsJson(*engine.hub(), "outputs");
     // The items from `from` on, as one message; null when none has JSON.
     auto message = [this](size_t from) -> std::shared_ptr<const std::string> {
         std::string msg = "{\"type\":\"events\",\"items\":[";

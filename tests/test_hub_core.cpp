@@ -1,13 +1,16 @@
 #define BOOST_TEST_MODULE skycued_hub_core
 #include <boost/test/unit_test.hpp>
 
+#include "forwarder.hpp"
 #include "hub/hub.hpp"
 #include "net_test_support.hpp"
 
 #include <skycue/net/buffer.hpp>
+#include <skycue/protocol.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -640,4 +643,152 @@ BOOST_AUTO_TEST_CASE(on_changed_fires_on_start_stop_and_error_change_only)
     BOOST_TEST(r.changes.load() == 3);  // stopped
     r.apply({});
     BOOST_TEST(r.changes.load() == 4);  // removed
+}
+
+namespace {
+
+// A Forwarder and a Hub over it, on one io thread, as in the daemon.
+struct CueRig {
+    IoThread t;
+    std::unique_ptr<Forwarder> fwd;
+    std::unique_ptr<Hub> hub;
+
+    explicit CueRig(ForwarderConfig cfg, bool start = true)
+    {
+        cfg.keyframe_interval = std::chrono::seconds(10);
+        cfg.heartbeat_interval = std::chrono::seconds(10);
+        t.call([&] {
+            fwd = std::make_unique<Forwarder>(t.io, cfg);
+            fwd->setKeyframeProvider([] {
+                skycue::Track tr;
+                tr.id = skycue::TrackId{0xabc123, skycue::AddressType::icao};
+                tr.source = skycue::Source::adsb_1090;
+                tr.position_time = std::chrono::system_clock::now();
+                tr.lat_deg = 38.9;
+                tr.lon_deg = -77.0;
+                return std::vector<skycue::Track>{tr};
+            });
+            hub = std::make_unique<Hub>(t.io, fwd.get());
+            if (start)
+                fwd->start();
+        });
+    }
+    ~CueRig()
+    {
+        t.call([this] {
+            hub.reset();
+            fwd.reset();
+        });
+    }
+    void apply(const std::vector<OutputDef>& defs, const std::map<std::string, bool>& builtin = {})
+    {
+        t.call([&] { hub->apply(defs, builtin); });
+    }
+    OutputState state(const std::string& id)
+    {
+        auto s = t.call([&] { return hub->find(id); });
+        BOOST_REQUIRE(s.has_value());
+        return *s;
+    }
+};
+
+OutputDef cueListen(const std::string& id, uint16_t port)
+{
+    OutputDef d = tcpListen(id, OutputKind::cue, port);
+    return d;
+}
+
+// The first frame type in what a client has received (Hello is 1 in the cue protocol).
+bool startsWithHello(const std::string& bytes)
+{
+    skycue::Frame f;
+    std::size_t used = 0;
+    const auto st = skycue::decodeFrame(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size(), f, used);
+    return st == skycue::DecodeStatus::ok && f.type == skycue::FrameType::hello;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(cue_output_added_at_runtime_greets_peer)
+{
+    ForwarderConfig cfg;
+    cfg.tcp_listen_ephemeral = true;
+    CueRig r(cfg);
+    const uint16_t port = freeTcpPort();
+    r.apply({cueListen("cue-extra", port)});
+    BOOST_TEST(r.state("cue-extra").up);
+    Client c(port);
+    BOOST_REQUIRE(c.readUntil(1));
+    BOOST_TEST(startsWithHello(c.got));
+    BOOST_REQUIRE(eventually([&] { return r.state("cue-extra").counters.peers == 1; }));
+    BOOST_REQUIRE(eventually([&] { return r.state("cue-extra").counters.messages >= 2; }));  // Hello and the keyframe
+    BOOST_TEST(r.state("cue-extra").counters.bytes > 0u);
+    BOOST_TEST(!r.state("cue-extra").def.builtin);
+
+    // Removal closes the peer and the forwarder no longer has the destination.
+    r.apply({});
+    BOOST_TEST(c.seesEnd());
+    BOOST_TEST(!r.t.call([&] { return r.hub->find("cue-extra").has_value(); }));
+    BOOST_TEST(!r.t.call([&] { return r.fwd->destinationStats("cue-extra").has_value(); }));
+}
+
+BOOST_AUTO_TEST_CASE(builtin_cue_listed_not_removable)
+{
+    UdpSink sink;
+    ForwarderConfig cfg;
+    cfg.tcp_listen_ephemeral = true;
+    cfg.udp_targets = {{"127.0.0.1", sink.port}};
+    CueRig r(cfg);
+    r.apply({tcpListen("b", OutputKind::beast, freeTcpPort())});
+    auto list = r.t.call([&] { return r.hub->list(); });
+    BOOST_REQUIRE(list.size() == 3u);
+    BOOST_TEST(list[0].def.id == "cue-tcp");
+    BOOST_TEST(list[1].def.id == "cue-udp-1");
+    BOOST_TEST(list[2].def.id == "b");
+    for (std::size_t i = 0; i < 2; ++i) {
+        BOOST_TEST(list[i].def.builtin);
+        BOOST_TEST((list[i].def.kind == OutputKind::cue));
+        BOOST_TEST(list[i].def.enabled);
+        BOOST_TEST(list[i].up);
+    }
+    BOOST_TEST((list[1].def.transport == InputTransport::udp));
+    BOOST_TEST(list[1].def.port == sink.port);
+
+    // Dropping them from `desired`, or redefining them, changes nothing.
+    r.apply({});
+    OutputDef imposter = tcpListen("cue-tcp", OutputKind::beast, freeTcpPort());
+    r.apply({imposter});
+    list = r.t.call([&] { return r.hub->list(); });
+    BOOST_REQUIRE(list.size() == 2u);
+    BOOST_TEST((list[0].def.kind == OutputKind::cue));
+    BOOST_TEST(list[0].up);
+    BOOST_TEST(r.t.call([&] { return r.fwd->destinations().size(); }) == 2u);
+}
+
+BOOST_AUTO_TEST_CASE(builtin_cue_disabled_before_start_not_bound)
+{
+    ForwarderConfig cfg;
+    cfg.tcp_port = freeTcpPort();
+    CueRig r(cfg, false);
+    r.apply({}, {{"cue-tcp", false}});
+    r.t.call([&] { r.fwd->start(); });  // does not throw and binds nothing
+    BOOST_TEST(r.t.call([&] { return r.fwd->tcpPort(); }) == 0u);
+    BOOST_TEST(!r.state("cue-tcp").def.enabled);
+    BOOST_TEST(!r.state("cue-tcp").up);
+    {
+        asio::io_context io;
+        tcp::acceptor probe(io, {asio::ip::make_address("0.0.0.0"), cfg.tcp_port});  // free: bindable by anyone
+    }
+
+    // Enabling it later binds the remembered port.
+    r.apply({}, {{"cue-tcp", true}});
+    BOOST_REQUIRE(eventually([&] { return r.state("cue-tcp").up; }));
+    Client c(cfg.tcp_port);
+    BOOST_REQUIRE(c.readUntil(1));
+    BOOST_TEST(startsWithHello(c.got));
+
+    // Disabling it again closes the peer and frees the port.
+    r.apply({}, {{"cue-tcp", false}});
+    BOOST_TEST(c.seesEnd());
+    BOOST_TEST(!r.state("cue-tcp").up);
 }

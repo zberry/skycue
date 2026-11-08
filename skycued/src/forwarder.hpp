@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -52,12 +53,22 @@ struct CueTcpClient {
     bool dialled = false;                                   // one of tcp_connect_targets, else accepted
     std::chrono::system_clock::time_point connected_since;  // wall clock at accept/connect
     uint64_t bytes_sent = 0;                                // bytes whose async_write completed
+    std::string output;                                     // id of the destination it belongs to
 };
 
 // One resolved UDP target (see Forwarder::udpTargets).
 struct CueUdpTarget {
     std::string endpoint;         // "host:port" as configured
     uint64_t datagrams_sent = 0;  // sends completed without error
+    std::string output;           // id of the destination it belongs to
+};
+
+// What one destination reports about itself (see Forwarder::destinationStats):
+// the library's counters, which count one message per TCP peer.
+struct DestinationStats {
+    bool up = false;  // listening / connected / the UDP sender has a usable target
+    uint64_t peers = 0, bytes = 0, messages = 0, dropped = 0;
+    std::string last_error;
 };
 
 // Threading: the Forwarder lives on the caller's io_context. Every method,
@@ -129,6 +140,9 @@ public:
     void addDestination(const ForwarderDestination& d);
     void removeDestination(const std::string& id);
     std::vector<ForwarderDestination> destinations() const; // in the order added
+    // Counters of one destination (a UDP target that could not start reports
+    // up == false and the reason in last_error); nullopt for an unknown id.
+    std::optional<DestinationStats> destinationStats(const std::string& id) const;
 
     // Port the TCP server listens on (useful with tcp_listen_ephemeral); 0
     // before start() or with no listener.

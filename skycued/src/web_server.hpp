@@ -20,7 +20,8 @@
 // (RuntimeConfig::onChange), on which it sends the filters and lists items,
 // so every page sees overlay_active change after "save as baseline". The
 // inputs_changed events of one io turn become a single {"type":"inputs"}
-// item (webapi::inputsJson), built when the message is. Each client has at most one write in flight and a queue of
+// item (webapi::inputsJson), built when the message is; the outputs_changed
+// events likewise become one {"type":"outputs"} item (webapi::outputsJson). Each client has at most one write in flight and a queue of
 // messages behind it; a client whose queued bytes (the one in flight
 // included) would pass max_ws_queue_bytes is disconnected (WARN), without
 // affecting the others. A ping goes out every ping_interval; a client that

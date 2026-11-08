@@ -9,6 +9,7 @@
 #include "web_config.hpp"
 #include "web_fisb.hpp"
 #include "web_inputs.hpp"
+#include "web_outputs.hpp"
 #include "web_stats.hpp"
 
 #include <dirent.h>
@@ -357,11 +358,13 @@ std::string cueClientsJson(const Forwarder& forwarder)
                           .add("direction", c.dialled ? "dialled" : "accepted")
                           .add("connected_since", formatIso8601Ms(c.connected_since))
                           .add("bytes_sent", static_cast<int64_t>(c.bytes_sent))
+                          .add("output", c.output)
                           .str());
     for (const auto& t : forwarder.udpTargets())
         udp.push_back(JsonWriter()
                           .add("endpoint", t.endpoint)
                           .add("datagrams_sent", static_cast<int64_t>(t.datagrams_sent))
+                          .add("output", t.output)
                           .str());
     return JsonWriter().addRaw("tcp", jsonArray(tcp)).addRaw("udp", jsonArray(udp)).str();
 }
@@ -446,6 +449,8 @@ std::string stateJson(const Engine& engine, const RuntimeConfig& runtime, const 
     for (const auto& e : engine.inputs().list())
         inputs.push_back(inputJson(e, wall));
     w.addRaw("inputs", jsonArray(inputs));
+    if (const Hub* hub = engine.hub())
+        w.addRaw("outputs", outputsArrayJson(*hub));
     return w.str();
 }
 
@@ -520,6 +525,7 @@ std::string eventJson(const EngineEvent& event)
     case EventKind::filters_changed:
     case EventKind::lists_changed:
     case EventKind::inputs_changed:
+    case EventKind::outputs_changed:
         break;
     case EventKind::fisb_text:
     case EventKind::fisb_shape:
@@ -668,6 +674,8 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return get ? json(200, cueClientsJson(engine.forwarder())) : notAllowed("GET");
         if (isInputsPath(path))
             return handleInputsApi(request, engine);
+        if (isOutputsPath(path))
+            return handleOutputsApi(request, engine);
         if (isFisbPath(path))
             return handleFisbApi(request, engine);
         if (isStatsPath(path))

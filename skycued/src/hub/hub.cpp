@@ -1,5 +1,7 @@
 #include "hub/hub.hpp"
 
+#include "forwarder.hpp"
+
 #include <skycue/net/dialer.hpp>
 #include <skycue/net/endpoint.hpp>
 #include <skycue/net/fanout.hpp>
@@ -56,6 +58,9 @@ struct Hub::Impl {
         std::shared_ptr<net::Dialer> dialer;
         std::shared_ptr<net::UdpSender> sender;
         bool running = false;
+        bool builtin_cue = false;  // one of the forwarder's own destinations (cue-tcp, cue-connect-N, cue-udp-N)
+        bool cue_added = false;    // the forwarder holds this output's destination
+        net::Endpoint cue_endpoint;  // builtin_cue: where it goes, remembered while it is removed
         std::string start_error;
         OutputCounters base;  // totals of the destinations stopped so far, plus hub-side drops
         bool seen_up = false;
@@ -66,6 +71,8 @@ struct Hub::Impl {
 
     Impl(boost::asio::io_context& io_, Forwarder* cue_) : io(io_), cue(cue_), timer(io_)
     {
+        if (cue)
+            seedBuiltinCue();
         for (auto& bus : buses) {
             auto changed = [this] { refresh(); };
             bus.stream.onPeerUp([changed](uint64_t, const boost::asio::ip::tcp::endpoint&,
@@ -81,6 +88,49 @@ struct Hub::Impl {
     std::function<void()> on_changed;
     boost::asio::steady_timer timer;
     bool stopped = false;
+
+    // The forwarder's own destinations are listed as built-in cue outputs,
+    // enabled until apply() says otherwise.
+    void seedBuiltinCue()
+    {
+        for (const auto& d : cue->destinations()) {
+            if (!d.builtin)
+                continue;
+            auto o = std::make_unique<Output>();
+            const auto& e = d.endpoint;
+            o->def.id = d.id;
+            o->def.kind = OutputKind::cue;
+            o->def.builtin = true;
+            o->def.port = e.port;
+            switch (e.transport) {
+            case net::Transport::tcp_listen:
+                o->def.name = "Cue stream (TCP listener)";
+                o->def.transport = InputTransport::tcp_listen;
+                o->def.bind = e.bind;
+                o->def.peer = e.peer;
+                break;
+            case net::Transport::tcp_connect:
+                o->def.name = "Cue stream (TCP target)";
+                o->def.transport = InputTransport::tcp_connect;
+                o->def.host = e.host;
+                break;
+            default:
+                o->def.name = "Cue stream (UDP target)";
+                o->def.transport = InputTransport::udp;
+                o->def.host = e.host;
+                o->def.group = e.group;
+                o->def.iface = e.iface;
+                o->def.ttl = e.ttl;
+                o->def.loopback = e.loopback;
+                break;
+            }
+            o->builtin_cue = true;
+            o->cue_added = true;
+            o->running = true;
+            o->cue_endpoint = e;
+            outputs.push_back(std::move(o));
+        }
+    }
 
     Output* findOutput(const std::string& id) const
     {
@@ -98,10 +148,21 @@ struct Hub::Impl {
 
     net::Fanout& fanoutOf(Output& o) { return o.isStream() ? busOf(o.def)->stream : busOf(o.def)->datagram; }
 
-    static bool upOf(const Output& o)
+    std::optional<DestinationStats> cueStats(const Output& o) const
+    {
+        if (!o.cue_added || !cue)
+            return std::nullopt;
+        return cue->destinationStats(o.def.id);
+    }
+
+    bool upOf(const Output& o) const
     {
         if (!o.running)
             return false;
+        if (o.cue_added) {
+            const auto s = cueStats(o);
+            return s && s->up;
+        }
         if (o.listener)
             return o.listener->listening();
         if (o.dialer)
@@ -111,10 +172,13 @@ struct Hub::Impl {
         return false;
     }
 
-    static std::string errorOf(const Output& o)
+    std::string errorOf(const Output& o) const
     {
         std::string live;
-        if (o.listener)
+        if (o.cue_added) {
+            if (const auto s = cueStats(o))
+                live = s->last_error;
+        } else if (o.listener)
             live = o.listener->counters().last_error;
         else if (o.dialer)
             live = o.dialer->counters().last_error;
@@ -125,11 +189,18 @@ struct Hub::Impl {
         return o.start_error;
     }
 
-    static OutputCounters countersOf(const Output& o)
+    OutputCounters countersOf(const Output& o) const
     {
         OutputCounters c = o.base;
         const net::Counters* live = nullptr;
-        if (o.listener) {
+        if (o.cue_added) {
+            if (const auto s = cueStats(o)) {
+                c.peers = s->peers;
+                c.bytes += s->bytes;
+                c.messages += s->messages;
+                c.dropped += s->dropped;
+            }
+        } else if (o.listener) {
             live = &o.listener->counters();
             c.peers = o.listener->peers();
         } else if (o.dialer) {
@@ -152,7 +223,21 @@ struct Hub::Impl {
     {
         o.start_error.clear();
         if (o.def.kind == OutputKind::cue) {
-            o.start_error = "cue outputs need the forwarder";
+            if (!cue) {
+                o.start_error = "cue outputs need the forwarder";
+                return;
+            }
+            try {
+                // Not marked builtin: a re-added built-in must retry its bind, not throw.
+                cue->addDestination(
+                    ForwarderDestination{o.def.id, o.builtin_cue ? o.cue_endpoint : toEndpoint(o.def), false});
+                o.cue_added = true;
+                o.running = true;
+            } catch (const std::exception& e) {
+                o.start_error = e.what();
+                if (o.start_error.empty())
+                    o.start_error = "start failed";
+            }
             return;
         }
         try {
@@ -202,8 +287,19 @@ struct Hub::Impl {
     }
 
     // Detach first, then stop: the fanout never sees a half-stopped destination.
-    void stopOutput(Output& o)
+    // `release_cue` false leaves a cue destination to the forwarder (the daemon
+    // is shutting down and the forwarder drains its own peers).
+    void stopOutput(Output& o, bool release_cue = true)
     {
+        if (o.cue_added) {
+            OutputCounters live = countersOf(o);
+            live.peers = 0;
+            live.last_error.clear();
+            o.base = live;
+            if (release_cue && cue)
+                cue->removeDestination(o.def.id);
+            o.cue_added = false;
+        }
         if (o.listener) {
             fanoutOf(o).detach(o.listener);
             o.listener->stop();
@@ -329,7 +425,24 @@ void Hub::apply(const std::vector<OutputDef>& desired, const std::map<std::strin
     bool changed = false;
     std::vector<std::unique_ptr<Impl::Output>> next;
     next.reserve(desired.size());
+    for (auto& builtin : im.outputs) {  // the forwarder's own destinations stay whatever `desired` holds
+        if (!builtin || !builtin->builtin_cue)
+            continue;
+        const auto it = builtin_enabled.find(builtin->def.id);
+        const bool want = it == builtin_enabled.end() || it->second;
+        if (builtin->def.enabled != want) {
+            builtin->def.enabled = want;
+            if (want)
+                im.start(*builtin);
+            else
+                im.stopOutput(*builtin);
+            changed = true;
+        }
+        next.push_back(std::move(builtin));
+    }
     for (const auto& given : desired) {
+        if (im.cue && (given.builtin || isReservedCueId(given.id)))
+            continue;
         OutputDef def = given;
         if (def.builtin) {
             const auto it = builtin_enabled.find(def.id);
@@ -396,7 +509,7 @@ void Hub::stop()
     im.stopped = true;
     im.timer.cancel();
     for (auto& o : im.outputs)
-        im.stopOutput(*o);
+        im.stopOutput(*o, false);
 }
 
 }  // namespace skycued

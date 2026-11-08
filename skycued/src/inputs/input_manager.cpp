@@ -149,13 +149,15 @@ void InputManager::load()
     InputsFile file;
     try {
         file = parseInputsFile(text);
-        checkSet(file.inputs);
+        checkSet(file.inputs, file.outputs);
     } catch (const InputDefError& e) {
         rejectFile(e.what(), "built-in inputs only");
         return;
     }
     warnRepaired(file.repaired_names);
+    warnRepairedOutputs(file.repaired_output_names);
     warnCapture(file.inputs);
+    outputs_ = file.outputs;
     file_builtin_ = file.builtin_enabled;
     for (std::size_t i = 0; i < builtin_count_; ++i) {
         const auto it = file_builtin_.find(slots_[i].def.id);
@@ -228,8 +230,8 @@ InputEntry InputManager::create(const InputDef& def)
     auto user = userDefs();
     user.push_back(d);
     checkCapture(d);
-    checkSet(user);
-    persist(user, builtinStates());
+    checkSet(user, outputs_);
+    persist(user, outputs_, builtinStates());
     slots_.push_back(Slot{d, build(d)});
     if (started_ && d.enabled)
         slots_.back().input->start();
@@ -255,8 +257,8 @@ InputEntry InputManager::replace(const std::string& id, const InputDef& def)
         if (u.id == id)
             u = d;
     checkCapture(d);
-    checkSet(user);
-    persist(user, builtinStates());
+    checkSet(user, outputs_);
+    persist(user, outputs_, builtinStates());
     retire(*s, true);
     s->def = d;
     s->input = build(d);
@@ -282,9 +284,9 @@ InputEntry InputManager::setEnabled(const std::string& id, bool enabled)
         for (auto& u : user)
             if (u.id == id)
                 u.enabled = enabled;
-        checkSet(user);
+        checkSet(user, outputs_);
     }
-    persist(user, builtin);
+    persist(user, outputs_, builtin);
     s->def.enabled = enabled;
     if (!enabled)
         s->input->stop();
@@ -304,7 +306,7 @@ void InputManager::remove(const std::string& id)
         throw InputForbidden("input '" + id + "' is built in: it can only be enabled or disabled");
     auto user = userDefs();
     user.erase(std::remove_if(user.begin(), user.end(), [&](const InputDef& u) { return u.id == id; }), user.end());
-    persist(user, builtinStates());
+    persist(user, outputs_, builtinStates());
     retire(*s, false);
     slots_.erase(slots_.begin() + (s - slots_.data()));
     changed();
@@ -396,14 +398,135 @@ InputDef InputManager::normalized(const InputDef& def)
     return parseInputDef(*object);
 }
 
-void InputManager::checkSet(const std::vector<InputDef>& user) const
+void InputManager::checkSet(const std::vector<InputDef>& user, const std::vector<OutputDef>& outputs) const
 {
     std::vector<InputDef> all;
     all.reserve(builtin_count_ + user.size());
     for (std::size_t i = 0; i < builtin_count_; ++i)
         all.push_back(slots_[i].def);
     all.insert(all.end(), user.begin(), user.end());
-    validateInputSet(all);
+    for (const auto& warning : validateInputSet(all, outputs, config_.reserved_ports))
+        LOG_WARN(warning);
+}
+
+OutputDef InputManager::normalizedOutput(const OutputDef& def)
+{
+    OutputDef user = def;
+    user.builtin = false;
+    const auto object = JsonObject::parse(outputDefJson(user));
+    if (!object)
+        throw InputDefError("definition cannot be encoded");
+    return parseOutputDef(*object);
+}
+
+void InputManager::warnRepairedOutputs(const std::vector<std::string>& ids) const
+{
+    for (const auto& id : ids)
+        LOG_ERROR(config_.inputs_file << ": output '" << id
+                                      << "': name repaired (it was not valid UTF-8, held a control character or was over"
+                                         " 64 characters); the repaired name is saved on the next change");
+}
+
+void InputManager::fireOutputs()
+{
+    if (on_outputs_changed_)
+        on_outputs_changed_(outputs_, outputBuiltinStates());
+}
+
+void InputManager::setBuiltinOutputIds(std::vector<std::string> ids) { builtin_outputs_ = std::move(ids); }
+
+std::map<std::string, bool> InputManager::outputBuiltinStates() const
+{
+    std::map<std::string, bool> out;
+    for (const auto& kv : file_builtin_)
+        if (isReservedCueId(kv.first))
+            out.insert(kv);
+    return out;
+}
+
+void InputManager::onOutputsChanged(
+    std::function<void(const std::vector<OutputDef>&, const std::map<std::string, bool>&)> handler)
+{
+    on_outputs_changed_ = std::move(handler);
+}
+
+OutputDef InputManager::createOutput(const OutputDef& def)
+{
+    checkWritable();
+    const OutputDef d = normalizedOutput(def);
+    for (const auto& o : outputs_)
+        if (o.id == d.id)
+            throw InputConflict("output '" + d.id + "' already exists");
+    auto next = outputs_;
+    next.push_back(d);
+    checkSet(userDefs(), next);
+    persist(userDefs(), next, builtinStates());
+    outputs_ = std::move(next);
+    fireOutputs();
+    return d;
+}
+
+OutputDef InputManager::replaceOutput(const std::string& id, const OutputDef& def)
+{
+    checkWritable();
+    if (std::find(builtin_outputs_.begin(), builtin_outputs_.end(), id) != builtin_outputs_.end())
+        throw InputForbidden("output '" + id + "' is built in: it can only be enabled or disabled");
+    auto next = outputs_;
+    const auto it = std::find_if(next.begin(), next.end(), [&](const OutputDef& o) { return o.id == id; });
+    if (it == next.end())
+        throw InputNotFound("no output '" + id + "'");
+    OutputDef d = normalizedOutput(def);
+    if (d.id != id)
+        throw InputDefError("id must stay '" + id + "'");
+    if (d == *it)
+        return *it;  // unchanged: no write, no restart
+    *it = d;
+    checkSet(userDefs(), next);
+    persist(userDefs(), next, builtinStates());
+    outputs_ = std::move(next);
+    fireOutputs();
+    return d;
+}
+
+void InputManager::setOutputEnabled(const std::string& id, bool enabled)
+{
+    checkWritable();
+    if (std::find(builtin_outputs_.begin(), builtin_outputs_.end(), id) != builtin_outputs_.end()) {
+        auto states = builtinStates();
+        const auto known = states.find(id);
+        if ((known != states.end() ? known->second : true) == enabled)
+            return;
+        states[id] = enabled;
+        persist(userDefs(), outputs_, states);
+        fireOutputs();
+        return;
+    }
+    auto next = outputs_;
+    const auto it = std::find_if(next.begin(), next.end(), [&](const OutputDef& o) { return o.id == id; });
+    if (it == next.end())
+        throw InputNotFound("no output '" + id + "'");
+    if (it->enabled == enabled)
+        return;
+    it->enabled = enabled;
+    checkSet(userDefs(), next);
+    persist(userDefs(), next, builtinStates());
+    outputs_ = std::move(next);
+    fireOutputs();
+}
+
+void InputManager::removeOutput(const std::string& id)
+{
+    checkWritable();
+    if (std::find(builtin_outputs_.begin(), builtin_outputs_.end(), id) != builtin_outputs_.end())
+        throw InputForbidden("output '" + id + "' is built in: it can only be enabled or disabled");
+    auto next = outputs_;
+    const auto it = std::find_if(next.begin(), next.end(), [&](const OutputDef& o) { return o.id == id; });
+    if (it == next.end())
+        throw InputNotFound("no output '" + id + "'");
+    next.erase(it);
+    persist(userDefs(), next, builtinStates());
+    outputs_ = std::move(next);
+    fireOutputs();
 }
 
 void InputManager::checkCapture(const InputDef& d) const
@@ -447,12 +570,18 @@ std::map<std::string, bool> InputManager::builtinStates() const
     return out;
 }
 
-void InputManager::persist(const std::vector<InputDef>& user, const std::map<std::string, bool>& builtin_enabled)
+void InputManager::persist(const std::vector<InputDef>& user, const std::vector<OutputDef>& outputs,
+                           const std::map<std::string, bool>& builtin_enabled)
 {
-    if (!watch_)
+    if (!watch_) {  // in memory: only the cue outputs' states have nowhere else to live
+        for (const auto& kv : builtin_enabled)
+            if (isReservedCueId(kv.first))
+                file_builtin_[kv.first] = kv.second;
         return;
+    }
     InputsFile file;
     file.inputs = user;
+    file.outputs = outputs;
     file.builtin_enabled = builtin_enabled;
     atomicWrite(config_.inputs_file, inputsFileJson(file));
     watch_->accept();
@@ -545,18 +674,21 @@ void InputManager::reloadFromDisk()
     InputsFile file;
     try {
         file = parseInputsFile(text);
-        checkSet(file.inputs);
+        checkSet(file.inputs, file.outputs);
     } catch (const InputDefError& e) {
-        rejectFile(e.what(), "inputs unchanged");
+        rejectFile(e.what(), "inputs and outputs unchanged");
         return;
     }
     warnRepaired(file.repaired_names);
+    warnRepairedOutputs(file.repaired_output_names);
     warnCapture(file.inputs);
-    applyFile(file.inputs, file.builtin_enabled);
+    applyFile(file.inputs, file.outputs, file.builtin_enabled);
 }
 
-void InputManager::applyFile(const std::vector<InputDef>& user, const std::map<std::string, bool>& builtin_enabled)
+void InputManager::applyFile(const std::vector<InputDef>& user, const std::vector<OutputDef>& outputs,
+                             const std::map<std::string, bool>& builtin_enabled)
 {
+    const auto cue_before = outputBuiltinStates();
     file_builtin_ = builtin_enabled;
     for (std::size_t i = 0; i < builtin_count_; ++i) {
         Slot& s = slots_[i];
@@ -601,6 +733,10 @@ void InputManager::applyFile(const std::vector<InputDef>& user, const std::map<s
             slots_.back().input->start();
     }
     changed();
+    if (outputs != outputs_ || cue_before != outputBuiltinStates()) {
+        outputs_ = outputs;
+        fireOutputs();
+    }
 }
 
 void InputManager::rejectFile(const std::string& why, const char* consequence)

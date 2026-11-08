@@ -32,6 +32,8 @@
 #include "inputs/input.hpp"
 #include "inputs/input_def.hpp"
 #include "inputs/input_types.hpp"
+#include "inputs/inputs_file.hpp"
+#include "outputs/output_def.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -63,6 +65,9 @@ struct InputManagerConfig {
     bool replaying = false;
     // How often the inputs are ticked and the file is polled (tests shorten it).
     std::chrono::milliseconds poll_interval{1000};
+    // Ports the daemon itself serves (the cue stream, the web server): an
+    // enabled tcp_listen output on one is refused.
+    std::vector<ReservedPort> reserved_ports;
 };
 
 struct InputEntry {
@@ -139,6 +144,27 @@ public:
     InputEntry setEnabled(const std::string& id, bool enabled);
     void remove(const std::string& id);
 
+    // Outputs (the hub's, spec §5): the user outputs in file order. The
+    // built-in cue outputs (cue-tcp, cue-connect-N, cue-udp-N) belong to the
+    // Forwarder: setBuiltinOutputIds names them (before load()); they accept
+    // only setOutputEnabled, their state lives in the file's "builtin" object.
+    // Writes follow the inputs' protocol (validate the would-be set, WARN
+    // lines logged, atomic write, then apply) and throw the same exceptions;
+    // InputNotFound is also thrown for a built-in id the Forwarder lacks.
+    // replaceOutput with the definition the output already has changes nothing.
+    // onOutputsChanged fires after any change to the user outputs or to a
+    // cue output's enabled state, a hand edit included, with the user outputs
+    // and the cue states ("builtin" ids that are cue ids only).
+    void setBuiltinOutputIds(std::vector<std::string> ids);
+    std::vector<OutputDef> outputs() const { return outputs_; }
+    std::map<std::string, bool> outputBuiltinStates() const;
+    OutputDef createOutput(const OutputDef& def);
+    OutputDef replaceOutput(const std::string& id, const OutputDef& def);
+    void setOutputEnabled(const std::string& id, bool enabled);
+    void removeOutput(const std::string& id);
+    void onOutputsChanged(
+        std::function<void(const std::vector<OutputDef>&, const std::map<std::string, bool>& builtin_enabled)> handler);
+
     // An enabled track input (any type but dump978) is connected.
     bool anyTrackInputConnected() const;
     std::size_t connectedCount() const;  // enabled and connected
@@ -162,8 +188,13 @@ private:
     // `def` as parseInputDef reads it back; throws InputDefError for one it
     // would refuse.
     static InputDef normalized(const InputDef& def);
-    // validateInputSet over the built-ins and `user`.
-    void checkSet(const std::vector<InputDef>& user) const;
+    // validateInputSet over the built-ins, `user`, `outputs` and the reserved
+    // ports; its WARN texts are logged.
+    void checkSet(const std::vector<InputDef>& user, const std::vector<OutputDef>& outputs) const;
+    // `def` as parseOutputDef reads it back; throws InputDefError for one it would refuse.
+    static OutputDef normalizedOutput(const OutputDef& def);
+    void warnRepairedOutputs(const std::vector<std::string>& ids) const;
+    void fireOutputs();
     // API writes only: capture needs record_dir (InputDefError).
     void checkCapture(const InputDef& def) const;
     // Loads and hand edits: one WARN when an entry asks for capture without
@@ -174,7 +205,8 @@ private:
     std::vector<InputDef> userDefs() const;
     // Writes the file for `user` and the current built-in states (no-op when
     // in-memory). Throws std::runtime_error.
-    void persist(const std::vector<InputDef>& user, const std::map<std::string, bool>& builtin_enabled);
+    void persist(const std::vector<InputDef>& user, const std::vector<OutputDef>& outputs,
+                 const std::map<std::string, bool>& builtin_enabled);
     std::map<std::string, bool> builtinStates() const;
 
     std::unique_ptr<Input> build(const InputDef& def);
@@ -185,7 +217,8 @@ private:
     void schedule();
     void onTimer();
     void reloadFromDisk();
-    void applyFile(const std::vector<InputDef>& user, const std::map<std::string, bool>& builtin_enabled);
+    void applyFile(const std::vector<InputDef>& user, const std::vector<OutputDef>& outputs,
+                   const std::map<std::string, bool>& builtin_enabled);
     // Renames the file .rejected and logs `why` and `consequence` at ERROR.
     void rejectFile(const std::string& why, const char* consequence);
     void changed();
@@ -200,6 +233,9 @@ private:
     std::map<std::string, bool> file_builtin_;     // "builtin" as last read or written
     std::map<std::string, bool> builtin_default_;  // def().enabled at addBuiltin
     std::map<std::string, InputCounters> retired_;
+    std::vector<OutputDef> outputs_;            // user outputs, in file order
+    std::vector<std::string> builtin_outputs_;  // the Forwarder's cue ids
+    std::function<void(const std::vector<OutputDef>&, const std::map<std::string, bool>&)> on_outputs_changed_;
     std::function<void(const TrackObservation&)> on_observation_;
     std::function<void(const std::string&, std::chrono::system_clock::time_point, const std::string&)> on_uplink_;
     std::function<void()> on_changed_;

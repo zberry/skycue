@@ -103,6 +103,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         std::shared_ptr<skycue::net::Listener> lis;
         std::shared_ptr<skycue::net::Dialer> dial;
         std::shared_ptr<skycue::net::UdpSender> udp;
+        std::string skip_error; // why a UDP target did not start
 
         std::string name() const
         {
@@ -119,6 +120,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         std::string peer;
         bool dialled = false;
         std::chrono::system_clock::time_point connected_since{};
+        std::string output; // id of the destination it belongs to
         const void* source = nullptr; // the library object (Fanout::PeerInfo::source) it belongs to
     };
 
@@ -174,6 +176,8 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         started = true;
         if (listening)
             LOG_INFO("forwarder: listening on TCP port " << tcpPort());
+        else if (cfg.tcp_port != 0 || cfg.tcp_listen_ephemeral)
+            LOG_INFO("forwarder: TCP listener disabled");
         else
             LOG_INFO("forwarder: TCP listener disabled (CUE_TCP_PORT=0)");
         helloToUdp();
@@ -236,6 +240,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
                 if (why.compare(0, 7, "target ") == 0 && why.find(": ") != std::string::npos)
                     why.erase(0, why.find(": ") + 2);
                 LOG_ERROR("forwarder: UDP target " << d.name() << " skipped" << (why.empty() ? "" : ": " + why));
+                d.skip_error = why.empty() ? "no usable target" : why;
                 d.udp.reset();
                 return;
             }
@@ -305,6 +310,7 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
                                     : endpointText(skycue::net::unmapV4(who.address()).to_string(), who.port());
         s.connected_since = std::chrono::system_clock::now();
         s.source = info->source;
+        s.output = d ? d->d.id : std::string();
         const auto& stored = sessions.emplace(peer, std::move(s)).first->second;
         LOG_INFO("forwarder: " << (stored.dialled ? "TCP target " : "TCP client ") << stored.peer << " connected ("
                                << sessions.size() << " total)");
@@ -454,6 +460,36 @@ struct Forwarder::Impl : std::enable_shared_from_this<Forwarder::Impl> {
         }
     }
 
+    std::optional<DestinationStats> statsOf(const std::string& id) const
+    {
+        const Dest* d = find(id);
+        if (!d)
+            return std::nullopt;
+        DestinationStats s;
+        const skycue::net::Counters* live = nullptr;
+        if (d->lis) {
+            live = &d->lis->counters();
+            s.up = d->lis->listening();
+            s.peers = d->lis->peers();
+        } else if (d->dial) {
+            live = &d->dial->counters();
+            s.up = d->dial->connected();
+            s.peers = s.up ? 1 : 0;
+        } else if (d->udp) {
+            live = &d->udp->counters();
+            s.up = d->udp->targets() > 0;
+        }
+        if (live) {
+            s.bytes = live->bytes_out;
+            s.messages = live->messages_out;
+            s.dropped = live->dropped;
+            s.last_error = live->last_error;
+        }
+        if (s.last_error.empty())
+            s.last_error = d->skip_error;
+        return s;
+    }
+
     // ---- timers --------------------------------------------------------------
 
     void armKeyframe()
@@ -591,6 +627,11 @@ void Forwarder::sendDrop(skycue::TrackId id, skycue::DropReason reason)
     impl_->broadcast(share(skycue::encodeTrackDrop(skycue::TrackDrop{id, reason})));
 }
 
+std::optional<DestinationStats> Forwarder::destinationStats(const std::string& id) const
+{
+    return impl_->statsOf(id);
+}
+
 void Forwarder::setKeyframeProvider(KeyframeProvider provider) { impl_->provider = std::move(provider); }
 void Forwarder::addDestination(const ForwarderDestination& d) { impl_->add(d); }
 void Forwarder::removeDestination(const std::string& id) { impl_->remove(id); }
@@ -614,7 +655,7 @@ std::vector<CueTcpClient> Forwarder::tcpClients() const
     for (const auto& kv : impl_->sessions) {
         const Impl::Session& s = kv.second;
         const auto info = impl_->fanout.peerInfo(kv.first);
-        out.push_back(CueTcpClient{s.peer, s.dialled, s.connected_since, info ? info->stats.bytes_written : 0});
+        out.push_back(CueTcpClient{s.peer, s.dialled, s.connected_since, info ? info->stats.bytes_written : 0, s.output});
     }
     return out;
 }
@@ -624,7 +665,7 @@ std::vector<CueUdpTarget> Forwarder::udpTargets() const
     std::vector<CueUdpTarget> out;
     for (const auto& d : impl_->dests)
         if (d->udp)
-            out.push_back(CueUdpTarget{d->name(), d->udp->counters().messages_out});
+            out.push_back(CueUdpTarget{d->name(), d->udp->counters().messages_out, d->d.id});
     return out;
 }
 

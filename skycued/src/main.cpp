@@ -10,6 +10,7 @@
 #include "config.hpp"
 #include "engine.hpp"
 #include "forwarder.hpp"
+#include "hub/hub.hpp"
 #include "inputs/input_manager.hpp"
 #include "inputs/inputs_file.hpp"
 #include "inputs/source_input.hpp"
@@ -47,6 +48,7 @@
 #include <sstream>
 #include <optional>
 #include <stdexcept>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -296,6 +298,10 @@ int run(int argc, char** argv)
     fc.keyframe_interval =
         std::chrono::milliseconds(std::max<long long>(1, std::llround(config.keyframe_interval_s * 1000)));
     Forwarder forwarder(io, fc);
+    // The hub republishes raw messages to the operator's outputs; the cue
+    // stream's destinations are its built-in outputs. After the Forwarder, so
+    // it is destroyed first.
+    Hub hub(io, &forwarder);
 
     std::unique_ptr<Recorder> received, sent, fisb;
     if (!config.record_dir.empty()) {
@@ -327,7 +333,24 @@ int run(int argc, char** argv)
     mc.record_raw = config.record_raw;
     mc.record_max_bytes = gigabytesToBytes(config.record_max_gb);
     mc.replaying = replaying;
+    // An output may not take a port the daemon serves itself.
+    if (config.cue_tcp_port != 0)
+        mc.reserved_ports.push_back({"tcp", config.cue_tcp_port, "the cue stream (CUE_TCP_PORT)"});
+    if (config.web_port != 0)
+        mc.reserved_ports.push_back({"tcp", config.web_port, "the web server (WEB_PORT)"});
     auto inputs = std::make_unique<InputManager>(io, mc);
+    {
+        std::vector<std::string> cue_ids;
+        for (const auto& d : forwarder.destinations())
+            if (d.builtin)
+                cue_ids.push_back(d.id);
+        inputs->setBuiltinOutputIds(std::move(cue_ids));
+    }
+    inputs->onOutputsChanged([&hub](const std::vector<OutputDef>& defs, const std::map<std::string, bool>& builtin) {
+        hub.apply(defs, builtin);
+    });
+    inputs->rawTap().setSink([&hub](const RawMessage& message) { hub.publish(message); },
+                             [&hub](RawKind kind) { return hub.wants(kind); });
     auto builtin = [](const char* id, InputType type, const std::string& host, uint16_t port) {
         InputDef d;
         d.id = id;
@@ -359,6 +382,9 @@ int run(int argc, char** argv)
         std::cerr << "skycued: " << e.what() << "\n";
         return 2;
     }
+    // The outputs of the inputs file (none while replaying) and the cue
+    // stream's enabled states; later changes arrive through onOutputsChanged.
+    hub.apply(inputs->outputs(), inputs->outputBuiltinStates());
 
     std::unique_ptr<Engine> engine;
     try {
@@ -368,6 +394,8 @@ int run(int argc, char** argv)
         std::cerr << "skycued: " << config_path << ": " << e.what() << "\n";
         return 2;
     }
+    engine->setHub(&hub);
+    hub.onChanged([&engine] { engine->outputsChanged(); });
     // The learned FIS-B report locations (fisb-locations.json in STATE_DIR,
     // else next to the config) and LOCATIONS_FILE under them.
     try {
@@ -479,6 +507,7 @@ int run(int argc, char** argv)
         if (web)
             web->stop();
         engine->stop();  // shutdown drops; the Forwarder closes its sockets within ~2 s
+        hub.stop();      // the user outputs; the cue destinations are the Forwarder's to drain
         exit_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         pollExit();
     });

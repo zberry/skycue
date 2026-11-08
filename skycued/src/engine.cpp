@@ -643,6 +643,13 @@ void Engine::inputsChanged()
     emit(kindEvent(EventKind::inputs_changed));
 }
 
+void Engine::outputsChanged()
+{
+    if (stopped_)
+        return;
+    emit(kindEvent(EventKind::outputs_changed));
+}
+
 void Engine::armLost()
 {
     LOG_WARN("source lost; forwarded tracks are dropped if it is not back within " << track_timeout_.count()

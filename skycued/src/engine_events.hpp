@@ -123,6 +123,7 @@ enum class EventKind {
     fisb_expired,  // a FIS-B item left the store, or a TWGO record was cancelled
     inputs_changed,  // an input was added, changed, removed, enabled, disabled, connected or lost
     fisb_location,   // a location id was learned, or its learned position moved (FisbNotice key, position)
+    outputs_changed, // an output started, stopped, changed or was added or removed (read Engine::hub())
 };
 
 // What a fisb_* event carries. Radar and raster events are notifications:
@@ -149,8 +150,8 @@ struct FisbNotice {
 // reason filtered, `decision` (the filter decision that dropped it). expired: `id`
 // (a track that was not being forwarded left the table: no drop is sent for
 // it, but an observer showing it should remove it). stats: `stats`.
-// filters_changed, lists_changed, inputs_changed: nothing set (inputs_changed:
-// read Engine::inputs()). fisb_*: `fisb`.
+// filters_changed, lists_changed, inputs_changed, outputs_changed: nothing set (inputs_changed:
+// read Engine::inputs(); outputs_changed: Engine::hub()). fisb_*: `fisb`.
 struct EngineEvent {
     EventKind kind = EventKind::stats;
     std::optional<TrackSnapshot> track;

@@ -29,7 +29,7 @@ Basis basisAt(double lat_rad, double lon_rad)
     return {{-sp * cl, -sp * sl, cp}, {-sl, cl, 0.0}, {-cp * cl, -cp * sl, -sp}};
 }
 
-constexpr double kKt = 0.514444;  // knots to m/s
+constexpr double kKt = 1852.0 / 3600.0; // knots to m/s
 constexpr double kFpm = 0.00508;   // feet per minute to m/s
 constexpr double kFt = 0.3048;     // feet to m
 constexpr double kSigmaDiv = 2.45; // 95 % radius to 1-sigma
@@ -155,7 +155,7 @@ std::optional<Computed> compute(const Track& t, const Options& o, const Prev* pr
 
 } // namespace
 
-Vec3 geodeticToEcef(double lat_deg, double lon_deg, double h_m)
+Vec3 geodeticToEcef(double lat_deg, double lon_deg, double h_m) noexcept
 {
     const double lat = lat_deg * kDeg, lon = lon_deg * kDeg;
     const double sp = std::sin(lat), cp = std::cos(lat);
@@ -163,14 +163,14 @@ Vec3 geodeticToEcef(double lat_deg, double lon_deg, double h_m)
     return {(n + h_m) * cp * std::cos(lon), (n + h_m) * cp * std::sin(lon), (n * (1.0 - kE2) + h_m) * sp};
 }
 
-Vec3 nedToEcef(double lat_deg, double lon_deg, double vn, double ve, double vd)
+Vec3 nedToEcef(double lat_deg, double lon_deg, double vn, double ve, double vd) noexcept
 {
     const Basis b = basisAt(lat_deg * kDeg, lon_deg * kDeg);
     return {vn * b.n.x + ve * b.e.x + vd * b.d.x, vn * b.n.y + ve * b.e.y + vd * b.d.y,
             vn * b.n.z + ve * b.e.z + vd * b.d.z};
 }
 
-LookAngles lookFrom(const Vec3& sensor, const Vec3& target)
+LookAngles lookFrom(const Vec3& sensor, const Vec3& target) noexcept
 {
     // Geodetic latitude and longitude of the sensor, only to orient the ENU
     // axes (height is not needed). Iterate lat = atan2(z + e2 N sin(lat), p);
@@ -201,7 +201,7 @@ LookAngles lookFrom(const Vec3& sensor, const Vec3& target)
     return out;
 }
 
-Vec3 propagate(const EcefState& s, std::chrono::system_clock::time_point to)
+Vec3 propagate(const EcefState& s, std::chrono::system_clock::time_point to) noexcept
 {
     if (!s.velocity)
         return s.position;
@@ -228,7 +228,7 @@ std::optional<EcefState> toEcef(const Track& t, const Options& o)
 struct EcefTracker::Impl {
     struct Entry {
         EcefState state;
-        double lat_deg, lon_deg, h_m;
+        Prev anchor; // fix the derived rungs measure from; see update()
         std::chrono::steady_clock::time_point arrival;
     };
 
@@ -284,20 +284,38 @@ std::optional<EcefState> EcefTracker::update(const Track& t)
     {
         std::lock_guard<std::mutex> lk(impl_->mu);
         auto it = impl_->tracks.find(t.id);
-        std::optional<Prev> prev;
-        if (it != impl_->tracks.end()) {
-            const auto& e = it->second;
-            prev = Prev{e.state.time, e.lat_deg, e.lon_deg, e.h_m, e.state.altitude_source};
-        }
-        auto c = compute(t, impl_->o, prev ? &*prev : nullptr);
+        const bool existed = it != impl_->tracks.end();
+        const Prev* anchor = existed ? &it->second.anchor : nullptr;
+        auto c = compute(t, impl_->o, anchor);
         if (!c)
             return std::nullopt;
         out = c->state;
-        const bool existed = it != impl_->tracks.end();
         if (existed && out.time < it->second.state.time)
             return out; // older than the stored state: returned only, nothing stored or notified
         const bool advanced = !existed || out.time > it->second.state.time;
-        Impl::Entry e{out, t.lat_deg, t.lon_deg, c->h_m, std::chrono::steady_clock::now()};
+        const Prev current{out.time, t.lat_deg, t.lon_deg, c->h_m, out.altitude_source};
+        // The anchor moves only when a derivation succeeded (so slow targets
+        // accumulate displacement until min_fix_separation_m), when derivation
+        // is off, or when it is older than max_fix_age (derivation then waits
+        // for the next fix).
+        Prev newAnchor = current;
+        if (existed && impl_->o.derive_velocity && advanced) {
+            const bool derived =
+                out.velocity_source == VelocitySource::derived || out.vertical_source == VerticalSource::derived;
+            const bool tooOld = out.time - anchor->time > impl_->o.max_fix_age;
+            if (!derived && !tooOld)
+                newAnchor = *anchor;
+        } else if (existed && !advanced) {
+            newAnchor = *anchor;
+        }
+        if (existed && !advanced && it->second.state.velocity_source == VelocitySource::derived &&
+            out.velocity_source == VelocitySource::none) {
+            // A keyframe repeating the time must not erase a derived velocity.
+            out.velocity = it->second.state.velocity;
+            out.velocity_source = it->second.state.velocity_source;
+            out.vertical_source = it->second.state.vertical_source;
+        }
+        Impl::Entry e{out, newAnchor, std::chrono::steady_clock::now()};
         if (existed)
             it->second = e;
         else

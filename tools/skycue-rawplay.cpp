@@ -6,7 +6,9 @@
 //   FILE.csv[.gz]           "epoch_seconds.fraction,HEX" lines: sent to
 //                           --raw-in (readsb's raw input, 30001) as
 //                           "@<12-hex-digit 12 MHz timestamp><HEX>;" lines,
-//                           paced by the epochs
+//                           paced by the epochs; to --1090-listen instead,
+//                           as Beast type 2/3 frames (the "@" timestamp's
+//                           12 MHz ticks, signal byte 0)
 //   FILE.txt[.gz], .log     dump978 raw UAT lines ("-..." / "+...", optionally
 //                           "<epoch_ms> "-prefixed as skycue-rawrec writes
 //                           them, or "<ns>,"-prefixed as stratux's UAT logs
@@ -16,7 +18,16 @@
 //                           stripped and paces the lines, untimestamped lines
 //                           go at 10 per second), served
 //                           to whoever connects to --uat-listen PORT (readsb
-//                           with --net-connector 127.0.0.1,PORT,uat_in)
+//                           with --net-connector 127.0.0.1,PORT,uat_in), and
+//                           to any number of clients at once
+//
+// --1090-listen PORT serves Beast frames the same way (readsb with
+// --net-connector 127.0.0.1,PORT,beast_in, or skycued's beast_raw input).
+// --wait-clients N (default 1) holds each listening stream until N clients are
+// connected to its port. A listening port serves its clients independently:
+// a client that stops reading has its backlog capped at 1 MiB, the rest is
+// dropped (counted, printed at exit) and the others are not held up. With
+// --speed 0 nothing is dropped: the stream waits for the slowest client.
 //
 // Any input may be gzip-compressed. Files of one kind play one after another
 // on one connection; the kinds play side by side. Times are scheduled from
@@ -26,13 +37,19 @@
 // everything is sent.
 
 #include "gz_line_reader.hpp"
+#include "inputs/transport.hpp"
 #include "log.hpp"
 #include "raw_formats.hpp"
 
-#include <boost/asio/connect.hpp>
+#include "skycue/net/buffer.hpp"
+#include "skycue/net/dialer.hpp"
+#include "skycue/net/listener.hpp"
+#include "skycue/net/tcp_options.hpp"
+
+#include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/write.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/program_options.hpp>
 
 #include <zlib.h>
@@ -43,9 +60,11 @@
 #include <cmath>
 #include <csignal>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -54,15 +73,13 @@
 
 namespace asio = boost::asio;
 namespace po = boost::program_options;
-using asio::ip::tcp;
+namespace net = skycue::net;
 using error_code = boost::system::error_code;
 using steady = std::chrono::steady_clock;
 using namespace skycued;
 
 namespace {
 
-constexpr std::chrono::milliseconds kMinBackoff{500};
-constexpr std::chrono::milliseconds kMaxBackoff{10000};
 constexpr int64_t kGapNs = 100'000'000;         // between files and passes
 constexpr int64_t kUntimedStepNs = 100'000'000;  // untimestamped UAT: 10 lines/s
 constexpr int64_t kMaxBeastStepNs = 60'000'000'000;  // larger Beast clock jumps are discontinuities
@@ -124,55 +141,59 @@ const char* kindName(Kind k)
 // A plain or gzip file (zlib reads both); a truncated gzip stream throws.
 using Reader = GzLineReader;
 
-// Where one stream goes: a connection to readsb (client), or the client that
-// connected to our listening port (server). Blocking; used by one thread.
-class Output {
+// The network library wants all its calls on one io thread; the playback
+// threads (one per kind, they block while pacing) reach it through call().
+class Io {
 public:
-    Output(const char* name, HostPort to) : name_(name), to_(std::move(to)), sock_(io_) {}
-    Output(const char* name, uint16_t port) : name_(name), sock_(io_), acceptor_(std::in_place, io_)
+    Io() : guard_(asio::make_work_guard(io_)), thread_([this] { io_.run(); }) {}
+    ~Io()
     {
-        const tcp::endpoint ep(asio::ip::address_v4::loopback(), port);
-        acceptor_->open(ep.protocol());
-        acceptor_->set_option(tcp::acceptor::reuse_address(true));
-        acceptor_->bind(ep);  // throws when the port is taken
-        acceptor_->listen();
-        // 127.0.0.1 only: readsb runs on this machine.
+        guard_.reset();
+        io_.stop();
+        thread_.join();
+    }
+    Io(const Io&) = delete;
+    Io& operator=(const Io&) = delete;
+
+    asio::io_context& context() { return io_; }
+
+    // Runs f on the io thread and returns its result (or rethrows what it threw).
+    template <class F>
+    auto call(F f) -> decltype(f())
+    {
+        std::packaged_task<decltype(f())()> task(std::move(f));
+        auto result = task.get_future();
+        asio::post(io_, [&task] { task(); });
+        return result.get();
     }
 
-    // Blocks until connected (client: retrying with backoff) or a client connected (server).
-    void open()
-    {
-        auto backoff = kMinBackoff;
-        bool warned = false;
-        for (;;) {
-            error_code ec;
-            if (acceptor_) {
-                acceptor_->accept(sock_, ec);
-                if (!ec) {
-                    LOG_INFO(name_ << ": client connected");
-                    return;
-                }
-                LOG_WARN(name_ << ": accept failed: " << ec.message());
-            } else {
-                tcp::resolver resolver(io_);
-                auto results = resolver.resolve(to_.host, to_.port, ec);
-                if (!ec)
-                    asio::connect(sock_, results, ec);
-                if (!ec) {
-                    LOG_INFO(name_ << ": connected to " << to_.host << ":" << to_.port);
-                    return;
-                }
-                if (!warned)
-                    LOG_WARN(name_ << ": " << to_.host << ":" << to_.port << ": " << ec.message()
-                                   << "; retrying until it accepts");
-                warned = true;
-                error_code ignored;
-                sock_.close(ignored);
-            }
-            std::this_thread::sleep_for(backoff);
-            backoff = std::min(backoff * 2, kMaxBackoff);
-        }
-    }
+private:
+    asio::io_context io_;
+    asio::executor_work_guard<asio::io_context::executor_type> guard_;
+    std::thread thread_;
+};
+
+void pauseMs(int ms)
+{
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+// Where one stream goes: a connection to readsb (dialed), or the clients that
+// connect to our listening port. Used by one playback thread.
+class Output {
+public:
+    virtual ~Output() = default;
+    Output(const Output&) = delete;
+    Output& operator=(const Output&) = delete;
+
+    // Blocks until connected (dialed: retrying with backoff) or until
+    // --wait-clients clients are connected (listening).
+    virtual void open() = 0;
+    // Waits for what is queued to go out, then closes.
+    virtual void close() = 0;
+    // What the done line adds to "N reconnects".
+    virtual std::string extra() const { return {}; }
+    virtual unsigned reconnects() const = 0;
 
     void send(const std::string& bytes, bool newline)
     {
@@ -183,44 +204,228 @@ public:
             flush();
     }
 
-    // On a write error the buffered data is dropped and the connection is
-    // opened again (a new client, for a server).
     void flush()
     {
         if (buf_.empty())
             return;
-        error_code ec;
-        asio::write(sock_, asio::buffer(buf_), ec);
+        deliver(net::makeBuf(buf_));
         buf_.clear();
-        if (ec) {
-            LOG_WARN(name_ << ": write failed (" << ec.message() << "); reconnecting");
-            error_code ignored;
-            sock_.close(ignored);
-            ++lost_;
-            open();
+    }
+
+protected:
+    Output() = default;
+    // Hands the buffer to the library; waits as the output's policy says.
+    virtual void deliver(const net::Buf& b) = 0;
+
+private:
+    std::string buf_;
+};
+
+// A connection to readsb's input, kept up by the library's Dialer. While it
+// is down the stream waits; the queue is held to a few hundred KiB so a fast
+// replay does not outrun the reader (and trip the library's queue cap).
+class DialOut final : public Output {
+public:
+    DialOut(Io& io, const char* name, HostPort to) : io_(io), name_(name), to_(std::move(to))
+    {
+        io_.call([this] {
+            net::TcpOptions t;
+            t.name = name_;
+            dialer_ = net::Dialer::create(io_.context(), to_.host, static_cast<uint16_t>(std::stoi(to_.port)), t);
+            dialer_->onConnection([this](bool up) {
+                if (up) {
+                    LOG_INFO(name_ << ": connected to " << to_.host << ":" << to_.port);
+                } else {
+                    LOG_WARN(name_ << ": connection lost; reconnecting");
+                    ++lost_;
+                }
+            });
+        });
+    }
+    ~DialOut() override { shutdown(); }
+
+    void open() override
+    {
+        io_.call([this] { dialer_->start(); });
+        while (!dialer_->connected())
+            pauseMs(20);
+    }
+
+    void close() override
+    {
+        flush();
+        for (int i = 0; i < 1000 && queued() > 0; ++i)
+            pauseMs(5);
+        shutdown();
+    }
+
+    unsigned reconnects() const override { return lost_; }
+
+protected:
+    void deliver(const net::Buf& b) override
+    {
+        for (;;) {
+            if (!dialer_->connected()) {
+                pauseMs(50);
+                continue;
+            }
+            if (io_.call([&] {
+                    if (!dialer_->connected())
+                        return false;
+                    dialer_->send(b);
+                    return true;
+                }))
+                break;
+        }
+        while (queued() > kDialBacklog && dialer_->connected())
+            pauseMs(2);
+    }
+
+private:
+    uint64_t queued() { return io_.call([this] { return dialer_ ? dialer_->peerStats().queued_bytes : uint64_t{0}; }); }
+    void shutdown()
+    {
+        io_.call([this] {
+            if (dialer_)
+                dialer_->stop();
+            dialer_.reset();
+        });
+    }
+
+    static constexpr uint64_t kDialBacklog = 256 * 1024;
+    Io& io_;
+    const char* name_;
+    HostPort to_;
+    std::shared_ptr<net::Dialer> dialer_;
+    std::atomic<unsigned> lost_{0};
+};
+
+// A listening port on 127.0.0.1 (readsb runs on this machine) serving every
+// client that connects. Each client has its own queue, so a client that stops
+// reading costs only itself: once its backlog is kBacklog the chunks it cannot
+// take are dropped and counted, and the others carry on. With --speed 0 there
+// is no pace to keep, so the stream waits for the backlogs to drain instead
+// and nothing is dropped.
+class ListenOut final : public Output {
+public:
+    static constexpr uint64_t kBacklog = 1024 * 1024;  // per client
+
+    ListenOut(Io& io, const char* name, uint16_t port, unsigned wait_clients, bool lossless)
+        : io_(io), name_(name), wait_clients_(wait_clients), lossless_(lossless)
+    {
+        io_.call([&] {  // throws when the port is taken
+            net::ListenOptions o;
+            o.tcp.name = name_;
+            o.tcp.send_cap = 4 * kBacklog;  // above the backlog plus a chunk: our own limit comes first
+            o.max_peers = 64;
+            o.fail_fast = true;
+            listener_ = net::Listener::create(io_.context(), "127.0.0.1", port, o);
+            listener_->onPeer([this](uint64_t stream, bool up, const asio::ip::tcp::endpoint& who) {
+                if (up) {
+                    streams_.insert(stream);
+                    LOG_INFO(name_ << ": client " << who << " connected");
+                } else {
+                    streams_.erase(stream);
+                    LOG_INFO(name_ << ": client " << who << " gone");
+                }
+            });
+            listener_->start();
+        });
+    }
+    ~ListenOut() override { shutdown(); }
+
+    void open() override
+    {
+        while (clients() < wait_clients_)
+            pauseMs(20);
+    }
+
+    void close() override
+    {
+        flush();
+        // Lossless: until everything is out, as a blocking write was. Otherwise as
+        // long as the clients are still taking data: one that does not read must
+        // not hold the exit.
+        uint64_t last = backlog();
+        for (int still = 0; last > 0 && (lossless_ || still < 100);) {
+            pauseMs(5);
+            const uint64_t now = backlog();
+            still = now < last ? 0 : still + 1;
+            last = now;
+        }
+        shutdown();
+    }
+
+    unsigned reconnects() const override { return waits_; }
+    std::string extra() const override
+    {
+        return ", " + std::to_string(dropped_bytes_.load()) + " bytes dropped (slow clients)";
+    }
+
+protected:
+    void deliver(const net::Buf& b) override
+    {
+        const uint64_t size = b->size();
+        enum class Result { sent, no_clients, full };
+        bool waiting = false;
+        for (;;) {
+            const Result r = io_.call([&] {
+                if (streams_.empty())
+                    return Result::no_clients;
+                if (lossless_)  // nothing is sent until every client has room
+                    for (uint64_t s : streams_)
+                        if (auto st = listener_->peerStats(s); st && st->queued_bytes + size > kBacklog)
+                            return Result::full;
+                for (uint64_t s : streams_) {
+                    auto st = listener_->peerStats(s);
+                    if (!st)
+                        continue;
+                    if (st->queued_bytes + size > kBacklog)
+                        dropped_bytes_ += size;
+                    else
+                        listener_->send(s, b);
+                }
+                return Result::sent;
+            });
+            if (r == Result::sent)
+                return;
+            if (r == Result::no_clients && !waiting) {  // everyone left: hold the stream until a client is back
+                waiting = true;
+                ++waits_;
+            }
+            pauseMs(r == Result::full ? 2 : 20);
         }
     }
 
-    void close()
+private:
+    unsigned clients() { return io_.call([this] { return static_cast<unsigned>(streams_.size()); }); }
+    uint64_t backlog()
     {
-        flush();
-        error_code ignored;
-        sock_.shutdown(tcp::socket::shutdown_send, ignored);
-        sock_.close(ignored);
-        if (acceptor_)
-            acceptor_->close(ignored);
+        return io_.call([this] {
+            uint64_t most = 0;
+            for (uint64_t s : streams_)
+                if (auto st = listener_->peerStats(s))
+                    most = std::max(most, st->queued_bytes);
+            return most;
+        });
+    }
+    void shutdown()
+    {
+        io_.call([this] {
+            if (listener_)
+                listener_->stop();
+            listener_.reset();
+        });
     }
 
-    unsigned reconnects() const { return lost_; }
-
-private:
-    std::string name_;
-    HostPort to_;
-    asio::io_context io_;
-    tcp::socket sock_;
-    std::optional<tcp::acceptor> acceptor_;
-    std::string buf_;
-    unsigned lost_ = 0;
+    Io& io_;
+    const char* name_;
+    unsigned wait_clients_;
+    bool lossless_;
+    std::shared_ptr<net::Listener> listener_;
+    std::set<uint64_t> streams_;  // io thread
+    std::atomic<uint64_t> dropped_bytes_{0};
+    std::atomic<unsigned> waits_{0};
 };
 
 // Absolute schedule: media time t (ns since the stream's start) is due at
@@ -250,6 +455,28 @@ private:
 struct Stats {
     uint64_t sent = 0, skipped = 0;
 };
+
+// The capture line as a Beast frame: type 1 (Mode A/C), 2 (short) or 3 (long),
+// the 12 MHz timestamp avrLine() computes, signal byte 0, 0x1a doubled.
+std::string beastFrame(int64_t epoch_ns, const std::string& hex)
+{
+    const auto ns = static_cast<uint64_t>(epoch_ns);
+    const uint64_t ticks = (ns / 250u * 3u + ns % 250u * 3u / 250u) & beast::kTimestampMask;
+    std::string f;
+    auto put = [&f](uint8_t b) {
+        f += static_cast<char>(b);
+        if (b == beast::kEscape)
+            f += static_cast<char>(b);
+    };
+    f += static_cast<char>(beast::kEscape);
+    f += hex.size() == 4 ? '1' : hex.size() == 14 ? '2' : '3';
+    for (int shift = 40; shift >= 0; shift -= 8)
+        put(static_cast<uint8_t>(ticks >> shift));
+    put(0);
+    for (std::size_t i = 0; i + 1 < hex.size(); i += 2)
+        put(static_cast<uint8_t>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+    return f;
+}
 
 // Each play* function plays one file starting at media time `base`, with
 // timestamps shifted by `shift_ns`, and returns the media time of its last record.
@@ -295,7 +522,7 @@ int64_t playBeast(const std::string& path, int64_t base, int64_t shift_ns, Outpu
     return base + rel;
 }
 
-int64_t playCsv(const std::string& path, int64_t base, int64_t shift_ns, Output& out, Pacer& pacer, Stats& st)
+int64_t playCsv(const std::string& path, bool as_beast, int64_t base, int64_t shift_ns, Output& out, Pacer& pacer, Stats& st)
 {
     Reader in(path);
     std::optional<int64_t> first;
@@ -311,7 +538,10 @@ int64_t playCsv(const std::string& path, int64_t base, int64_t shift_ns, Output&
             first = m->epoch_ns;
         rel = std::max(rel, m->epoch_ns - *first);
         pacer.waitFor(base + rel);
-        out.send(avrLine(m->epoch_ns + shift_ns, m->hex), true);
+        if (as_beast)
+            out.send(beastFrame(m->epoch_ns + shift_ns, m->hex), false);
+        else
+            out.send(avrLine(m->epoch_ns + shift_ns, m->hex), true);
         ++st.sent;
     }
     return base + rel;
@@ -358,7 +588,8 @@ int64_t playUat(const std::string& path, int64_t base, int64_t, Output& out, Pac
     return base + rel;
 }
 
-void playStream(Kind kind, const std::vector<std::string>& files, Output& out, double speed, bool loop)
+void playStream(Kind kind, bool csv_as_beast, const std::vector<std::string>& files, Output& out, double speed,
+                bool loop)
 {
     const char* name = kindName(kind);
     try {
@@ -373,7 +604,7 @@ void playStream(Kind kind, const std::vector<std::string>& files, Output& out, d
                 LOG_INFO(name << ": playing " << f << (pass ? " (pass " + std::to_string(pass + 1) + ")" : ""));
                 switch (kind) {
                 case Kind::beast: media = playBeast(f, media, shift, out, pacer, st); break;
-                case Kind::csv: media = playCsv(f, media, shift, out, pacer, st); break;
+                case Kind::csv: media = playCsv(f, csv_as_beast, media, shift, out, pacer, st); break;
                 case Kind::uat: media = playUat(f, media, shift, out, pacer, st); break;
                 }
                 media += kGapNs;
@@ -384,33 +615,38 @@ void playStream(Kind kind, const std::vector<std::string>& files, Output& out, d
                 break;
         }
         out.close();
-        LOG_INFO(name << ": done: " << st.sent << (kind == Kind::beast ? " frames" : " lines") << " sent, "
-                      << st.skipped << (kind == Kind::beast ? " bytes" : " lines") << " skipped, "
-                      << out.reconnects() << " reconnects");
+        const bool frames = kind == Kind::beast || csv_as_beast;
+        LOG_INFO(name << ": done: " << st.sent << (frames ? " frames" : " lines") << " sent, " << st.skipped
+                      << (kind == Kind::beast ? " bytes" : " lines") << " skipped, " << out.reconnects()
+                      << " reconnects" << out.extra());
     } catch (const std::exception& e) {
         LOG_ERROR(name << ": " << e.what());
         g_failed = 1;
     }
 }
 
-}  // namespace
-
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
     std::string beast_arg, raw_arg;
-    int uat_port = 0;
+    int uat_port = 0, beast_port = 0, wait_clients = 1;
     double speed = 1.0;
     std::vector<std::string> files;
     po::options_description desc(
-        "usage: skycue-rawplay [--beast-in HOST:PORT] [--raw-in HOST:PORT] [--uat-listen PORT]\n"
-        "                      [--speed N] [--loop] FILE...\n"
+        "usage: skycue-rawplay [--beast-in HOST:PORT] [--raw-in HOST:PORT] [--1090-listen PORT]\n"
+        "                      [--uat-listen PORT] [--wait-clients N] [--speed N] [--loop] FILE...\n"
         "Replays .bin (Beast), .csv[.gz] (epoch,HEX) and .txt[.gz]/.log[.gz] (UAT: dump978 lines,\n"
-        "optionally '<epoch_ms> ' or stratux '<ns>,' prefixed) captures into readsb");
+        "optionally '<epoch_ms> ' or stratux '<ns>,' prefixed) captures into readsb or skycued");
     desc.add_options()("help,h", "show this help")(
         "beast-in", po::value(&beast_arg), "readsb Beast input for .bin files (e.g. 127.0.0.1:30004)")(
         "raw-in", po::value(&raw_arg), "readsb raw input for .csv files (e.g. 127.0.0.1:30001)")(
+        "1090-listen", po::value(&beast_port),
+        "port on 127.0.0.1 to serve Beast frames on, to any number of clients: .bin files as recorded,\n"
+        ".csv files as type 2/3 frames (readsb: --net-connector 127.0.0.1,PORT,beast_in)")(
         "uat-listen", po::value(&uat_port),
-        "port on 127.0.0.1 to serve UAT lines on (readsb: --net-connector 127.0.0.1,PORT,uat_in)")(
+        "port on 127.0.0.1 to serve UAT lines on, to any number of clients (readsb: --net-connector "
+        "127.0.0.1,PORT,uat_in)")(
+        "wait-clients", po::value(&wait_clients)->default_value(1),
+        "hold playback until this many clients are connected to each listening port in use")(
         "speed", po::value(&speed)->default_value(1.0), "playback speed; 0 = as fast as possible")(
         "loop", "start again after the last file, timestamps shifted forward");
     po::options_description hidden;
@@ -453,6 +689,10 @@ int main(int argc, char** argv)
     }
     if (vm.count("uat-listen") && (uat_port < 1 || uat_port > 65535))
         return usage("--uat-listen must be a port number 1-65535");
+    if (vm.count("1090-listen") && (beast_port < 1 || beast_port > 65535))
+        return usage("--1090-listen must be a port number 1-65535");
+    if (wait_clients < 1 || wait_clients > 64)
+        return usage("--wait-clients must be 1-64");
 
     std::vector<std::string> by_kind[3];
     for (const auto& f : files) {
@@ -467,28 +707,55 @@ int main(int argc, char** argv)
         }
         by_kind[static_cast<int>(*k)].push_back(f);
     }
-    if (!by_kind[static_cast<int>(Kind::beast)].empty() && !beast_to)
-        return usage(".bin files need --beast-in HOST:PORT");
-    if (!by_kind[static_cast<int>(Kind::csv)].empty() && !raw_to)
-        return usage(".csv files need --raw-in HOST:PORT");
-    if (!by_kind[static_cast<int>(Kind::uat)].empty() && !vm.count("uat-listen"))
+    const bool have_beast = !by_kind[static_cast<int>(Kind::beast)].empty();
+    const bool have_csv = !by_kind[static_cast<int>(Kind::csv)].empty();
+    const bool have_uat = !by_kind[static_cast<int>(Kind::uat)].empty();
+    // .bin goes to --beast-in or --1090-listen, .csv to --raw-in (AVR lines)
+    // or --1090-listen (Beast frames); one listening port takes one kind.
+    if (have_beast && beast_to && vm.count("1090-listen"))
+        return usage(".bin files go to --beast-in or --1090-listen, not both");
+    if (have_csv && raw_to && vm.count("1090-listen"))
+        return usage(".csv files go to --raw-in or --1090-listen, not both");
+    const bool beast_listens = have_beast && !beast_to && vm.count("1090-listen");
+    const bool csv_listens = have_csv && !raw_to && vm.count("1090-listen");
+    if (beast_listens && csv_listens)
+        return usage(".bin and .csv files cannot share --1090-listen: send one of them with --beast-in or --raw-in");
+    if (have_beast && !beast_to && !beast_listens)
+        return usage(".bin files need --beast-in HOST:PORT or --1090-listen PORT");
+    if (have_csv && !raw_to && !csv_listens)
+        return usage(".csv files need --raw-in HOST:PORT or --1090-listen PORT");
+    if (have_uat && !vm.count("uat-listen"))
         return usage("UAT files need --uat-listen PORT");
 
     // NOLINTNEXTLINE(cert-err33-c): constant, valid arguments: cannot fail
     std::signal(SIGPIPE, SIG_IGN);
-    // Every output is set up (the UAT port bound) before anything plays.
+    installNetLogSink();
+    Io io;
+    // Every output is set up (the listening ports bound) before anything plays.
     std::vector<std::pair<Kind, std::unique_ptr<Output>>> outs;
+    const char* failing = "";
     try {
+        const bool lossless = speed == 0;
+        const auto waits = static_cast<unsigned>(wait_clients);
         for (Kind k : {Kind::beast, Kind::csv, Kind::uat}) {
             if (by_kind[static_cast<int>(k)].empty())
                 continue;
-            if (k == Kind::uat)
-                outs.emplace_back(k, std::make_unique<Output>(kindName(k), static_cast<uint16_t>(uat_port)));
-            else
-                outs.emplace_back(k, std::make_unique<Output>(kindName(k), k == Kind::beast ? *beast_to : *raw_to));
+            if (k == Kind::uat) {
+                failing = "--uat-listen";
+                outs.emplace_back(k, std::make_unique<ListenOut>(io, kindName(k), static_cast<uint16_t>(uat_port),
+                                                                 waits, lossless));
+            } else if ((k == Kind::beast && beast_listens) || (k == Kind::csv && csv_listens)) {
+                failing = "--1090-listen";
+                outs.emplace_back(k, std::make_unique<ListenOut>(io, kindName(k), static_cast<uint16_t>(beast_port),
+                                                                 waits, lossless));
+            } else {
+                failing = "";
+                outs.emplace_back(k, std::make_unique<DialOut>(io, kindName(k), k == Kind::beast ? *beast_to : *raw_to));
+            }
         }
     } catch (const std::exception& e) {
-        std::cerr << "skycue-rawplay: --uat-listen " << uat_port << ": " << e.what() << "\n";
+        const int port = std::string(failing) == "--uat-listen" ? uat_port : beast_port;
+        std::cerr << "skycue-rawplay: " << failing << " " << port << ": " << e.what() << "\n";
         return 1;
     }
     std::vector<std::thread> threads;
@@ -496,9 +763,23 @@ int main(int argc, char** argv)
         const Kind k = o.first;
         Output& out = *o.second;
         const auto& list = by_kind[static_cast<int>(k)];
-        threads.emplace_back([k, &list, &out, speed, loop] { playStream(k, list, out, speed, loop); });
+        const bool as_beast = csv_listens;
+        threads.emplace_back([k, as_beast, &list, &out, speed, loop] { playStream(k, as_beast, list, out, speed, loop); });
     }
     for (auto& t : threads)
         t.join();
     return g_failed ? 1 : 0;
+}
+
+}  // namespace
+
+// What escapes run() ends the program with a message and status 1, not terminate().
+int main(int argc, char** argv)
+{
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "skycue-rawplay: " << e.what() << "\n";
+        return 1;
+    }
 }

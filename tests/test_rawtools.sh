@@ -245,6 +245,37 @@ play_to_sink "$tmp/d.out" --beast-in --speed 0 "$tmp/rec"/beast-*.bin >/dev/null
 cmp -s "$tmp/d.out" "$tmp/sent.bin" || fail "(d) rawplay of the capture differs"
 echo "ok (d) rawrec capture byte-identical; rawplay replays it"
 
+# ---- (d2) rawrec endpoint words: tcp://HOST:PORT, and udp://BIND:PORT datagrams -----
+rm -f "$tmp/uport"
+python3 "$tmp/uat_server.py" "$tmp/uport" & us=$!
+wait_file "$tmp/uport" 5 || fail "(d2) uat server did not start"
+uport=$(free_port)
+"$rawrec" --uat "tcp://127.0.0.1:$(cat "$tmp/uport")" --dir "$tmp/ep" 2>"$tmp/ep.err" & rec=$!
+bg_pids+=("$rec")
+wait "$us"
+wait_for 5 test -s "$tmp/ep"/uat-*.txt 2>/dev/null
+slow_sleep 0.3
+kill -TERM "$rec"; wait "$rec" || fail "(d2) rawrec tcp:// exit $?"
+[ "$(wc -l < "$tmp/ep"/uat-*.txt)" = 2 ] || { cat "$tmp/ep"/uat-*.txt "$tmp/ep.err"; fail "(d2) tcp:// recorded the wrong number of lines"; }
+"$rawrec" --uat "udp://127.0.0.1:$uport" --dir "$tmp/epu" 2>"$tmp/epu.err" & rec=$!
+bg_pids+=("$rec")
+# Datagrams of two lines each, repeated: the first ones may come before rawrec has bound.
+python3 - "$uport" <<'PY'
+import socket, sys, time
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+for _ in range(30):
+    s.sendto(b"-00a66ef1;rs=1;\n+3514c952;\n", ("127.0.0.1", int(sys.argv[1])))
+    time.sleep(0.05)
+PY
+slow_sleep 0.3
+kill -TERM "$rec"; wait "$rec" || fail "(d2) rawrec udp:// exit $?"
+n=$(cat "$tmp/epu"/uat-*.txt | wc -l)
+[ "$n" -ge 2 ] && [ $((n % 2)) = 0 ] || { cat "$tmp/epu"/uat-*.txt "$tmp/epu.err"; fail "(d2) udp:// recorded $n lines"; }
+grep -qE '^1[0-9]{12} -00a66ef1;rs=1;$' "$tmp/epu"/uat-*.txt || fail "(d2) udp:// line format"
+"$rawrec" --uat "udp://127.0.0.1" --dir "$tmp/epx" >/dev/null 2>&1
+[ $? -eq 2 ] || fail "(d2) a udp:// endpoint without a port should exit 2"
+echo "ok (d2) rawrec tcp:// and udp:// endpoints"
+
 # ---- (e) rotation by size, at frame boundaries ---------------------------------
 rawrec_run "$tmp/rot" 1000 1 --rotate-mb 0.01
 n=$(ls "$tmp/rot"/beast-*.bin | wc -l)
@@ -334,6 +365,119 @@ play_to_sink "$tmp/h.out" --beast-in --speed 0 "$tmp/gap.bin" >/dev/null
 cmp -s "$tmp/h.out" "$tmp/gap.want" || fail "(h) replay of the gapped capture is not the 110 good frames"
 grep -q 'done: 110 frames sent, 9 bytes skipped' "$tmp/play.err" || { cat "$tmp/play.err"; fail "(h) rawplay summary"; }
 echo "ok (h) rawplay resyncs after a truncated frame: 110 frames, 9 bytes skipped"
+
+# ---- (i) rawplay serves several clients --------------------------------------------
+# These use generated files, not fixtures/raw/. fetch.py (above) takes the port and
+# the output file; delay.py is the same after a pause; mute.py connects and never reads.
+cat > "$tmp/mute.py" <<'PY'
+import socket, sys, time
+deadline = time.time() + 10
+while True:
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)  # a small window: the server's queue fills early
+    try:
+        s.connect(("127.0.0.1", int(sys.argv[1]))); break
+    except OSError:
+        s.close()
+        if time.time() > deadline: sys.exit("mute: cannot connect")
+        time.sleep(0.05)
+time.sleep(300)
+PY
+uat_lines() { # uat_lines N WIDTH STEP_MS: "<epoch_ms> -<WIDTH x a>;" lines, STEP_MS apart
+  awk -v n="$1" -v w="$2" -v step="$3" 'BEGIN { pad = sprintf("%*s", w, ""); gsub(/ /, "a", pad)
+    for (i = 0; i < n; i++) printf "%d -%s;\n", 1793536496000 + i * step, i % 10 pad }'
+}
+
+# two_clients_same_frames: both clients of one listener get the same bytes, for
+# UAT lines, for a .bin as recorded and for a .csv as Beast frames.
+uat_lines 300 90 5 > "$tmp/i.txt"
+sed 's/^[0-9]* //' "$tmp/i.txt" > "$tmp/i.want"
+p1=$(free_port)
+python3 "$tmp/fetch.py" "$p1" "$tmp/i1.out" & f1=$!
+python3 "$tmp/fetch.py" "$p1" "$tmp/i2.out" & f2=$!
+timeout $((60*slowf)) "$rawplay" --uat-listen "$p1" --wait-clients 2 --speed 4 "$tmp/i.txt" 2>"$tmp/play.err" ||
+  { cat "$tmp/play.err"; fail "(i) two clients: rawplay exit $?"; }
+wait "$f1" "$f2" || fail "(i) a client failed"
+cmp -s "$tmp/i1.out" "$tmp/i.want" || fail "(i) client 1 lines differ from the file's"
+cmp -s "$tmp/i2.out" "$tmp/i.want" || fail "(i) client 2 lines differ from the file's"
+grep -q 'uat: done: 300 lines sent, 0 lines skipped, 0 reconnects, 0 bytes dropped' "$tmp/play.err" ||
+  { cat "$tmp/play.err"; fail "(i) uat summary"; }
+p1=$(free_port)
+python3 "$tmp/fetch.py" "$p1" "$tmp/i1.out" & f1=$!
+python3 "$tmp/fetch.py" "$p1" "$tmp/i2.out" & f2=$!
+timeout $((60*slowf)) "$rawplay" --1090-listen "$p1" --wait-clients 2 --speed 0 "$tmp/gap.bin" 2>"$tmp/play.err" ||
+  { cat "$tmp/play.err"; fail "(i) 1090 .bin: rawplay exit $?"; }
+wait "$f1" "$f2" || fail "(i) a 1090 client failed"
+cmp -s "$tmp/i1.out" "$tmp/gap.want" || fail "(i) 1090 client 1 differs from the 110 good frames"
+cmp -s "$tmp/i2.out" "$tmp/gap.want" || fail "(i) 1090 client 2 differs from the 110 good frames"
+# .csv as type 2/3 frames: a long (28 hex digits) and a short (14) message, the
+# timestamp as the "@" lines carry it, signal byte 0.
+printf '1700000000.000000,8D4840D6202CC371C32CE0576098\n1700000000.500000,5D4840D6202CC3\n' > "$tmp/i.csv"
+python3 - "$tmp/i.csv" "$tmp/csv.want" <<'PY'
+import sys
+def frame(epoch_ns, hexs):
+    ticks = (epoch_ns * 12 // 1000) & ((1 << 48) - 1)
+    t = {14: b"2", 28: b"3"}[len(hexs)]
+    body = ticks.to_bytes(6, "big") + b"\x00" + bytes.fromhex(hexs)
+    return b"\x1a" + t + body.replace(b"\x1a", b"\x1a\x1a")
+out = b""
+for line in open(sys.argv[1]):
+    ts, h = line.strip().split(",")
+    sec, frac = ts.split(".")
+    out += frame(int(sec) * 10**9 + int((frac + "000000000")[:9]), h)
+open(sys.argv[2], "wb").write(out)
+PY
+python3 - "$tmp/i.csv" <<'PY'
+# the file must hold one 28- and one 14-digit message
+import sys
+lens = [len(l.strip().split(",")[1]) for l in open(sys.argv[1])]
+sys.exit(0 if lens == [28, 14] else "i.csv: digits %r" % lens)
+PY
+p1=$(free_port)
+python3 "$tmp/fetch.py" "$p1" "$tmp/i1.out" & f1=$!
+timeout $((60*slowf)) "$rawplay" --1090-listen "$p1" --speed 0 "$tmp/i.csv" 2>"$tmp/play.err" ||
+  { cat "$tmp/play.err"; fail "(i) 1090 .csv: rawplay exit $?"; }
+wait "$f1" || fail "(i) a 1090 csv client failed"
+cmp -s "$tmp/i1.out" "$tmp/csv.want" || { od -An -tx1 "$tmp/i1.out" | head -3; od -An -tx1 "$tmp/csv.want" | head -3; fail "(i) .csv not served as Beast frames"; }
+echo "ok (i) rawplay_two_clients_same_frames: UAT lines, .bin frames, .csv as Beast frames"
+
+# slow_client_does_not_stall_the_other: one client connects and never reads; 24 MB
+# of lines at 10x the file's 24 s span. The reader gets every line on time; the
+# one that does not read is dropped from, and rawplay says how much.
+uat_lines 24000 1000 1 > "$tmp/j.txt"
+sed 's/^[0-9]* //' "$tmp/j.txt" > "$tmp/j.want"
+p1=$(free_port)
+python3 "$tmp/mute.py" "$p1" & mute=$!
+bg_pids+=("$mute")
+python3 "$tmp/fetch.py" "$p1" "$tmp/j.out" & f1=$!
+t0=$(now)
+timeout $((60*slowf)) "$rawplay" --uat-listen "$p1" --wait-clients 2 --speed 10 "$tmp/j.txt" 2>"$tmp/play.err" ||
+  { cat "$tmp/play.err"; fail "(i) slow client: rawplay exit $?"; }
+wall=$(awk -v a="$t0" -v b="$(now)" 'BEGIN { printf "%.2f", b - a }')
+wait "$f1" || fail "(i) the reading client failed"
+kill "$mute" 2>/dev/null
+cmp -s "$tmp/j.out" "$tmp/j.want" || fail "(i) the reading client lost lines ($(wc -l < "$tmp/j.out") of 24000)"
+dropped=$(sed -n 's/.*, \([0-9]*\) bytes dropped (slow clients).*/\1/p' "$tmp/play.err")
+[ -n "$dropped" ] && [ "$dropped" -gt 0 ] || { cat "$tmp/play.err"; fail "(i) nothing dropped for the client that does not read"; }
+awk -v w="$wall" -v f="$slowf" 'BEGIN { exit !(w <= 2.4 + 4 * f) }' || fail "(i) 2.4 s of lines took ${wall}s: stalled"
+echo "ok (i) rawplay_slow_client_does_not_stall_the_other: ${wall}s, $dropped bytes dropped for the silent client"
+
+# wait_clients_holds_playback: with --wait-clients 2 and one client, nothing is sent;
+# the second client releases it.
+uat_lines 20 90 1 > "$tmp/k.txt"
+sed 's/^[0-9]* //' "$tmp/k.txt" > "$tmp/k.want"
+p1=$(free_port)
+python3 "$tmp/fetch.py" "$p1" "$tmp/k1.out" & f1=$!
+"$rawplay" --uat-listen "$p1" --wait-clients 2 --speed 0 "$tmp/k.txt" 2>"$tmp/play.err" & rp=$!
+bg_pids+=("$rp")
+slow_sleep 1.5
+[ ! -s "$tmp/k1.out" ] || fail "(i) played with one of two clients"
+kill -0 "$rp" 2>/dev/null || fail "(i) rawplay exited while waiting for the second client"
+python3 "$tmp/fetch.py" "$p1" "$tmp/k2.out" & f2=$!
+wait "$rp" || { cat "$tmp/play.err"; fail "(i) rawplay exit $?"; }
+wait "$f1" "$f2" || fail "(i) a client failed"
+cmp -s "$tmp/k1.out" "$tmp/k.want" && cmp -s "$tmp/k2.out" "$tmp/k.want" || fail "(i) the held lines differ"
+echo "ok (i) rawplay_wait_clients_holds_playback"
 
 # ---- full stack: the capture through a real readsb -----------------------------
 if [ "$have_raw" = 0 ]; then

@@ -228,6 +228,11 @@ skycue-rawrec --beast 127.0.0.1:30005 --uat 127.0.0.1:30978 --dir /var/lib/skycu
 `<RECORD_DIR>/raw`). Leave out `--beast` or `--uat` for a receiver you do not
 have. `RECORD_DIR/raw` is where [Recordings](#recordings) expects them.
 
+Each of `--beast` and `--uat` takes `HOST:PORT` (or the same as
+`tcp://HOST:PORT`), which connects and reconnects with a backoff from 0.5 s to
+10 s, or `udp://BIND:PORT`, which binds that address and port and records the
+datagrams that arrive (for UAT, the lines in them).
+
 `skycue-rawplay` plays them back into a network-only readsb, so the decoder
 interprets them again:
 
@@ -249,6 +254,22 @@ The receiver position given to readsb (and in `skycue.conf`) must match the
 capture's region, or readsb cannot decode positions and the range filter
 drops everything: the sample capture in `tests/fixtures/raw/` is European,
 so use `52.0` / `4.5` for it.
+
+`--1090-listen PORT` serves the Beast frames on 127.0.0.1 instead of dialing
+readsb: `.bin` files as recorded, `.csv` files as type 1, 2 or 3 frames (the
+twelve-hex-digit timestamp of the `@` lines, signal byte 0). `.bin` files go
+to `--beast-in` or to `--1090-listen`, `.csv` files to `--raw-in` or to
+`--1090-listen`, and one listening port serves one kind. Both listening ports
+(`--1090-listen` and `--uat-listen`) serve any number of clients at once,
+each of which gets every frame or line: readsb (`--net-connector
+127.0.0.1,PORT,beast_in`) and skycued's `beast_raw` input can read the same
+replay at the same time. `--wait-clients N` (default 1) holds playback of each
+listening port in use until N clients are connected to it; if every client
+leaves later, playback waits for one again. A client that stops reading costs
+only itself: when 1 MiB is queued for it, further data for that client is
+dropped, and the number of bytes dropped is printed at the end
+(`... 0 reconnects, 0 bytes dropped (slow clients)`). With `--speed 0` nothing
+is dropped: playback waits for the slowest client.
 
 ## IQ files
 
@@ -367,7 +388,9 @@ It reads one of two kinds of file:
 FILE may be gzip-compressed. pingsim sends to one of:
 
 - `--udp HOST:PORT`: one datagram per record, for a `pingstation_json` input
-  or a `udp` `pingstation_cat021` input.
+  or a `udp` `pingstation_cat021` input. HOST can be a multicast group
+  (`--udp 239.1.1.5:4001`); `--iface ADDR` then names the local interface
+  address the datagrams leave from.
 - `--tcp HOST:PORT`: connects, for a `tcp_listen` CAT021 input.
 - `--tcp-listen PORT`: listens on 127.0.0.1 and serves one client at a
   time, for a `tcp_connect` CAT021 input (`"host":"127.0.0.1"` and that

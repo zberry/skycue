@@ -10,17 +10,17 @@ target_link_libraries(skycue-dump PRIVATE skycue::skycue skycued_asterix Boost::
 
 # skycue-rawrec: records readsb's Beast output and dump978's raw UAT lines.
 add_executable(skycue-rawrec skycue-rawrec.cpp)
-target_link_libraries(skycue-rawrec PRIVATE skycued_core Boost::program_options Threads::Threads)
+target_link_libraries(skycue-rawrec PRIVATE skycued_core skycue::net Boost::program_options Threads::Threads)
 
 # skycue-rawplay: replays raw Beast, epoch,HEX and UAT captures into readsb.
 # Links zlib to read .gz captures.
 add_executable(skycue-rawplay skycue-rawplay.cpp)
-target_link_libraries(skycue-rawplay PRIVATE skycued_core Boost::program_options ZLIB::ZLIB Threads::Threads)
+target_link_libraries(skycue-rawplay PRIVATE skycued_core skycue::net Boost::program_options ZLIB::ZLIB Threads::Threads)
 
 # skycue-pingsim: plays a pingStation 3 (capture files, or recordings
 # synthesised as pingStation JSON or CAT021) to a skycued input.
 add_executable(skycue-pingsim skycue-pingsim.cpp)
-target_link_libraries(skycue-pingsim PRIVATE skycued_core Boost::program_options ZLIB::ZLIB)
+target_link_libraries(skycue-pingsim PRIVATE skycued_core skycue::net Boost::program_options ZLIB::ZLIB)
 
 # skycue-stats: summarises received/sent recordings and readsb JSON captures
 # (plain or .gz; zlib reads both).

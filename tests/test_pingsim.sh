@@ -215,4 +215,42 @@ timeout $((10*slowf)) "$pingsim" --udp "127.0.0.1:$cat_port" --as cat021 --speed
 rc=$?
 [ "$rc" -eq 1 ] || { cat "$tmp/loop.out"; fail "(e) pingsim --loop over nothing exit $rc, want 1"; }
 
+"$pingsim" --tcp-listen 1 --iface 127.0.0.1 --as cat021 "$sample" >"$tmp/iface.out" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] && grep -q -- '--iface needs --udp' "$tmp/iface.out" || { cat "$tmp/iface.out"; fail "(e) --iface without --udp exit $rc"; }
+
+# ---- (f) --udp to a multicast group, from the interface --iface names ---------------
+# A receiver joined to the group on 127.0.0.1 counts the datagrams. Skipped (not
+# failed) where the host does not deliver loopback multicast.
+cat > "$tmp/mc.py" <<'PY'
+import socket, struct, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("239.255.42.77", 0))
+open(sys.argv[1] + ".tmp", "w").write(str(s.getsockname()[1]))
+import os; os.rename(sys.argv[1] + ".tmp", sys.argv[1])
+s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
+             struct.pack("4s4s", socket.inet_aton("239.255.42.77"), socket.inet_aton("127.0.0.1")))
+s.settimeout(float(sys.argv[2]))
+n = 0
+try:
+    while n < 20:
+        s.recv(2048); n += 1
+except socket.timeout:
+    pass
+print(n)
+PY
+rm -f "$tmp/mcport"
+python3 "$tmp/mc.py" "$tmp/mcport" $((5*slowf)) >"$tmp/mc.count" & mc_pid=$!
+wait_file "$tmp/mcport" 5 || fail "(f) multicast receiver did not start"
+"$pingsim" --udp "239.255.42.77:$(cat "$tmp/mcport")" --iface 127.0.0.1 --as cat021 --speed 0 "$sample" >"$tmp/mc.out" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$tmp/mc.out"; fail "(f) multicast pingsim exit $rc"; }
+wait "$mc_pid"
+if [ "$(cat "$tmp/mc.count")" -ge 1 ]; then
+  echo "ok (f) multicast: $(cat "$tmp/mc.count") datagrams reached the group"
+else
+  echo "SKIP (f) multicast: nothing received on this host's loopback"
+fi
+
 echo "PASS"

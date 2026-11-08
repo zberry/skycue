@@ -9,7 +9,8 @@
 //                         CAT021 (ed. 2.5) block, stamped with the send time
 //                         and paced by the observation times
 //
-// Output: --udp HOST:PORT (one datagram per record), --tcp HOST:PORT (connects,
+// Output: --udp HOST:PORT (one datagram per record; a multicast group from the
+// interface --iface ADDR names), --tcp HOST:PORT (connects,
 // for a tcp_listen input) or --tcp-listen PORT (serves one client at a time,
 // for a tcp_connect input; on 127.0.0.1 unless --bind ADDR). JSON is UDP
 // only, as the pingstation_json input.
@@ -23,15 +24,19 @@
 #include "asterix/cat021_encode.hpp"
 #include "gz_line_reader.hpp"
 #include "inputs/ping_encode.hpp"
+#include "inputs/transport.hpp"
 #include "log.hpp"
 #include "recording_reader.hpp"
 
-#include <boost/asio/connect.hpp>
+#include "skycue/net/buffer.hpp"
+#include "skycue/net/dialer.hpp"
+#include "skycue/net/listener.hpp"
+#include "skycue/net/tcp_options.hpp"
+#include "skycue/net/udp_sender.hpp"
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ip/udp.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/write.hpp>
+#include <boost/asio/executor_work_guard.hpp>
 #include <boost/program_options.hpp>
 
 #include <algorithm>
@@ -40,17 +45,18 @@
 #include <csignal>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
 namespace asio = boost::asio;
 namespace po = boost::program_options;
 using asio::ip::tcp;
-using asio::ip::udp;
+namespace net = skycue::net;
 using error_code = boost::system::error_code;
 using steady = std::chrono::steady_clock;
 using std::chrono::system_clock;
@@ -85,118 +91,175 @@ std::optional<HostPort> parseHostPort(const std::string& s)
 
 enum class Mode { udp, tcp, tcp_listen };
 
-// Where the records go. Blocking, on the one io_context.
+// Where the records go, on the network library. The library works on its
+// io_context's thread; this tool has one thread, which runs the io_context
+// itself, in short turns: whenever it waits (pacing, a connection, a full
+// queue) and after each record.
 class Output {
 public:
-    Output(asio::io_context& io, Mode mode, HostPort to, const asio::ip::address& bind, uint16_t listen_port)
-        : io_(io), mode_(mode), to_(std::move(to)), tcp_(io), udp_(io)
+    Output(asio::io_context& io, Mode mode, HostPort to, const asio::ip::address& bind, uint16_t listen_port,
+           std::string iface)
+        : io_(io), mode_(mode), to_(std::move(to)), iface_(std::move(iface)), guard_(asio::make_work_guard(io))
     {
         if (mode_ == Mode::tcp_listen) {
-            const tcp::endpoint ep(bind, listen_port);
-            acceptor_.emplace(io_);
-            acceptor_->open(ep.protocol());
-            acceptor_->set_option(tcp::acceptor::reuse_address(true));
-            acceptor_->bind(ep);  // throws when the port is taken
-            acceptor_->listen();
+            net::ListenOptions o;
+            o.max_peers = 1;  // one client at a time
+            o.fail_fast = true;
+            listener_ = net::Listener::create(io_, bind.to_string(), listen_port, o);
+            listener_->onPeer([this](uint64_t stream, bool up, const tcp::endpoint& who) {
+                if (up) {
+                    streams_.insert(stream);
+                    LOG_INFO("client " << who << " connected");
+                } else {
+                    streams_.erase(stream);
+                    LOG_INFO("client " << who << " gone");
+                }
+            });
+            listener_->start();  // throws when the port is taken
         }
     }
+    ~Output()
+    {
+        stopAll();
+        guard_.reset();
+    }
+    Output(const Output&) = delete;
+    Output& operator=(const Output&) = delete;
 
-    // UDP: resolves the target. TCP: blocks until connected (retrying with
-    // backoff) or until a client connected.
+    // Runs the library until t.
+    void pumpUntil(steady::time_point t)
+    {
+        while (steady::now() < t) {
+            io_.restart();
+            io_.run_until(t);
+        }
+    }
+    void pumpFor(std::chrono::milliseconds d) { pumpUntil(steady::now() + d); }
+
+    // UDP: resolves the target (retrying with backoff). TCP: blocks until
+    // connected (retrying with backoff) or until a client connected.
     void open()
     {
-        auto backoff = kMinBackoff;
-        bool warned = false;
-        for (;;) {
-            error_code ec;
-            if (mode_ == Mode::tcp_listen) {
-                acceptor_->accept(tcp_, ec);
-                if (!ec) {
-                    LOG_INFO("client " << tcp_.remote_endpoint(ec) << " connected");
-                    return;
-                }
-                LOG_WARN("accept failed: " << ec.message());
-            } else if (mode_ == Mode::udp) {
-                udp::resolver resolver(io_);
-                auto results = resolver.resolve(to_.host, to_.port, ec);
-                if (!ec && !results.empty()) {
-                    target_ = results.begin()->endpoint();
-                    if (udp_.is_open())
-                        udp_.close(ec);
-                    udp_.open(target_.protocol(), ec);
-                    if (!ec)
-                        return;
-                }
-                if (!ec)
-                    ec = asio::error::host_not_found;
-                LOG_WARN(to_.host << ":" << to_.port << ": " << ec.message() << "; retrying");
-            } else {
-                tcp::resolver resolver(io_);
-                auto results = resolver.resolve(to_.host, to_.port, ec);
-                if (!ec)
-                    asio::connect(tcp_, results, ec);
-                if (!ec) {
+        if (mode_ == Mode::tcp_listen) {
+            while (listener_->peers() == 0)
+                pumpFor(std::chrono::milliseconds(20));
+            return;
+        }
+        if (mode_ == Mode::tcp) {
+            net::TcpOptions t;
+            dialer_ = net::Dialer::create(io_, to_.host, static_cast<uint16_t>(std::stoi(to_.port)), t);
+            dialer_->onConnection([this](bool up) {
+                if (up) {
                     LOG_INFO("connected to " << to_.host << ":" << to_.port);
-                    return;
+                } else {
+                    LOG_WARN("connection lost; reconnecting");
+                    ++lost_;
                 }
-                if (!warned)
-                    LOG_WARN(to_.host << ":" << to_.port << ": " << ec.message() << "; retrying until it accepts");
-                warned = true;
-                error_code ignored;
-                tcp_.close(ignored);
-            }
-            std::this_thread::sleep_for(backoff);
+            });
+            dialer_->start();
+            while (!dialer_->connected())
+                pumpFor(std::chrono::milliseconds(20));
+            return;
+        }
+        auto backoff = kMinBackoff;
+        for (;;) {
+            sender_ = net::UdpSender::create(io_);
+            net::UdpTarget target;
+            target.host = to_.host;
+            target.port = static_cast<uint16_t>(std::stoi(to_.port));
+            target.iface = iface_;
+            sender_->addTarget(target);
+            if (sender_->start() > 0)
+                return;
+            LOG_WARN(to_.host << ":" << to_.port << ": " << sender_->counters().last_error << "; retrying");
+            sender_->stop();
+            pumpFor(backoff);
             backoff = std::min(backoff * 2, kMaxBackoff);
         }
     }
 
-    // A failed TCP write drops the record and connects again (a new client,
-    // for --tcp-listen). A failed datagram is dropped and counted.
+    // A record while the TCP connection is down waits for the next one (a new
+    // client, for --tcp-listen). A datagram the kernel cannot take is dropped
+    // and counted.
     void send(const std::vector<uint8_t>& bytes)
     {
-        error_code ec;
+        const net::Buf b = net::makeBuf(bytes.data(), bytes.size());
         if (mode_ == Mode::udp) {
-            udp_.send_to(asio::buffer(bytes), target_, 0, ec);
-            if (ec) {
-                if (lost_++ == 0)
-                    LOG_WARN("send failed: " << ec.message() << " (logged once)");
-            }
+            sender_->send(b);
+            io_.restart();
+            io_.poll();
             return;
         }
-        asio::write(tcp_, asio::buffer(bytes), ec);
-        if (ec) {
-            LOG_WARN("write failed (" << ec.message() << "); reconnecting");
-            error_code ignored;
-            tcp_.close(ignored);
-            ++lost_;
-            open();
+        while (!connected()) {
+            if (mode_ == Mode::tcp_listen && !waiting_) {
+                waiting_ = true;
+                ++lost_;
+                LOG_WARN("no client; waiting for one");
+            }
+            pumpFor(std::chrono::milliseconds(20));
         }
+        waiting_ = false;
+        if (listener_)
+            listener_->sendAll(b);
+        else
+            dialer_->send(b);
+        io_.restart();
+        io_.poll();
+        while (queued() > kBacklog && connected())  // do not outrun the reader
+            pumpFor(std::chrono::milliseconds(2));
     }
 
     void close()
     {
-        error_code ignored;
-        if (mode_ == Mode::udp) {
-            udp_.close(ignored);
-            return;
-        }
-        tcp_.shutdown(tcp::socket::shutdown_send, ignored);
-        tcp_.close(ignored);
-        if (acceptor_)
-            acceptor_->close(ignored);
+        for (int i = 0; i < 2000 && queued() > 0 && connected(); ++i)
+            pumpFor(std::chrono::milliseconds(2));
+        stopAll();
     }
 
-    unsigned lost() const { return lost_; }
+    // Reconnects (TCP) or datagrams the kernel would not take (UDP).
+    unsigned lost() const { return mode_ == Mode::udp ? static_cast<unsigned>(udp_dropped_) : lost_; }
 
 private:
+    bool connected() const { return listener_ ? listener_->peers() > 0 : dialer_ && dialer_->connected(); }
+    uint64_t queued()
+    {
+        if (dialer_)
+            return dialer_->peerStats().queued_bytes;
+        uint64_t most = 0;
+        if (listener_)
+            for (uint64_t s : streams_)
+                if (auto st = listener_->peerStats(s))
+                    most = std::max(most, st->queued_bytes);
+        return most;
+    }
+    void stopAll()
+    {
+        if (sender_) {
+            udp_dropped_ = sender_->counters().dropped;
+            sender_->stop();
+        }
+        if (dialer_)
+            dialer_->stop();
+        if (listener_)
+            listener_->stop();
+        io_.restart();
+        boost::system::error_code ignored;
+        io_.poll(ignored);
+    }
+
+    static constexpr uint64_t kBacklog = 256 * 1024;
     asio::io_context& io_;
     Mode mode_;
     HostPort to_;
-    tcp::socket tcp_;
-    udp::socket udp_;
-    udp::endpoint target_;
-    std::optional<tcp::acceptor> acceptor_;
+    std::string iface_;
+    asio::executor_work_guard<asio::io_context::executor_type> guard_;
+    std::shared_ptr<net::UdpSender> sender_;
+    std::shared_ptr<net::Dialer> dialer_;
+    std::shared_ptr<net::Listener> listener_;
+    std::set<uint64_t> streams_;
     unsigned lost_ = 0;
+    uint64_t udp_dropped_ = 0;
+    bool waiting_ = false;
 };
 
 struct StatusOptions {
@@ -209,8 +272,8 @@ struct StatusOptions {
 // of wall time from the start, between the records.
 class Pacer {
 public:
-    Pacer(asio::io_context& io, double speed, Output& out, std::optional<StatusOptions> status)
-        : timer_(io), speed_(speed), out_(out), status_(status)
+    Pacer(double speed, Output& out, std::optional<StatusOptions> status)
+        : speed_(speed), out_(out), status_(status)
     {
     }
 
@@ -239,16 +302,8 @@ public:
     uint64_t statuses() const { return statuses_; }
 
 private:
-    void sleepUntil(steady::time_point t)
-    {
-        if (steady::now() >= t)
-            return;
-        timer_.expires_at(t);
-        error_code ignored;
-        timer_.wait(ignored);
-    }
+    void sleepUntil(steady::time_point t) { out_.pumpUntil(t); }
 
-    asio::steady_timer timer_;
     double speed_;
     Output& out_;
     std::optional<StatusOptions> status_;
@@ -338,12 +393,12 @@ int64_t playFile(const std::string& path, Form form, Mode mode, uint8_t sac, uin
 
 int run(int argc, char** argv)
 {
-    std::string udp_arg, tcp_arg, capture_file, as_form, bind_arg = "127.0.0.1";
+    std::string udp_arg, tcp_arg, capture_file, as_form, bind_arg = "127.0.0.1", iface;
     int listen_port = 0, sac = 0, sic = 0;
     double speed = 1.0, status_interval = 0, status_lat = 0, status_lon = 0;
     std::vector<std::string> files;
     po::options_description desc(
-        "usage: skycue-pingsim (--udp HOST:PORT | --tcp HOST:PORT | --tcp-listen PORT [--bind ADDR])\n"
+        "usage: skycue-pingsim (--udp HOST:PORT [--iface ADDR] | --tcp HOST:PORT | --tcp-listen PORT [--bind ADDR])\n"
         "                      (--capture FILE | --as json|cat021 FILE) [--speed N] [--loop]\n"
         "                      [--sac N] [--sic N] [--status-interval S --status-lat D --status-lon D]\n"
         "Plays a pingStation 3 to a skycued input: a capture file as recorded, or a received-stream\n"
@@ -353,6 +408,8 @@ int run(int argc, char** argv)
         "tcp", po::value(&tcp_arg), "connect to HOST:PORT (a tcp_listen CAT021 input)")(
         "tcp-listen", po::value(&listen_port), "serve CAT021 on PORT (a tcp_connect input)")(
         "bind", po::value(&bind_arg), "with --tcp-listen: the local address (default 127.0.0.1)")(
+        "iface", po::value(&iface),
+        "with --udp to a multicast group (--udp GROUP:PORT): the local interface address to send from")(
         "capture", po::value(&capture_file), "replay a capture file (capture-<id>-*.jsonl)")(
         "as", po::value(&as_form), "json or cat021: synthesise from the recording FILE")(
         "speed", po::value(&speed)->default_value(1.0), "playback speed; 0 = as fast as possible")(
@@ -406,6 +463,8 @@ int run(int argc, char** argv)
     } else if (vm.count("bind")) {
         return usage("--bind needs --tcp-listen");
     }
+    if (vm.count("iface") && !vm.count("udp"))
+        return usage("--iface needs --udp");
     error_code bind_ec;
     const auto bind_addr = asio::ip::make_address(bind_arg, bind_ec);
     if (bind_ec)
@@ -458,10 +517,11 @@ int run(int argc, char** argv)
 
     // NOLINTNEXTLINE(cert-err33-c): constant, valid arguments: cannot fail
     std::signal(SIGPIPE, SIG_IGN);
+    installNetLogSink();
     asio::io_context io;
     std::optional<Output> out;
     try {
-        out.emplace(io, mode, to.value_or(HostPort{}), bind_addr, static_cast<uint16_t>(listen_port));
+        out.emplace(io, mode, to.value_or(HostPort{}), bind_addr, static_cast<uint16_t>(listen_port), iface);
     } catch (const std::exception& e) {
         std::cerr << "skycue-pingsim: --tcp-listen " << bind_arg << ":" << listen_port << ": " << e.what() << "\n";
         return 1;
@@ -469,7 +529,7 @@ int run(int argc, char** argv)
     const bool loop = vm.count("loop") > 0;
     try {
         out->open();
-        Pacer pacer(io, speed, *out, status);
+        Pacer pacer(speed, *out, status);
         pacer.start();
         Stats st;
         int64_t media = 0;

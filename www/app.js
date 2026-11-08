@@ -1810,7 +1810,7 @@
 
   function saveBaseline() {
     if (!window.confirm('Save the running filters and lists as the baseline?\n\n' +
-        'This rewrites MAX_RANGE_NM / MIN_ELEVATION_DEG in skycue.conf and the allow/block list files.')) return;
+        'This writes filters.max_range_nm / filters.min_elevation_deg to skycue.overrides.toml (skycue.toml is not changed) and appends to the allow/block list files.')) return;
     request('POST', 'api/filters/save-baseline').then(function (res) {
       showMsg($('save-msg'), res.unsaved ? 'Not saved:\n' + res.unsaved : 'Saved as baseline.', !!res.unsaved);
       return Promise.all([request('GET', 'api/filters'), request('GET', 'api/lists')]);
@@ -3307,6 +3307,7 @@
       ['Config file', d.config_path],
       ['Inputs file', d.inputs_path],
       ['Overlay file', d.overlay_path + (d.overlay_active ? ' (unsaved changes)' : '')],
+      ['Overrides file', d.overrides_path],
       ['www directory', d.www_dir],
       ['Recording to', d.record_dir || 'not recording'],
       ['Recording files', (d.recording_files || []).join(', ') || 'none'],
@@ -3334,7 +3335,7 @@
         tr.setAttribute('data-key', r.key);
         tr.appendChild(el('th', null, r.key));
         tr.appendChild(el('td', 'cfg-value', String(r.value)));
-        tr.appendChild(el('td', 'cfg-source', r.source));
+        tr.appendChild(el('td', 'cfg-source', P.configSourceLabel(r.source)));
         if (r.restart) restart.appendChild(el('span', 'badge', 'restart'));
         tr.appendChild(restart);
         body.appendChild(tr);

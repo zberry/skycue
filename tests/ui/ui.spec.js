@@ -312,7 +312,10 @@ test('save_baseline_confirms_and_clears_overlay', async ({ page }) => {
   await expect.poll(async () => (await api('/api/filters')).body.overlay_active, { timeout: 3000 }).toBe(false);
   expect(dialogSeen).toBe('confirm');
   expect((await api('/api/filters')).body.max_range_nm).toBe(want);
-  expect(fs.readFileSync(CONF, 'utf8')).toMatch(new RegExp('^MAX_RANGE_NM=' + want + '\\s*$', 'm'));
+  // skycued never writes skycue.toml: the baseline goes to skycue.overrides.toml.
+  const overrides = (await api('/api/config')).body.daemon.overrides_path;
+  expect(fs.readFileSync(overrides, 'utf8')).toMatch(new RegExp('^max_range_nm = ' + want + '(\\.0)?\\s*$', 'm'));
+  expect(fs.readFileSync(CONF, 'utf8')).not.toMatch(new RegExp('^max_range_nm = ' + want + '\\b', 'm'));
   await expect(page.locator('#overlay-indicator')).toBeHidden();
 });
 
@@ -411,7 +414,7 @@ test('screenshots', async ({ page }, testInfo) => {
   await expect(page.locator('#cues-filters li').first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath(`skycue-cues-${testInfo.project.name}.png`), fullPage: true });
   await page.locator('#tab-config').click();
-  await expect(page.locator('#pane-config tr[data-key="RECEIVER_LAT"] .cfg-value')).toHaveText('38.9');
+  await expect(page.locator('#pane-config tr[data-key="receiver.lat"] .cfg-value')).toHaveText('38.9');
   await page.screenshot({ path: testInfo.outputPath(`skycue-config-${testInfo.project.name}.png`), fullPage: true });
 });
 
@@ -1023,20 +1026,21 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   await page.locator('#wx-toggle').click();
   await page.locator('#tab-config').click();
   const row = (k) => page.locator(`#pane-config tr[data-key="${k}"]`);
-  await expect(row('RECEIVER_LAT').locator('.cfg-value')).toHaveText('38.9');
-  await expect(row('RECEIVER_LAT').locator('.cfg-source')).toHaveText('conf');
-  await expect(row('WEB_PORT').locator('.cfg-value')).toHaveText(port);
-  await expect(row('WEB_PORT').locator('.cfg-restart')).toContainText('restart');
-  await expect(row('MIN_INTERVAL_S').locator('.cfg-source')).toHaveText('default');
-  await expect(row('MAX_RANGE_NM').locator('.cfg-restart')).not.toContainText('restart');
-  await expect(page.locator('#pane-config table[data-group="FIS-B"] tr[data-key="LOCATIONS_FILE"]')).toHaveCount(1);
+  await expect(row('receiver.lat').locator('.cfg-value')).toHaveText('38.9');
+  await expect(row('receiver.lat').locator('.cfg-source')).toHaveText('conf');
+  await expect(row('web.port').locator('.cfg-value')).toHaveText(port);
+  await expect(row('web.port').locator('.cfg-restart')).toContainText('restart');
+  await expect(row('cues.min_interval_s').locator('.cfg-source')).toHaveText('default');
+  await expect(row('filters.max_range_nm').locator('.cfg-restart')).not.toContainText('restart');
+  await expect(page.locator('#pane-config table[data-group="Paths"] tr[data-key="paths.locations_file"]')).toHaveCount(1);
   await expect(page.locator('#config-daemon')).toContainText('skycued');
   // run.sh's skycued replays the readsb fixture in real time, looped.
   await expect(page.locator('#config-daemon tr', { hasText: 'Runs' })).toContainText(/replay of \S*readsb-sample\.jsonl \(speed 1, looped\)/);
   await expect(page.locator('#config-daemon tr', { hasText: 'Learned locations' })).toContainText(/learned, kept in \S*fisb-locations\.json/);
-  await expect(page.locator('#config-daemon tr', { hasText: 'Operator locations' })).toContainText('no LOCATIONS_FILE');
+  await expect(page.locator('#config-daemon tr', { hasText: 'Operator locations' })).toContainText('no paths.locations_file');
   const text = await page.evaluate(() => window.skycueApp.configText());
-  expect(text).toContain(`\n# WEB_PORT: conf, restart\nWEB_PORT=${port}\n`);
+  expect(text).toContain(`\n[web]\n`);
+  expect(text).toContain(`\n# web.port: conf, restart\nport = ${port}\n`);
   await page.locator('#config-copy').click();
   await expect(page.locator('#config-copy-status')).toHaveText('Copied');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(text);
@@ -1051,7 +1055,7 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   await expect(page.locator('#config-copy-status')).toHaveText('');
   await expect(page.locator('#config-copy-status')).not.toHaveClass(/\berror\b/);
   await expect(page.locator('#config-copy-text')).toBeHidden();
-  await expect(row('RECEIVER_LAT').locator('.cfg-value')).toHaveText('38.9');
+  await expect(row('receiver.lat').locator('.cfg-value')).toHaveText('38.9');
   expect(errors).toEqual([]);
 });
 
@@ -4768,7 +4772,7 @@ test('stats_coverage_polar_histograms_and_density', async ({ page }, testInfo) =
   await sec.screenshot({ path: testInfo.outputPath(`skycue-stats-coverage-${testInfo.project.name}.png`) });
 });
 
-// The "no receiver position" caption needs a daemon without RECEIVER_LAT/LON;
+// The "no receiver position" caption needs a daemon without receiver.lat/lon;
 // every UI daemon here has one (the radar, FIS-B and receivers daemons too),
 // so it is not tested in the browser.
 test.skip('stats_coverage_caption_without_receiver', async () => {});

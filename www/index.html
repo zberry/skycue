@@ -47,12 +47,12 @@
       <label for="max-range">Max range (nm)</label>
       <div class="row">
         <input id="max-range" type="number" min="0.1" step="any" inputmode="decimal">
-        <button type="button" class="reset" data-reset="max_range_nm" title="Back to the skycue.conf value">↺</button>
+        <button type="button" class="reset" data-reset="max_range_nm" title="Back to the skycue.toml value">↺</button>
       </div>
       <label for="min-elevation">Min elevation (°)</label>
       <div class="row">
         <input id="min-elevation" type="number" min="-90" max="90" step="any" inputmode="decimal">
-        <button type="button" class="reset" data-reset="min_elevation_deg" title="Back to the skycue.conf value">↺</button>
+        <button type="button" class="reset" data-reset="min_elevation_deg" title="Back to the skycue.toml value">↺</button>
       </div>
       <label for="ring-alt">Elevation-mask ring for aircraft at</label>
       <select id="ring-alt"></select>
@@ -69,7 +69,7 @@
         <input type="text" placeholder="hex or registration" aria-label="Add to block list" maxlength="10">
         <button type="submit">Add</button>
       </form>
-      <p id="overlay-indicator" hidden>Unsaved changes: the running filters differ from skycue.conf and the list files.</p>
+      <p id="overlay-indicator" hidden>Unsaved changes: the running filters differ from skycue.toml and the list files.</p>
       <button id="save-baseline" type="button" disabled>Save as baseline</button>
       <p id="save-msg" class="msg" role="status"></p>
     </section>

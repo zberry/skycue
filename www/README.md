@@ -1,6 +1,6 @@
 # skycue web UI
 
-The page skycued serves on `WEB_PORT` (see `docs/web-api.md`): `index.html`,
+The page skycued serves on `web.port` (see `docs/web-api.md`): `index.html`,
 `app_pure.js` (pure helpers, `window.skycuePure`, also loaded by the node
 test), `alerts_pure.js` (the alert rules engine, `window.skycueAlertsPure`,
 node-tested by `tests/js/alerts_pure.test.js`), `alerts_view.js` (the alert
@@ -157,7 +157,7 @@ with the list's age classes and go when their record expires; hover shows
 the station, a click the parsed report and raw text. The Reports toggles
 (METAR, TAF, PIREP, Winds, each with its count) and the station filter apply
 to the list and the symbols alike. Positions come from `/api/fisb/locations`
-and `fisb_location` (ids learned from NOTAM points, or `LOCATIONS_FILE`): a
+and `fisb_location` (ids learned from NOTAM points, or `paths.locations_file`): a
 report whose station has no known position is listed with "no position" and
 never plotted, and the Reports header shows "n of m positioned" (n: the
 reports with a symbol); those rows get a "show" link that pans to the symbol.
@@ -306,11 +306,12 @@ operator locations through `daemonLocationsText`); `groupConfig` sorts the keys 
 per `CONFIG_GROUPS` entry (a key no group names goes to a trailing
 `Other`, an empty group is left out), each key a `tr[data-key]` with
 `td.cfg-value`, `td.cfg-source` and `td.cfg-restart` (a `restart` badge
-when the key needs one). `#config-copy` writes `configText` (skycue.conf
-text, quoted as `conf_rewrite.cpp`'s `quoteValue` does, each key preceded
-by a `# KEY: source[, restart]` comment line so the text parses as it is;
-`confValue` returns null for a value the grammar cannot hold, which is left
-as a comment) with `navigator.clipboard.writeText`;
+when the key needs one; `configSourceLabel` shows the source `set` as
+`--set`). `#config-copy` writes `configText` (skycue.toml text: a `[table]`
+header where the table changes, each key preceded by a `# key: source[,
+restart]` comment line so the text parses as it is; `tomlValue` returns null
+for a value skycue.toml cannot hold, which is left as a comment) with
+`navigator.clipboard.writeText`;
 `#config-copy-status` says `Copied`, or `Copy failed` with the text shown
 selected in the read-only `#config-copy-text`. Keys, values and paths are
 set with `textContent`.

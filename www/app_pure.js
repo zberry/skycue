@@ -34,7 +34,7 @@
   }
 
   // Elevation in degrees of a target seen from the receiver; altitudes in
-  // metres (the receiver's is RECEIVER_ALT_M + ANTENNA_HEIGHT_M).
+  // metres (the receiver's is receiver.alt_m + receiver.antenna_height_m).
   function elevationAtDistance(dM, dhM) {
     return Math.atan2(dhM - dM * dM / (2 * EFFECTIVE_RADIUS_M), dM) / DEG;
   }
@@ -330,17 +330,38 @@
   }
 
   // ---- Config tab ----
-  // GET /api/config's keys in the tab's tables, in this order; a key no
-  // group names (one added to skycued later) goes to a trailing Other.
+  // GET /api/config's keys (the dotted names of skycue.toml) in the tab's
+  // tables, in this order; a key no group names (one added to skycued later)
+  // goes to a trailing Other. Each table's keys sit together, so configText
+  // writes every [table] header once.
   var CONFIG_GROUPS = [
-    ['Receiver site', ['RECEIVER_LAT', 'RECEIVER_LON', 'RECEIVER_ALT_M', 'ANTENNA_HEIGHT_M']],
-    ['Decoders', ['SDR_1090_SERIAL', 'SDR_978_SERIAL', 'GAIN_1090', 'GAIN_978', 'DUMP978_RAW_PORT', 'DUMP978_JSON_PORT', 'READSB_JSON_PORT', 'READSB_BEAST_PORT', 'TRACK_DECODER', 'INPUTS_FILE']],
-    ['Cue outputs', ['CUE_TCP_PORT', 'CUE_TCP_CONNECT', 'CUE_UDP_TARGETS', 'MIN_INTERVAL_S', 'MAX_INTERVAL_S', 'TRACK_TIMEOUT_S', 'KEYFRAME_INTERVAL_S']],
-    ['Recording', ['RECORD_DIR', 'RECORD_FORMATS', 'RECORD_MAX_GB', 'RECORD_RAW']],
-    ['Filters', ['MAX_RANGE_NM', 'MIN_ELEVATION_DEG', 'ALLOW_LIST_FILE', 'BLOCK_LIST_FILE']],
-    ['Web', ['WEB_BIND', 'WEB_PORT', 'TRAIL_SECONDS']],
-    ['Statistics', ['STATS_FILE', 'STATS_AIRCRAFT_MAX', 'STATS_SAVE_S']],
-    ['FIS-B', ['FISB_ENABLE', 'FISB_EXPERIMENTAL', 'LOCATIONS_FILE']]];
+    ['Receiver site', ['receiver.lat', 'receiver.lon', 'receiver.alt_m', 'receiver.antenna_height_m']],
+    ['Decoders', ['sdr.serial_1090', 'sdr.serial_978', 'sdr.gain_1090', 'sdr.gain_978', 'inputs.file', 'inputs.decoder',
+      'inputs.readsb.enable', 'inputs.readsb.host', 'inputs.readsb.json_port', 'inputs.readsb.beast_port',
+      'inputs.dump978.enable', 'inputs.dump978.host', 'inputs.dump978.raw_port', 'inputs.dump978.json_port']],
+    ['Cue outputs', ['cues.tcp_port', 'cues.tcp_connect', 'cues.udp_targets', 'cues.min_interval_s', 'cues.max_interval_s', 'cues.track_timeout_s', 'cues.keyframe_interval_s']],
+    ['Recording', ['recording.dir', 'recording.formats', 'recording.max_gb', 'recording.raw']],
+    ['Filters', ['filters.max_range_nm', 'filters.min_elevation_deg', 'filters.allow_list_file', 'filters.block_list_file']],
+    ['Web', ['web.bind', 'web.port', 'web.trail_seconds']],
+    ['Statistics', ['stats.file', 'stats.aircraft_max', 'stats.save_s']],
+    ['FIS-B', ['fisb.enable', 'fisb.experimental']],
+    ['Paths', ['paths.state_dir', 'paths.map_dir', 'paths.locations_file']]];
+
+  // How configText writes a key's value (the API gives every value as text):
+  // 'num' a number, 'bool' true/false, 'strs' a list of words (the entries
+  // separated by spaces); any other key is a string.
+  var CONFIG_TYPES = {
+    'receiver.lat': 'num', 'receiver.lon': 'num', 'receiver.alt_m': 'num', 'receiver.antenna_height_m': 'num',
+    'inputs.readsb.enable': 'bool', 'inputs.readsb.json_port': 'num', 'inputs.readsb.beast_port': 'num',
+    'inputs.dump978.enable': 'bool', 'inputs.dump978.raw_port': 'num', 'inputs.dump978.json_port': 'num',
+    'cues.tcp_port': 'num', 'cues.tcp_connect': 'strs', 'cues.udp_targets': 'strs', 'cues.min_interval_s': 'num',
+    'cues.max_interval_s': 'num', 'cues.track_timeout_s': 'num', 'cues.keyframe_interval_s': 'num',
+    'filters.max_range_nm': 'num', 'filters.min_elevation_deg': 'num', 'web.port': 'num', 'web.trail_seconds': 'num',
+    'recording.formats': 'strs', 'recording.raw': 'bool', 'recording.max_gb': 'num',
+    'fisb.enable': 'bool', 'fisb.experimental': 'bool', 'stats.aircraft_max': 'num', 'stats.save_s': 'num'};
+
+  // The label of a /api/config source: --set is "set" in the JSON.
+  function configSourceLabel(source) { return source === 'set' ? '--set' : source; }
 
   // [{group, rows}] in CONFIG_GROUPS order, each group's rows in its key
   // order; groups with no key are left out.
@@ -376,41 +397,66 @@
   function daemonLocationsText(d) {
     var l = d.locations || {};
     var learned = (l.learned || 0) + ' learned, ' + (l.learned_path ? 'kept in ' + l.learned_path : 'not saved this run');
-    var op = !l.operator_path ? 'no LOCATIONS_FILE'
+    var op = !l.operator_path ? 'no paths.locations_file'
       : (l.operator || 0) + ' from ' + l.operator_path +
         (l.operator_rejected ? ', ' + l.operator_rejected + ' lines rejected' : '') +
         (l.operator_overflow ? ', ' + l.operator_overflow + ' over the cap' : '');
     return [learned, op];
   }
 
-  // A value as skycue.conf spells it, the same rules as conf_rewrite.cpp
-  // quoteValue: bare when every character is one of the grammar's unquoted
-  // ones, else "..." when it has none of " $ ` \, else '...' when it has no
-  // '; null when the grammar cannot hold it (both kinds, or a line break).
-  function confValue(v) {
-    if (/[\r\n]/.test(v)) return null;
-    if (/^[A-Za-z0-9_.,:/+@%=-]*$/.test(v)) return v;
-    if (!/["$`\\]/.test(v)) return '"' + v + '"';
-    if (v.indexOf("'") < 0) return "'" + v + "'";
-    return null;
+  // A string as a TOML basic string, escaped the way toml_lite reads it;
+  // null when it holds a NUL (which skycue.toml cannot).
+  function tomlString(v) {
+    if (v.indexOf('\u0000') >= 0) return null;
+    return '"' + v.replace(/[\\"\u0000-\u001f\u007f]/g, function (c) {
+      if (c === '\\') return '\\\\';
+      if (c === '"') return '\\"';
+      if (c === '\n') return '\\n';
+      if (c === '\t') return '\\t';
+      if (c === '\r') return '\\r';
+      return '\\u' + ('0000' + c.charCodeAt(0).toString(16).toUpperCase()).slice(-4);
+    }) + '"';
   }
 
-  // The whole configuration as skycue.conf text (the Config tab's copy):
-  // a `# <group>` line before each group, and before each key a comment
-  // with its source and whether it needs a restart, so every line is one
-  // parseConfigText and skycued accept. A value the grammar cannot
-  // hold is left as a comment saying so.
+  // The value text of `key` as a TOML value (see CONFIG_TYPES); null when it
+  // cannot be written: a number or boolean that is not one, or a NUL.
+  function tomlValue(key, v) {
+    var type = CONFIG_TYPES[key] || 'str';
+    if (type === 'num') return /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(v) ? v : null;
+    if (type === 'bool') return v === 'true' || v === 'false' ? v : null;
+    if (type === 'strs') {
+      var words = v.split(/\s+/).filter(function (w) { return w !== ''; }).map(tomlString);
+      return words.indexOf(null) >= 0 ? null : '[' + words.join(', ') + ']';
+    }
+    return tomlString(v);
+  }
+
+  // The whole configuration as skycue.toml text (the Config tab's copy):
+  // a `# <group>` line before each group, a [table] header where the table
+  // changes, and before each key a comment with its source and whether it
+  // needs a restart, so the text is a skycue.toml skycued accepts. A key that
+  // cannot be written (or whose table was written before, or that is in no
+  // table) is left as a comment saying so.
   function configText(cfg) {
     var d = cfg.daemon || {}, out = '# ' + d.version + ', started ' + d.started + '\n';
+    var table = null, seen = {};
     groupConfig(cfg.keys || []).forEach(function (g) {
       out += '# ' + g.group + '\n';
       g.rows.forEach(function (r) {
-        var v = String(r.value), q = confValue(v);
-        out += '# ' + r.key + ': ' + r.source + (r.restart ? ', restart' : '') + '\n';
-        out += q === null
-          ? '# ' + r.key + ' cannot be written in skycue.conf (it holds both \' and one of " $ ` \\, or a line break): ' +
-            v.replace(/[\r\n]+/g, ' ') + '\n'
-          : r.key + '=' + q + '\n';
+        var v = String(r.value), q = tomlValue(r.key, v), dot = r.key.lastIndexOf('.');
+        var t = dot < 0 ? null : r.key.slice(0, dot), name = r.key.slice(dot + 1);
+        var note = '# ' + r.key + ': ' + configSourceLabel(r.source) + (r.restart ? ', restart' : '') + '\n';
+        if (q === null || t === null || (t !== table && seen[t])) {
+          out += note + '# ' + r.key + ' cannot be written in skycue.toml here: ' + v.replace(/[\r\n]+/g, ' ') + '\n';
+          return;
+        }
+        if (t !== table) {
+          out += '[' + t + ']\n';
+          table = t;
+          seen[t] = true;
+        }
+        out += note;
+        out += name + ' = ' + q + '\n';
       });
     });
     return out;
@@ -2039,7 +2085,8 @@
     dropRemovesMarker: dropRemovesMarker,
     CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
     filterHistoryRows: filterHistoryRows,
-    CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText, confValue: confValue,
+    CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText, tomlValue: tomlValue,
+    configSourceLabel: configSourceLabel,
     daemonModeText: daemonModeText, daemonLocationsText: daemonLocationsText,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,
     BINS_PER_BLOCK: BINS_PER_BLOCK, expandRle: expandRle, dbzColor: dbzColor, SHAPE_COLORS: SHAPE_COLORS,

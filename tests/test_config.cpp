@@ -151,6 +151,23 @@ BOOST_AUTO_TEST_CASE(example_matches_the_parser_fixture)
     BOOST_TEST(readExample() == slurp(std::string(SKYCUE_FIXTURE_DIR) + "/skycue_example.toml"));
 }
 
+BOOST_AUTO_TEST_CASE(config_copy_text_parses)
+{
+    // What the web Config tab's "Copy as text" writes (tests/js/app_pure.test.js
+    // checks the text against this file).
+    const Config c = parseConfigText(slurp(std::string(SKYCUE_FIXTURE_DIR) + "/config-copy.toml"), "config-copy.toml");
+    BOOST_TEST(c.receiver_lat == 38.9);
+    BOOST_TEST(c.receiver_lon == -77.0);
+    BOOST_TEST(c.sdr_1090_serial == "");
+    BOOST_TEST(c.cue_udp_targets.size() == 2u);
+    BOOST_TEST(c.cue_udp_targets[1].first == "10.0.0.2");
+    BOOST_TEST(c.record_dir == "/srv/sky cue/rec");
+    BOOST_TEST(c.max_range_nm == 20.0);
+    BOOST_TEST(c.allow_list_file == "allow \"main\" $1.txt");
+    BOOST_TEST(c.block_list_file == "it's $HOME.txt");
+    BOOST_TEST(c.locations_file == "o'hare locations.csv");
+}
+
 BOOST_AUTO_TEST_CASE(example_parses_with_defaults)
 {
     // The example's own position is 0.0 / 0.0, which is refused; set it by --set.

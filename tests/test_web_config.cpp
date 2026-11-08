@@ -108,7 +108,11 @@ struct ConfigFx {
     // `setup`, when given, runs first with the temp dir: it may write files
     // there and returns more skycue.toml entries (dotted key -> TOML literal).
     using ConfMap = std::map<std::string, std::string>;
-    explicit ConfigFx(const std::function<ConfMap(const std::string& dir)>& setup = nullptr)
+    // `set_args` and `env` are the --set list and the SKYCUE_* variables the
+    // daemon runs with.
+    explicit ConfigFx(const std::function<ConfMap(const std::string& dir)>& setup = nullptr,
+                      const std::vector<std::string>& set_args = {},
+                      const std::map<std::string, std::string>& env = {})
     {
         conf = tmp.path + "/skycue.toml";
         rec = tmp.path + "/rec";
@@ -119,7 +123,9 @@ struct ConfigFx {
             for (const auto& [k, v] : setup(tmp.path))
                 kv[k] = v;
         std::ofstream(conf) << skycue_test::tomlConf(kv);
-        fx = std::make_unique<EngineFx>(skycued::parseConfigFile(conf), fakeSource(src), 10s, rec);
+        const std::string overrides = skycued::overridesPathOf(conf, set_args, env);
+        fx = std::make_unique<EngineFx>(skycued::parseConfigFile(conf, overrides, set_args, env), fakeSource(src), 10s,
+                                        rec);
         info.version = "skycued test";
         info.started = std::chrono::system_clock::now();
         info.config_path = conf;
@@ -127,10 +133,11 @@ struct ConfigFx {
         info.map_dir = tmp.path + "/maps";
         info.log_level = "info";
         info.inputs_path = inputs_file;
-        info.cli_overrides = {{"WEB_PORT", "0"}};
+        info.cli_overrides = {{"web.port", "0"}};
         info.recorders = {{"received", fx->received.get()}, {"sent", fx->sent.get()}, {"fisb", nullptr}};
         fx->t.call([&] {
             rc = std::make_unique<RuntimeConfig>(fx->t.io, conf, *fx->engine);
+            rc->setLayers(set_args, env);
             rc->load();
             WebConfig wc;
             wc.port = 0;
@@ -155,8 +162,7 @@ struct ConfigFx {
 
 }  // namespace
 
-// re-enabled in Task 4: /api/config keys are the dotted names
-BOOST_AUTO_TEST_CASE(config_json_sources_and_values, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(config_json_sources_and_values)
 {
     ConfigFx f;
     const auto r = request(f.port, http::verb::get, "/api/config");
@@ -164,11 +170,11 @@ BOOST_AUTO_TEST_CASE(config_json_sources_and_values, *boost::unit_test::disabled
     const auto config = parsed(r.body);
     const auto keys = keysOf(config);
     BOOST_TEST(keys.order == skycued::knownConfigKeys(), boost::test_tools::per_element());
-    expectKey(keys, "RECEIVER_LAT", "38.9", "conf", true);
-    expectKey(keys, "MAX_RANGE_NM", "120", "conf", false);
-    expectKey(keys, "MIN_INTERVAL_S", "1", "default", true);
-    expectKey(keys, "WEB_PORT", "0", "cli", true);
-    expectKey(keys, "RECORD_FORMATS", "csv jsonl", "default", true);
+    expectKey(keys, "receiver.lat", "38.9", "conf", true);
+    expectKey(keys, "filters.max_range_nm", "120", "conf", false);
+    expectKey(keys, "cues.min_interval_s", "1", "default", true);
+    expectKey(keys, "web.port", "0", "flag", true);
+    expectKey(keys, "recording.formats", "csv jsonl", "default", true);
 
     const auto daemon = config.getObject("daemon");
     BOOST_REQUIRE(daemon);
@@ -189,8 +195,7 @@ BOOST_AUTO_TEST_CASE(config_json_sources_and_values, *boost::unit_test::disabled
         BOOST_TEST(name.find('/') == std::string::npos, name);
 }
 
-// re-enabled in Task 4: /api/config keys are the dotted names and the overrides file is skycue.overrides.toml
-BOOST_AUTO_TEST_CASE(overrides_source_reported, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(overrides_source_reported)
 {
     ConfigFx f([](const std::string& dir) {
         std::ofstream(dir + "/skycue.overrides.toml") << "[filters]\nmax_range_nm = 90\n";
@@ -199,9 +204,9 @@ BOOST_AUTO_TEST_CASE(overrides_source_reported, *boost::unit_test::disabled())
     auto r = request(f.port, http::verb::get, "/api/config");
     BOOST_TEST_REQUIRE(r.status == 200u, r.body);
     auto config = parsed(r.body);
-    expectKey(keysOf(config), "MAX_RANGE_NM", "90", "overrides", false);
-    expectKey(keysOf(config), "MIN_ELEVATION_DEG", "0", "default", false);
-    expectKey(keysOf(config), "STATE_DIR", f.tmp.path, "conf", true);
+    expectKey(keysOf(config), "filters.max_range_nm", "90", "overrides", false);
+    expectKey(keysOf(config), "filters.min_elevation_deg", "0", "default", false);
+    expectKey(keysOf(config), "paths.state_dir", f.tmp.path, "conf", true);
     auto daemon = config.getObject("daemon");
     BOOST_REQUIRE(daemon);
     BOOST_TEST(daemon->getString("overrides_path").value_or("?") == f.tmp.path + "/skycue.overrides.toml");
@@ -211,22 +216,20 @@ BOOST_AUTO_TEST_CASE(overrides_source_reported, *boost::unit_test::disabled())
     r = request(f.port, http::verb::get, "/api/config");
     BOOST_TEST_REQUIRE(r.status == 200u, r.body);
     config = parsed(r.body);
-    expectKey(keysOf(config), "MAX_RANGE_NM", "20", "overlay", false);
+    expectKey(keysOf(config), "filters.max_range_nm", "20", "runtime", false);
 }
 
-// re-enabled in Task 4: overrides_path is reported beside the conf even without state_dir
-BOOST_AUTO_TEST_CASE(overrides_path_empty_without_state_dir, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(overrides_path_beside_the_conf_without_state_dir)
 {
     ConfigFx f;
     const auto r = request(f.port, http::verb::get, "/api/config");
     BOOST_TEST_REQUIRE(r.status == 200u, r.body);
     const auto daemon = parsed(r.body).getObject("daemon");
     BOOST_REQUIRE(daemon);
-    BOOST_TEST(daemon->getString("overrides_path").value_or("?") == "");
+    BOOST_TEST(daemon->getString("overrides_path").value_or("?") == f.tmp.path + "/skycue.overrides.toml");
 }
 
-// re-enabled in Task 4: /api/config keys are the dotted names
-BOOST_AUTO_TEST_CASE(overlay_source_after_put, *boost::unit_test::disabled())
+BOOST_AUTO_TEST_CASE(overlay_source_after_put)
 {
     ConfigFx f;
     const auto put = request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":20}");
@@ -234,11 +237,40 @@ BOOST_AUTO_TEST_CASE(overlay_source_after_put, *boost::unit_test::disabled())
     const auto r = request(f.port, http::verb::get, "/api/config");
     BOOST_TEST_REQUIRE(r.status == 200u, r.body);
     const auto config = parsed(r.body);
-    expectKey(keysOf(config), "MAX_RANGE_NM", "20", "overlay", false);
-    expectKey(keysOf(config), "MIN_ELEVATION_DEG", "0", "default", false);
+    expectKey(keysOf(config), "filters.max_range_nm", "20", "runtime", false);
+    expectKey(keysOf(config), "filters.min_elevation_deg", "0", "default", false);
     const auto daemon = config.getObject("daemon");
     BOOST_REQUIRE(daemon);
     BOOST_TEST(daemon->getBool("overlay_active").value_or(false) == true);
+}
+
+BOOST_AUTO_TEST_CASE(api_config_dotted_keys_and_sources)
+{
+    // One key from each source: conf, overrides, env, --set, flag, runtime, and a default.
+    ConfigFx f(
+        [](const std::string& dir) {
+            std::ofstream(dir + "/skycue.overrides.toml") << "[filters]\nmin_elevation_deg = 4\n";
+            return ConfigFx::ConfMap{{"paths.state_dir", "\"" + dir + "\""}, {"receiver.alt_m", "30"}};
+        },
+        {"stats.save_s=60"}, {{"SKYCUE_WEB_TRAIL_SECONDS", "300"}});
+    auto config = parsed(request(f.port, http::verb::get, "/api/config").body);
+    auto keys = keysOf(config);
+    BOOST_TEST(keys.order == skycued::knownConfigKeys(), boost::test_tools::per_element());
+    for (const auto& name : keys.order)
+        BOOST_TEST(name.find('.') != std::string::npos, name);  // dotted, never FOO_BAR
+    expectKey(keys, "receiver.alt_m", "30", "conf", true);
+    expectKey(keys, "filters.min_elevation_deg", "4", "overrides", false);
+    expectKey(keys, "web.trail_seconds", "300", "env", true);
+    expectKey(keys, "stats.save_s", "60", "set", true);
+    expectKey(keys, "web.port", "0", "flag", true);
+    expectKey(keys, "cues.keyframe_interval_s", "10", "default", true);
+    const auto put = request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":20}");
+    BOOST_TEST_REQUIRE(put.status == 200u, put.body);
+    config = parsed(request(f.port, http::verb::get, "/api/config").body);
+    keys = keysOf(config);
+    expectKey(keys, "filters.max_range_nm", "20", "runtime", false);
+    expectKey(keys, "web.trail_seconds", "300", "env", true);
+    expectKey(keys, "stats.save_s", "60", "set", true);
 }
 
 BOOST_AUTO_TEST_CASE(config_without_daemon_info_500)

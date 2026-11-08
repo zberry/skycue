@@ -263,7 +263,7 @@ become regression tests.
 | `seeds/pingstation/seed-11.bin` (mode 2) | the generated block `kSampleBlock` of `tests/test_cat021.cpp` (51 bytes), edition byte 2.5 |
 | `seeds/pingstation/seed-12.bin` (mode 2), `seed-13.bin` (mode 3) | two vectors built on the generated block (`kSampleBlock`), edition byte 2.5: the datagram of `two_blocks_per_datagram` (the block, then a block of two records with address 000002); the stream of `framer_resync_after_garbage` (`00 15 ff 7e`, the block) with the CAT 48 block of `framer_skips_other_category_in_sync` and the block again, other categories accepted |
 | `seeds/config_files/seed-1.toml` (mode 0) | `packaging/skycue.toml.example` with `lat = 51.5`, `lon = -0.12` (the values of `parses_example_file` in `tests/test_config.cpp`) |
-| `seeds/config_files/seed-2.conf` (mode 0) | `tests/fixtures/config-copy.conf` |
+| `seeds/config_files/seed-2.toml` (mode 0) | `tests/fixtures/config-copy.toml` |
 | `seeds/config_files/seed-3.json` (mode 1) | the inputs file of `inputs_file_round_trip` in `tests/test_input_def.cpp` (`ps-north`, `ps-south`, `rb2`; readsb on, dump978 off) |
 | `seeds/config_files/seed-4.json` (mode 2) | the overlay of `tests/test_runtime_config.cpp` (line 195) with a `min_elevation_deg`, without the unknown key |
 | `seeds/config_files/seed-5.json` (mode 3) | a `fisb-locations.json` of three ids (`KPRG` from `tests/test_location_index.cpp`, a centroid with count 0) |

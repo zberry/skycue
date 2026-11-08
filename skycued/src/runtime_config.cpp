@@ -1,9 +1,9 @@
 #include "runtime_config.hpp"
 
-#include "conf_rewrite.hpp"
 #include "engine.hpp"
 #include "json_lite.hpp"
 #include "log.hpp"
+#include "toml_lite.hpp"
 
 #include <unistd.h>
 
@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <map>
 #include <set>
@@ -129,7 +130,7 @@ std::string readFile(const std::string& path)
 
 IdList loadList(const std::string& path) { return path.empty() ? IdList() : IdList::loadFile(path); }
 
-// In STATE_DIR when it is set, else next to skycue.conf.
+// In paths.state_dir when it is set, else next to skycue.toml.
 std::string overlayPathFor(const std::string& conf_path, const std::string& state_dir)
 {
     const std::string dir = state_dir.empty() ? dirOf(conf_path) : state_dir;
@@ -213,48 +214,50 @@ struct RestartKey {
 
 #define SKYCUED_RESTART_KEY(KEY, field) {KEY, [](const Config& a, const Config& b) { return a.field != b.field; }}
 
-// Every skycue.conf key but the four the Engine applies live (MAX_RANGE_NM,
-// MIN_ELEVATION_DEG, ALLOW_LIST_FILE, BLOCK_LIST_FILE), in knownConfigKeys() order.
+// Every skycue.toml key but the four the Engine applies live
+// (filters.max_range_nm, filters.min_elevation_deg, filters.allow_list_file,
+// filters.block_list_file), in knownConfigKeys() order.
 constexpr RestartKey kRestartKeys[] = {
-    SKYCUED_RESTART_KEY("RECEIVER_LAT", receiver_lat),
-    SKYCUED_RESTART_KEY("RECEIVER_LON", receiver_lon),
-    SKYCUED_RESTART_KEY("RECEIVER_ALT_M", receiver_alt_m),
-    SKYCUED_RESTART_KEY("ANTENNA_HEIGHT_M", antenna_height_m),
-    SKYCUED_RESTART_KEY("SDR_1090_SERIAL", sdr_1090_serial),
-    SKYCUED_RESTART_KEY("SDR_978_SERIAL", sdr_978_serial),
-    SKYCUED_RESTART_KEY("GAIN_1090", gain_1090),
-    SKYCUED_RESTART_KEY("GAIN_978", gain_978),
-    SKYCUED_RESTART_KEY("DUMP978_RAW_PORT", dump978_raw_port),
-    SKYCUED_RESTART_KEY("DUMP978_JSON_PORT", dump978_json_port),
-    SKYCUED_RESTART_KEY("READSB_JSON_PORT", readsb_json_port),
-    SKYCUED_RESTART_KEY("READSB_BEAST_PORT", readsb_beast_port),
-    SKYCUED_RESTART_KEY("TRACK_DECODER", track_decoder),
-    SKYCUED_RESTART_KEY("READSB_HOST", readsb_host),
-    SKYCUED_RESTART_KEY("DUMP978_HOST", dump978_host),
-    SKYCUED_RESTART_KEY("DUMP978_ENABLE", dump978_enable),
-    SKYCUED_RESTART_KEY("WEB_PORT", web_port),
-    SKYCUED_RESTART_KEY("CUE_TCP_PORT", cue_tcp_port),
-    SKYCUED_RESTART_KEY("CUE_TCP_CONNECT", cue_tcp_connect_targets),
-    SKYCUED_RESTART_KEY("CUE_UDP_TARGETS", cue_udp_targets),
-    SKYCUED_RESTART_KEY("RECORD_DIR", record_dir),
-    SKYCUED_RESTART_KEY("RECORD_FORMATS", record_formats),
-    SKYCUED_RESTART_KEY("MIN_INTERVAL_S", min_interval_s),
-    SKYCUED_RESTART_KEY("MAX_INTERVAL_S", max_interval_s),
-    SKYCUED_RESTART_KEY("TRACK_TIMEOUT_S", track_timeout_s),
-    SKYCUED_RESTART_KEY("KEYFRAME_INTERVAL_S", keyframe_interval_s),
-    SKYCUED_RESTART_KEY("RECORD_RAW", record_raw),
-    SKYCUED_RESTART_KEY("WEB_BIND", web_bind),
-    SKYCUED_RESTART_KEY("RECORD_MAX_GB", record_max_gb),
-    SKYCUED_RESTART_KEY("TRAIL_SECONDS", trail_seconds),
-    SKYCUED_RESTART_KEY("FISB_ENABLE", fisb_enable),
-    SKYCUED_RESTART_KEY("FISB_EXPERIMENTAL", fisb_experimental),
-    SKYCUED_RESTART_KEY("STATE_DIR", state_dir),
-    SKYCUED_RESTART_KEY("MAP_DIR", map_dir),
-    SKYCUED_RESTART_KEY("INPUTS_FILE", inputs_file),
-    SKYCUED_RESTART_KEY("LOCATIONS_FILE", locations_file),
-    SKYCUED_RESTART_KEY("STATS_FILE", stats_file),
-    SKYCUED_RESTART_KEY("STATS_AIRCRAFT_MAX", stats_aircraft_max),
-    SKYCUED_RESTART_KEY("STATS_SAVE_S", stats_save_s),
+    SKYCUED_RESTART_KEY("receiver.lat", receiver_lat),
+    SKYCUED_RESTART_KEY("receiver.lon", receiver_lon),
+    SKYCUED_RESTART_KEY("receiver.alt_m", receiver_alt_m),
+    SKYCUED_RESTART_KEY("receiver.antenna_height_m", antenna_height_m),
+    SKYCUED_RESTART_KEY("sdr.serial_1090", sdr_1090_serial),
+    SKYCUED_RESTART_KEY("sdr.serial_978", sdr_978_serial),
+    SKYCUED_RESTART_KEY("sdr.gain_1090", gain_1090),
+    SKYCUED_RESTART_KEY("sdr.gain_978", gain_978),
+    SKYCUED_RESTART_KEY("inputs.dump978.raw_port", dump978_raw_port),
+    SKYCUED_RESTART_KEY("inputs.dump978.json_port", dump978_json_port),
+    SKYCUED_RESTART_KEY("inputs.readsb.json_port", readsb_json_port),
+    SKYCUED_RESTART_KEY("inputs.readsb.beast_port", readsb_beast_port),
+    SKYCUED_RESTART_KEY("inputs.decoder", track_decoder),
+    SKYCUED_RESTART_KEY("inputs.readsb.host", readsb_host),
+    SKYCUED_RESTART_KEY("inputs.dump978.host", dump978_host),
+    SKYCUED_RESTART_KEY("inputs.readsb.enable", inputs_readsb_enable),
+    SKYCUED_RESTART_KEY("inputs.dump978.enable", dump978_enable),
+    SKYCUED_RESTART_KEY("web.port", web_port),
+    SKYCUED_RESTART_KEY("cues.tcp_port", cue_tcp_port),
+    SKYCUED_RESTART_KEY("cues.tcp_connect", cue_tcp_connect_targets),
+    SKYCUED_RESTART_KEY("cues.udp_targets", cue_udp_targets),
+    SKYCUED_RESTART_KEY("recording.dir", record_dir),
+    SKYCUED_RESTART_KEY("recording.formats", record_formats),
+    SKYCUED_RESTART_KEY("cues.min_interval_s", min_interval_s),
+    SKYCUED_RESTART_KEY("cues.max_interval_s", max_interval_s),
+    SKYCUED_RESTART_KEY("cues.track_timeout_s", track_timeout_s),
+    SKYCUED_RESTART_KEY("cues.keyframe_interval_s", keyframe_interval_s),
+    SKYCUED_RESTART_KEY("recording.raw", record_raw),
+    SKYCUED_RESTART_KEY("web.bind", web_bind),
+    SKYCUED_RESTART_KEY("recording.max_gb", record_max_gb),
+    SKYCUED_RESTART_KEY("web.trail_seconds", trail_seconds),
+    SKYCUED_RESTART_KEY("fisb.enable", fisb_enable),
+    SKYCUED_RESTART_KEY("fisb.experimental", fisb_experimental),
+    SKYCUED_RESTART_KEY("paths.state_dir", state_dir),
+    SKYCUED_RESTART_KEY("paths.map_dir", map_dir),
+    SKYCUED_RESTART_KEY("inputs.file", inputs_file),
+    SKYCUED_RESTART_KEY("paths.locations_file", locations_file),
+    SKYCUED_RESTART_KEY("stats.file", stats_file),
+    SKYCUED_RESTART_KEY("stats.aircraft_max", stats_aircraft_max),
+    SKYCUED_RESTART_KEY("stats.save_s", stats_save_s),
 };
 
 #undef SKYCUED_RESTART_KEY
@@ -402,6 +405,7 @@ RuntimeConfig::RuntimeConfig(boost::asio::io_context& io, std::string conf_path,
     : conf_path_(std::move(conf_path)),
       overlay_path_(overlayPathFor(conf_path_, "")),
       engine_(engine),
+      env_(environmentOverrides()),
       conf_watch_(conf_path_),
       overlay_watch_(overlay_path_),
       timer_(io)
@@ -424,21 +428,30 @@ void RuntimeConfig::load()
 {
     // Stamps before reading: an edit in between is then seen again, never missed.
     conf_watch_.accept();
-    // skycue.conf alone says where the overrides file is (its STATE_DIR, from
-    // the grammar pass only: its values may be valid only with the
-    // overrides); then both are read once the overrides' stamp is taken.
-    // Again if STATE_DIR was edited in between.
-    std::string overrides = skycued::overridesPathOf(conf_path_);
+    // skycue.toml, the environment and --set say where the overrides file is
+    // (paths.state_dir, from the grammar pass only: the main file's values may
+    // be valid only with the overrides); then all are read once the overrides'
+    // stamp is taken. Again if paths.state_dir was edited in between.
+    std::string overrides = skycued::overridesPathOf(conf_path_, set_args_, env_);
     for (;;) {
         overrides_watch_ = SettledFile(overrides);
         overrides_watch_.accept();
-        file_conf_ = parseConfigFile(conf_path_, overrides);
+        file_conf_ = parseConfigFile(conf_path_, overrides, set_args_, env_);
         if (skycued::overridesPath(file_conf_) == overrides)
             break;
         overrides = skycued::overridesPath(file_conf_);
     }
+    files_only_ = file_conf_;
+    if (!file_conf_.sources.empty()) {
+        try {
+            files_only_ = parseConfigFile(conf_path_, overrides, {}, {});
+        } catch (const std::exception& e) {
+            // Valid only with the environment or --set: nothing to compare edits with.
+            LOG_DEBUG("runtime: the files alone are not a valid configuration: " << e.what());
+        }
+    }
     running_ = file_conf_;
-    // The overlay's directory follows STATE_DIR as parsed now (a restart key).
+    // The overlay's directory follows paths.state_dir as parsed now (a restart key).
     overlay_path_ = overlayPathFor(conf_path_, running_.state_dir);
     overlay_watch_ = SettledFile(overlay_path_);
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
@@ -448,11 +461,11 @@ void RuntimeConfig::load()
     }
     overlay_watch_.accept();
     overlay_ = Overlay();
-    // An install that moved to STATE_DIR: the overlay next to the config is
+    // An install that moved to paths.state_dir: the overlay next to the config is
     // no longer read, and its changes look lost.
     const std::string beside_conf = overlayPathFor(conf_path_, "");
     if (!overlay_watch_.stamp().exists && beside_conf != overlay_path_ && FileStamp::of(beside_conf).exists)
-        LOG_WARN(beside_conf << ": not read: STATE_DIR is set, so the overlay is " << overlay_path_
+        LOG_WARN(beside_conf << ": not read: paths.state_dir is set, so the overlay is " << overlay_path_
                              << " (move the file there to keep its changes)");
     if (overlay_watch_.stamp().exists) {
         try {
@@ -546,6 +559,44 @@ void RuntimeConfig::writeFile(SettledFile& file, const std::string& text)
     file.accept();
 }
 
+namespace {
+
+// "2026-11-08T12:00:00Z"
+std::string isoUtcNow()
+{
+    const std::time_t t = std::time(nullptr);
+    std::tm tm{};
+    ::gmtime_r(&t, &tm);
+    char buf[32];
+    return std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm) == 0 ? std::string() : std::string(buf);
+}
+
+}  // namespace
+
+void RuntimeConfig::writeOverrides(const std::map<std::string, toml_lite::Value>& set)
+{
+    const std::string& path = overrides_watch_.path();
+    std::map<std::string, toml_lite::Value> values;
+    if (FileStamp::of(path).exists) {
+        // The filter keys it holds already stay; one that is not valid TOML is
+        // not overwritten blind.
+        for (const auto& [key, entry] : toml_lite::parse(readFile(path), path).entries)
+            if (std::find(overridesFileKeys().begin(), overridesFileKeys().end(), key) != overridesFileKeys().end())
+                values[key] = entry.value;
+    }
+    for (const auto& [key, value] : set)
+        values[key] = value;
+    std::string out = "# written by skycued " + isoUtcNow() + "; only filter keys; edits are picked up live\n\n[filters]\n";
+    for (const auto& key : overridesFileKeys()) {
+        const auto it = values.find(key);
+        if (it != values.end())
+            out += key.substr(key.find('.') + 1) + " = " + toml_lite::formatValue(it->second) + "\n";
+    }
+    // Never write a file skycued would refuse.
+    parseConfigLayers(readFile(conf_path_), conf_path_, out, path, set_args_, env_);
+    writeFile(overrides_watch_, out);
+}
+
 void RuntimeConfig::writeOverlay(const Overlay& overlay)
 {
     if (overlay.empty()) {
@@ -606,44 +657,22 @@ std::string RuntimeConfig::promoteToBaseline()
     bool conf_written = false;
     bool list_written[2] = {false, false};
 
-    std::map<std::string, std::string> values;
+    std::map<std::string, toml_lite::Value> values;
     if (next.max_range_nm)
-        values["MAX_RANGE_NM"] = formatRoundTrip(*next.max_range_nm);
+        values["filters.max_range_nm"] = *next.max_range_nm;
     if (next.min_elevation_deg)
-        values["MIN_ELEVATION_DEG"] = formatRoundTrip(*next.min_elevation_deg);
-    if (!values.empty() && running_.state_dir.empty()) {
-        try {
-            const std::string text = readFile(conf_path_);
-            const std::string out = conf_rewrite::rewriteKeys(text, values);
-            parseConfigText(out, conf_path_);  // never write a file skycued would refuse
-            if (out != text) {
-                writeFile(conf_watch_, out);
-                conf_written = true;
-            }
-            next.max_range_nm.reset();
-            next.min_elevation_deg.reset();
-        } catch (const std::exception& e) {
-            problems.push_back(std::string("skycue.conf not updated: ") + e.what());
-        }
-    } else if (!values.empty()) {
-        // STATE_DIR is set: skycue.conf (perhaps root's) is left alone.
+        values["filters.min_elevation_deg"] = *next.min_elevation_deg;
+    if (!values.empty()) {
         const std::string& path = overrides_watch_.path();
         try {
-            const std::string text = FileStamp::of(path).exists ? readFile(path) : std::string();
-            const std::string out = conf_rewrite::rewriteKeys(
-                text.empty() ? std::string("# Written by skycued (\"save as baseline\"); read after skycue.conf.\n")
-                             : text,
-                values);
-            // Never write a file skycued would refuse.
-            parseConfigLayers(readFile(conf_path_), conf_path_, out, path);
-            if (out != text) {
-                writeFile(overrides_watch_, out);
-                conf_written = true;
-            }
+            writeOverrides(values);
+            conf_written = true;
             next.max_range_nm.reset();
             next.min_elevation_deg.reset();
         } catch (const std::exception& e) {
-            problems.push_back(std::string(kOverridesFileName) + " not updated: " + e.what());
+            problems.push_back(std::string(kOverridesFileName) + " not updated: " + e.what() + "; it is " + path +
+                               ", in paths.state_dir when that is set (set paths.state_dir to a directory"
+                               " skycued can write)");
         }
     }
 
@@ -653,10 +682,10 @@ std::string RuntimeConfig::promoteToBaseline()
         auto& remove = allow ? next.allow_remove : next.block_remove;
         if (add.empty() && remove.empty())
             continue;
-        const char* key = allow ? "ALLOW_LIST_FILE" : "BLOCK_LIST_FILE";
+        const char* key = allow ? "filters.allow_list_file" : "filters.block_list_file";
         const std::string& path = listPath(kind);
         if (path.empty()) {
-            problems.push_back(std::string(key) + " is not set in skycue.conf: the " + (allow ? "allow" : "block") +
+            problems.push_back(std::string(key) + " is not set in skycue.toml: the " + (allow ? "allow" : "block") +
                                " list changes (" + std::to_string(add.size()) + " added, " +
                                std::to_string(remove.size()) + " removed) stay in " + kOverlayName);
             continue;
@@ -684,7 +713,7 @@ std::string RuntimeConfig::promoteToBaseline()
 
     // Read back what was written (and anything edited by hand meanwhile).
     if (conf_written)
-        reloadConf(running_.state_dir.empty() ? baseName(conf_path_) : std::string(kOverridesFileName));
+        reloadConf(kOverridesFileName);
     for (ListKind kind : {ListKind::allow, ListKind::block})
         if (list_written[kind == ListKind::allow ? 0 : 1])
             reloadList(kind);
@@ -753,8 +782,9 @@ void RuntimeConfig::reloadConf(const std::string& edited)
 {
     Config c;
     try {
-        // The overrides file of the running STATE_DIR (a changed one needs a restart).
-        c = parseConfigFile(conf_path_, overrides_watch_.path());
+        // The overrides file of the running paths.state_dir (a changed one needs
+        // a restart); the environment and --set stay above both files.
+        c = parseConfigFile(conf_path_, overrides_watch_.path(), set_args_, env_);
     } catch (const std::exception& e) {
         LOG_ERROR(e.what() << "; keeping the previous configuration");
         return;
@@ -770,15 +800,35 @@ void RuntimeConfig::reloadConf(const std::string& edited)
     // A filter value edited by hand that the overlay replaces changes nothing
     // the Engine runs with: say so, or the edit looks ignored.
     const std::pair<const char*, bool> overridden[] = {
-        {"MAX_RANGE_NM", c.max_range_nm != file_conf_.max_range_nm && overlay_.max_range_nm.has_value()},
-        {"MIN_ELEVATION_DEG",
+        {"filters.max_range_nm", c.max_range_nm != file_conf_.max_range_nm && overlay_.max_range_nm.has_value()},
+        {"filters.min_elevation_deg",
          c.min_elevation_deg != file_conf_.min_elevation_deg && overlay_.min_elevation_deg.has_value()},
     };
     for (const auto& o : overridden)
         if (o.second)
             LOG_WARN("runtime: " << o.first << " edited in " << edited << " but overridden by " << kOverlayName
                                  << " (use the UI or \"save as baseline\")");
-    // An edit of skycue.conf that the overrides file replaces changes nothing
+    // An edit of a filter key that the environment or --set sets changes
+    // nothing either: say which, or the edit looks ignored.
+    Config files = c;
+    if (!c.sources.empty()) {
+        try {
+            files = parseConfigFile(conf_path_, overrides_watch_.path(), {}, {});
+        } catch (const std::exception&) {
+            files = files_only_;  // valid only with the environment or --set: no comparison
+        }
+    }
+    for (const auto& src : c.sources) {
+        if ((src.source != "env" && src.source != "--set") ||
+            std::find(overridesFileKeys().begin(), overridesFileKeys().end(), src.key) == overridesFileKeys().end())
+            continue;
+        if (configValueText(files, src.key) != configValueText(files_only_, src.key))
+            LOG_WARN("runtime: " << src.key << " edited in " << edited << " but pinned by "
+                                 << (src.source == "env" ? envNameOf(src.key) : std::string("--set")) << " ("
+                                 << configValueText(c, src.key) << "); that value stays");
+    }
+    files_only_ = files;
+    // An edit of skycue.toml that the overrides file replaces changes nothing
     // either: one line per key, so the edit does not look ignored.
     if (edited == baseName(conf_path_))
         for (const auto& key : overridesFileKeys()) {
@@ -789,8 +839,8 @@ void RuntimeConfig::reloadConf(const std::string& edited)
                 LOG_INFO("runtime: " << key << " edited in " << edited << " but " << kOverridesFileName
                                      << " sets it (" << configValueText(c, key) << "); that value stays");
         }
-    // A relative list file resolves against STATE_DIR as running: a changed
-    // STATE_DIR is a restart key, so it does not move the lists before then.
+    // A relative list file resolves against paths.state_dir as running: a changed
+    // paths.state_dir is a restart key, so it does not move the lists before then.
     c.allow_list_path = listFilePath(running_.state_dir, c.allow_list_file);
     c.block_list_path = listFilePath(running_.state_dir, c.block_list_file);
     const Config old = file_conf_;
@@ -803,13 +853,14 @@ void RuntimeConfig::reloadConf(const std::string& edited)
     running_.block_list_path = c.block_list_path;
     // Whether the file sets a live key follows the file, like its value; the
     // overrides file holds live keys only.
-    for (const char* key : {"MAX_RANGE_NM", "MIN_ELEVATION_DEG", "ALLOW_LIST_FILE", "BLOCK_LIST_FILE"}) {
+    for (const auto& key : overridesFileKeys()) {
         if (c.file_keys.count(key))
             running_.file_keys.insert(key);
         else
             running_.file_keys.erase(key);
     }
     running_.override_keys = c.override_keys;
+    running_.sources = c.sources;
     for (ListKind kind : {ListKind::allow, ListKind::block}) {
         const bool allow = kind == ListKind::allow;
         if ((allow ? old.allow_list_path : old.block_list_path) == listPath(kind))

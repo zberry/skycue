@@ -82,18 +82,26 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
                                    .str());
 
     const auto& restart = restartConfigKeys();
+    std::map<std::string, std::string> layer;  // key -> "env" or "--set"
+    for (const auto& src : effective.sources)
+        if (src.source == "env" || src.source == "--set")
+            layer[src.key] = src.source == "env" ? "env" : "set";
     std::vector<std::string> keys;
     for (const auto& key : knownConfigKeys()) {
-        const bool from_overlay = (key == "MAX_RANGE_NM" && overlay.max_range_nm.has_value()) ||
-                                  (key == "MIN_ELEVATION_DEG" && overlay.min_elevation_deg.has_value());
-        const auto cli = info.cli_overrides.find(key);
+        const bool from_overlay = (key == "filters.max_range_nm" && overlay.max_range_nm.has_value()) ||
+                                  (key == "filters.min_elevation_deg" && overlay.min_elevation_deg.has_value());
+        const auto flag = info.cli_overrides.find(key);
+        const auto pinned = layer.find(key);
         std::string value, source;
         if (from_overlay) {
             value = configValueText(effective, key);
-            source = "overlay";
-        } else if (cli != info.cli_overrides.end()) {
-            value = cli->second;  // RuntimeConfig parsed the file alone
-            source = "cli";
+            source = "runtime";
+        } else if (flag != info.cli_overrides.end()) {
+            value = flag->second;  // RuntimeConfig parsed the files alone
+            source = "flag";
+        } else if (pinned != layer.end()) {
+            value = configValueText(effective, key);
+            source = pinned->second;
         } else {
             value = configValueText(effective, key);
             source = effective.override_keys.count(key) ? "overrides"

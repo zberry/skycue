@@ -1,36 +1,40 @@
 #pragma once
 
-// RuntimeConfig: the configuration skycued runs with, in three layers.
+// RuntimeConfig: the configuration skycued runs with, in these layers.
 //
-//   1. The baseline: skycue.conf, then (when STATE_DIR is set)
-//      skycue.overrides.conf in STATE_DIR, whose MAX_RANGE_NM,
-//      MIN_ELEVATION_DEG, ALLOW_LIST_FILE and BLOCK_LIST_FILE replace
-//      skycue.conf's; and the list files they name (an unset one is an
+//   1. The baseline: skycue.toml, then skycue.overrides.toml (in
+//      paths.state_dir when that is set, else beside skycue.toml), whose
+//      filters.max_range_nm, filters.min_elevation_deg, filters.allow_list_file
+//      and filters.block_list_file replace skycue.toml's; then the SKYCUE_*
+//      environment and --set, which stay above both files on every reload; and
+//      the list files the filters.*_list_file keys name (an unset one is an
 //      empty list).
-//   2. The runtime overlay, skycue.runtime.json in STATE_DIR (next to
-//      skycue.conf when STATE_DIR is unset): filter values that replace the
+//   2. The runtime overlay, skycue.runtime.json in paths.state_dir (next to
+//      skycue.toml when that is unset): filter values that replace the
 //      baseline's, and list entries added to or removed from the list files
 //      (schema in docs/web-api.md). The web UI changes only this layer
 //      (applyUi); it survives a restart.
 //   3. Effective = baseline with the overlay applied: each list is the file's
 //      entries, minus the overlay's `remove`, plus its `add`.
 //
-// promoteToBaseline ("save as baseline") writes the overlay into the
-// baseline files and clears it. That is the only time skycue.conf (STATE_DIR
-// unset) or skycue.overrides.conf (STATE_DIR set; skycue.conf is then never
-// written) is written.
+// promoteToBaseline ("save as baseline") writes the overlay's filter values
+// into skycue.overrides.toml, a file skycued owns and writes whole (a header
+// line, then the filter keys), and clears them from the overlay.
+// skycue.toml is never written.
 //
 // The watcher (startWatching) polls the five files every second (mtime,
 // size, inode) and applies an edit made by hand once the file has kept the
 // same stamp for two polls in a row (so within about 2 s, and never half
 // written): the effective values are
 // handed to the Engine's live setters, so every change is recorded once, as
-// "<origin>: ..." with origin "file:<file name>" (skycue.conf and
-// skycue.overrides.conf are reloaded together). An edit that does not parse
+// "<origin>: ..." with origin "file:<file name>" (skycue.toml and
+// skycue.overrides.toml are reloaded together). An edit that does not parse
 // is logged once at ERROR and the previous values stay in effect. A changed
-// skycue.conf key that is not a filter key (ports, serials, intervals...) and
+// skycue.toml key that is not a filter key (ports, serials, intervals...) and
 // now differs from its running value is logged at WARN, once per reload: it
-// takes effect only on a restart, and effective() keeps its running value.
+// takes effect only on a restart, and effective() keeps its running value. A
+// filter key that the environment or --set sets is not changed by an edit of
+// a file: that is logged at WARN ("pinned by --set" or "pinned by SKYCUE_...").
 // The watcher skips the files' changes made by this object (it records each
 // file's stamp after writing it).
 //
@@ -44,11 +48,13 @@
 #include "config.hpp"
 #include "file_util.hpp"
 #include "filters.hpp"
+#include "toml_lite.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -80,9 +86,9 @@ Overlay parseOverlay(const std::string& text, std::vector<std::string>* warnings
 // The overlay as skycue.runtime.json text (indented, ending in a newline).
 std::string overlayJson(const Overlay& overlay);
 
-// The skycue.conf keys that take effect only on a restart: every key but
-// the four applied live (MAX_RANGE_NM, MIN_ELEVATION_DEG, ALLOW_LIST_FILE,
-// BLOCK_LIST_FILE). The one list: the watcher's warning and GET /api/config
+// The (dotted) skycue.toml keys that take effect only on a restart: every key
+// but the four applied live (filters.max_range_nm, filters.min_elevation_deg,
+// filters.allow_list_file, filters.block_list_file). The one list: the watcher's warning and GET /api/config
 // both use it.
 const std::vector<std::string>& restartConfigKeys();
 // The keys of restartConfigKeys() whose values differ between `a` and `b`, in that order.
@@ -90,15 +96,24 @@ std::vector<std::string> restartKeysChanged(const Config& a, const Config& b);
 
 class RuntimeConfig {
 public:
-    // `conf_path` is skycue.conf; the overlay is skycue.runtime.json in its
-    // STATE_DIR as parsed by load(), or in the config's directory when that
-    // is unset (overlayPath() is the latter until load()).
+    // `conf_path` is skycue.toml; the overlay is skycue.runtime.json in its
+    // paths.state_dir as parsed by load(), or in the config's directory when
+    // that is unset (overlayPath() is the latter until load()). The
+    // environment layer is environmentOverrides() until setLayers().
     RuntimeConfig(boost::asio::io_context& io, std::string conf_path, Engine& engine);
     ~RuntimeConfig();
+    // The layers above the files that every load and reload applies: `--set`
+    // arguments ("key=value", a later one wins) and the SKYCUE_* environment
+    // (names to values). Call before load(); main passes its --set list.
+    void setLayers(std::vector<std::string> set_args, std::map<std::string, std::string> env)
+    {
+        set_args_ = std::move(set_args);
+        env_ = std::move(env);
+    }
     RuntimeConfig(const RuntimeConfig&) = delete;
     RuntimeConfig& operator=(const RuntimeConfig&) = delete;
 
-    // Parses skycue.conf (throws ConfigError) and the list files (throws
+    // Parses skycue.toml (throws ConfigError) and the list files (throws
     // std::runtime_error), then the overlay when there is one: a malformed
     // overlay is logged at ERROR, ignored (the baseline applies) and renamed
     // to skycue.runtime.json.rejected, so nothing overwrites it. Hands
@@ -117,18 +132,18 @@ public:
     // cannot be written (nothing changes then either).
     void applyUi(const Overlay& delta, const std::string& origin);
 
-    // Writes the overlay into the baseline: MAX_RANGE_NM/MIN_ELEVATION_DEG
-    // into skycue.conf, or into skycue.overrides.conf (created when missing)
-    // when STATE_DIR is set (conf_rewrite; every other byte kept), `add` entries
-    // appended to the list files (a missing file is created), `remove`
+    // Writes the overlay into the baseline: filters.max_range_nm and
+    // filters.min_elevation_deg into skycue.overrides.toml (written whole,
+    // keeping the filter keys it already holds; created when missing), `add`
+    // entries appended to the list files (a missing file is created), `remove`
     // entries commented out there ("# removed by skycue save-baseline:
     // <line>"). Each part that was written leaves the overlay, which is then
     // rewritten (deleted when empty). Returns "" when everything was
     // promoted, else what was not, one problem per line: a list with changes
-    // whose *_LIST_FILE key is unset, or a file that could not be written.
-    // What was not promoted stays in the overlay. The effective values do not
-    // change; anything that does (a file edited meanwhile) is applied with
-    // origin "save-baseline".
+    // whose filters.*_list_file key is unset, or a file that could not be
+    // written (the overrides file's message names its path and
+    // paths.state_dir). The effective values do not change; anything that does
+    // (a file edited meanwhile) is applied with origin "save-baseline".
     std::string promoteToBaseline();
 
     // Starts the 1 s poll (see the top of this file). Once.
@@ -142,13 +157,13 @@ public:
     // this object's changing methods.
     void onChange(std::function<void()> callback) { on_change_ = std::move(callback); }
 
-    // skycue.conf as running: filter values and list file names as in effect
+    // skycue.toml as running: filter values and list file names as in effect
     // now (overlay included), other keys as at load().
     Config effective() const;
     Overlay overlay() const { return overlay_; }
     std::string overlayPath() const { return overlay_path_; }
-    // skycue.overrides.conf in STATE_DIR as parsed by load(); "" when that is
-    // unset (or before load()).
+    // The overrides file as parsed by load(): in paths.state_dir, else beside
+    // skycue.toml.
     std::string overridesPath() const { return skycued::overridesPath(running_); }
 
 private:
@@ -164,6 +179,8 @@ private:
     void changed();  // on_change_, if set
     void writeOverlay(const Overlay& overlay);  // throws std::runtime_error
     void writeFile(SettledFile& file, const std::string& text);  // throws; accepts our write
+    // Writes skycue.overrides.toml whole: its filter keys, `set` over them.
+    void writeOverrides(const std::map<std::string, toml_lite::Value>& set);  // throws
 
     // Watcher reloads: each logs its errors and keeps the previous values.
     // `edited`: the base name of the file whose change this reads (for the log).
@@ -175,8 +192,11 @@ private:
 
     std::string conf_path_, overlay_path_;
     Engine& engine_;
-    Config file_conf_;  // the last good parse of skycue.conf
-    Config running_;    // as at load(), with the baseline filter keys of file_conf_
+    std::vector<std::string> set_args_;
+    std::map<std::string, std::string> env_;
+    Config file_conf_;   // the last good parse of skycue.toml and the layers above it
+    Config files_only_;  // the same without the environment and --set (what the files say)
+    Config running_;     // as at load(), with the baseline filter keys of file_conf_
     Overlay overlay_;
     IdList allow_file_, block_file_;
     // The watched files; a list's path is "" until load() and follows

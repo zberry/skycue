@@ -21,9 +21,9 @@ struct DaemonInfo {
     std::string version;                            // kVersion
     std::chrono::system_clock::time_point started;  // wall clock at main() start
     std::string config_path, www_dir, log_level;
-    std::string map_dir;  // where tiles and overlays are read: MAP_DIR, else www_dir
+    std::string map_dir;  // where tiles and overlays are read: paths.map_dir, else www_dir
     std::string inputs_path;                        // the resolved inputs file, always set by main
-    std::map<std::string, std::string> cli_overrides;  // conf key -> value text ("WEB_PORT" -> "8081")
+    std::map<std::string, std::string> cli_overrides;  // dotted key -> value text ("web.port" -> "8081")
     std::vector<std::pair<std::string, const Recorder*>> recorders;  // ("received", r) ...; nullptr entries skipped
     // How it runs: replay_file set for --replay (with its speed and loop),
     // else live; readsb / dump978: whether the built-in decoder input is
@@ -42,17 +42,18 @@ struct LocationFacts {
 };
 
 // {"daemon":{version, started, uptime_s, config_path, inputs_path,
-// overlay_path, overlay_active, overrides_path ("" when STATE_DIR is
-// unset), www_dir, map_dir, record_dir, recording_files,
+// overlay_path, overlay_active, overrides_path (skycue.overrides.toml: in
+// paths.state_dir when set, else beside the config), www_dir, map_dir,
+// record_dir, recording_files,
 // log_level, mode ("live" or "replay"), replay ({file, speed, loop}; replay
 // only), readsb, dump978, locations ({learned_path, learned, operator_path,
-// operator, operator_rejected, operator_overflow})}, "keys":[{key, value, source, restart}, ...]}, the keys in
-// knownConfigKeys() order. `source` is "overlay" (a filter value the
-// overlay sets), else "cli" (a command-line override; its value is the
-// override's), else "overrides" (skycue.overrides.conf sets it), else
-// "conf" (skycue.conf sets it), else "default"; `restart` is
-// whether the key is in restartConfigKeys(). Call on the RuntimeConfig's
-// thread.
+// operator, operator_rejected, operator_overflow})}, "keys":[{key, value, source, restart}, ...]}, the
+// dotted keys in knownConfigKeys() order. `source` is "runtime" (a filter
+// value the runtime overlay sets), else "flag" (a command-line flag; its value
+// is the flag's), else "env" (a SKYCUE_* variable), else "set" (--set), else
+// "overrides" (skycue.overrides.toml sets it), else "conf" (skycue.toml sets
+// it), else "default"; `restart` is whether the key is in restartConfigKeys().
+// Call on the RuntimeConfig's thread.
 std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, const LocationFacts& locations,
                        std::chrono::system_clock::time_point now);
 

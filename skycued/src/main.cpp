@@ -467,19 +467,21 @@ int run(int argc, char** argv)
     daemon.log_level = log_level;
     daemon.inputs_path = inputs_path;
     if (vm.count("cue-tcp-port"))
-        daemon.cli_overrides["CUE_TCP_PORT"] = std::to_string(cue_tcp_port);
+        daemon.cli_overrides["cues.tcp_port"] = std::to_string(cue_tcp_port);
     if (vm.count("web-port"))
-        daemon.cli_overrides["WEB_PORT"] = std::to_string(web_port);
+        daemon.cli_overrides["web.port"] = std::to_string(web_port);
     if (vm.count("web-bind"))
-        daemon.cli_overrides["WEB_BIND"] = web_bind;
+        daemon.cli_overrides["web.bind"] = web_bind;
     if (vm.count("inputs-file"))
-        daemon.cli_overrides["INPUTS_FILE"] = inputs_file;
+        daemon.cli_overrides["inputs.file"] = inputs_file;
     if (vm.count("readsb-host"))
-        daemon.cli_overrides["READSB_HOST"] = readsb_host;
+        daemon.cli_overrides["inputs.readsb.host"] = readsb_host;
     if (vm.count("dump978-host"))
-        daemon.cli_overrides["DUMP978_HOST"] = dump978_host;
+        daemon.cli_overrides["inputs.dump978.host"] = dump978_host;
     if (vm.count("no-uat"))
-        daemon.cli_overrides["DUMP978_ENABLE"] = "no";
+        daemon.cli_overrides["inputs.dump978.enable"] = "false";
+    if (vm.count("no-readsb"))
+        daemon.cli_overrides["inputs.readsb.enable"] = "false";
     daemon.recorders = {{"received", received.get()}, {"sent", sent.get()}, {"fisb", fisb.get()}};
     if (replaying) {
         daemon.replay_file = replay_path;

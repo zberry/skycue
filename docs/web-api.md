@@ -53,7 +53,7 @@ There is no authentication; see [Security](#security).
 - Errors are `{"error": "<what went wrong>"}` with status:
   - `400`: the body is not a JSON object, has an unknown key, a value of
     the wrong type, a value out of range (the same checks as
-    `skycue.conf`), or a bad list entry (the message names it). Nothing
+    `skycue.toml`), or a bad list entry (the message names it). Nothing
     changes.
   - `403`: a `PUT`/`POST`/`DELETE` from another origin
     ([Security](#security)), or a change a built-in input does not take
@@ -124,7 +124,7 @@ overlay file is rewritten, the Engine applies the change at once (one
 re-evaluated: drops and sends follow the record), and the response is
 sent after all of that. A key left out of the body changes nothing; a
 key set to `null` removes that value from the overlay, so the baseline
-(`skycue.conf`) value applies again (clearing a value the overlay does
+(`skycue.toml` and `skycue.overrides.toml`) value applies again (clearing a value the overlay does
 not have changes nothing). Because of how skycued parses JSON, the string
 `"null"` is read as `null` too.
 `max_range_nm` must be > 0; `min_elevation_deg` in -90..90. List entries
@@ -186,9 +186,9 @@ about the daemon. It is read only: nothing in it can be changed here.
 
 ```json
 {"daemon": {"version": "skycued 0.1.0", "started": "2026-11-02T14:03:06.912Z", "uptime_s": 3725,
-            "config_path": "/etc/skycue/skycue.conf", "inputs_path": "/etc/skycue/skycue.inputs.json",
+            "config_path": "/etc/skycue/skycue.toml", "inputs_path": "/etc/skycue/skycue.inputs.json",
             "overlay_path": "/etc/skycue/skycue.runtime.json", "overlay_active": true,
-            "overrides_path": "",
+            "overrides_path": "/var/lib/skycue/skycue.overrides.toml",
             "www_dir": "/usr/local/share/skycue/www", "map_dir": "/usr/local/share/skycue/www",
             "record_dir": "/var/lib/skycue/rec",
             "recording_files": ["received-20261102-140306.jsonl", "sent-20261102-140306.jsonl"],
@@ -197,25 +197,28 @@ about the daemon. It is read only: nothing in it can be changed here.
                           "operator_path": "/etc/skycue/locations.csv", "operator": 61234,
                           "operator_rejected": 0, "operator_overflow": 0}},
  "keys": [
-  {"key": "RECEIVER_LAT", "value": "38.9", "source": "conf", "restart": true},
-  {"key": "MAX_RANGE_NM", "value": "20", "source": "overlay", "restart": false},
-  {"key": "MIN_INTERVAL_S", "value": "1", "source": "default", "restart": true},
-  {"key": "WEB_PORT", "value": "8081", "source": "cli", "restart": true}
+  {"key": "receiver.lat", "value": "38.9", "source": "conf", "restart": true},
+  {"key": "filters.max_range_nm", "value": "20", "source": "runtime", "restart": false},
+  {"key": "cues.min_interval_s", "value": "1", "source": "default", "restart": true},
+  {"key": "web.trail_seconds", "value": "300", "source": "env", "restart": true},
+  {"key": "stats.save_s", "value": "60", "source": "set", "restart": true},
+  {"key": "web.port", "value": "8081", "source": "flag", "restart": true}
  ]}
 ```
 
 `daemon`: `started` is the wall-clock time skycued started and `uptime_s`
 the whole seconds since; `config_path` is the `--config` file as given;
-`inputs_path` the inputs file in use (resolved as for `INPUTS_FILE`, or
+`inputs_path` the inputs file in use (resolved as for `inputs.file`, or
 `--inputs-file`); `overlay_path` the runtime overlay file, and
 `overlay_active` whether the overlay holds changes not saved to the
 baseline (as in the filters object); `overrides_path` the
-`skycue.overrides.conf` in `STATE_DIR` that save as baseline writes (see
-[Save as baseline](#save-as-baseline); `""` when `STATE_DIR` is unset);
+`skycue.overrides.toml` that save as baseline writes: in `paths.state_dir`
+when that is set, else beside the config file (see
+[Save as baseline](#save-as-baseline); the file may not exist yet);
 `www_dir` the web UI's files; `map_dir` the directory `/tiles/`,
-`/overlays/` and `/api/tiles-available` are read from: `MAP_DIR`, or
-`www_dir` when `MAP_DIR` is unset;
-`record_dir` is `RECORD_DIR` (`""`:
+`/overlays/` and `/api/tiles-available` are read from: `paths.map_dir`, or
+`www_dir` when `paths.map_dir` is unset;
+`record_dir` is `recording.dir` (`""`:
 not recording) and `recording_files` the base names of the recording files
 being written now; `log_level` is `--log-level`. `mode` is `"live"` or
 `"replay"`; a replay adds `"replay": {"file": "<--replay FILE>", "speed":
@@ -225,23 +228,26 @@ being written now; `log_level` is `--log-level`. `mode` is `"live"` or
 keys' values may not be in use. `locations` is the FIS-B report-location
 index now: `learned_path` the `fisb-locations.json` it saves to (`""` when
 it is not saved this run, see [operating.md](operating.md#report-locations-fisb-locationsjson)),
-`learned` its ids, `operator_path` the resolved `LOCATIONS_FILE` (`""` for
+`learned` its ids, `operator_path` the resolved `paths.locations_file` (`""` for
 none), `operator` the ids read from it, `operator_rejected` its lines that
 did not parse and `operator_overflow` the ids past the 250,000 cap.
 
-`keys` has every `skycue.conf` key, in the order of
-`packaging/skycue.conf.example`. `value` is the value running, spelled as
-`skycue.conf` would (`yes`/`no`, `host:port host:port`, `""` for an unset
-string). `source` is where it came from, the first that applies:
-`overlay` (`MAX_RANGE_NM` or `MIN_ELEVATION_DEG` set by the runtime
-overlay), `cli` (a command-line option: `--cue-tcp-port`, `--web-port`,
-`--web-bind`, `--inputs-file`, `--readsb-host`, `--dump978-host`, or
-`--no-uat` for `DUMP978_ENABLE`; `value` is the option's), `overrides` (set
-in `skycue.overrides.conf`, `STATE_DIR` only), `conf` (set in
-`skycue.conf`), `default`. `restart` is true for every key that takes
-effect only when skycued restarts: all but `MAX_RANGE_NM`,
-`MIN_ELEVATION_DEG`, `ALLOW_LIST_FILE` and `BLOCK_LIST_FILE`, which apply
-at once. Other methods: 405 with `Allow: GET`.
+`keys` has every `skycue.toml` key, by its dotted name (`web.port`,
+`inputs.readsb.host`), in the order of `packaging/skycue.toml.example`.
+`value` is the value running, spelled as text (`true`/`false`, `host:port
+host:port` for a list, `""` for an unset string, numbers in their shortest
+exact form). `source` is where it came from, the first that applies:
+`runtime` (`filters.max_range_nm` or `filters.min_elevation_deg` set by the
+runtime overlay), `flag` (a command-line option: `--cue-tcp-port`,
+`--web-port`, `--web-bind`, `--inputs-file`, `--readsb-host`,
+`--dump978-host`, or `--no-uat` / `--no-readsb` for the `enable` keys;
+`value` is the option's), `env` (a `SKYCUE_*` environment variable, such as
+`SKYCUE_WEB_TRAIL_SECONDS`), `set` (a `--set key=value` argument), `overrides`
+(set in `skycue.overrides.toml`), `conf` (set in `skycue.toml`), `default`.
+`restart` is true for every key that takes effect only when skycued
+restarts: all but `filters.max_range_nm`, `filters.min_elevation_deg`,
+`filters.allow_list_file` and `filters.block_list_file`, which apply at
+once. Other methods: 405 with `Allow: GET`.
 
 `GET /api/tiles-available` reads the map directory (`MAP_DIR` when it is
 set, else the www directory; `www/` below): when `www/tiles/meta.json` exists (written by
@@ -654,19 +660,21 @@ API still works.
 ## Runtime overlay: `skycue.runtime.json`
 
 Changes made from the web UI (filter values, allow/block list entries) are
-not written to `skycue.conf`. They go to `skycue.runtime.json`, a file in
-`STATE_DIR` when that is set (`/var/lib/skycue` in the packages), else in
-the same directory as `skycue.conf`, which skycued reads at startup, so they
-survive a restart. With `STATE_DIR` set, a `skycue.runtime.json` left next
-to `skycue.conf` (from before `STATE_DIR` was set) is not read; skycued logs
-a WARN naming both paths, so move it into `STATE_DIR` to keep its changes.
+not written to `skycue.toml`. They go to `skycue.runtime.json`, a file in
+`paths.state_dir` when that is set (`/var/lib/skycue` in the packages), else in
+the same directory as `skycue.toml`, which skycued reads at startup, so they
+survive a restart. With `paths.state_dir` set, a `skycue.runtime.json` left next
+to `skycue.toml` (from before `paths.state_dir` was set) is not read; skycued logs
+a WARN naming both paths, so move it into `paths.state_dir` to keep its changes.
 What skycued runs with is:
 
-- **baseline**: `skycue.conf`, and the list files it names in
-  `ALLOW_LIST_FILE` / `BLOCK_LIST_FILE` (a key left empty is an empty list);
+- **baseline**: `skycue.toml`, then `skycue.overrides.toml`, then the
+  `SKYCUE_*` environment and `--set` (which stay above both files), and the
+  list files named by `filters.allow_list_file` / `filters.block_list_file`
+  (a key left empty is an empty list);
 - **overlay**: `skycue.runtime.json`, on top of the baseline;
 - **effective**: each filter value from the overlay when it has one, else
-  from `skycue.conf`; each list is the list file's entries, minus the
+  from the baseline; each list is the list file's entries, minus the
   overlay's `remove` entries, plus its `add` entries.
 
 ### Schema
@@ -685,8 +693,8 @@ What skycued runs with is:
 | Key | Type | Meaning |
 |-----|------|---------|
 | `version` | integer, must be `1` | format version (may be left out) |
-| `filters.max_range_nm` | number > 0, or `null` | replaces `MAX_RANGE_NM` |
-| `filters.min_elevation_deg` | number -90..90, or `null` | replaces `MIN_ELEVATION_DEG` |
+| `filters.max_range_nm` | number > 0, or `null` | replaces `filters.max_range_nm` |
+| `filters.min_elevation_deg` | number -90..90, or `null` | replaces `filters.min_elevation_deg` |
 | `lists.allow.add`, `lists.block.add` | array of entries | added to the list |
 | `lists.allow.remove`, `lists.block.remove` | array of entries | removed from the list file's entries |
 
@@ -698,7 +706,7 @@ warning in the log.
 
 skycued writes the file atomically (to `skycue.runtime.json.tmp`, then
 renamed over it), and deletes it when the overlay becomes empty. All its
-writes (this file, and `skycue.conf` and the list files on save as
+writes (this file, and `skycue.overrides.toml` and the list files on save as
 baseline) work this way: a file that is a symlink stays a symlink (the
 temporary file goes next to the file it points to, which is the one
 replaced), and the replaced file's mode and, when skycued may set it, its
@@ -722,58 +730,67 @@ overlay stays in effect.
 
 "Save as baseline" moves the overlay into the baseline files and clears it:
 
-- `MAX_RANGE_NM` / `MIN_ELEVATION_DEG` are rewritten in `skycue.conf` in
-  place; every other byte of the file (comments, blank lines, other keys) is
-  kept. A key that is not in the file is appended at the end under a
-  `# added by skycue save-baseline` line. When `STATE_DIR` is set they go
-  to `skycue.overrides.conf` in `STATE_DIR` instead, the same way (the file
-  is created when missing), and `skycue.conf` is not touched: it may belong
-  to root and skycued need not be able to write it.
+- `filters.max_range_nm` / `filters.min_elevation_deg` are written to
+  `skycue.overrides.toml`, a file skycued owns: it is written whole each
+  time (the filter keys it already holds stay, the saved ones replace them),
+  after a header line `# written by skycued <ISO-8601 UTC time>; only filter
+  keys; edits are picked up live`. It sits in `paths.state_dir` when that is
+  set, else beside `skycue.toml`. `skycue.toml` itself is never written: it
+  may belong to root and skycued need not be able to write it. When the
+  directory is not writable (the packages' `/etc/skycue` is root's, for a
+  hand install without `paths.state_dir`), the save fails with a message that
+  names the path and says to set `paths.state_dir`; the overlay keeps the
+  values.
 - `add` entries are appended to the list files (a list file that is named
   but missing is created).
 - `remove` entries are commented out in the list files, as
   `# removed by skycue save-baseline: <the line>`, so the history stays
   visible.
-- A list with changes whose `ALLOW_LIST_FILE` / `BLOCK_LIST_FILE` key is
-  empty cannot be saved: its changes stay in the overlay and the result says
-  so. The same goes for a file that cannot be written.
+- A list with changes whose `filters.allow_list_file` /
+  `filters.block_list_file` key is empty cannot be saved: its changes stay in
+  the overlay and the result says so. The same goes for a file that cannot be
+  written.
 
-This is the only time skycued writes `skycue.conf` (`STATE_DIR` unset) or
-`skycue.overrides.conf` (`STATE_DIR` set; `skycue.conf` is then never
-written).
-
-`skycue.overrides.conf` has the `skycue.conf` grammar and may assign only
-`MAX_RANGE_NM`, `MIN_ELEVATION_DEG`, `ALLOW_LIST_FILE` and
-`BLOCK_LIST_FILE`; skycued reads it right after `skycue.conf` (only when
-`STATE_DIR` is set), and its values replace `skycue.conf`'s. Any other key
-in it is an error naming the file and line, as is a line that does not
-parse; at startup that stops skycued, as an error in `skycue.conf` does.
-A relative `ALLOW_LIST_FILE` / `BLOCK_LIST_FILE` set there is taken from
-`STATE_DIR` too. You may edit it by hand, or delete it to go back to
-`skycue.conf`'s values. An edit of `skycue.conf` to a key that
-`skycue.overrides.conf` sets changes nothing while that file sets it.
+`skycue.overrides.toml` has the `skycue.toml` grammar and may assign only
+`filters.max_range_nm`, `filters.min_elevation_deg`, `filters.allow_list_file`
+and `filters.block_list_file`; skycued reads it right after `skycue.toml`,
+and its values replace `skycue.toml`'s. Any other key in it is an error naming
+the file and line, as is a line that does not parse; at startup that stops
+skycued, as an error in `skycue.toml` does, and a save refuses to overwrite
+a file that does not parse. A relative `filters.allow_list_file` /
+`filters.block_list_file` set there is taken from `paths.state_dir` too. You
+may edit it by hand, or delete it to go back to `skycue.toml`'s values. An
+edit of `skycue.toml` to a key that `skycue.overrides.toml` sets changes
+nothing while that file sets it. The `SKYCUE_*` environment and `--set` rank
+above both files: a filter key they set is not changed by an edit of either
+file (skycued logs `runtime: filters.max_range_nm edited in skycue.toml but
+pinned by --set (88); that value stays`, or `pinned by
+SKYCUE_FILTERS_MAX_RANGE_NM`, at WARN).
 
 ### Hot reload
 
-skycued checks `skycue.conf`, `skycue.overrides.conf` (when `STATE_DIR` is
-set), `skycue.runtime.json` and both list files once a second; an edit of
-either config file reloads both. A hand edit is applied once the file has stayed the same for two
+skycued checks `skycue.toml`, `skycue.overrides.toml`,
+`skycue.runtime.json` and both list files once a second; an edit of
+either config file reloads both, with the environment and `--set` applied
+again on top. A hand edit is applied once the file has stayed the same for two
 checks in a row (so within about 2 s, and never while an editor is still
 writing it), and recorded as a `filter_change` with origin
 `file:<file name>`. skycued compares each file's modification time, size and
 inode; on a file system whose modification times have 1 s resolution, an
 edit that keeps the size and lands in the same second as the previous one
-can go unnoticed (save it again, or let the editor replace the file). A `skycue.conf` edit that
+can go unnoticed (save it again, or let the editor replace the file). A
+`skycue.toml` or `skycue.overrides.toml` edit that
 does not parse is logged once at ERROR and the previous configuration stays
-in effect. Only the filter keys (`MAX_RANGE_NM`, `MIN_ELEVATION_DEG`,
-`ALLOW_LIST_FILE`, `BLOCK_LIST_FILE`) take effect at once; a change to any
+in effect. Only the filter keys (`filters.max_range_nm`,
+`filters.min_elevation_deg`, `filters.allow_list_file`,
+`filters.block_list_file`) take effect at once; a change to any
 other key that now differs from the value skycued is running with is
 logged at WARN as requiring a restart (setting it back clears that).
 
-The overlay wins over `skycue.conf`. A hand edit of `MAX_RANGE_NM` or
-`MIN_ELEVATION_DEG` while the overlay holds a value for that key changes
-nothing that skycued runs with, and is logged at WARN:
-`runtime: MAX_RANGE_NM edited in skycue.conf but overridden by
+The overlay wins over `skycue.toml`. A hand edit of `filters.max_range_nm` or
+`filters.min_elevation_deg` while the overlay holds a value for that key
+changes nothing that skycued runs with, and is logged at WARN:
+`runtime: filters.max_range_nm edited in skycue.toml but overridden by
 skycue.runtime.json (use the UI or "save as baseline")`. To make the edit
 take effect, clear the overlay's value (the ↺ button in the UI, or
 `PUT /api/filters` with `null`), or save the running values as the

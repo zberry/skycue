@@ -1,0 +1,31 @@
+0# skycued 0.1.0, started 2026-01-01T00:00:00.000Z
+# Receiver site
+[receiver]
+# receiver.lat: conf, restart
+lat = 38.9
+# receiver.lon: conf, restart
+lon = -77.0
+# Decoders
+[sdr]
+# sdr.serial_1090: default, restart
+serial_1090 = ""
+# Cue outputs
+[cues]
+# cues.udp_targets: conf, restart
+udp_targets = ["127.0.0.1:30501", "10.0.0.2:30502"]
+# Recording
+[recording]
+# recording.dir: conf, restart
+dir = "/srv/sky cue/rec"
+# Filters
+[filters]
+# filters.max_range_nm: runtime
+max_range_nm = 20
+# filters.allow_list_file: conf
+allow_list_file = "allow \"main\" $1.txt"
+# filters.block_list_file: conf
+block_list_file = "it's $HOME.txt"
+# Paths
+[paths]
+# paths.locations_file: conf, restart
+locations_file = "o'hare locations.csv"

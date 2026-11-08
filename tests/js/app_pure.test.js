@@ -1043,30 +1043,49 @@ test('filter_history_rows_diff_consecutive', () => {
   const rows = P.filterHistoryRows([
     { time: 'T0', origin: 'startup', filters: { max_range_nm: 150, min_elevation_deg: 0 } },
     { time: 'T1', origin: 'ui', filters: { max_range_nm: 20, min_elevation_deg: 0 } },
-    { time: 'T2', origin: 'file:skycue.conf', filters: { max_range_nm: 20, min_elevation_deg: 2 } }]);
-  assert.deepStrictEqual(rows.map((r) => r.origin), ['file:skycue.conf', 'ui', 'startup']);
+    { time: 'T2', origin: 'file:skycue.toml', filters: { max_range_nm: 20, min_elevation_deg: 2 } }]);
+  assert.deepStrictEqual(rows.map((r) => r.origin), ['file:skycue.toml', 'ui', 'startup']);
   assert.deepStrictEqual(rows[0].diffs, [{ field: 'min_elevation_deg', from: 0, to: 2 }]);
   assert.deepStrictEqual(rows[1].diffs, [{ field: 'max_range_nm', from: 150, to: 20 }]);
   assert.deepStrictEqual(rows[2].diffs, [{ field: 'max_range_nm', from: null, to: 150 }, { field: 'min_elevation_deg', from: null, to: 0 }]);
   assert.deepStrictEqual(P.filterHistoryRows([]), []);
 });
 const CFG = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
-  { key: 'RECEIVER_LAT', value: '38.9', source: 'conf', restart: true }, { key: 'WEB_BIND', value: '127.0.0.1', source: 'default', restart: true },
-  { key: 'CUE_UDP_TARGETS', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
-  { key: 'MAX_RANGE_NM', value: '20', source: 'overlay', restart: false }, { key: 'RECORD_DIR', value: '', source: 'default', restart: true },
-  { key: 'NEW_KEY', value: 'x', source: 'conf', restart: true }] };
+  { key: 'receiver.lat', value: '38.9', source: 'conf', restart: true }, { key: 'web.bind', value: '127.0.0.1', source: 'default', restart: true },
+  { key: 'cues.udp_targets', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
+  { key: 'filters.max_range_nm', value: '20', source: 'runtime', restart: false }, { key: 'recording.dir', value: '', source: 'default', restart: true },
+  { key: 'web.trail_seconds', value: '300', source: 'env', restart: true }, { key: 'stats.save_s', value: '60', source: 'set', restart: true },
+  { key: 'new.key', value: 'x', source: 'conf', restart: true }] };
 test('config_grouping', () => {
   const g = P.groupConfig(CFG.keys);
-  assert.deepStrictEqual(g.map((x) => x.group), ['Receiver site', 'Cue outputs', 'Recording', 'Filters', 'Web', 'Other']);
-  assert.deepStrictEqual(g[5].rows.map((r) => r.key), ['NEW_KEY']);
+  assert.deepStrictEqual(g.map((x) => x.group), ['Receiver site', 'Cue outputs', 'Recording', 'Filters', 'Web', 'Statistics', 'Other']);
+  assert.deepStrictEqual(g[6].rows.map((r) => r.key), ['new.key']);
+  // Every key of skycued's list is in a group (none falls to Other); the keys of one table sit together.
+  const all = P.CONFIG_GROUPS.reduce((a, x) => a.concat(x[1]), []);
+  assert.strictEqual(new Set(all).size, all.length);
+  assert.ok(all.every((k) => /^[a-z0-9_]+(\.[a-z0-9_]+)+$/.test(k)), 'dotted lower-case names');
+  const seen = new Set();
+  let last = null;
+  all.forEach((k) => { const t = k.slice(0, k.lastIndexOf('.')); if (t !== last) { assert.ok(!seen.has(t), 'table ' + t + ' split'); seen.add(t); last = t; } });
 });
 test('config_text', () => {
   const t = P.configText(CFG);
   assert.ok(t.startsWith('# skycued 0.1.0, started 2026-01-01T00:00:00.000Z\n'));
-  assert.ok(t.includes('# Receiver site\n# RECEIVER_LAT: conf, restart\nRECEIVER_LAT=38.9\n'));
-  assert.ok(t.includes('# CUE_UDP_TARGETS: conf, restart\nCUE_UDP_TARGETS="127.0.0.1:30501 10.0.0.2:30502"\n'));
-  assert.ok(t.includes('# MAX_RANGE_NM: overlay\nMAX_RANGE_NM=20\n'));
-  assert.ok(t.includes('# RECORD_DIR: default, restart\nRECORD_DIR=\n'));
+  assert.ok(t.includes('# Receiver site\n[receiver]\n# receiver.lat: conf, restart\nlat = 38.9\n'));
+  assert.ok(t.includes('# cues.udp_targets: conf, restart\nudp_targets = ["127.0.0.1:30501", "10.0.0.2:30502"]\n'));
+  assert.ok(t.includes('# filters.max_range_nm: runtime\nmax_range_nm = 20\n'));
+  assert.ok(t.includes('# recording.dir: default, restart\ndir = ""\n'));
+  assert.ok(t.includes('# web.trail_seconds: env, restart\ntrail_seconds = 300\n'));
+  assert.ok(t.includes('# stats.save_s: --set, restart\nsave_s = 60\n'));
+});
+test('config panel shows dotted keys and env/--set sources', () => {
+  // The keys come as the API gives them: dotted, with the sources conf, overrides, runtime, flag, env, set.
+  const keys = ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.trail_seconds', 'stats.save_s', 'web.port'].map((k) => ({ key: k, value: '1', source: 'conf', restart: false }));
+  const rows = P.groupConfig(keys).reduce((a, g) => a.concat(g.rows.map((r) => r.key)), []);
+  assert.deepStrictEqual(rows, ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.port', 'web.trail_seconds', 'stats.save_s']);
+  assert.ok(!P.groupConfig(keys).some((g) => g.group === 'Other'));
+  assert.deepStrictEqual(['conf', 'overrides', 'runtime', 'flag', 'env', 'set', 'default'].map(P.configSourceLabel),
+    ['conf', 'overrides', 'runtime', 'flag', 'env', '--set', 'default']);
 });
 test('daemon_mode_and_locations_text', () => {
   assert.strictEqual(P.daemonModeText({ mode: 'live', readsb: true, dump978: true }), 'live: readsb, dump978');
@@ -1076,54 +1095,68 @@ test('daemon_mode_and_locations_text', () => {
     'replay of /d/r.jsonl (unpaced, looped)');
   assert.strictEqual(P.daemonModeText({ mode: 'replay', replay: { file: 'r.jsonl', speed: 2, loop: false } }), 'replay of r.jsonl (speed 2)');
   assert.deepStrictEqual(P.daemonLocationsText({ locations: { learned_path: '/e/fisb-locations.json', learned: 42,
-    operator_path: '', operator: 0 } }), ['42 learned, kept in /e/fisb-locations.json', 'no LOCATIONS_FILE']);
+    operator_path: '', operator: 0 } }), ['42 learned, kept in /e/fisb-locations.json', 'no paths.locations_file']);
   assert.deepStrictEqual(P.daemonLocationsText({ locations: { learned_path: '', learned: 0, operator_path: '/e/l.csv',
     operator: 2, operator_rejected: 1, operator_overflow: 3 } }),
     ['0 learned, not saved this run', '2 from /e/l.csv, 1 lines rejected, 3 over the cap']);
 });
-test('conf_value_every_branch', () => {
-  assert.strictEqual(P.confValue('38.9'), '38.9');
-  assert.strictEqual(P.confValue(''), '');
-  assert.strictEqual(P.confValue('a b'), '"a b"');
-  assert.strictEqual(P.confValue("o'hare x"), '"o\'hare x"');
-  assert.strictEqual(P.confValue('say "hi" $1'), '\'say "hi" $1\'');
-  assert.strictEqual(P.confValue('it\'s $HOME'), null);
-  assert.strictEqual(P.confValue('a\nb'), null);
+test('toml_value_every_branch', () => {
+  assert.strictEqual(P.tomlValue('receiver.lat', '38.9'), '38.9');
+  assert.strictEqual(P.tomlValue('web.port', '8080'), '8080');
+  assert.strictEqual(P.tomlValue('receiver.lat', ''), null);       // unset: left as a comment
+  assert.strictEqual(P.tomlValue('web.port', '80 80'), null);
+  assert.strictEqual(P.tomlValue('recording.raw', 'true'), 'true');
+  assert.strictEqual(P.tomlValue('recording.raw', 'yes'), null);
+  assert.strictEqual(P.tomlValue('cues.udp_targets', ''), '[]');
+  assert.strictEqual(P.tomlValue('cues.tcp_connect', 'h:1'), '["h:1"]');
+  assert.strictEqual(P.tomlValue('recording.dir', ''), '""');
+  assert.strictEqual(P.tomlValue('recording.dir', 'a b'), '"a b"');
+  assert.strictEqual(P.tomlValue('recording.dir', 'say "hi" \\ $1'), '"say \\"hi\\" \\\\ $1"');
+  assert.strictEqual(P.tomlValue('recording.dir', 'a\nb\tc\u0001\u007f'), '"a\\nb\\tc\\u0001\\u007F"');
+  assert.strictEqual(P.tomlValue('recording.dir', 'a\u0000b'), null);
+  assert.strictEqual(P.tomlValue('inputs.decoder', 'readsb'), '"readsb"');
 });
-// Every line is a comment or KEY=value in the conf grammar (config.cpp
-// parseConfigText, skycued's config grammar):
-// ^[A-Z][A-Z0-9_]*=  then  ^"[^"$`\\]*"$  or  ^'[^']*'$  or  ^[A-Za-z0-9_.,:/+@%=-]*$.
-function confGrammarValue(line) {
-  if (/^\s*(#|$)/.test(line)) return undefined;
-  const m = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
-  if (!m) throw new Error('malformed line: ' + line);
-  const v = m[2];
-  let q;
-  if ((q = /^"([^"$`\\]*)"$/.exec(v)) || (q = /^'([^']*)'$/.exec(v))) return [m[1], q[1]];
-  if (/^[A-Za-z0-9_.,:/+@%=-]*$/.test(v)) return [m[1], v];
-  throw new Error('malformed value: ' + line);
+// A reader for the lines configText writes: a comment, a [table] header, or key = value with a
+// string (the escapes \" \\ \n \t \r \uXXXX), a number, a boolean or an array of strings
+// (skycued's toml_lite, test_config.cpp config_copy_text_parses, accepts the same text).
+function tomlLines(text) {
+  const out = {};
+  let table = null;
+  const str = (v) => /^"((?:[^"\\]|\\.)*)"$/.exec(v) && JSON.parse(v);
+  text.split('\n').forEach((l) => {
+    if (/^\s*(#|$)/.test(l)) return;
+    let m = /^\[([a-z0-9_.]+)\]$/.exec(l);
+    if (m) { assert.ok(!(m[1] in out) && table !== m[1], 'table twice'); table = m[1]; return; }
+    m = /^([a-z0-9_]+) = (.*)$/.exec(l);
+    assert.ok(m && table, 'malformed line: ' + l);
+    const v = m[2];
+    let val;
+    if (str(v) !== null && str(v) !== undefined && str(v) !== false) val = str(v);
+    else if (/^\[.*\]$/.test(v)) val = v === '[]' ? '' : v.slice(1, -1).split(', ').map((w) => JSON.parse(w)).join(' ');
+    else if (/^(-?\d+(\.\d+)?|true|false)$/.test(v)) val = v;
+    else throw new Error('malformed value: ' + l);
+    out[table + '.' + m[1]] = val;
+  });
+  return out;
 }
 // The same keys and values test_config.cpp (config_copy_text_parses) checks.
 const CFG_COPY = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
-  { key: 'RECEIVER_LAT', value: '38.9', source: 'conf', restart: true },
-  { key: 'RECEIVER_LON', value: '-77.0', source: 'conf', restart: true },
-  { key: 'SDR_1090_SERIAL', value: '', source: 'default', restart: true },
-  { key: 'CUE_UDP_TARGETS', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
-  { key: 'RECORD_DIR', value: '/srv/sky cue/rec', source: 'conf', restart: true },
-  { key: 'MAX_RANGE_NM', value: '20', source: 'overlay', restart: false },
-  { key: 'ALLOW_LIST_FILE', value: 'allow "main" $1.txt', source: 'conf', restart: false },
-  { key: 'BLOCK_LIST_FILE', value: "it's $HOME.txt", source: 'conf', restart: false },
-  { key: 'LOCATIONS_FILE', value: "o'hare locations.csv", source: 'conf', restart: true }] };
-test('config_text_round_trips_through_the_conf_grammar', () => {
+  { key: 'receiver.lat', value: '38.9', source: 'conf', restart: true },
+  { key: 'receiver.lon', value: '-77.0', source: 'conf', restart: true },
+  { key: 'sdr.serial_1090', value: '', source: 'default', restart: true },
+  { key: 'cues.udp_targets', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
+  { key: 'recording.dir', value: '/srv/sky cue/rec', source: 'conf', restart: true },
+  { key: 'filters.max_range_nm', value: '20', source: 'runtime', restart: false },
+  { key: 'filters.allow_list_file', value: 'allow "main" $1.txt', source: 'conf', restart: false },
+  { key: 'filters.block_list_file', value: "it's $HOME.txt", source: 'conf', restart: false },
+  { key: 'paths.locations_file', value: "o'hare locations.csv", source: 'conf', restart: true }] };
+test('config_text_round_trips_through_toml', () => {
   const t = P.configText(CFG_COPY);
   // test_config.cpp parses this same fixture with parseConfigText.
-  assert.strictEqual(t, fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'config-copy.conf'), 'utf8'));
-  const got = {};
-  t.split('\n').forEach((l) => { const kv = confGrammarValue(l); if (kv) got[kv[0]] = kv[1]; });
+  assert.strictEqual(t, fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'config-copy.toml'), 'utf8'));
   const want = {};
-  CFG_COPY.keys.forEach((k) => { if (k.key !== 'BLOCK_LIST_FILE') want[k.key] = k.value; });
-  assert.deepStrictEqual(got, want);   // BLOCK_LIST_FILE cannot be held: left as a comment
-  assert.ok(t.includes('# BLOCK_LIST_FILE cannot be written in skycue.conf'));
+  CFG_COPY.keys.forEach((k) => { want[k.key] = k.value; });
+  assert.deepStrictEqual(tomlLines(t), want);
 });
 
 test('nearestInsideAncestor skips region-edge ancestors', () => {

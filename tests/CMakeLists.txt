@@ -688,5 +688,15 @@ target_compile_definitions(test_geom_altitude PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_geom_altitude)
 add_test(NAME geom_altitude COMMAND test_geom_altitude)
 
+# Geometric altitude evaluation on the data: leave-one-aircraft-out fit on the
+# 120 s capture and own-difference hold on the OpenSky fixtures (skips when absent).
+add_executable(test_geom_eval test_geom_eval.cpp)
+target_link_libraries(test_geom_eval PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
+target_compile_definitions(test_geom_eval PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_geom_eval)
+add_test(NAME geom_eval COMMAND test_geom_eval)
+set_tests_properties(geom_eval PROPERTIES TIMEOUT 120)
+
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

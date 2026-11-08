@@ -38,12 +38,14 @@ constexpr unsigned kVrSrcBit = 121, kVrSignBit = 122, kVrBit = 123, kVrLen = 9;
 // against the Stratux golden (551 surface frames: speed and track agree on all).
 constexpr unsigned kGndSpeedBit = 99, kGndSpeedLen = 11;
 // Track/heading type: 0 n/a, 1 true track, 2 magnetic heading, 3 true heading;
-// only 1 is a track (a deliberate ruling). The golden has types 1 (426 frames, track
-// agrees) and 0 (125, no track); 2 and 3 never occur in it.
+// only 1 is a track (a deliberate ruling). The Stratux golden has types 1 (426 frames, track
+// agrees) and 0 (125, no track); types 2 and 3 are confirmed by the synthetic golden
+// (dump978-fa prints magnetic_heading / true_heading from the same 9 bits, x 360/512,
+// and no track; ours gives no track_deg for them).
 constexpr uint32_t kGndTypeTrack = 1;
 constexpr unsigned kGndTypeBit = 110, kGndTrackBit = 112, kGndTrackLen = 9;
 constexpr unsigned kMsBit = 136;                  // DO-282B MS: byte 17
-constexpr unsigned kEmergencyBit = 184;           // consistent with the golden (every frame is "none"); the field after it, MOPS version, matches at 187
+constexpr unsigned kEmergencyBit = 184;           // confirmed by the synthetic golden (codes 0..2, 4..6 by name; 3 and 7 differ, see decodeModeStatus)
 constexpr unsigned kNacpBit = 200;                // confirmed against the dump978-fa golden
 constexpr unsigned kCsidBit = 214;                // set for call signs, clear for squawks (golden); was 213
 constexpr unsigned kAuxBit = 232;                 // DO-282B AUX SV: byte 29
@@ -235,10 +237,11 @@ std::optional<ModeStatus> decodeModeStatus(const UatFrame& f)
     ModeStatus ms;
     const uint32_t g1 = bitsAt(b, kMsBit, 16), g2 = bitsAt(b, kMsBit + 16, 16), g3 = bitsAt(b, kMsBit + 32, 16);
     const unsigned cat = g1 / 1600;
-    // Sets A-D, 0 = "A0" (no information, as the golden prints it and as the 1090 decoder does);
-    // 32..39 stay unmapped (the golden has only A0-A2, so the code points are not confirmed).
-    if (cat <= 31) {
-        ms.emitter_category = std::string(1, "ABCD"[cat / 8]);
+    // Sets A-D, 0 = "A0" (no information, as the golden prints it and as the 1090 decoder does).
+    // 32..39: dump978-fa prints E0..E7 for them (synthetic golden), so the letter E; the public
+    // spec text this layout follows names no set E, so that is the tool's reading, taken as is.
+    if (cat <= 39) {
+        ms.emitter_category = std::string(1, "ABCDE"[cat / 8]);
         ms.emitter_category += static_cast<char>('0' + cat % 8);
     }
     bool ok = g1 < 64000 && g2 < 64000 && g3 < 64000;
@@ -267,6 +270,9 @@ std::optional<ModeStatus> decodeModeStatus(const UatFrame& f)
                 ms.squawk = sq;
         }
     }
+    // Codes 0..2 and 4..6 agree with dump978-fa (which names 4..6 nordo, unlawful, downed). Code 3
+    // is minimum fuel in the public spec text; dump978-fa prints "invalid" for it, ours keeps the
+    // spec name. Code 7 is reserved: dump978-fa prints "reserved", ours has no value.
     static const char* const names[] = {"none", "general", "medical", "minimum_fuel",
                                         "no_comms", "unlawful_interference", "downed_aircraft"};
     const uint32_t em = bitsAt(b, kEmergencyBit, 3);

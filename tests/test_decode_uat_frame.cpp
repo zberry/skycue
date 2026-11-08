@@ -306,7 +306,7 @@ BOOST_AUTO_TEST_CASE(vrate_sign_source_and_64fpm)
 
 BOOST_AUTO_TEST_CASE(emitter_category_letters)
 {
-    const struct { unsigned v; const char* s; } cases[] = {{0, "A0"}, {1, "A1"}, {9, "B1"}, {17, "C1"}, {25, "D1"}, {31, "D7"}, {39, ""}};
+    const struct { unsigned v; const char* s; } cases[] = {{0, "A0"}, {1, "A1"}, {9, "B1"}, {17, "C1"}, {25, "D1"}, {31, "D7"}, {32, "E0"}, {39, "E7"}};
     for (const auto& c : cases) {
         UatSpec s;
         s.type = 1;

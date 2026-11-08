@@ -7,7 +7,7 @@ OUT_TXT is dump978-fa's stdout from --raw-stdout --json-stdout: raw lines
 downlink line is paired with the JSON object of the same time; the gzip JSONL
 has one object per downlink, in time order:
   {hex, address, qualifier, lat, lon, alt_baro, alt_geom, gs, track, vrate,
-   vrate_src, callsign, category, squawk, nic, nac_p, ag, emergency}
+   vrate_src, callsign, category, squawk, nic, nac_p, ag, emergency, mag_heading, true_heading}
 Keys absent in the JSON are absent here. A JSON key this script does not know
 is an error (so a new field of the tool is looked at, not dropped), and so is
 a downlink with no JSON beyond the 5 % a demodulation miss may cost.
@@ -25,6 +25,8 @@ SCALARS = {
     "geometric_altitude": "alt_geom",
     "ground_speed": "gs",
     "true_track": "track",
+    "magnetic_heading": "mag_heading",  # ground track type 2 (no real capture has it)
+    "true_heading": "true_heading",     # ground track type 3
     "callsign": "callsign",
     "flightplan_id": "squawk",  # a CSID-0 mode status: the four octal digits
     "emitter_category": "category",

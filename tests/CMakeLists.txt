@@ -732,6 +732,20 @@ skycue_set_warnings(test_decode_uat_golden)
 add_test(NAME decode_uat_golden COMMAND test_decode_uat_golden)
 set_tests_properties(decode_uat_golden PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
+# Synthetic UAT coverage matrix (about 110 frames built with encodeUat): uat_synth prints the
+# frames and the values built into them (fixtures/gen_uat_synthetic.sh runs it, then dump978-fa);
+# the test compares dump978-fa's decode of them, the built-in values and our decoder; skips when a
+# golden is absent.
+add_executable(uat_synth uat_synth.cpp)
+skycue_set_warnings(uat_synth)
+add_executable(test_decode_uat_synthetic test_decode_uat_synthetic.cpp)
+target_link_libraries(test_decode_uat_synthetic PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
+target_compile_definitions(test_decode_uat_synthetic PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_decode_uat_synthetic)
+add_test(NAME decode_uat_synthetic COMMAND test_decode_uat_synthetic)
+set_tests_properties(decode_uat_synthetic PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
 # pingStation `source: decode`: rawData frames of both bands through the decoders, the 1 s duplicate
 # rule, the reference from the status position, and device mode unchanged.
 add_executable(test_ping_decode test_ping_decode.cpp)

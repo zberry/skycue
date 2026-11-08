@@ -155,6 +155,26 @@ and `nac_p` appear in the golden more often than in the decoder's output.
 - Licence: derived from `stratux-uat-2015b.log.gz`, so BSD-3-Clause, Copyright
   (c) 2015 Christopher Young, as for the stratux repository.
 
+## raw/uat-synthetic.golden.jsonl.gz and raw/uat-synthetic.expect.jsonl.gz
+
+- Made by `gen_uat_synthetic.sh DUMP978 IQGEN OUT_GZ EXPECT_GZ [UAT_SYNTH]`: the test
+  helper `uat_synth` (built from `tests/uat_synth.cpp` and `tests/uat_test_support.hpp`'s
+  `encodeUat`) prints the 109 frames of the matrix and writes the values built into each;
+  `gen_uat_golden.sh` then runs the frames through `skycue-iqgen` and dump978-fa as for the
+  goldens above (temporary CU8, about 9 MB, deleted on exit). The `.golden` file has the
+  tool's decode (same keys as the other goldens, plus `mag_heading` and `true_heading` for
+  ground track types 2 and 3), the `.expect` file one object per frame, keyed by `hex`, with
+  `row`, `group` and the built-in values in the same key names (a key is absent where the row
+  builds "not available"). 109 of 109 paired.
+- Content: emitter categories 0..39, emergency codes 0..7, ground state vectors with track
+  types 0..3 and speed not available, a frame without a position, N/S or E/W velocity not
+  available, a supersonic one, vertical rate (baro and geometric, up and down, not
+  available), a squawk and a call sign, secondary altitude present and absent with a
+  barometric and a geometric primary, address qualifiers 0..6, positions near the corners,
+  the origin and the equator/meridian, altitudes -1000, 0 and 101,350 ft, NIC 0..11, NACp 0..11.
+  Every frame is made by us, so there is no third-party content and no licence beyond this repository's.
+- Used by `tests/test_decode_uat_synthetic.cpp` (ctest `decode_uat_synthetic`).
+
 ## raw/stratux-uat-2015b.log.gz
 
 - Origin: https://github.com/stratux/stratux, file

@@ -300,6 +300,7 @@ BOOST_AUTO_TEST_CASE(geom_eval_uat_difference_spread)
             dec.feed(*f, at(1.7e9 + static_cast<double>(n++)), std::nullopt);  // the capture has no timestamps
         }
     }
+    BOOST_CHECK(!diffs.empty());  // a fixture without both altitudes must fail, not pass silently
     if (diffs.empty()) {
         std::cout << "geom_eval: the UAT capture has no frame carrying both altitudes\n";
         return;

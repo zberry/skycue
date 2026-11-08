@@ -638,6 +638,7 @@ BOOST_AUTO_TEST_CASE(uat_geometric_sv_type_reported_without_aux)
     const skycue::TrackId id{0x777777, skycue::AddressType::icao};
     auto r = rig.eng.resolve(id, now);
     BOOST_CHECK(r.source == GeomSource::reported);
+    BOOST_CHECK(r.source != GeomSource::estimated);  // the seeded fit was not used
     BOOST_REQUIRE(r.alt_geom_ft);
     BOOST_CHECK_EQUAL(*r.alt_geom_ft, 5000);
     BOOST_CHECK(!r.uncertainty_ft);

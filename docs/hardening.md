@@ -725,10 +725,14 @@ same shape runs in under a minute as the ctest `hub` (`tests/test_hub.sh`).
 way `soak.sh` samples an instance. The source is the 120 s capture from
 `scripts/fixtures/fetch-test-captures.sh`, played over and over:
 
-1. `skycue-rawplay --1090-listen PORT --loop --speed 5` on the capture.
-2. A skycued with `TRACK_DECODER=skycued`, `READSB_BEAST_PORT=PORT`,
-   `--no-uat`, a web port and the test receiver position (not the
-   capture's region; give the input `ref_lat` and `ref_lon` of the capture, see
+1. `skycue-rawplay --1090-listen PORT --loop --speed 5` on the capture, and
+   a second one with `--uat-listen UATPORT --loop --speed 5` on
+   `uat-sample.txt.gz`, so one instance decodes both bands.
+2. A skycued with `TRACK_DECODER=skycued`, `READSB_BEAST_PORT=PORT`, a
+   `uat_raw` input on `UATPORT` (the built-in `dump978` input would do
+   as well, with the dump978 port at `UATPORT`), a web port and the test
+   receiver position (not the capture's region; give each input the
+   `ref_lat` and `ref_lon` of its capture, see
    [operating.md](operating.md#raw-capture-and-replay)), with the same WebSocket and cue clients
    as an instance of `soak.sh`.
 3. Every minute, RSS and fd count (`/proc`), `GET /api/stats` (`decoder`,
@@ -736,7 +740,7 @@ way `soak.sh` samples an instance. The source is the 120 s capture from
 
 It passes when, after the first 10 minutes: RSS grows less than 5 %
 (the rule below on that window); `decoder.keys` never exceeds the decoder's
-limit of 20,000 and in this replay stays at the capture's aircraft count;
+limit of 20,000 and in this replay stays at the captures' aircraft count (both bands);
 the `evicted` rate is steady; the `crc_fail` share of `frames` is constant
 (the loop replays the same frames, so any drift is a bug); the
 `observations` rate does not drift by more than 10 % between the first and

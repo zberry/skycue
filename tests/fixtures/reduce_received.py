@@ -73,7 +73,12 @@ def main(src, out, uat=False, golden=False, ref=None):
             hexid = o.get("hex")
             if not isinstance(hexid, str) or "lat" not in o or "lon" not in o:
                 continue
-            a = acc.setdefault(hexid, {"positions": 0, "pos": None, "second": None, "all": []})
+            a = acc.setdefault(hexid, {"positions": 0, "pos": None, "second": None, "all": [], "ident": {}})
+            if uat:  # sticky: a frame that carries the call sign or squawk sets it for the address
+                for src_k, dst in IDENT:
+                    if src_k in o:
+                        v = o[src_k]
+                        a["ident"][dst] = v.strip() if isinstance(v, str) else v
             p = (o["lat"], o["lon"])
             if p == a["pos"]:
                 continue
@@ -82,11 +87,12 @@ def main(src, out, uat=False, golden=False, ref=None):
             a["pos"] = p
             a["t"] = o.get("time")
             a["motion"] = {dst: o[src_k] for src_k, dst in motion if src_k in o}
-            a["ident"] = {}
-            for src_k, dst in IDENT:
-                if src_k in o:
-                    v = o[src_k]
-                    a["ident"][dst] = v.strip() if isinstance(v, str) else v
+            if not uat:
+                a["ident"] = {}
+                for src_k, dst in IDENT:
+                    if src_k in o:
+                        v = o[src_k]
+                        a["ident"][dst] = v.strip() if isinstance(v, str) else v
             if a["positions"] == 2:
                 a["second"] = {"t": a["t"], "lat": p[0], "lon": p[1]}
     rows = []
@@ -105,8 +111,8 @@ def main(src, out, uat=False, golden=False, ref=None):
             g.write((json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n").encode())
     if far:
         print("left out, beyond 300 NM of the receiver: " + " ".join(sorted(far)), file=sys.stderr)
-    print("addresses=%d with_second=%d total_positions=%d" % (
-        len(rows), sum(1 for r in rows if "second" in r), sum(r["positions"] for r in rows)))
+    print("excluded=%d addresses=%d with_second=%d total_positions=%d" % (
+        len(far), len(rows), sum(1 for r in rows if "second" in r), sum(r["positions"] for r in rows)))
 
 
 if __name__ == "__main__":

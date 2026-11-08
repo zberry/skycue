@@ -17,8 +17,10 @@ Criteria (those of the C++ golden test, dynamic fields raised to 97 %):
   >= 97 % agreement per field where both have a value.
 --uat (dump978-fa golden, reduce_received.py --uat/--uat-golden): every THEIRS address with
 >= 1 position is positioned by OURS (100 %; UAT positions are absolute, one frame each) and
->= 98 % of the second and 100 % of the last positions are within 1e-5 degrees; identity as above;
-alt_geom joins the per-field agreement at 97 %.
+>= 100 % of the second and of the last positions are within 1e-5 degrees; identity as above;
+alt_geom joins the per-field agreement. Every floor is 100 % under --uat (both decoders read the
+same frame, so what both report must agree); a field absent on one side (a surface frame has
+no track) is not compared; a field the golden never carries is skipped with a note.
 Observation counts and `positions` are reported only. Standard library only.
 """
 import gzip
@@ -115,7 +117,7 @@ def compare(ours, theirs, uat=False):
         else:
             print("last position differs: %s ours %.6f,%.6f theirs %.6f,%.6f (positions ours %d theirs %d)" % (
                 h, ol["lat"], ol["lon"], tl["lat"], tl["lon"], o["positions"], t["positions"]))
-    for name, n, d, need in (("second", second_ok, second_n, POS_MIN),
+    for name, n, d, need in (("second", second_ok, second_n, pos_min),
                              ("last", last_ok, len(positioned), pos_min)):
         r = n / d if d else 0.0
         print("%s positions within %g deg: %d of %d (%.2f %%, need %.0f %%)" % (name, POS_TOL, n, d, 100 * r, 100 * need))
@@ -132,10 +134,11 @@ def compare(ours, theirs, uat=False):
         print("%s: %d compared, %d differ (need 0)" % (f, n, bad))
         ok &= bad == 0
     for f, tol, circ in dyn + (("nac_p", 0.0, False),):
-        n = good = 0
+        n = good = theirs_n = 0
         for h in positioned:
             ov = ours[h]["last"].get(f) if f != "nac_p" else ours[h].get(f)
             tv = theirs[h]["last"].get(f) if f != "nac_p" else theirs[h].get(f)
+            theirs_n += tv is not None
             if ov is None or tv is None:
                 continue
             n += 1
@@ -144,10 +147,13 @@ def compare(ours, theirs, uat=False):
             else:
                 print("%s differs: %s ours %s theirs %s" % (f, h, ov, tv))
         r = good / n if n else 0.0
-        need = MIN_BY_FIELD.get(f, DYN_MIN)
+        need = 1.0 if uat else MIN_BY_FIELD.get(f, DYN_MIN)
         print("%s: %d of %d agree (%.2f %%, need %.0f %%)" % (f, good, n, 100 * r, 100 * need))
         if f in NOTE_BY_FIELD and good < n:
             print("  classification: %s" % NOTE_BY_FIELD[f])
+        if uat and theirs_n == 0:
+            print("  note: the golden has no %s here, nothing to compare" % f)  # e.g. a capture without geometric altitude
+            continue
         if n == 0:
             print("  FAIL: no comparable rows for %s (a vacuous pass is not a pass)" % f)
         ok &= n > 0 and r >= need

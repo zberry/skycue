@@ -2954,7 +2954,8 @@ test.describe('receiver tab (pingsim)', () => {
     page.on('request', (r) => { if (isPost(r)) posts.push(r.url()); });
     const form = page.locator('#input-form');
     await form.locator('select[name=type]').selectOption('pingstation_json');
-    await expect(form.locator('[name=transport]')).toBeHidden();
+    await expect(form.locator('[name=transport]')).toBeVisible(); // any type takes any transport now
+    await expect(form.locator('[name=transport]')).toHaveValue('udp');
     await expect(form.locator('[name=host]')).toBeHidden();
     await form.locator('[name=id]').fill('PS');
     await form.locator('[name=port]').fill('0');
@@ -3134,6 +3135,273 @@ test.describe('receiver tab (pingsim)', () => {
     } finally {
       socks.forEach((s) => s.destroy());
     }
+  });
+});
+
+// ---- Receiver tab: input endpoint fields and Outputs ----
+const RX_OUT_PORT = Number(process.env.SKYCUE_RX_OUTPUT_PORT);
+const rxOutputs = async () => (await rxApi('GET', '/api/outputs')).body.outputs;
+const outputCard = (page, id) => page.locator(`#outputs-list .output-card[data-id="${id}"]`);
+// beast-out as run.sh wrote it, for rxRestoreOutputs.
+let beastOutDef = null;
+async function rxRestoreOutputs() {
+  for (const o of await rxOutputs()) {
+    if (o.builtin) {
+      if (!o.enabled) await rxApi('POST', `/api/outputs/${o.id}/enable`, {});
+    } else if (o.id !== 'beast-out') await rxApi('DELETE', '/api/outputs/' + o.id);
+    else if (JSON.stringify(definition(o)) !== JSON.stringify(beastOutDef)) await rxApi('PUT', '/api/outputs/beast-out', beastOutDef);
+  }
+  if (!(await rxOutputs()).some((o) => o.id === 'beast-out')) await rxApi('POST', '/api/outputs', beastOutDef);
+}
+function freeTcpPort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.on('error', reject);
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
+}
+async function fillOutput(form, fields) {
+  for (const [name, value] of Object.entries(fields)) {
+    const e = form.locator(`[name=${name}]`);
+    if ((await e.evaluate((n) => n.tagName)) === 'SELECT') await e.selectOption(value);
+    else await e.fill(String(value));
+  }
+}
+
+test.describe('receiver tab (outputs)', () => {
+  test.use({ baseURL: RX_BASE });
+  test.beforeAll(async () => {
+    if (!psSimDef) psSimDef = definition((await rxInputs()).find((i) => i.id === 'ps-sim'));
+    if (!beastOutDef) beastOutDef = definition((await rxOutputs()).find((o) => o.id === 'beast-out'));
+  });
+  test.afterEach(async () => { await rxRestore(); await rxRestoreOutputs(); });
+
+  test('outputs_section_lists_builtin_cue_outputs', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openReceiverTab(page);
+    const outs = await rxOutputs();
+    const builtins = outs.filter((o) => o.builtin);
+    expect(builtins.length).toBeGreaterThan(0);
+    await expect(page.locator('#outputs-list .output-card')).toHaveCount(outs.length);
+    for (const b of builtins) {
+      const card = outputCard(page, b.id);
+      await expect(card.locator('.output-kind')).toContainText('cue');
+      await expect(card.locator('.output-endpoint')).toHaveText(/^udp 127\.0\.0\.1:\d+ *$/);
+      await expect(card.locator('[data-act=toggle]')).toBeVisible();
+      await expect(card.locator('[data-act=edit]')).toHaveCount(0);
+      await expect(card.locator('[data-act=remove]')).toHaveCount(0);
+    }
+    // The file's output is a card of its own with the full buttons.
+    const own = outputCard(page, 'beast-out');
+    await expect(own.locator('.output-name')).toHaveText('Beast out');
+    await expect(own.locator('.output-endpoint')).toHaveText(`tcp_listen 127.0.0.1:${RX_OUT_PORT}`);
+    await expect(own.locator('.dot')).toHaveClass(/\bdot-green\b/);
+    for (const act of ['toggle', 'edit', 'remove']) await expect(own.locator(`[data-act=${act}]`)).toBeVisible();
+    // A built-in turns off and on again from its card.
+    const card = outputCard(page, builtins[0].id);
+    await card.locator('[data-act=toggle]').click();
+    await expect(card.locator('.dot')).toHaveClass(/\bdot-grey\b/);
+    await expect(card.locator('[data-act=toggle]')).toHaveText('Enable');
+    await card.locator('[data-act=toggle]').click();
+    await expect(card.locator('[data-act=toggle]')).toHaveText('Disable');
+    expect(errors).toEqual([]);
+  });
+
+  test('add_beast_output_and_see_peer_count_rise', async ({ page }) => {
+    await openReceiverTab(page);
+    const port = await freeTcpPort();
+    const form = page.locator('#output-form');
+    await fillOutput(form, { kind: 'beast', id: 'beast-two', name: 'Second beast', transport: 'tcp_listen',
+      bind: '127.0.0.1', port });
+    await form.locator('button[type=submit]').click();
+    const card = outputCard(page, 'beast-two');
+    await expect(card.locator('.output-endpoint')).toHaveText(`tcp_listen 127.0.0.1:${port}`);
+    await expect(card.locator('.output-peers')).toHaveText('peers 0');
+    await expect(form.locator('[name=id]')).toHaveValue(''); // reset for the next one
+    expect((await rxOutputs()).find((o) => o.id === 'beast-two')).toMatchObject({ kind: 'beast', port, enabled: true });
+    const sock = net.connect(port, '127.0.0.1');
+    await new Promise((ok) => sock.once('connect', ok));
+    try {
+      await expect(card.locator('.output-peers')).toHaveText('peers 1', { timeout: 3000 });
+    } finally { sock.destroy(); }
+    await expect(card.locator('.output-peers')).toHaveText('peers 0', { timeout: 3000 });
+  });
+
+  test('edit_output_port_recreates_it', async ({ page }) => {
+    await openReceiverTab(page);
+    const form = page.locator('#output-form');
+    const card = outputCard(page, 'beast-out');
+    await card.locator('[data-act=edit]').click();
+    await expect(form.locator('[name=id]')).toHaveValue('beast-out');
+    await expect(form.locator('[name=id]')).toHaveAttribute('readonly', '');
+    await expect(form.locator('[name=port]')).toHaveValue(String(RX_OUT_PORT));
+    const port = await freeTcpPort();
+    await form.locator('[name=port]').fill(String(port));
+    await form.locator('button[type=submit]').click();
+    await expect(card.locator('.output-endpoint')).toHaveText(`tcp_listen 127.0.0.1:${port}`);
+    expect((await rxOutputs()).find((o) => o.id === 'beast-out').port).toBe(port);
+    // The new port accepts; the old one no longer does.
+    const sock = net.connect(port, '127.0.0.1');
+    await new Promise((ok, no) => { sock.once('connect', ok); sock.once('error', no); });
+    await expect(card.locator('.output-peers')).toHaveText('peers 1', { timeout: 3000 });
+    sock.destroy();
+    await new Promise((ok) => {
+      const old = net.connect(RX_OUT_PORT, '127.0.0.1');
+      old.once('connect', () => { old.destroy(); ok('open'); });
+      old.once('error', () => ok('closed'));
+    }).then((state) => expect(state).toBe('closed'));
+  });
+
+  test('delete_output_removes_card', async ({ page }) => {
+    await openReceiverTab(page);
+    const card = outputCard(page, 'beast-out');
+    page.once('dialog', (d) => d.dismiss());
+    await card.locator('[data-act=remove]').click();
+    await page.waitForTimeout(500);
+    await expect(card).toHaveCount(1);
+    let asked = '';
+    page.once('dialog', (d) => { asked = d.message(); d.accept(); });
+    await card.locator('[data-act=remove]').click();
+    await expect(card).toHaveCount(0);
+    expect(asked).toBe('Remove output beast-out?');
+    expect((await rxOutputs()).some((o) => o.id === 'beast-out')).toBe(false);
+  });
+
+  test('output_form_shows_ttl_only_for_a_multicast_group', async ({ page }) => {
+    await openReceiverTab(page);
+    const form = page.locator('#output-form');
+    const shown = async (name) => form.locator(`[name=${name}]`).isVisible();
+    await expect(form.locator('[name=bind]')).toBeVisible();
+    for (const n of ['host', 'group', 'ttl', 'interface', 'loopback']) expect(await shown(n), n).toBe(false);
+    await form.locator('select[name=transport]').selectOption('tcp_connect');
+    await expect(form.locator('[name=host]')).toBeVisible();
+    await expect(form.locator('[name=bind]')).toBeHidden();
+    await form.locator('select[name=transport]').selectOption('udp');
+    await expect(form.locator('[name=group]')).toBeVisible();
+    await expect(form.locator('[name=host]')).toBeVisible();
+    for (const n of ['ttl', 'interface', 'loopback', 'peer', 'bind']) expect(await shown(n), n).toBe(false);
+    await form.locator('[name=group]').fill('239.1.1.5');
+    for (const n of ['ttl', 'interface', 'loopback']) await expect(form.locator(`[name=${n}]`)).toBeVisible();
+    await expect(form.locator('[name=host]')).toBeHidden(); // a group replaces the host
+    await form.locator('[name=group]').fill('');
+    for (const n of ['ttl', 'interface', 'loopback']) await expect(form.locator(`[name=${n}]`)).toBeHidden();
+    await expect(form.locator('[name=host]')).toBeVisible();
+    // And a multicast output goes through with its options.
+    await fillOutput(form, { kind: 'json', id: 'json-mc', group: '239.1.1.5', port: 4978, interface: '127.0.0.1', ttl: 3 });
+    await form.locator('button[type=submit]').click();
+    await expect(outputCard(page, 'json-mc').locator('.output-endpoint')).toHaveText('udp 239.1.1.5:4978 via 127.0.0.1 ttl 3');
+    expect((await rxOutputs()).find((o) => o.id === 'json-mc')).toMatchObject({ group: '239.1.1.5', ttl: 3, loopback: true });
+  });
+
+  test('input_form_shows_group_and_interface_only_for_udp', async ({ page }) => {
+    await openReceiverTab(page);
+    const form = page.locator('#input-form');
+    const transport = form.locator('select[name=transport]');
+    for (const type of ['readsb', 'uat_raw', 'beast_raw', 'pingstation_json', 'pingstation_cat021']) {
+      await form.locator('select[name=type]').selectOption(type);
+      for (const t of ['tcp_connect', 'tcp_listen', 'udp']) {
+        await transport.selectOption(t);
+        const on = t === 'udp';
+        await expect(form.locator('[name=group]'), `${type} ${t}`).toBeVisible({ visible: on });
+        await expect(form.locator('[name=interface]'), `${type} ${t}`).toBeVisible({ visible: on });
+        await expect(form.locator('[name=host]'), `${type} ${t}`).toBeVisible({ visible: t === 'tcp_connect' });
+      }
+      await expect(form.locator('[name=format]')).toBeVisible({ visible: type === 'beast_raw' });
+    }
+    // Changing the type goes back to that type's default transport.
+    await form.locator('select[name=type]').selectOption('uat_raw');
+    await expect(transport).toHaveValue('tcp_connect');
+    await form.locator('select[name=type]').selectOption('pingstation_json');
+    await expect(transport).toHaveValue('udp');
+    // A group binds the group: no Bind beside it.
+    await expect(form.locator('[name=bind]')).toBeVisible();
+    await form.locator('[name=group]').fill('239.1.1.5');
+    await expect(form.locator('[name=bind]')).toBeHidden();
+  });
+
+  test('input_form_adds_raw_input_over_a_transport', async ({ page }) => {
+    await openReceiverTab(page);
+    const form = page.locator('#input-form');
+    const port = await freeTcpPort();
+    await form.locator('select[name=type]').selectOption('beast_raw');
+    await form.locator('select[name=transport]').selectOption('tcp_listen');
+    await fillOutput(form, { id: 'beast-in', bind: '127.0.0.1', port, format: 'avr' });
+    await form.locator('button[type=submit]').click();
+    const card = inputCard(page, 'beast-in');
+    await expect(card.locator('.input-endpoint')).toHaveText(`beast_raw listen 127.0.0.1:${port}`);
+    expect((await rxInputs()).find((i) => i.id === 'beast-in')).toMatchObject({ type: 'beast_raw', transport: 'tcp_listen',
+      format: 'avr' });
+  });
+
+  test('input_form_leaves_default_transport_out', async ({ page }) => {
+    await openReceiverTab(page);
+    const form = page.locator('#input-form');
+    const bodies = [];
+    page.on('request', (r) => { if (isPost(r)) bodies.push(JSON.parse(r.postData())); });
+    await form.locator('select[name=type]').selectOption('readsb');
+    await fillOutput(form, { id: 'rs-one', host: '127.0.0.1', port: await freeTcpPort() });
+    await form.locator('button[type=submit]').click();
+    await expect(inputCard(page, 'rs-one')).toHaveCount(1);
+    expect(bodies.length).toBe(1);
+    expect(bodies[0]).not.toHaveProperty('transport');
+  });
+
+  test('invalid_output_shows_server_message_in_form', async ({ page }) => {
+    await openReceiverTab(page);
+    const posts = [];
+    page.on('request', (r) => { if (r.method() === 'POST' && /\/api\/outputs$/.test(r.url())) posts.push(r.url()); });
+    const form = page.locator('#output-form');
+    await fillOutput(form, { id: 'cue-tcp', port: 0 });
+    await form.locator('button[type=submit]').click();
+    await expect(form.locator('.field-error[data-for=id]')).toHaveText("id 'cue-tcp' is reserved");
+    await expect(form.locator('.field-error[data-for=port]')).toHaveText('port must be an integer from 1 to 65535');
+    expect(posts).toEqual([]);
+    // A port another output holds: skycued's 400, word for word.
+    await fillOutput(form, { id: 'beast-clash', bind: '127.0.0.1', port: RX_OUT_PORT });
+    const answer = page.waitForResponse((r) => r.request().method() === 'POST' && /\/api\/outputs$/.test(r.url()));
+    await form.locator('button[type=submit]').click();
+    const res = await answer;
+    expect(res.status()).toBe(400);
+    const message = (await res.json()).error;
+    expect(message).toContain('beast-out');
+    await expect(form.locator('.form-error')).toHaveText(message);
+    expect((await rxOutputs()).some((o) => o.id === 'beast-clash')).toBe(false);
+  });
+
+  test('cues_tab_unchanged_with_a_cue_output', async ({ page }) => {
+    const errors = watchErrors(page);
+    const port = await freeTcpPort();
+    expect((await rxApi('POST', '/api/outputs', { id: 'cue-two', kind: 'cue', transport: 'tcp_listen', bind: '127.0.0.1',
+      port })).status).toBe(201);
+    const sock = net.connect(port, '127.0.0.1');
+    await new Promise((ok) => sock.once('connect', ok));
+    try {
+      await openPage(page);
+      await page.locator('#wx-toggle').click();
+      await page.locator('#tab-cues').click();
+      await expect(page.locator('#pane-cues')).toBeVisible();
+      // The session is listed as before; the daemon's `output` field is not shown.
+      const row = page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` });
+      await expect(row).toHaveCount(1, { timeout: 10000 });
+      await expect(row).toContainText('accepted');
+      await expect(row).not.toContainText('cue-two');
+    } finally { sock.destroy(); }
+    expect(errors).toEqual([]);
+  });
+
+  test('page_works_when_the_outputs_api_is_missing', async ({ page }) => {
+    // An older skycued answers 404 to the poll: the inputs part is as before.
+    const errors = watchErrors(page);
+    await page.route('**/api/outputs', (route) => route.fulfill({ status: 404, contentType: 'application/json',
+      body: '{"error":"no such API path: /api/outputs"}' }));
+    await openReceiverTab(page);
+    await expect(inputCard(page, 'ps-sim')).toHaveCount(1);
+    await page.waitForTimeout(2500);
+    await expect(page.locator('#input-form')).toBeVisible();
+    expect(errors.filter((e) => !/404/.test(e))).toEqual([]);
   });
 });
 

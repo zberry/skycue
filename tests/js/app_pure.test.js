@@ -546,19 +546,193 @@ test('validateInputDef rejects unknown edition', () => {
       'host must be an IPv4 address or a hostname of at most 253 characters', host);
   });
   assert.strictEqual(P.validateInputDef({ id: 'x', type: 'replay', port: 1 }).errors.type,
-    'type must be one of readsb, dump978, pingstation_json, pingstation_cat021');
+    'type must be one of readsb, dump978, pingstation_json, pingstation_cat021, beast_raw, uat_raw');
 });
 
 test('inputFields for cat021 tcp_connect has host not bind', () => {
   const f = P.inputFields('pingstation_cat021', 'tcp_connect');
   assert.ok(f.indexOf('host') >= 0 && f.indexOf('bind') < 0 && f.indexOf('peer') < 0, f.join());
-  assert.deepStrictEqual(P.inputFields('pingstation_cat021', 'udp'), ['id', 'name', 'transport', 'bind', 'port', 'peer',
-    'edition', 'sac', 'sic', 'status_url', 'status_interval_s', 'time_mode', 'capture', 'enabled']);
-  assert.deepStrictEqual(P.inputFields('pingstation_json'), ['id', 'name', 'bind', 'port', 'peer',
-    'status_url', 'status_interval_s', 'time_mode', 'capture', 'enabled']);
-  assert.deepStrictEqual(P.inputFields('readsb'), ['id', 'name', 'host', 'port', 'enabled']);
+  assert.deepStrictEqual(P.inputFields('pingstation_cat021', 'udp'), ['id', 'name', 'transport', 'bind', 'group',
+    'interface', 'port', 'peer', 'edition', 'sac', 'sic', 'status_url', 'status_interval_s', 'time_mode', 'capture',
+    'enabled']);
+  assert.deepStrictEqual(P.inputFields('pingstation_json'), ['id', 'name', 'transport', 'bind', 'group', 'interface',
+    'port', 'peer', 'status_url', 'status_interval_s', 'time_mode', 'capture', 'enabled']);
+  assert.deepStrictEqual(P.inputFields('readsb'), ['id', 'name', 'transport', 'host', 'port', 'enabled']);
   // Before a transport is chosen the fields are udp's, the add form's preselected value.
   assert.deepStrictEqual(P.inputFields('pingstation_cat021'), P.inputFields('pingstation_cat021', 'udp'));
+});
+
+test('inputFields_per_type_and_transport', () => {
+  const f = P.inputFields;
+  // The type decides the default transport; any of the three is allowed.
+  assert.deepStrictEqual(f('readsb', 'tcp_listen'), ['id', 'name', 'transport', 'bind', 'port', 'peer', 'enabled']);
+  assert.deepStrictEqual(f('uat_raw'), ['id', 'name', 'transport', 'host', 'port', 'capture', 'enabled']);
+  assert.deepStrictEqual(f('uat_raw', 'udp'), ['id', 'name', 'transport', 'bind', 'group', 'interface', 'port', 'peer',
+    'capture', 'enabled']);
+  assert.deepStrictEqual(f('beast_raw'), ['id', 'name', 'transport', 'host', 'port', 'format', 'capture', 'enabled']);
+  assert.deepStrictEqual(f('pingstation_json', 'tcp_connect'), ['id', 'name', 'transport', 'host', 'port', 'status_url',
+    'status_interval_s', 'time_mode', 'capture', 'enabled']);
+  // group and interface only for udp; format only for beast_raw; capture not for readsb.
+  ['readsb', 'dump978', 'uat_raw', 'beast_raw', 'pingstation_json', 'pingstation_cat021'].forEach((type) => {
+    ['tcp_connect', 'tcp_listen'].forEach((t) => {
+      const list = f(type, t);
+      assert.ok(list.indexOf('group') < 0 && list.indexOf('interface') < 0, type + ' ' + t);
+    });
+    assert.ok(f(type, 'udp').indexOf('group') >= 0 && f(type, 'udp').indexOf('interface') >= 0, type);
+    assert.strictEqual(f(type, 'udp').indexOf('format') >= 0, type === 'beast_raw', type);
+  });
+  assert.ok(f('readsb', 'udp').indexOf('capture') < 0);
+  // A group binds the group itself: no bind.
+  assert.ok(f('readsb', 'udp', '239.1.1.5').indexOf('bind') < 0);
+  assert.ok(f('readsb', 'udp', '').indexOf('bind') >= 0);
+  assert.strictEqual(P.inputTransport('beast_raw'), 'tcp_connect');
+  assert.strictEqual(P.inputTransport('pingstation_json'), 'udp');
+  assert.strictEqual(P.inputTransport('readsb', 'udp'), 'udp');
+});
+
+// One row per message of Task 1's input_def.cpp that the page can show
+// (copy a changed server text here, and the page's helper with it).
+test('validateInputDef_matches_server_messages_for_new_keys', () => {
+  const rows = [
+    [{ id: 'a', type: 'beast_raw', host: '192.0.2.1', port: 1, format: 'hex' }, 'format', 'format must be beast or avr'],
+    [{ id: 'a', type: 'uat_raw', host: '192.0.2.1', port: 1, format: 'beast' }, 'format', 'format applies to beast_raw only'],
+    [{ id: 'a', type: 'readsb', transport: 'udp', port: 1, group: '10.0.0.1' }, 'group',
+      'group must be a multicast address (224.0.0.0 to 239.255.255.255)'],
+    [{ id: 'a', type: 'readsb', host: '192.0.2.1', port: 1, group: '239.1.1.1' }, 'group', 'group applies to udp only'],
+    [{ id: 'a', type: 'readsb', host: '192.0.2.1', port: 1, interface: '192.0.2.2' }, 'interface',
+      'interface applies to udp only'],
+    [{ id: 'a', type: 'readsb', transport: 'udp', port: 1, interface: '192.0.2.2' }, 'interface',
+      'interface applies to a multicast group only'],
+    [{ id: 'a', type: 'readsb', transport: 'udp', port: 1, group: '239.1.1.1', interface: 'eth0' }, 'interface',
+      'interface must be an IPv4 address'],
+    [{ id: 'a', type: 'readsb', transport: 'udp', port: 1, group: '239.1.1.1', bind: '0.0.0.0' }, 'bind',
+      'bind does not apply when group is set'],
+    [{ id: 'a', type: 'readsb', transport: 'udp', port: 1, bind: '999.1.1.1' }, 'bind', 'bind must be an IPv4 address'],
+    [{ id: 'a', type: 'readsb', transport: 'tcp_listen', port: 1, host: '192.0.2.1' }, 'host',
+      'host is not used with tcp_listen'],
+    [{ id: 'a', type: 'readsb', transport: 'tcp_connect', port: 1, bind: '0.0.0.0' }, 'bind',
+      'bind is not used with tcp_connect'],
+    [{ id: 'a', type: 'readsb', transport: 'tcp_connect', port: 1, peer: '192.0.2.1' }, 'peer',
+      'peer applies to udp and tcp_listen only'],
+    [{ id: 'a', type: 'readsb', host: 'h', port: 1, capture: true }, 'capture',
+      'capture applies to beast_raw, uat_raw, pingstation_json and pingstation_cat021 only'],
+    [{ id: 'a', type: 'readsb', transport: 'tcp', port: 1 }, 'transport', 'transport must be udp, tcp_connect or tcp_listen'],
+    [{ id: 'a', type: 'dump979', host: 'h', port: 1 }, 'type',
+      'type must be one of readsb, dump978, pingstation_json, pingstation_cat021, beast_raw, uat_raw'],
+    [{ id: 'a', type: 'readsb', port: 1 }, 'host', 'host is required']
+  ];
+  rows.forEach(([def, field, message]) => {
+    assert.strictEqual(P.validateInputDef(def).errors[field], message, JSON.stringify(def));
+  });
+  const ok = [
+    { id: 'a', type: 'beast_raw', host: '192.0.2.1', port: 30005, format: 'avr', capture: true },
+    { id: 'a', type: 'uat_raw', transport: 'udp', group: '239.1.1.5', interface: '192.0.2.10', port: 4978 },
+    { id: 'a', type: 'readsb', transport: 'tcp_listen', bind: '0.0.0.0', port: 30047, peer: '192.0.2.9' },
+    { id: 'a', type: 'pingstation_json', transport: 'udp', group: '239.1.1.5', port: 4001 }
+  ];
+  ok.forEach((def) => assert.deepStrictEqual(P.validateInputDef(def), { ok: true, errors: {} }, JSON.stringify(def)));
+});
+
+test('outputFields_hide_ttl_without_group', () => {
+  const f = P.outputFields;
+  assert.deepStrictEqual(f('beast', 'tcp_listen'), ['id', 'name', 'kind', 'transport', 'bind', 'port', 'peer', 'enabled']);
+  assert.deepStrictEqual(f('beast', 'tcp_connect'), ['id', 'name', 'kind', 'transport', 'host', 'port', 'enabled']);
+  assert.deepStrictEqual(f('json', 'udp'), ['id', 'name', 'kind', 'transport', 'host', 'group', 'port', 'enabled']);
+  assert.deepStrictEqual(f('json', 'udp', ''), f('json', 'udp'));
+  assert.deepStrictEqual(f('json', 'udp', '239.1.1.5'), ['id', 'name', 'kind', 'transport', 'group', 'port',
+    'interface', 'ttl', 'loopback', 'enabled']);
+  ['tcp_listen', 'tcp_connect'].forEach((t) => {
+    ['ttl', 'loopback', 'interface', 'group'].forEach((k) => assert.ok(f('beast', t, '239.1.1.5').indexOf(k) < 0, t + k));
+  });
+});
+
+test('validateOutputDef_matches_server_messages', () => {
+  const rows = [
+    [{ kind: 'beast', transport: 'tcp_listen', port: 1 }, 'id', 'id is required'],
+    [{ id: 'A', kind: 'beast', transport: 'tcp_listen', port: 1 }, 'id', 'id must be 1 to 32 characters of a-z, 0-9 and -'],
+    [{ id: 'cue-tcp', kind: 'beast', transport: 'tcp_listen', port: 1 }, 'id', "id 'cue-tcp' is reserved"],
+    [{ id: 'cue-udp-3', kind: 'beast', transport: 'tcp_listen', port: 1 }, 'id', "id 'cue-udp-3' is reserved"],
+    [{ id: 'cue-connect-12', kind: 'beast', transport: 'tcp_listen', port: 1 }, 'id', "id 'cue-connect-12' is reserved"],
+    [{ id: 'a', transport: 'tcp_listen', port: 1 }, 'kind', 'kind must be one of beast, uat, json, pingstation_json, cat021, cue'],
+    [{ id: 'a', kind: 'raw', transport: 'tcp_listen', port: 1 }, 'kind', 'kind must be one of beast, uat, json, pingstation_json, cat021, cue'],
+    [{ id: 'a', kind: 'beast', port: 1 }, 'transport', 'transport is required for outputs (tcp_listen, tcp_connect or udp)'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp', port: 1 }, 'transport', 'transport must be tcp_listen, tcp_connect or udp'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_listen' }, 'port', 'port is required'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_listen', port: 70000 }, 'port', 'port must be an integer from 1 to 65535'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_listen', port: 1, bind: 'x' }, 'bind', 'bind must be an IPv4 address'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_listen', port: 1, peer: 'x' }, 'peer', 'peer must be an IPv4 address'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_connect', port: 1, bind: '0.0.0.0' }, 'bind', 'bind applies to tcp_listen only'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', host: 'h', port: 1, peer: '192.0.2.1' }, 'peer', 'peer applies to tcp_listen only'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_listen', port: 1, host: 'h' }, 'host', 'host is not used with tcp_listen'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_connect', port: 1 }, 'host', 'host is required'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_connect', port: 1, host: '-x' }, 'host',
+      'host must be an IPv4 address or a hostname of at most 253 characters'],
+    [{ id: 'a', kind: 'beast', transport: 'tcp_connect', host: 'h', port: 1, group: '239.1.1.1' }, 'group', 'group applies to udp only'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, group: '10.0.0.1' }, 'group',
+      'group must be a multicast address (224.0.0.0 to 239.255.255.255)'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1 }, 'host', 'udp needs a host (unicast) or a group (multicast)'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, host: 'h', group: '239.1.1.1' }, 'host',
+      'host and group cannot both be set'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, host: 'h', ttl: 4 }, 'ttl',
+      'ttl applies to a multicast group only'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, host: 'h', loopback: false }, 'loopback',
+      'loopback applies to a multicast group only'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, host: 'h', interface: '192.0.2.1' }, 'interface',
+      'interface applies to a multicast group only'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, group: '239.1.1.1', interface: 'eth0' }, 'interface',
+      'interface must be an IPv4 address'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, group: '239.1.1.1', ttl: 0 }, 'ttl',
+      'ttl must be an integer from 1 to 255'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, group: '239.1.1.1', ttl: 256 }, 'ttl',
+      'ttl must be an integer from 1 to 255'],
+    [{ id: 'a', kind: 'beast', transport: 'udp', port: 1, group: '239.1.1.1', loopback: 'yes' }, 'loopback',
+      'loopback must be true or false'],
+    [{ id: 'a', name: 'x'.repeat(65), kind: 'beast', transport: 'tcp_listen', port: 1 }, 'name',
+      'name must be at most 64 printable characters']
+  ];
+  rows.forEach(([def, field, message]) => {
+    assert.strictEqual(P.validateOutputDef(def).errors[field], message, JSON.stringify(def));
+  });
+  const ok = [
+    { id: 'out-1', kind: 'beast', transport: 'tcp_listen', port: 30005 },
+    { id: 'out-2', kind: 'json', transport: 'tcp_connect', host: '192.0.2.30', port: 30500, enabled: false },
+    { id: 'out-3', kind: 'cat021', transport: 'udp', group: '239.1.1.5', interface: '192.0.2.10', ttl: 1, loopback: true,
+      port: 4978 },
+    { id: 'out-4', kind: 'cue', transport: 'udp', host: 'h.example', port: 4978 }
+  ];
+  ok.forEach((def) => assert.deepStrictEqual(P.validateOutputDef(def), { ok: true, errors: {} }, JSON.stringify(def)));
+  assert.deepStrictEqual(P.OUTPUT_KINDS, ['beast', 'uat', 'json', 'pingstation_json', 'cat021', 'cue']);
+});
+
+test('outputEndpoint_text', () => {
+  assert.strictEqual(P.outputEndpoint({ transport: 'tcp_listen', bind: '0.0.0.0', port: 30005 }), 'tcp_listen 0.0.0.0:30005');
+  assert.strictEqual(P.outputEndpoint({ transport: 'tcp_connect', host: '192.0.2.30', port: 30500 }),
+    'tcp_connect 192.0.2.30:30500');
+  assert.strictEqual(P.outputEndpoint({ transport: 'udp', group: '239.1.1.5', interface: '192.0.2.10', ttl: 1, port: 4978 }),
+    'udp 239.1.1.5:4978 via 192.0.2.10 ttl 1');
+  assert.strictEqual(P.outputEndpoint({ transport: 'udp', group: '239.1.1.5', interface: null, ttl: 4, port: 4978 }),
+    'udp 239.1.1.5:4978 ttl 4');
+  assert.strictEqual(P.outputEndpoint({ transport: 'udp', host: '192.0.2.30', port: 4978 }), 'udp 192.0.2.30:4978');
+});
+
+test('outputDot_states', () => {
+  const o = (enabled, state) => ({ enabled, state });
+  assert.strictEqual(P.outputDot(o(false, { up: true, last_error: '' })), 'grey');
+  assert.strictEqual(P.outputDot(o(true, { up: false, last_error: '' })), 'red');
+  assert.strictEqual(P.outputDot(o(true, { up: false, last_error: 'bind failed' })), 'red');
+  assert.strictEqual(P.outputDot(o(true, { up: true, last_error: 'connection reset' })), 'amber');
+  assert.strictEqual(P.outputDot(o(true, { up: true, last_error: '' })), 'green');
+  assert.strictEqual(P.outputDot({ enabled: true }), 'red');
+});
+
+test('inputEndpoint new transports', () => {
+  assert.strictEqual(P.inputEndpoint({ type: 'readsb', transport: 'tcp_listen', bind: '0.0.0.0', port: 30047 }),
+    'readsb listen 0.0.0.0:30047');
+  assert.strictEqual(P.inputEndpoint({ type: 'uat_raw', host: '192.0.2.1', port: 30978 }), 'uat_raw 192.0.2.1:30978');
+  assert.strictEqual(P.inputEndpoint({ type: 'beast_raw', transport: 'udp', group: '239.1.1.5', interface: '192.0.2.10',
+    port: 4978 }), 'beast_raw udp 239.1.1.5:4978 via 192.0.2.10');
+  assert.strictEqual(P.inputEndpoint({ type: 'pingstation_json', transport: 'udp', group: '239.1.1.5', port: 4001 }),
+    'udp 239.1.1.5:4001');
 });
 
 const live = (state, extra) => Object.assign({ id: 'ps', type: 'pingstation_json', enabled: true,

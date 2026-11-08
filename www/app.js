@@ -1523,7 +1523,7 @@
   // draws a tab when it is shown. A new tab: its markup and one entry here.
   var TAB_SHOWN = {
     weather: function () { renderWx(true); },
-    receiver: function () { renderReceiver(); },
+    receiver: function () { renderReceiver(); pollOutputs(); },
     cues: showCues,
     config: showConfig
   };
@@ -2869,7 +2869,8 @@
   // or the device says is shown with textContent, never as markup.
   var INPUTS_POLL_MS = 5000;
   var SHOW_MIN_ZOOM = 6;            // "Show" zooms in to this from further out
-  var NUMERIC_FIELDS = { port: true, sac: true, sic: true, status_interval_s: true };
+  var NUMERIC_FIELDS = { port: true, sac: true, sic: true, status_interval_s: true, ttl: true };
+  var OUTPUTS_POLL_MS = 1000;       // GET /api/outputs while the Receiver tab is shown (the counters)
   var DOT_TITLES = { green: 'connected, receiving', amber: 'connected, no data for 30 s',
     red: 'disconnected, or the status poll failed 3 times', grey: 'disabled' };
   var ACT_LABELS = { toggle: 'Disable', edit: 'Edit', remove: 'Remove', show: 'Show' };
@@ -2895,7 +2896,11 @@
     devices: new Map(),             // id -> device marker
     stations: new Map(),            // site_id -> station marker
     editing: null,                  // the id of the input the form edits; null: it adds one
-    enabledTouched: false           // the form's Enabled box was changed while editing
+    enabledTouched: false,          // the form's Enabled box was changed while editing
+    outputs: [],                    // output objects, as GET /api/outputs lists them
+    outCards: new Map(),            // id -> output card element
+    outEditing: null,               // the id of the output the output form edits; null: it adds one
+    outEnabledTouched: false
   };
 
   function el(tag, cls, text) {
@@ -3048,6 +3053,7 @@
   }
   function renderReceiver() {
     renderInputs();
+    renderOutputs();
     renderStations();
     renderHealth();
   }
@@ -3361,7 +3367,9 @@
 
   // ---- the add / edit form ----
   function formEl(name) { return $('input-form').elements[name]; }
-  function formFields() { return P.inputFields(formEl('type').value, formEl('transport').value); }
+  function formFields() {
+    return P.inputFields(formEl('type').value, formEl('transport').value, formEl('group').value.trim());
+  }
   function syncFormFields() {
     var shown = formFields();
     eachEl('#input-form [data-field]', function (l) {
@@ -3371,6 +3379,8 @@
   }
   // The definition the form holds; a field left empty is not sent, so
   // skycued's default applies.
+  // A transport that is the type's default (any type but cat021) is left
+  // out as well, so a v1 inputs file stays one.
   function formDef() {
     var def = { type: formEl('type').value };
     formFields().forEach(function (f) {
@@ -3382,6 +3392,7 @@
       var v = f === 'name' ? e.value : e.value.trim();
       if (v !== '') def[f] = NUMERIC_FIELDS[f] ? Number(v) : v;
     });
+    if (def.type !== 'pingstation_cat021' && def.transport === P.inputTransport(def.type)) delete def.transport;
     return def;
   }
   function showFieldErrors(errors) {
@@ -3415,9 +3426,10 @@
     var form = $('input-form');
     formEl('type').value = inp.type;
     formEl('type').disabled = true;
-    if (inp.transport) formEl('transport').value = inp.transport;
-    P.inputFields(inp.type, inp.transport).forEach(function (f) {
-      var e = formEl(f), v = inp[f];
+    formEl('transport').value = P.inputTransport(inp.type, inp.transport);
+    formEl('group').value = inp.group || '';
+    P.inputFields(inp.type, inp.transport, inp.group).forEach(function (f) {
+      var e = formEl(f), v = f === 'transport' ? formEl('transport').value : inp[f];
       if (e.type === 'checkbox') e.checked = !!v;
       else e.value = v === undefined || v === null ? '' : String(v);
     });
@@ -3453,7 +3465,8 @@
   function onFormInput(ev) {
     var name = ev.target.name;
     if (name === 'enabled') rx.enabledTouched = true;
-    if (name === 'type' || name === 'transport') syncFormFields();
+    if (name === 'type') formEl('transport').value = P.inputTransport(formEl('type').value);
+    if (name === 'type' || name === 'transport' || name === 'group') syncFormFields();
     // Once marked, the marks follow the typing.
     if ($('input-form').querySelector('.invalid')) showFieldErrors(P.validateInputDef(formDef()).errors);
   }
@@ -3483,6 +3496,196 @@
     }
   }
 
+  // ---- Outputs (docs/web-api.md, Outputs) ----
+  // The list comes with the snapshot and the `outputs` items (a definition
+  // changed, an output came up or went down); the counters are read by
+  // polling GET /api/outputs every OUTPUTS_POLL_MS while the tab is shown.
+  var OUT_DOT_TITLES = { green: 'up', amber: 'up, with a last error', red: 'not up', grey: 'disabled' };
+  function outputById(id) {
+    for (var i = 0; i < rx.outputs.length; i++) if (rx.outputs[i].id === id) return rx.outputs[i];
+    return null;
+  }
+  function applyOutputs(list) {
+    rx.outputs = Array.isArray(list) ? list : [];
+    var edited = rx.outEditing !== null && outputById(rx.outEditing);
+    if (edited && !rx.outEnabledTouched) outEl('enabled').checked = !!edited.enabled;
+    if (tabShown('receiver')) renderOutputs();
+  }
+  function refreshOutputs() {
+    return request('GET', 'api/outputs').then(function (j) { applyOutputs(j.outputs); });
+  }
+  function pollOutputs() {
+    // A skycued without outputs answers 404: the section stays empty.
+    if (connected && tabShown('receiver')) refreshOutputs().catch(function () { /* the watchdog reports a dead skycued */ });
+  }
+  function makeOutputCard(out) {
+    var card = el('div', 'output-card');
+    card.setAttribute('data-id', out.id);
+    var head = el('div', 'output-head');
+    head.appendChild(el('span', 'dot'));
+    head.appendChild(el('span', 'output-name'));
+    head.appendChild(el('span', 'output-kind'));
+    card.appendChild(head);
+    card.appendChild(el('div', 'output-endpoint'));
+    var line = el('div', 'output-stats');
+    ['output-peers', 'output-bytes', 'output-dropped'].forEach(function (c) { line.appendChild(el('span', c)); });
+    card.appendChild(line);
+    card.appendChild(el('div', 'output-error'));
+    var acts = el('div', 'output-actions');
+    (out.builtin ? ['toggle'] : ['toggle', 'edit', 'remove']).forEach(function (a) {
+      var b = el('button', null, ACT_LABELS[a]);
+      b.type = 'button';
+      b.setAttribute('data-act', a);
+      acts.appendChild(b);
+    });
+    card.appendChild(acts);
+    return card;
+  }
+  function fillOutputCard(card, out) {
+    var st = out.state || {}, color = P.outputDot(out);
+    var dot = card.querySelector('.dot');
+    dot.className = 'dot dot-' + color;
+    dot.title = OUT_DOT_TITLES[color];
+    setText(card, 'output-name', out.name || out.id);
+    setText(card, 'output-kind', (out.name ? out.id + ' · ' : '') + out.kind);
+    setText(card, 'output-endpoint', P.outputEndpoint(out));
+    setText(card, 'output-peers', 'peers ' + (st.peers || 0));
+    setText(card, 'output-bytes', 'bytes ' + (st.bytes || 0));
+    setText(card, 'output-dropped', 'dropped ' + (st.dropped || 0));
+    setText(card, 'output-error', st.last_error ? 'last error: ' + st.last_error : '').hidden = !st.last_error;
+    card.querySelector('[data-act=toggle]').textContent = out.enabled ? 'Disable' : 'Enable';
+  }
+  function renderOutputs() {
+    var list = $('outputs-list'), seen = {};
+    rx.outputs.forEach(function (out, i) {
+      seen[out.id] = true;
+      var card = rx.outCards.get(out.id);
+      if (!card) {
+        card = makeOutputCard(out);
+        rx.outCards.set(out.id, card);
+      }
+      if (list.children[i] !== card) list.insertBefore(card, list.children[i] || null);
+      fillOutputCard(card, out);
+    });
+    rx.outCards.forEach(function (card, id) {
+      if (seen[id]) return;
+      card.remove();
+      rx.outCards.delete(id);
+    });
+    list.classList.toggle('empty', !rx.outputs.length);
+  }
+
+  // the output form: the input form's way, over P.outputFields
+  function outEl(name) { return $('output-form').elements[name]; }
+  function outFields() {
+    return P.outputFields(outEl('kind').value, outEl('transport').value, outEl('group').value.trim());
+  }
+  function syncOutFields() {
+    var shown = outFields();
+    eachEl('#output-form [data-field]', function (l) {
+      l.hidden = shown.indexOf(l.getAttribute('data-field')) < 0;
+    });
+  }
+  function outDef() {
+    var def = {};
+    outFields().forEach(function (f) {
+      var e = outEl(f);
+      if (e.type === 'checkbox') {
+        def[f] = e.checked;
+        return;
+      }
+      var v = f === 'name' ? e.value : e.value.trim();
+      if (v !== '') def[f] = NUMERIC_FIELDS[f] ? Number(v) : v;
+    });
+    return def;
+  }
+  function showOutErrors(errors) {
+    eachEl('#output-form .field-error', function (e) {
+      var f = e.getAttribute('data-for'), msg = errors[f] || '';
+      e.textContent = msg;
+      var input = outEl(f);
+      input.classList.toggle('invalid', !!msg);
+      if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+    });
+  }
+  function showOutFormError(text) { $('output-form').querySelector('.form-error').textContent = text || ''; }
+  function resetOutForm() {
+    var form = $('output-form');
+    form.reset();
+    rx.outEditing = null;
+    rx.outEnabledTouched = false;
+    outEl('id').readOnly = false;
+    $('output-form-title').textContent = 'Add output';
+    form.querySelector('button[type=submit]').textContent = 'Add';
+    form.querySelector('[data-act=cancel]').hidden = true;
+    showOutErrors({});
+    showOutFormError('');
+    syncOutFields();
+  }
+  function editOutput(out) {
+    resetOutForm();
+    rx.outEditing = out.id;
+    var form = $('output-form');
+    outEl('kind').value = out.kind;
+    outEl('transport').value = out.transport;
+    outEl('group').value = out.group || '';
+    P.outputFields(out.kind, out.transport, out.group).forEach(function (f) {
+      var e = outEl(f), v = out[f];
+      if (e.type === 'checkbox') e.checked = !!v;
+      else e.value = v === undefined || v === null ? '' : String(v);
+    });
+    outEl('id').readOnly = true;
+    $('output-form-title').textContent = 'Edit ' + out.id;
+    form.querySelector('button[type=submit]').textContent = 'Save';
+    form.querySelector('[data-act=cancel]').hidden = false;
+    syncOutFields();
+    form.scrollIntoView({ block: 'nearest' });
+  }
+  function submitOutput(ev) {
+    ev.preventDefault();
+    var def = outDef(), id = rx.outEditing;
+    var current = id !== null && outputById(id);
+    if (current && !rx.outEnabledTouched) def.enabled = current.enabled;
+    var check = P.validateOutputDef(def);
+    showOutErrors(check.errors);
+    showOutFormError('');
+    if (!check.ok) return;
+    var submit = $('output-form').querySelector('button[type=submit]');
+    submit.disabled = true;
+    var req = id === null ? request('POST', 'api/outputs', def) :
+      request('PUT', 'api/outputs/' + encodeURIComponent(id), def);
+    req.then(function () {
+      resetOutForm();
+      return refreshOutputs();
+    }).catch(function (err) {
+      showOutFormError(err.message); // skycued's message, word for word
+    }).then(function () { submit.disabled = false; });
+  }
+  function onOutFormInput(ev) {
+    var name = ev.target.name;
+    if (name === 'enabled') rx.outEnabledTouched = true;
+    if (name === 'kind' || name === 'transport' || name === 'group') syncOutFields();
+    if ($('output-form').querySelector('.invalid')) showOutErrors(P.validateOutputDef(outDef()).errors);
+  }
+  function onOutputCardClick(ev) {
+    var b = ev.target.closest('button[data-act]');
+    var card = b && b.closest('.output-card');
+    var out = card && outputById(card.getAttribute('data-id'));
+    if (!out) return;
+    var act = b.getAttribute('data-act'), path = 'api/outputs/' + encodeURIComponent(out.id);
+    var done = function () { showMsg($('outputs-msg'), ''); return refreshOutputs(); };
+    var failed = function (err) { showMsg($('outputs-msg'), err.message, true); };
+    if (act === 'toggle') {
+      request('POST', path + (out.enabled ? '/disable' : '/enable'), {}).then(done).catch(failed);
+    } else if (act === 'edit') {
+      editOutput(out);
+    } else if (act === 'remove') {
+      if (!window.confirm('Remove output ' + out.id + '?')) return;
+      if (rx.outEditing === out.id) resetOutForm();
+      request('DELETE', path).then(done).catch(failed);
+    }
+  }
+
   // ---- WebSocket -----------------------------------------------------------------
   function setConnected(on) {
     connected = on;
@@ -3506,6 +3709,7 @@
     rx.dataWall = {};
     applyStats(s.stats);
     applyInputs(s.inputs);
+    if (s.outputs) applyOutputs(s.outputs);
     applyLists(s.lists);
     applyFilters(s.filters);
     updateReceiver();
@@ -3533,6 +3737,7 @@
       case 'filters': applyFilters(it); if (tabShown('cues')) fetchCueHistory(); break;
       case 'lists': applyLists(it); break;
       case 'inputs': applyInputs(it.inputs); break;
+      case 'outputs': applyOutputs(it.outputs); pollOutputs(); break;
       case 'fisb_text': case 'fisb_shape': case 'fisb_radar': case 'fisb_raster': case 'fisb_expired':
       case 'fisb_location':
         onFisbItem(it);
@@ -3655,6 +3860,12 @@
     $('input-form').addEventListener('change', onFormInput);
     $('input-form').querySelector('[data-act=cancel]').addEventListener('click', resetForm);
     $('inputs-list').addEventListener('click', onCardClick);
+    $('output-form').addEventListener('submit', submitOutput);
+    $('output-form').addEventListener('input', onOutFormInput);
+    $('output-form').addEventListener('change', onOutFormInput);
+    $('output-form').querySelector('[data-act=cancel]').addEventListener('click', resetOutForm);
+    $('outputs-list').addEventListener('click', onOutputCardClick);
+    syncOutFields();
     syncFormFields();
     $('shape-close').addEventListener('click', hideShape);
     $('wx-filter').addEventListener('input', function () {
@@ -3756,6 +3967,7 @@
     setInterval(watchdog, 1000);
     setInterval(pollFisb, FISB_POLL_MS);
     setInterval(pollInputs, INPUTS_POLL_MS);
+    setInterval(pollOutputs, OUTPUTS_POLL_MS);
     setInterval(pollCues, CUES_POLL_MS);
     var ticks = 0;
     setInterval(function () {

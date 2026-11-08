@@ -491,32 +491,34 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 /* receiver tab */
 #pane-receiver h2 { margin-top: 14px; }
 #pane-receiver h2:first-child { margin-top: 0; }
-#inputs-list { display: flex; flex-direction: column; gap: 8px; }
+#inputs-list, #outputs-list { display: flex; flex-direction: column; gap: 8px; }
 #inputs-list.empty::before { content: "No inputs."; color: var(--muted); font-size: 12px; }
-.input-card { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; background: var(--panel-2); font-size: 12px; }
-.input-head { display: flex; align-items: baseline; gap: 6px; }
-.input-head .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; align-self: center; background: #6e7681; }
+#outputs-list.empty::before { content: "No outputs."; color: var(--muted); font-size: 12px; }
+.input-card, .output-card { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; background: var(--panel-2); font-size: 12px; }
+.input-head, .output-head { display: flex; align-items: baseline; gap: 6px; }
+.input-head .dot, .output-head .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; align-self: center; background: #6e7681; }
 .dot-green { background: var(--sent) !important; }
 .dot-amber { background: #e3b341 !important; }
 .dot-red { background: var(--blocked) !important; }
 .dot-grey { background: #6e7681 !important; }
-.input-name { font-weight: 600; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
-.input-type { margin-left: auto; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.input-endpoint { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text); margin: 2px 0; }
-.input-stats { display: flex; flex-wrap: wrap; gap: 0 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.input-name, .output-name { font-weight: 600; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.input-type, .output-kind { margin-left: auto; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.input-endpoint, .output-endpoint { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text); margin: 2px 0; }
+.input-stats, .output-stats { display: flex; flex-wrap: wrap; gap: 0 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .input-device { color: var(--muted); margin-top: 2px; }
 .input-device.stale { color: var(--elev); }
-.input-error { color: var(--blocked); margin-top: 2px; overflow-wrap: anywhere; }
-.input-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.input-actions button { font-size: 12px; padding: 2px 8px; }
-#input-form { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
-#input-form h3, #alerts-config h3 { font-size: 13px; margin: 0 0 6px; }
-#input-form label.field, #alerts-config label.field { display: block; color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+.input-error, .output-error { color: var(--blocked); margin-top: 2px; overflow-wrap: anywhere; }
+.input-actions, .output-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.input-actions button, .output-actions button { font-size: 12px; padding: 2px 8px; }
+#input-form, #output-form { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+#input-form h3, #output-form h3, #alerts-config h3 { font-size: 13px; margin: 0 0 6px; }
+#input-form label.field, #output-form label.field, #alerts-config label.field { display: block; color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 #input-form label.field input:not([type="checkbox"]), #input-form label.field select,
+#output-form label.field input:not([type="checkbox"]), #output-form label.field select,
 #alerts-config label.field textarea { display: block; width: 100%; margin-top: 2px; }
-#input-form label.field.check, #alerts-config label.field.check { display: flex; margin-top: 8px; }
-#input-form select:disabled { opacity: .6; }
-#input-form input[readonly] { color: var(--muted); }
+#input-form label.field.check, #output-form label.field.check, #alerts-config label.field.check { display: flex; margin-top: 8px; }
+#input-form select:disabled, #output-form select:disabled { opacity: .6; }
+#input-form input[readonly], #output-form input[readonly] { color: var(--muted); }
 .field-error { display: block; color: var(--blocked); font-size: 11px; min-height: 0; }
 .field-error:empty { display: none; }
 .form-buttons { margin-top: 8px; }

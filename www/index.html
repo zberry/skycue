@@ -358,6 +358,8 @@
             <option value="pingstation_json">pingStation JSON</option>
             <option value="readsb">readsb (JSON)</option>
             <option value="dump978">dump978 (raw UAT)</option>
+            <option value="beast_raw">Beast (raw ADS-B)</option>
+            <option value="uat_raw">UAT (raw)</option>
           </select></label>
         <label class="field" data-field="id">Id <input name="id" type="text" maxlength="32" autocomplete="off"
           spellcheck="false" placeholder="ps-north"><small class="field-error" data-for="id"></small></label>
@@ -366,17 +368,24 @@
         <label class="field" data-field="transport">Transport
           <select name="transport">
             <option value="udp" selected>udp</option>
-            <option value="tcp_listen">tcp_listen (the device connects)</option>
-            <option value="tcp_connect">tcp_connect (connect to the device)</option>
+            <option value="tcp_listen">tcp_listen (the sender connects)</option>
+            <option value="tcp_connect">tcp_connect (connect to the sender)</option>
           </select><small class="field-error" data-for="transport"></small></label>
         <label class="field" data-field="host">Host <input name="host" type="text" autocomplete="off" spellcheck="false"
           placeholder="192.0.2.10"><small class="field-error" data-for="host"></small></label>
         <label class="field" data-field="bind">Bind <input name="bind" type="text" autocomplete="off" spellcheck="false"
           placeholder="0.0.0.0"><small class="field-error" data-for="bind"></small></label>
+        <label class="field" data-field="group">Multicast group <input name="group" type="text" autocomplete="off"
+          spellcheck="false" placeholder="none (unicast)"><small class="field-error" data-for="group"></small></label>
+        <label class="field" data-field="interface">Interface <input name="interface" type="text" autocomplete="off"
+          spellcheck="false" placeholder="default"><small class="field-error" data-for="interface"></small></label>
         <label class="field" data-field="port">Port <input name="port" type="text" inputmode="numeric"
           autocomplete="off"><small class="field-error" data-for="port"></small></label>
         <label class="field" data-field="peer">Peer <input name="peer" type="text" autocomplete="off" spellcheck="false"
           placeholder="any"><small class="field-error" data-for="peer"></small></label>
+        <label class="field" data-field="format">Format
+          <select name="format"><option value="beast" selected>beast</option><option value="avr">avr</option></select>
+          <small class="field-error" data-for="format"></small></label>
         <label class="field" data-field="edition">Edition
           <select name="edition">
             <option>2.2</option><option>2.3</option><option>2.4</option><option selected>2.5</option><option>2.6</option><option>2.7</option>
@@ -403,6 +412,55 @@
       <p class="msg help">A green dot: connected and data in the last 30 s; amber: connected, no data for 30 s; red:
         disconnected, or the device's status poll failed 3 times in a row; grey: disabled. With CAT021 the device sends
         only aircraft, so when the sky is empty its status poll (Status URL) is the only sign that it is alive.</p>
+      <h2>Outputs</h2>
+      <div id="outputs-list"></div>
+      <p id="outputs-msg" class="msg" role="status"></p>
+      <form id="output-form" class="def-form" novalidate>
+        <h3 id="output-form-title">Add output</h3>
+        <label class="field" data-field="kind">Kind
+          <select name="kind">
+            <option value="beast">beast</option>
+            <option value="uat">uat</option>
+            <option value="json">json</option>
+            <option value="pingstation_json">pingstation_json</option>
+            <option value="cat021">cat021</option>
+            <option value="cue">cue</option>
+          </select><small class="field-error" data-for="kind"></small></label>
+        <label class="field" data-field="id">Id <input name="id" type="text" maxlength="32" autocomplete="off"
+          spellcheck="false" placeholder="beast-out"><small class="field-error" data-for="id"></small></label>
+        <label class="field" data-field="name">Name <input name="name" type="text" autocomplete="off"
+          placeholder="Beast to the map"><small class="field-error" data-for="name"></small></label>
+        <label class="field" data-field="transport">Transport
+          <select name="transport">
+            <option value="tcp_listen" selected>tcp_listen (clients connect to us)</option>
+            <option value="tcp_connect">tcp_connect (we connect to a server)</option>
+            <option value="udp">udp</option>
+          </select><small class="field-error" data-for="transport"></small></label>
+        <label class="field" data-field="host">Host <input name="host" type="text" autocomplete="off" spellcheck="false"
+          placeholder="192.0.2.30"><small class="field-error" data-for="host"></small></label>
+        <label class="field" data-field="bind">Bind <input name="bind" type="text" autocomplete="off" spellcheck="false"
+          placeholder="0.0.0.0"><small class="field-error" data-for="bind"></small></label>
+        <label class="field" data-field="group">Multicast group <input name="group" type="text" autocomplete="off"
+          spellcheck="false" placeholder="none (unicast)"><small class="field-error" data-for="group"></small></label>
+        <label class="field" data-field="port">Port <input name="port" type="text" inputmode="numeric"
+          autocomplete="off"><small class="field-error" data-for="port"></small></label>
+        <label class="field" data-field="peer">Peer <input name="peer" type="text" autocomplete="off" spellcheck="false"
+          placeholder="any"><small class="field-error" data-for="peer"></small></label>
+        <label class="field" data-field="interface">Interface <input name="interface" type="text" autocomplete="off"
+          spellcheck="false" placeholder="default"><small class="field-error" data-for="interface"></small></label>
+        <label class="field" data-field="ttl">TTL <input name="ttl" type="text" inputmode="numeric" autocomplete="off"
+          placeholder="1"><small class="field-error" data-for="ttl"></small></label>
+        <label class="field check" data-field="loopback"><input name="loopback" type="checkbox" checked> Loopback</label>
+        <label class="field check" data-field="enabled"><input name="enabled" type="checkbox" checked> Enabled</label>
+        <p class="form-error msg error" role="alert"></p>
+        <div class="row form-buttons">
+          <button type="submit">Add</button>
+          <button type="button" data-act="cancel" hidden>Cancel</button>
+        </div>
+      </form>
+      <p class="msg help">Outputs republish what the inputs receive: beast, uat, json and pingstation_json as the
+        inputs saw them, cat021 as received, cue as the cue stream. A green dot: up; amber: up, with a last error; red:
+        not up; grey: disabled. The built-in cue outputs can be disabled but not edited or removed.</p>
       <h2>Ground stations</h2>
       <ul id="stations-list" class="rx-list"></ul>
       <h2>Decoder health</h2>

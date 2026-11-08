@@ -11,7 +11,9 @@
 # .bin) and NODE_PATH. One more, the
 # "receivers" skycued, runs no built-in decoder inputs and one
 # pingstation_json input, ps-sim, that skycue-pingsim feeds the readsb
-# fixture to (with a device status every 2 s), for the Receiver tab cases;
+# fixture to (with a device status every 2 s), one beast tcp_listen output
+# (beast-out, port in SKYCUE_RX_OUTPUT_PORT) and one cue UDP target, for the
+# Receiver tab cases;
 # and the "stats" skycued, the readsb fixture at 20x with its statistics in
 # a stats.json, which the ledger case restarts.
 # usage: run.sh SKYCUED FIXTURE_DIR WWW_STAGE PINGSIM [PLAYWRIGHT ARGS...]
@@ -261,8 +263,14 @@ ps_port=$(python3 -I -c 'import socket; s = socket.socket(type=socket.SOCK_DGRAM
 mkdir -p "$tmp/rx-record" || fail "receivers RECORD_DIR"
 sed -e "s/^WEB_PORT=.*/WEB_PORT=$rx_port/" -e "s/^CUE_TCP_PORT=.*/CUE_TCP_PORT=0/" "$tmp/skycue.conf" > "$tmp/receivers.conf"
 echo "RECORD_DIR=$tmp/rx-record" >> "$tmp/receivers.conf"
-printf '{"version":1,"inputs":[{"id":"ps-sim","name":"pingsim","type":"pingstation_json","bind":"127.0.0.1","port":%s}]}\n' \
-  "$ps_port" > "$tmp/receivers.inputs.json"
+# One cue destination, so the Outputs section has a built-in cue output (cue-udp-1)
+# to list; nothing listens there.
+echo "CUE_UDP_TARGETS=127.0.0.1:$(python3 -I -c 'import socket; s = socket.socket(type=socket.SOCK_DGRAM); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')" >> "$tmp/receivers.conf"
+# One beast tcp_listen output on a free port (the specs read it from
+# SKYCUE_RX_OUTPUT_PORT); it makes the file a version 2 one.
+rx_out_port=$(free_port)
+printf '{"version":2,"inputs":[{"id":"ps-sim","name":"pingsim","type":"pingstation_json","bind":"127.0.0.1","port":%s}],"outputs":[{"id":"beast-out","name":"Beast out","kind":"beast","transport":"tcp_listen","bind":"127.0.0.1","port":%s}]}\n' \
+  "$ps_port" "$rx_out_port" > "$tmp/receivers.inputs.json"
 bash -c "echo \$\$ > '$tmp/receivers.pid'; exec '$skycued' --config '$tmp/receivers.conf' --no-readsb --no-uat --inputs-file '$tmp/receivers.inputs.json' --www-dir '$www' >>'$tmp/receivers.log' 2>&1" </dev/null >/dev/null 2>&1 &
 rx_base="http://127.0.0.1:$rx_port"
 up=0
@@ -302,6 +310,7 @@ export SKYCUE_PID_FILE="$pidfile"
 export SKYCUE_TILES_URL="$tiles_base"
 export SKYCUE_OVERLAYS_URL="$ov_base"
 export SKYCUE_RECEIVERS_URL="$rx_base"
+export SKYCUE_RX_OUTPUT_PORT="$rx_out_port"
 export SKYCUE_STATS_URL="$st_base"
 export SKYCUE_STATS_START_CMD="$st_start_cmd"
 export SKYCUE_STATS_PID_FILE="$tmp/stats.pid"

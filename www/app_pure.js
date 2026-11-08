@@ -601,18 +601,20 @@
   // ---- Receiver tab: input definitions (docs/web-api.md, Inputs) ----
   // The rules and messages of skycued's parseInputDef
   // (skycued/src/inputs/input_def.cpp), for the fields the add form has.
-  var INPUT_TYPES = ['readsb', 'dump978', 'pingstation_json', 'pingstation_cat021'];
+  var INPUT_TYPES = ['readsb', 'dump978', 'pingstation_json', 'pingstation_cat021', 'beast_raw', 'uat_raw'];
   var TRANSPORTS = ['udp', 'tcp_connect', 'tcp_listen'];
   var EDITIONS = ['2.2', '2.3', '2.4', '2.5', '2.6', '2.7'];
   var RESERVED_IDS = ['readsb', 'dump978', 'replay'];
   function isPingStation(type) { return type === 'pingstation_json' || type === 'pingstation_cat021'; }
+  // The transport an input of `type` runs over: the one given, else the
+  // type's default (skycued has none for cat021; the add form preselects udp).
   function inputTransport(type, transport) {
-    if (type === 'pingstation_json') return 'udp';
-    // cat021 has no default in skycued (transport is required); the add form
-    // preselects udp, so the fields shown before one is chosen are udp's.
-    if (type === 'pingstation_cat021') return TRANSPORTS.indexOf(transport) >= 0 ? transport : 'udp';
-    return 'tcp_connect';
+    if (TRANSPORTS.indexOf(transport) >= 0) return transport;
+    return type === 'pingstation_json' || type === 'pingstation_cat021' ? 'udp' : 'tcp_connect';
   }
+  function takesCapture(type) { return isPingStation(type) || type === 'beast_raw' || type === 'uat_raw'; }
+  // 224.0.0.0 to 239.255.255.255.
+  function isMulticast(s) { return isIpv4(s) && Number(s.split('.')[0]) >= 224 && Number(s.split('.')[0]) <= 239; }
   // Dotted decimal, four parts of 0..255 without leading zeros.
   function isIpv4(s) {
     return typeof s === 'string' && /^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$/.test(s) &&
@@ -646,15 +648,21 @@
   function isIntIn(v, lo, hi) { return typeof v === 'number' && Math.floor(v) === v && v >= lo && v <= hi; }
   function unset(v) { return v === undefined || v === null || v === ''; }
 
-  // The form fields for an input of `type` over `transport`, in order.
-  function inputFields(type, transport) {
-    var listens = inputTransport(type, transport) !== 'tcp_connect';
-    var f = ['id', 'name'];
-    if (type === 'pingstation_cat021') f.push('transport');
-    f.push(listens ? 'bind' : 'host', 'port');
-    if (listens) f.push('peer');
+  // The form fields for an input of `type` over `transport`, in order. A
+  // udp input with a `group` binds the group, so it has no `bind`.
+  function inputFields(type, transport, group) {
+    var t = inputTransport(type, transport);
+    var f = ['id', 'name', 'transport'];
+    if (t === 'tcp_connect') f.push('host', 'port');
+    else if (t === 'tcp_listen') f.push('bind', 'port', 'peer');
+    else {
+      if (unset(group)) f.push('bind');
+      f.push('group', 'interface', 'port', 'peer');
+    }
     if (type === 'pingstation_cat021') f.push('edition', 'sac', 'sic');
-    if (isPingStation(type)) f.push('status_url', 'status_interval_s', 'time_mode', 'capture');
+    if (type === 'beast_raw') f.push('format');
+    if (isPingStation(type)) f.push('status_url', 'status_interval_s', 'time_mode');
+    if (takesCapture(type)) f.push('capture');
     f.push('enabled');
     return f;
   }
@@ -672,26 +680,52 @@
     else if (INPUT_TYPES.indexOf(def.type) < 0) errors.type = 'type must be one of ' + INPUT_TYPES.join(', ');
     if (def.type === 'pingstation_cat021' && unset(def.transport))
       errors.transport = 'transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)';
-    else if (def.type === 'pingstation_cat021' && TRANSPORTS.indexOf(def.transport) < 0)
+    else if (!unset(def.transport) && TRANSPORTS.indexOf(def.transport) < 0)
       errors.transport = 'transport must be udp, tcp_connect or tcp_listen';
-    var fields = inputFields(def.type, def.transport);
+    var t = inputTransport(def.type, def.transport);
+    var fields = inputFields(def.type, def.transport, def.group);
     var has = function (k) { return fields.indexOf(k) >= 0; };
     var name = def.name;
     if (!unset(name) && (typeof name !== 'string' || /[\x00-\x1f\x7f]/.test(name) || Array.from(name).length > 64))
       errors.name = 'name must be at most 64 printable characters';
+    // Keys the transport or type does not take (the form never sends them).
+    if (!unset(def.host) && t !== 'tcp_connect') errors.host = 'host is not used with ' + t;
+    if (!unset(def.bind) && t === 'tcp_connect') errors.bind = 'bind is not used with ' + t;
+    if (!unset(def.peer) && t === 'tcp_connect') errors.peer = 'peer applies to udp and tcp_listen only';
+    ['group', 'interface'].forEach(function (k) {
+      if (!unset(def[k]) && t !== 'udp') errors[k] = k + ' applies to udp only';
+    });
+    if (!unset(def.format) && def.type !== 'beast_raw') errors.format = 'format applies to beast_raw only';
+    if (def.capture !== undefined && !takesCapture(def.type))
+      errors.capture = 'capture applies to beast_raw, uat_raw, pingstation_json and pingstation_cat021 only';
     if (def.port === undefined || def.port === null) errors.port = 'port is required';
     else if (!isIntIn(def.port, 1, 65535)) errors.port = 'port must be an integer from 1 to 65535';
-    if (has('bind') && !unset(def.bind) && !isIpv4(def.bind)) errors.bind = 'bind must be an IPv4 address';
-    if (has('peer') && !unset(def.peer) && !isIpv4(def.peer)) errors.peer = 'peer must be an IPv4 address';
+    if (t === 'udp') {
+      if (!unset(def.group) && !(typeof def.group === 'string' && isMulticast(def.group)))
+        errors.group = 'group must be a multicast address (224.0.0.0 to 239.255.255.255)';
+      if (!unset(def.interface) && !errors.interface) {
+        if (unset(def.group)) errors.interface = 'interface applies to a multicast group only';
+        else if (!isIpv4(def.interface)) errors.interface = 'interface must be an IPv4 address';
+      }
+    }
+    if (!errors.bind && !unset(def.bind)) {
+      if (!unset(def.group) && t === 'udp') errors.bind = 'bind does not apply when group is set';
+      else if (!isIpv4(def.bind)) errors.bind = 'bind must be an IPv4 address';
+    }
+    if (!errors.peer && !unset(def.peer) && !isIpv4(def.peer)) errors.peer = 'peer must be an IPv4 address';
     if (has('host')) {
       if (unset(def.host)) errors.host = 'host is required';
       else if (!isHost(def.host)) errors.host = 'host must be an IPv4 address or a hostname of at most 253 characters';
+    } else if (!errors.host && !unset(def.host) && !isHost(def.host)) {
+      errors.host = 'host must be an IPv4 address or a hostname of at most 253 characters';
     }
     if (has('edition') && !unset(def.edition) && EDITIONS.indexOf(def.edition) < 0)
       errors.edition = 'edition must be one of ' + EDITIONS.join(', ');
     ['sac', 'sic'].forEach(function (k) {
       if (has(k) && !unset(def[k]) && !isIntIn(def[k], 0, 255)) errors[k] = k + ' must be null or an integer from 0 to 255';
     });
+    if (has('format') && !unset(def.format) && def.format !== 'beast' && def.format !== 'avr')
+      errors.format = 'format must be beast or avr';
     if (has('status_url') && !unset(def.status_url) && !(typeof def.status_url === 'string' && isHttpUrl(def.status_url)))
       errors.status_url = 'status_url must be an http:// URL without userinfo, with a port of 1 to 65535';
     if (has('status_interval_s') && def.status_interval_s !== undefined && !isIntIn(def.status_interval_s, 5, 3600))
@@ -702,6 +736,100 @@
       if (has(k) && def[k] !== undefined && typeof def[k] !== 'boolean') errors[k] = k + ' must be true or false';
     });
     return { ok: Object.keys(errors).length === 0, errors: errors };
+  }
+
+  // ---- Receiver tab: output definitions (docs/web-api.md, Outputs) ----
+  // The rules and messages of skycued's parseOutputDef
+  // (skycued/src/outputs/output_def.cpp).
+  var OUTPUT_KINDS = ['beast', 'uat', 'json', 'pingstation_json', 'cat021', 'cue'];
+  var OUTPUT_TRANSPORTS = ['tcp_listen', 'tcp_connect', 'udp'];
+  function isCueId(id) {
+    return id === 'cue-tcp' || /^cue-(connect|udp)-(0|[1-9]\d{0,5})$/.test(id);
+  }
+  // The form fields for an output over `transport`, in order. A unicast udp
+  // output has a host; with a group it has the multicast options instead.
+  function outputFields(kind, transport, group) {
+    var f = ['id', 'name', 'kind', 'transport'];
+    if (transport === 'tcp_connect') f.push('host', 'port');
+    else if (transport === 'udp') {
+      if (unset(group)) f.push('host');
+      f.push('group', 'port');
+      if (!unset(group)) f.push('interface', 'ttl', 'loopback');
+    } else f.push('bind', 'port', 'peer');
+    f.push('enabled');
+    return f;
+  }
+  function validateOutputDef(def) {
+    var errors = {};
+    def = def || {};
+    var id = def.id;
+    if (unset(id)) errors.id = 'id is required';
+    else if (typeof id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(id)) errors.id = 'id must be 1 to 32 characters of a-z, 0-9 and -';
+    else if (isCueId(id)) errors.id = "id '" + id + "' is reserved";
+    if (OUTPUT_KINDS.indexOf(def.kind) < 0) errors.kind = 'kind must be one of ' + OUTPUT_KINDS.join(', ');
+    var t = def.transport;
+    if (unset(t)) errors.transport = 'transport is required for outputs (tcp_listen, tcp_connect or udp)';
+    else if (OUTPUT_TRANSPORTS.indexOf(t) < 0) errors.transport = 'transport must be tcp_listen, tcp_connect or udp';
+    if (errors.transport) return { ok: false, errors: errors };
+    var name = def.name;
+    if (!unset(name) && (typeof name !== 'string' || /[\x00-\x1f\x7f]/.test(name) || Array.from(name).length > 64))
+      errors.name = 'name must be at most 64 printable characters';
+    ['bind', 'peer'].forEach(function (k) {
+      if (!unset(def[k]) && t !== 'tcp_listen') errors[k] = k + ' applies to tcp_listen only';
+    });
+    if (!unset(def.host) && t === 'tcp_listen') errors.host = 'host is not used with tcp_listen';
+    if (!unset(def.group) && t !== 'udp') errors.group = 'group applies to udp only';
+    if (def.port === undefined || def.port === null) errors.port = 'port is required';
+    else if (!isIntIn(def.port, 1, 65535)) errors.port = 'port must be an integer from 1 to 65535';
+    if (t === 'tcp_listen') {
+      if (!errors.bind && !unset(def.bind) && !isIpv4(def.bind)) errors.bind = 'bind must be an IPv4 address';
+      if (!errors.peer && !unset(def.peer) && !isIpv4(def.peer)) errors.peer = 'peer must be an IPv4 address';
+    } else if (!errors.host) {
+      if (t === 'tcp_connect' && unset(def.host)) errors.host = 'host is required';
+      else if (!unset(def.host) && !isHost(def.host))
+        errors.host = 'host must be an IPv4 address or a hostname of at most 253 characters';
+    }
+    if (t === 'udp') {
+      if (!unset(def.group) && !(typeof def.group === 'string' && isMulticast(def.group)))
+        errors.group = 'group must be a multicast address (224.0.0.0 to 239.255.255.255)';
+      if (!errors.group && !errors.host) {
+        if (unset(def.host) && unset(def.group)) errors.host = 'udp needs a host (unicast) or a group (multicast)';
+        else if (!unset(def.host) && !unset(def.group)) errors.host = 'host and group cannot both be set';
+      }
+    }
+    ['interface', 'ttl', 'loopback'].forEach(function (k) {
+      if (def[k] !== undefined && !(k === 'interface' && unset(def[k])) && unset(def.group))
+        errors[k] = k + ' applies to a multicast group only';
+    });
+    if (!unset(def.group)) {
+      if (!errors.interface && !unset(def.interface) && !isIpv4(def.interface))
+        errors.interface = 'interface must be an IPv4 address';
+      if (!errors.ttl && def.ttl !== undefined && !isIntIn(def.ttl, 1, 255))
+        errors.ttl = 'ttl must be an integer from 1 to 255';
+      if (!errors.loopback && def.loopback !== undefined && typeof def.loopback !== 'boolean')
+        errors.loopback = 'loopback must be true or false';
+    }
+    if (def.enabled !== undefined && typeof def.enabled !== 'boolean') errors.enabled = 'enabled must be true or false';
+    return { ok: Object.keys(errors).length === 0, errors: errors };
+  }
+  // Where an output sends, for its card.
+  function outputEndpoint(def) {
+    if (def.transport === 'tcp_connect') return 'tcp_connect ' + def.host + ':' + def.port;
+    if (def.transport === 'udp') {
+      if (!def.group) return 'udp ' + def.host + ':' + def.port;
+      return 'udp ' + def.group + ':' + def.port + (def.interface ? ' via ' + def.interface : '') +
+        ' ttl ' + (def.ttl === undefined || def.ttl === null ? 1 : def.ttl);
+    }
+    return 'tcp_listen ' + (def.bind || '0.0.0.0') + ':' + def.port;
+  }
+  // The card's dot: grey disabled; red not up; amber up but with a last
+  // error; else green.
+  function outputDot(output) {
+    var s = (output && output.state) || {};
+    if (!output || !output.enabled) return 'grey';
+    if (!s.up) return 'red';
+    if (s.last_error) return 'amber';
+    return 'green';
   }
 
   // The card's status dot: grey disabled; red disconnected or the status
@@ -741,12 +869,16 @@
 
   // Where an input gets its data, for its card.
   function inputEndpoint(def) {
-    if (def.type === 'readsb' || def.type === 'dump978') return def.type + ' ' + def.host + ':' + def.port;
-    if (!isPingStation(def.type)) return String(def.type);
-    var t = inputTransport(def.type, def.transport);
-    if (t === 'udp') return 'udp ' + def.bind + ':' + def.port;
-    if (t === 'tcp_listen') return 'tcp listen ' + def.bind + ':' + def.port;
-    return 'tcp → ' + def.host + ':' + def.port;
+    var t = inputTransport(def.type, def.transport), ping = isPingStation(def.type);
+    var where;
+    if (t === 'tcp_connect') where = def.host + ':' + def.port;
+    else if (t === 'udp' && def.group)
+      where = def.group + ':' + def.port + (def.interface ? ' via ' + def.interface : '');
+    else where = (def.bind || '0.0.0.0') + ':' + def.port;
+    if (def.type === 'replay') return 'replay';
+    if (INPUT_TYPES.indexOf(def.type) < 0) return String(def.type);
+    if (ping) return (t === 'udp' ? 'udp ' : t === 'tcp_listen' ? 'tcp listen ' : 'tcp → ') + where;
+    return def.type + (t === 'tcp_connect' ? ' ' : t === 'udp' ? ' udp ' : ' listen ') + where;
   }
 
   // The card's rejected counter, with the refused-peer count beside it when
@@ -1910,6 +2042,9 @@
     overlayOffer: overlayOffer,
     INPUT_TYPES: INPUT_TYPES, validateInputDef: validateInputDef, inputFields: inputFields, inputDot: inputDot,
     inputRates: inputRates, statusStale: statusStale, inputEndpoint: inputEndpoint, rejectedText: rejectedText,
+    inputTransport: inputTransport, OUTPUT_KINDS: OUTPUT_KINDS, OUTPUT_TRANSPORTS: OUTPUT_TRANSPORTS,
+    outputFields: outputFields, validateOutputDef: validateOutputDef, outputEndpoint: outputEndpoint,
+    outputDot: outputDot,
     inputsSummary: inputsSummary,
     gpsStatusText: gpsStatusText, receiverStatusText: receiverStatusText,
     FLIGHT_CATEGORIES: FLIGHT_CATEGORIES, reportBody: reportBody, visibilitySm: visibilitySm,

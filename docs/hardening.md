@@ -63,7 +63,8 @@ subproject:
   `tests` and `examples` gets its ctest `TIMEOUT` (1500 s when it has none)
   multiplied by the factor and `SKYCUE_TEST_SLOW=<factor>` in its
   environment. The C++ tests scale their upper-bound waits with
-  `slow()` from `tests/test_slow.hpp` (the shared `kWait`), and the
+  `slow()` from `tests/test_slow.hpp` (which includes `net/tests/slow.hpp`,
+  the one definition; the shared `kWait`), and the
   Playwright config scales its `timeout` and `expect.timeout`. A check that
   something did *not* happen within a time is not scaled.
 

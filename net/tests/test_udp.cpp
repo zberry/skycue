@@ -500,7 +500,8 @@ BOOST_AUTO_TEST_CASE(udp_sender_skips_unresolvable_target)
         x->addTarget(target("127.0.0.1", r->localPort()));
         return x;
     });
-    BOOST_CHECK_EQUAL(t.call([&] { return s->start(); }), 1u);
+    // start() resolves the unresolvable name, which can take a while.
+    BOOST_CHECK_EQUAL(t.call([&] { return s->start(); }, slow(std::chrono::seconds(30))), 1u);
     BOOST_CHECK_EQUAL(t.call([&] { return s->targets(); }), 1u);
     BOOST_CHECK(t.call([&] { return s->counters().last_error; }).find("no-such-host.invalid") != std::string::npos);
     t.call([&] { s->send(makeBuf("ok")); return 0; });

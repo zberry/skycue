@@ -1,6 +1,3 @@
-# The net library's test support (net_test_support.hpp: free ports, IoThread).
-include_directories(${PROJECT_SOURCE_DIR}/net/tests)
-
 add_executable(test_smoke test_smoke.cpp)
 target_link_libraries(test_smoke PRIVATE Boost::unit_test_framework)
 target_compile_definitions(test_smoke PRIVATE BOOST_TEST_DYN_LINK)
@@ -18,6 +15,7 @@ add_executable(test_client test_client.cpp)
 target_link_libraries(test_client PRIVATE skycue::skycue Boost::unit_test_framework)
 target_compile_definitions(test_client PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_client)
+target_include_directories(test_client PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME client COMMAND test_client)
 set_tests_properties(client PROPERTIES TIMEOUT 60)
 
@@ -117,6 +115,7 @@ add_executable(test_forwarder test_forwarder.cpp)
 target_link_libraries(test_forwarder PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_forwarder PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_forwarder)
+target_include_directories(test_forwarder PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME forwarder COMMAND test_forwarder)
 set_tests_properties(forwarder PROPERTIES TIMEOUT 60)
 
@@ -221,6 +220,7 @@ target_link_libraries(test_engine PRIVATE skycued_core Boost::unit_test_framewor
 target_compile_definitions(test_engine PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_engine)
+target_include_directories(test_engine PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME engine COMMAND test_engine)
 set_tests_properties(engine PROPERTIES TIMEOUT 120)
 
@@ -229,6 +229,7 @@ target_link_libraries(test_stats_engine PRIVATE skycued_core Boost::unit_test_fr
 target_compile_definitions(test_stats_engine PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_stats_engine)
+target_include_directories(test_stats_engine PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME stats_engine COMMAND test_stats_engine)
 set_tests_properties(stats_engine PROPERTIES TIMEOUT 120)
 
@@ -238,6 +239,7 @@ foreach(_t engine_api recording_independence runtime_config web_config check_inp
   target_compile_definitions(test_${_t} PRIVATE BOOST_TEST_DYN_LINK
     SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
   skycue_set_warnings(test_${_t})
+  target_include_directories(test_${_t} PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
   add_test(NAME ${_t} COMMAND test_${_t})
   set_tests_properties(${_t} PROPERTIES TIMEOUT 60)
 endforeach()
@@ -282,6 +284,7 @@ target_compile_definitions(test_web_server PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
 add_dependencies(test_web_server skycued)
 skycue_set_warnings(test_web_server)
+target_include_directories(test_web_server PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME web_server COMMAND test_web_server)
 set_tests_properties(web_server PROPERTIES TIMEOUT 120)
 
@@ -291,6 +294,7 @@ target_link_libraries(test_fisb_web PRIVATE skycued_core Boost::unit_test_framew
 target_compile_definitions(test_fisb_web PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_fisb_web)
+target_include_directories(test_fisb_web PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME fisb_web COMMAND test_fisb_web)
 set_tests_properties(fisb_web PROPERTIES TIMEOUT 120)
 
@@ -362,6 +366,7 @@ target_link_libraries(test_fisb_decoder PRIVATE skycued_core Boost::unit_test_fr
 target_compile_definitions(test_fisb_decoder PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_fisb_decoder)
+target_include_directories(test_fisb_decoder PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME fisb_decoder COMMAND test_fisb_decoder)
 set_tests_properties(fisb_decoder PROPERTIES TIMEOUT 120)
 
@@ -406,6 +411,7 @@ target_link_libraries(test_transports PRIVATE skycued_core Boost::unit_test_fram
 target_compile_definitions(test_transports PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_transports)
+target_include_directories(test_transports PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME transports COMMAND test_transports)
 set_tests_properties(transports PROPERTIES TIMEOUT 60)
 
@@ -453,6 +459,7 @@ target_link_libraries(test_inputs PRIVATE skycued_core Boost::unit_test_framewor
 target_compile_definitions(test_inputs PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_inputs)
+target_include_directories(test_inputs PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME inputs COMMAND test_inputs)
 set_tests_properties(inputs PROPERTIES TIMEOUT 120)
 
@@ -462,6 +469,7 @@ target_link_libraries(test_status_poller PRIVATE skycued_core Boost::unit_test_f
 target_compile_definitions(test_status_poller PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_status_poller)
+target_include_directories(test_status_poller PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME status_poller COMMAND test_status_poller)
 set_tests_properties(status_poller PROPERTIES TIMEOUT 60)
 
@@ -472,6 +480,7 @@ target_link_libraries(test_capture PRIVATE skycued_core Boost::unit_test_framewo
 target_compile_definitions(test_capture PRIVATE BOOST_TEST_DYN_LINK
   SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 skycue_set_warnings(test_capture)
+target_include_directories(test_capture PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME capture COMMAND test_capture)
 set_tests_properties(capture PROPERTIES TIMEOUT 60)
 

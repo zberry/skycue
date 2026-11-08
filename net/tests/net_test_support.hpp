@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <future>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -44,7 +45,8 @@ inline bool haveIpv6Loopback()
 }
 
 // An io_context run on a thread of its own. call() runs a function on that
-// thread and returns its result (rethrowing its exception).
+// thread and returns its result (rethrowing its exception); it throws
+// std::runtime_error when the function has not run within `limit`.
 struct IoThread {
     boost::asio::io_context io;
     boost::asio::executor_work_guard<boost::asio::io_context::executor_type> guard{io.get_executor()};
@@ -55,12 +57,14 @@ struct IoThread {
     IoThread& operator=(const IoThread&) = delete;
 
     template <class F>
-    auto call(F&& f) -> std::invoke_result_t<F>
+    auto call(F&& f, std::chrono::milliseconds limit = slow(std::chrono::seconds(5))) -> std::invoke_result_t<F>
     {
         using R = std::invoke_result_t<F>;
         auto task = std::make_shared<std::packaged_task<R()>>(std::forward<F>(f));
         auto fut = task->get_future();
         boost::asio::post(io, [task] { (*task)(); });
+        if (fut.wait_for(limit) != std::future_status::ready)
+            throw std::runtime_error("io thread call timed out");
         return fut.get();
     }
 

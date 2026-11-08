@@ -40,10 +40,11 @@ public:
     void addTarget(const UdpTarget& t);
     // Resolves host names synchronously, so it may block on name resolution:
     // call it before serving, not from a latency-sensitive path.
-    std::size_t start();                    // unresolvable targets are logged, skipped; returns the usable count
+    std::size_t start();                    // unresolvable targets are skipped (last_error says why, debug log); returns the usable count
     void stop();
     // One datagram per target; a no-op before start(). An oversize buffer
-    // counts once in `dropped` per target; it is logged once a minute per target.
+    // counts once in `dropped` per target. Failures are logged at debug only;
+    // the host reads counters().last_error ("<target>: <reason>") and reports as it sees fit.
     void send(const Buf& b);
     std::size_t targets() const;            // usable targets after start()
     const Counters& counters() const;

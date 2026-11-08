@@ -103,7 +103,7 @@ struct UdpSender::Impl {
         counters.last_error = t.name + ": " + why;
         const auto now = std::chrono::steady_clock::now();
         if (!t.logged || now - t.last_log >= kErrorLogEvery) {
-            log(LogLevel::warn, name, "udp send to " + counters.last_error);
+            log(LogLevel::debug, name, "udp send to " + counters.last_error);
             t.logged = true;
             t.last_log = now;
         }
@@ -158,7 +158,7 @@ std::size_t UdpSender::start()
             const auto results = resolver.resolve(cfg.host, std::to_string(cfg.port), ec);
             if (ec || results.begin() == results.end()) {
                 m.counters.last_error = "target " + r.name + ": " + (ec ? ec.message() : "no address");
-                log(LogLevel::warn, m.name, "udp " + m.counters.last_error + " (skipped)");
+                log(LogLevel::debug, m.name, "udp " + m.counters.last_error + " (skipped)");
                 continue;
             }
             // One address per target: the first IPv4 one, else the first.
@@ -183,7 +183,7 @@ std::size_t UdpSender::start()
             if (ec) {
                 fs.sock.reset();
                 m.counters.last_error = "target " + r.name + ": open socket: " + ec.message();
-                log(LogLevel::warn, m.name, "udp " + m.counters.last_error + " (skipped)");
+                log(LogLevel::debug, m.name, "udp " + m.counters.last_error + " (skipped)");
                 continue;
             }
         }
@@ -191,11 +191,11 @@ std::size_t UdpSender::start()
             const std::string why = m.applyMulticast(r, fs);
             if (!why.empty()) {
                 m.counters.last_error = "target " + r.name + ": " + why;
-                log(LogLevel::warn, m.name, "udp " + m.counters.last_error + " (skipped)");
+                log(LogLevel::debug, m.name, "udp " + m.counters.last_error + " (skipped)");
                 continue;
             }
         }
-        log(LogLevel::info, m.name, "udp target " + r.name);
+        log(LogLevel::debug, m.name, "udp target " + r.name);
         m.resolved.push_back(std::move(r));
     }
     return m.resolved.size();

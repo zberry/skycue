@@ -4,8 +4,11 @@
 // reads in chunks and reconnects with doubling backoff when the peer goes
 // away. All work and all callbacks run on the io_context's thread (it must be
 // run by one thread); call every member from that thread, except connected(),
-// which may be read from any. Connection notifications are always delivered
-// asynchronously (posted), never from inside send() or stop(). After stop() returns no callback is invoked.
+// which may be read from any. The "connected" notification (onConnection(true))
+// is made synchronously from the connect handler, so a host can queue a greeting
+// before anything else is sent. The "lost" notification (onConnection(false))
+// and onFailure are always posted, never made from inside send() or stop().
+// After stop() returns no callback is invoked.
 //
 // Each resolved address gets TcpOptions::connect_timeout to connect; on a
 // timeout or a refusal the next address is tried, and when all fail the
@@ -41,7 +44,10 @@ public:
     Dialer& operator=(const Dialer&) = delete;
 
     void onData(std::function<void(const uint8_t*, std::size_t)> h);
-    void onConnection(std::function<void(bool up)> h); // true after connect, false when lost (not after stop)
+    void onConnection(std::function<void(bool up)> h); // true (synchronously) after connect, false (posted) when lost (not after stop)
+    // Why the connection in the lost notification now being delivered went
+    // away; valid only inside the onConnection handler call for `up == false`.
+    const PeerDown& downInfo() const;
     // Called once per failed attempt cycle: the lookup failed, or every resolved
     // address failed or timed out. `why` is the text of counters().last_error
     // ("resolve h: ...", "connect h:p: <addr>: <reason>"). Posted like the
@@ -50,6 +56,9 @@ public:
     void onFailure(std::function<void(const std::string& why)> h);
     void start();
     void stop();
+    // Like stop(), but a connection that is up still gets its notification
+    // (posted, DownReason::shutdown), for a host that closes it deliberately.
+    void stopWithNotice();
     bool connected() const;
     void send(const Buf& b); // queued; dropped and counted when not connected or empty (see buffer.hpp)
     const Counters& counters() const; // read on the io thread only
@@ -65,7 +74,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
     void connect();
-    void lost(uint64_t gen, const std::string& why);
+    void lost(uint64_t gen, const std::string& why, DownReason reason = DownReason::error);
     void readLoop(uint64_t gen);
     struct Attempt;
     void connectNext(uint64_t gen, const std::shared_ptr<boost::asio::ip::tcp::socket>& sock,

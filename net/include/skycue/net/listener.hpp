@@ -52,6 +52,13 @@ public:
     void send(uint64_t stream, const Buf& b); // per-peer queue; over the cap the peer is closed (dropped++); an empty Buf is dropped (dropped++)
     void sendAll(const Buf& b); // an empty Buf is dropped and counted once per peer
     std::size_t peers() const;
+    // Closes one peer after shutting down its sending side. The peer-down
+    // notification follows (posted) with DownReason::shutdown. A stream that
+    // is not connected is ignored.
+    void close(uint64_t stream);
+    // Why the peer in the peer-down notification now being delivered went
+    // away; valid only inside the onPeer handler call for `up == false`.
+    const PeerDown& downInfo() const;
     // Send-side stats of one peer; empty when the stream is not (or no longer) connected.
     std::optional<PeerStats> peerStats(uint64_t stream) const;
     const Counters& counters() const; // read on the io thread only
@@ -64,7 +71,7 @@ private:
     void bindAndListen(bool throwOnFailure);
     void acceptLoop(uint64_t gen, const std::shared_ptr<boost::asio::ip::tcp::acceptor>& acc);
     void adopt(const std::shared_ptr<Session>& s);
-    void closeSession(const std::shared_ptr<Session>& s, const std::string& why);
+    void closeSession(const std::shared_ptr<Session>& s, const std::string& why, DownReason reason);
     void readLoop(uint64_t gen, const std::shared_ptr<Session>& s);
     void sendTo(const std::shared_ptr<Session>& s, const Buf& b);
     void retire(Session& s); // folds the session's write counts into the totals and drops its queue

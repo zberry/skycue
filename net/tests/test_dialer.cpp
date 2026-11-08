@@ -4,6 +4,7 @@
 #include "net_test_support.hpp"
 #include "skycue/net/buffer.hpp"
 #include "skycue/net/dialer.hpp"
+#include "skycue/net/log.hpp"
 #include "skycue/net/tcp_options.hpp"
 
 #include <netinet/in.h>
@@ -210,6 +211,48 @@ BOOST_AUTO_TEST_CASE(dialer_reconnects_with_backoff)
     BOOST_TEST(gap.count() < 2000);
     BOOST_TEST(t.call([&] { return d->counters().connects; }) == 2u);
     t.call([&] { d->stop(); srv->stopAll(); });
+}
+
+// The loss of an established connection is debug (the host words it); the
+// first failed connect attempt after it is the warning, the next ones debug;
+// the down notification says why.
+BOOST_AUTO_TEST_CASE(dialer_loss_is_debug_and_first_failed_attempt_is_warn)
+{
+    test::IoThread t;
+    auto srv = t.call([&] { return TestServer::create(t.io); });
+    const uint16_t port = srv->port();
+    std::mutex m;
+    std::vector<std::pair<LogLevel, std::string>> logs;
+    setLogSink([&](LogLevel lv, const std::string&, const std::string& msg) {
+        std::lock_guard<std::mutex> l(m);
+        logs.emplace_back(lv, msg);
+    });
+    TcpOptions o;
+    o.min_backoff = milliseconds(20);
+    o.max_backoff = milliseconds(40);
+    auto d = Dialer::create(t.io, "127.0.0.1", port, o);
+    std::atomic<int> reason{-1};
+    d->onConnection([&](bool up) {
+        if (!up)
+            reason = static_cast<int>(d->downInfo().reason);
+    });
+    t.call([&] { d->start(); });
+    BOOST_REQUIRE(test::eventually([&] { return srv->accepted() == 1; }));
+    t.call([&] { srv->stopAll(); });
+    BOOST_REQUIRE(test::eventually([&] { return reason.load() == static_cast<int>(DownReason::closed); }));
+    BOOST_REQUIRE(test::eventually([&] { return t.call([&] { return d->attempts(); }) >= 4u; }));
+    t.call([&] { d->stop(); });
+    setLogSink(nullptr);
+    std::lock_guard<std::mutex> l(m);
+    int warns = 0;
+    for (const auto& e : logs)
+        if (e.first == LogLevel::warn)
+            ++warns;
+    BOOST_TEST(warns == 1);
+    BOOST_REQUIRE(!logs.empty());
+    for (const auto& e : logs)
+        if (e.second.find("read: ") == 0)
+            BOOST_CHECK_MESSAGE(e.first == LogLevel::debug, "level of " << e.second);
 }
 
 BOOST_AUTO_TEST_CASE(dialer_backoff_grows_when_nobody_listens)

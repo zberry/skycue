@@ -206,7 +206,7 @@ BOOST_AUTO_TEST_CASE(fanout_reaches_listener_peers_dialer_and_udp)
     BOOST_REQUIRE(eventually([&] { return rx->bound(); }));
     auto u = udpSenderTo(t, rx->localPort());
 
-    Fanout f(t.io);
+    Fanout f;
     t.call([&] {
         f.attach(l);
         f.attach(d);
@@ -255,8 +255,12 @@ BOOST_AUTO_TEST_CASE(fanout_slow_peer_dropped_others_continue)
     o.tcp.send_cap = 4096;
     auto l = startListener(t, o);
     BOOST_REQUIRE(eventually([&] { return l->listening(); }));
-    Fanout f(t.io);
-    t.call([&] { f.attach(l); });
+    Fanout f;
+    auto reason = std::make_shared<std::atomic<int>>(-1);
+    t.call([&] {
+        f.attach(l);
+        f.onPeerDown([reason](uint64_t, DownReason why, const std::string&) { *reason = static_cast<int>(why); });
+    });
     Client slowc, good;
     slowc.connect(l->localPort(), 4096); // never reads, small receive window
     good.connect(l->localPort());
@@ -276,6 +280,7 @@ BOOST_AUTO_TEST_CASE(fanout_slow_peer_dropped_others_continue)
     }
     BOOST_CHECK_GE(dropped(), 1u);
     BOOST_CHECK(eventually([&] { return t.call([&] { return l->peers(); }) == 1; }));
+    BOOST_CHECK(eventually([&] { return reason->load() == static_cast<int>(DownReason::over_cap); }));
     BOOST_CHECK_EQUAL(good.read(published * chunk.size(), slow(std::chrono::seconds(5))).size(),
                       published * chunk.size());
     t.call([&] { f.publish(makeBuf(std::string_view("tail"))); });
@@ -295,7 +300,7 @@ BOOST_AUTO_TEST_CASE(fanout_drops_while_dialer_down)
         x->start();
         return x;
     });
-    Fanout f(t.io);
+    Fanout f;
     t.call([&] { f.attach(d); });
     t.call([&] {
         for (int i = 0; i < 5; ++i)
@@ -320,7 +325,7 @@ BOOST_AUTO_TEST_CASE(fanout_detach_stops_delivery)
     auto rx = startUdpReceiver(t, dg);
     BOOST_REQUIRE(eventually([&] { return rx->bound(); }));
     auto u = udpSenderTo(t, rx->localPort());
-    Fanout f(t.io);
+    Fanout f;
     t.call([&] { f.attach(u); });
     t.call([&] { f.publish(makeBuf(std::string_view("before"))); });
     BOOST_REQUIRE(eventually([&] { return dg->count() == 1; }));
@@ -338,14 +343,14 @@ BOOST_AUTO_TEST_CASE(fanout_peer_up_hook_can_greet)
     IoThread t;
     auto l = startListener(t);
     BOOST_REQUIRE(eventually([&] { return l->listening(); }));
-    Fanout f(t.io);
+    Fanout f;
     auto downs = std::make_shared<std::atomic<int>>(0);
     t.call([&] {
         f.attach(l);
         f.onPeerUp([](uint64_t, const tcp::endpoint&, const std::function<void(const Buf&)>& to) {
             to(makeBuf(std::string_view("hello\n")));
         });
-        f.onPeerDown([downs](uint64_t) { ++*downs; });
+        f.onPeerDown([downs](uint64_t, DownReason, const std::string&) { ++*downs; });
     });
     {
         Client c;
@@ -377,10 +382,11 @@ BOOST_AUTO_TEST_CASE(fanout_peer_ids_unique_and_peer_info)
     to.max_backoff = milliseconds(50);
     auto d = t.call([&] { return Dialer::create(t.io, "127.0.0.1", srv->port(), to); });
 
-    Fanout f(t.io);
+    Fanout f;
     struct Seen {
         std::mutex m;
         std::vector<uint64_t> ups, downs;
+        std::vector<DownReason> reasons;
         std::vector<uint16_t> ports;
     };
     auto seen = std::make_shared<Seen>();
@@ -394,9 +400,10 @@ BOOST_AUTO_TEST_CASE(fanout_peer_ids_unique_and_peer_info)
             seen->ups.push_back(id);
             seen->ports.push_back(who.port());
         });
-        f.onPeerDown([seen](uint64_t id) {
+        f.onPeerDown([seen](uint64_t id, DownReason why, const std::string&) {
             std::lock_guard<std::mutex> lk(seen->m);
             seen->downs.push_back(id);
+            seen->reasons.push_back(why);
         });
         d->start();
     });
@@ -438,12 +445,17 @@ BOOST_AUTO_TEST_CASE(fanout_peer_ids_unique_and_peer_info)
     });
 
     // A closing client and a dropped dialer connection both give peer-down.
+    BOOST_CHECK_EQUAL(a.read(10, slow(std::chrono::seconds(2))), "0123456789"); // nothing unread: an orderly close
     a.s.close();
     BOOST_REQUIRE(eventually([&] {
         std::lock_guard<std::mutex> lk(seen->m);
         return seen->downs.size() == 1 && seen->downs[0] == ups[1];
     }));
     BOOST_CHECK(!t.call([&] { return f.peerInfo(ups[1]); }));
+    {
+        std::lock_guard<std::mutex> lk(seen->m);
+        BOOST_CHECK(seen->reasons[0] == DownReason::closed); // an orderly close by the client
+    }
     t.call([&] { srv->stop(); });
     BOOST_REQUIRE(eventually([&] {
         std::lock_guard<std::mutex> lk(seen->m);
@@ -456,6 +468,72 @@ BOOST_AUTO_TEST_CASE(fanout_peer_ids_unique_and_peer_info)
         l1->stop();
         l2->stop();
         d->stop();
+    });
+}
+
+BOOST_AUTO_TEST_CASE(fanout_close_peer_listener_and_dialer)
+{
+    IoThread t;
+    auto l = startListener(t);
+    BOOST_REQUIRE(eventually([&] { return l->listening(); }));
+    auto sink = std::make_shared<Sink>();
+    auto srv = t.call([&] { return Server::create(t.io, 0, sink); });
+    TcpOptions to;
+    to.min_backoff = milliseconds(20);
+    to.max_backoff = milliseconds(50);
+    auto d = t.call([&] { return Dialer::create(t.io, "127.0.0.1", srv->port(), to); });
+    Fanout f;
+    struct Seen {
+        std::mutex m;
+        std::vector<uint64_t> ups, downs;
+        std::vector<DownReason> reasons;
+    };
+    auto seen = std::make_shared<Seen>();
+    t.call([&] {
+        f.attach(l);
+        f.attach(d);
+        f.onPeerUp([seen](uint64_t id, const tcp::endpoint&, const std::function<void(const Buf&)>&) {
+            std::lock_guard<std::mutex> lk(seen->m);
+            seen->ups.push_back(id);
+        });
+        f.onPeerDown([seen](uint64_t id, DownReason why, const std::string&) {
+            std::lock_guard<std::mutex> lk(seen->m);
+            seen->downs.push_back(id);
+            seen->reasons.push_back(why);
+        });
+        d->start();
+    });
+    Client c;
+    c.connect(l->localPort());
+    BOOST_REQUIRE(eventually([&] {
+        std::lock_guard<std::mutex> lk(seen->m);
+        return seen->ups.size() == 2;
+    }));
+    std::vector<uint64_t> ups;
+    {
+        std::lock_guard<std::mutex> lk(seen->m);
+        ups = seen->ups;
+    }
+    t.call([&] { f.closePeer(ups[0]); f.closePeer(ups[1]); f.closePeer(9999); });
+    BOOST_REQUIRE(eventually([&] {
+        std::lock_guard<std::mutex> lk(seen->m);
+        return seen->downs.size() == 2;
+    }));
+    {
+        std::lock_guard<std::mutex> lk(seen->m);
+        BOOST_CHECK(seen->reasons[0] == DownReason::shutdown);
+        BOOST_CHECK(seen->reasons[1] == DownReason::shutdown);
+    }
+    // The closed client sees the end of the stream; the dialer does not redial.
+    BOOST_CHECK(eventually([&] { return c.read(1, milliseconds(50)).empty() && !t.call([&] { return l->peers(); }); }));
+    std::this_thread::sleep_for(milliseconds(150));
+    BOOST_CHECK(!t.call([&] { return d->connected(); }));
+    t.call([&] {
+        f.detach(l);
+        f.detach(d);
+        l->stop();
+        d->stop();
+        srv->stop();
     });
 }
 

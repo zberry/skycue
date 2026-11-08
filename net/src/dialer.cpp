@@ -54,6 +54,19 @@ struct Dialer::Impl {
     std::atomic<bool> up{false};
     std::unique_ptr<WriteQueue> wq; // exists while connected
     tcp::endpoint remote;           // of the current or latest connection
+    PeerDown last_down;             // of the notification being delivered
+    PeerDown pending_down;          // of a loss whose notification is still posted
+    bool down_pending = false;
+    // Delivers the posted loss notification now, or when its post runs.
+    void deliverDown()
+    {
+        if (!down_pending)
+            return;
+        down_pending = false;
+        last_down = pending_down;
+        if (on_conn)
+            on_conn(false);
+    }
 };
 
 std::shared_ptr<Dialer> Dialer::create(asio::io_context& io, std::string host, uint16_t port, TcpOptions o)
@@ -78,6 +91,7 @@ Dialer::~Dialer() = default;
 void Dialer::onData(std::function<void(const uint8_t*, std::size_t)> h) { impl_->on_data = std::move(h); }
 void Dialer::onConnection(std::function<void(bool)> h) { impl_->on_conn = std::move(h); }
 void Dialer::onFailure(std::function<void(const std::string&)> h) { impl_->on_fail = std::move(h); }
+const PeerDown& Dialer::downInfo() const { return impl_->last_down; }
 bool Dialer::connected() const { return impl_->up.load(); }
 const Counters& Dialer::counters() const
 {
@@ -111,6 +125,7 @@ void Dialer::stop()
     m.running = false;
     ++m.gen;
     ++m.stop_epoch;
+    m.down_pending = false;
     m.retry.cancel();
     m.connect_timer.cancel();
     boost::system::error_code ec;
@@ -120,6 +135,24 @@ void Dialer::stop()
     m.socket.reset();
     m.up = false;
     m.retireQueue();
+}
+
+void Dialer::stopWithNotice()
+{
+    auto& m = *impl_;
+    const bool was_up = m.up.load();
+    stop();
+    if (!was_up || !m.on_conn)
+        return;
+    m.pending_down = PeerDown{DownReason::shutdown, "closed by the host"};
+    m.down_pending = true;
+    std::weak_ptr<Dialer> weak = shared_from_this();
+    const uint64_t epoch = m.stop_epoch;
+    asio::post(m.io, [weak, epoch] {
+        auto self = weak.lock();
+        if (self && self->impl_->stop_epoch == epoch)
+            self->impl_->deliverDown();
+    });
 }
 
 // The addresses of one attempt and where it is in them.
@@ -235,6 +268,11 @@ void Dialer::connected(uint64_t gen, const std::shared_ptr<tcp::socket>& sock)
     }
     st.up = true;
     log(LogLevel::debug, st.opts.name, "connected to " + st.host + ":" + std::to_string(st.port));
+    // A loss whose notification is still posted comes first, so the host
+    // sees down for the old connection before up for the new one.
+    st.deliverDown();
+    if (gen != st.gen)
+        return;
     if (st.on_conn)
         st.on_conn(true);
     if (gen != st.gen)
@@ -242,7 +280,7 @@ void Dialer::connected(uint64_t gen, const std::shared_ptr<tcp::socket>& sock)
     readLoop(gen);
 }
 
-void Dialer::lost(uint64_t gen, const std::string& why)
+void Dialer::lost(uint64_t gen, const std::string& why, DownReason reason)
 {
     auto& m = *impl_;
     if (gen != m.gen)
@@ -257,10 +295,12 @@ void Dialer::lost(uint64_t gen, const std::string& why)
     m.socket.reset();
     m.retireQueue();
     m.counters.last_error = why;
-    // The first failure since the last success is a warning, the following
-    // ones debug; a warning names the peer (the debug line is read next to it).
-    const bool quiet = m.failed_before && !was_up;
-    m.failed_before = true;
+    // The first failed connect attempt since the last success is a warning, the
+    // following ones debug; a warning names the peer (the debug line is read
+    // next to it). The loss of an established connection is debug: the host
+    // logs it in its own words, and the next failed attempt is the first.
+    const bool quiet = was_up || m.failed_before;
+    m.failed_before = !was_up;
     if (m.running) {
         const auto delay = m.backoff.next();
         const std::string retrying = "; retrying in " + std::to_string(delay.count()) + " ms";
@@ -268,7 +308,9 @@ void Dialer::lost(uint64_t gen, const std::string& why)
             log(LogLevel::debug, m.opts.name, why + retrying);
         else
             log(LogLevel::warn, m.opts.name,
-                (why.find(m.host) == std::string::npos ? m.host + ":" + std::to_string(m.port) + ": " : std::string()) +
+                (why.rfind("resolve ", 0) == 0 || why.rfind("connect ", 0) == 0
+                     ? std::string()
+                     : m.host + ":" + std::to_string(m.port) + ": ") +
                     why + retrying +
                     " (further failures logged at debug level)");
         std::weak_ptr<Dialer> weak = shared_from_this();
@@ -293,10 +335,12 @@ void Dialer::lost(uint64_t gen, const std::string& why)
         // Always asynchronous: the caller of send() must not be re-entered.
         std::weak_ptr<Dialer> weak = shared_from_this();
         const uint64_t epoch = m.stop_epoch;
+        m.pending_down = PeerDown{reason, why};
+        m.down_pending = true;
         asio::post(m.io, [weak, epoch] {
             auto self = weak.lock();
-            if (self && self->impl_->stop_epoch == epoch && self->impl_->on_conn)
-                self->impl_->on_conn(false);
+            if (self && self->impl_->stop_epoch == epoch)
+                self->impl_->deliverDown();
         });
     }
 }
@@ -313,7 +357,8 @@ void Dialer::readLoop(uint64_t gen)
         if (gen != m.gen)
             return;
         if (ec) {
-            self->lost(gen, std::string("read: ") + ec.message());
+            self->lost(gen, std::string("read: ") + ec.message(),
+                       ec == asio::error::eof ? DownReason::closed : DownReason::error);
             return;
         }
         m.counters.bytes_in += n;
@@ -336,7 +381,7 @@ void Dialer::send(const Buf& b)
     }
     if (!m.wq->enqueue(b)) {
         ++m.counters.dropped;
-        lost(m.gen, "send queue over " + std::to_string(m.opts.send_cap) + " bytes");
+        lost(m.gen, "send queue over " + std::to_string(m.opts.send_cap) + " bytes", DownReason::over_cap);
     }
 }
 

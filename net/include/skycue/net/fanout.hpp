@@ -27,7 +27,6 @@
 #include "skycue/net/listener.hpp"
 #include "skycue/net/udp_sender.hpp"
 
-#include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
 #include <cstddef>
@@ -35,14 +34,13 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace skycue::net {
 
 class Fanout {
 public:
     Fanout();
-    // Older form: the io_context was never used. Kept for existing callers.
-    explicit Fanout(boost::asio::io_context& io);
     ~Fanout();
     Fanout(const Fanout&) = delete;
     Fanout& operator=(const Fanout&) = delete;
@@ -69,8 +67,16 @@ public:
     using PeerUpHook = std::function<void(std::uint64_t peer, const boost::asio::ip::tcp::endpoint& who,
                                           const std::function<void(const Buf&)>& sendToThatPeer)>;
     void onPeerUp(PeerUpHook h);
-    // Called (asynchronously) when a TCP peer of an attached destination is gone.
-    void onPeerDown(std::function<void(std::uint64_t peer)> h);
+    // Called (asynchronously) when a TCP peer of an attached destination is
+    // gone, with why: `closed` (orderly end of stream), `error` (a read or
+    // write failed), `over_cap` (cut off for its send queue) or `shutdown`
+    // (closePeer). `why` is the library's text ("read: Connection reset by peer").
+    using PeerDownHook = std::function<void(std::uint64_t peer, DownReason reason, const std::string& why)>;
+    void onPeerDown(PeerDownHook h);
+    // Closes one peer from the host's side: a listener's stream is shut down
+    // and closed, a dialer is stopped (so it does not redial). The peer-down
+    // follows (posted) with DownReason::shutdown. An unknown id is ignored.
+    void closePeer(std::uint64_t peer);
 
     struct PeerInfo {
         PeerStats stats;       // send side of the connection

@@ -21,7 +21,6 @@ using asio::ip::tcp;
 
 namespace {
 constexpr std::chrono::milliseconds kAcceptRetry{100};
-constexpr std::chrono::seconds kAcceptWarnEvery{10};
 } // namespace
 
 struct Listener::Session {
@@ -57,8 +56,7 @@ struct Listener::Impl {
     uint64_t stop_epoch = 0; // changes on stop(); suppresses notifications posted earlier
     bool running = false;
     bool bind_failed_before = false;
-    bool accept_warned = false;
-    std::chrono::steady_clock::time_point last_accept_warn;
+    PeerDown last_down;
     std::atomic<bool> up{false};
     std::atomic<uint16_t> bound_port{0};
     std::function<void(uint64_t, const uint8_t*, std::size_t)> on_data;
@@ -93,6 +91,18 @@ void Listener::onPeer(std::function<void(uint64_t, bool, const tcp::endpoint&)> 
 bool Listener::listening() const { return impl_->up.load(); }
 uint16_t Listener::localPort() const { return impl_->bound_port.load(); }
 std::size_t Listener::peers() const { return impl_->sessions.size(); }
+const PeerDown& Listener::downInfo() const { return impl_->last_down; }
+void Listener::close(uint64_t stream)
+{
+    auto& m = *impl_;
+    const auto it = m.sessions.find(stream);
+    if (it == m.sessions.end())
+        return;
+    const auto s = it->second; // closeSession erases the entry
+    boost::system::error_code ec;
+    s->socket->shutdown(tcp::socket::shutdown_send, ec);
+    closeSession(s, "closed by the host", DownReason::shutdown);
+}
 std::optional<PeerStats> Listener::peerStats(uint64_t stream) const
 {
     const auto it = impl_->sessions.find(stream);
@@ -216,15 +226,9 @@ void Listener::acceptLoop(uint64_t gen, const std::shared_ptr<tcp::acceptor>& ac
         if (ec) {
             if (ec == asio::error::operation_aborted)
                 return;
-            m.counters.last_error = "accept: " + ec.message();
-            const auto now = std::chrono::steady_clock::now();
-            if (!m.accept_warned || now - m.last_accept_warn >= kAcceptWarnEvery) {
-                m.accept_warned = true;
-                m.last_accept_warn = now;
-                log(LogLevel::warn, m.opts.tcp.name, m.counters.last_error);
-            } else {
-                log(LogLevel::debug, m.opts.tcp.name, m.counters.last_error);
-            }
+            m.counters.last_error = "accept failed: " + ec.message();
+            // A host that wants to report it reads counters().last_error.
+            log(LogLevel::debug, m.opts.tcp.name, m.counters.last_error);
             std::weak_ptr<Listener> weak = self;
             m.accept_retry.after(kAcceptRetry, [weak, gen, acc] {
                 auto l = weak.lock();
@@ -267,7 +271,7 @@ void Listener::adopt(const std::shared_ptr<Session>& s)
             auto self = weak.lock();
             auto sess = ws.lock();
             if (self && sess && !sess->closed)
-                self->closeSession(sess, std::string("write: ") + wec.message());
+                self->closeSession(sess, std::string("write: ") + wec.message(), DownReason::error);
         });
     }
     m.counters.peers = m.sessions.size();
@@ -282,7 +286,7 @@ void Listener::adopt(const std::shared_ptr<Session>& s)
     readLoop(gen, s);
 }
 
-void Listener::closeSession(const std::shared_ptr<Session>& s, const std::string& why)
+void Listener::closeSession(const std::shared_ptr<Session>& s, const std::string& why, DownReason reason)
 {
     auto& m = *impl_;
     if (s->closed)
@@ -301,10 +305,11 @@ void Listener::closeSession(const std::shared_ptr<Session>& s, const std::string
         const uint64_t epoch = m.stop_epoch;
         const uint64_t stream = s->stream;
         const tcp::endpoint who = s->who;
-        asio::post(m.io, [weak, epoch, stream, who] {
+        asio::post(m.io, [weak, epoch, stream, who, reason, why] {
             auto self = weak.lock();
             if (!self || self->impl_->stop_epoch != epoch)
                 return;
+            self->impl_->last_down = PeerDown{reason, why};
             if (const auto hook = self->impl_->on_peer) // a copy: the hook may replace the handler
                 hook(stream, false, who);
         });
@@ -322,7 +327,8 @@ void Listener::readLoop(uint64_t gen, const std::shared_ptr<Session>& s)
         if (gen != m.gen || s->closed)
             return;
         if (ec) {
-            self->closeSession(s, std::string("read: ") + ec.message());
+            self->closeSession(s, std::string("read: ") + ec.message(),
+                               ec == asio::error::eof ? DownReason::closed : DownReason::error);
             return;
         }
         m.counters.bytes_in += n;
@@ -370,7 +376,7 @@ void Listener::sendTo(const std::shared_ptr<Session>& s, const Buf& b)
     }
     if (!s->wq.enqueue(b)) {
         ++m.counters.dropped;
-        closeSession(s, "send queue over " + std::to_string(m.opts.tcp.send_cap) + " bytes");
+        closeSession(s, "send queue over " + std::to_string(m.opts.tcp.send_cap) + " bytes", DownReason::over_cap);
     }
 }
 

@@ -22,7 +22,7 @@ struct Fanout::State {
     std::vector<std::shared_ptr<DialerEntry>> dialers;
     std::vector<std::shared_ptr<UdpSender>> senders;
     PeerUpHook up;
-    std::function<void(uint64_t)> down;
+    PeerDownHook down;
     uint64_t next_peer = 1;
 };
 
@@ -43,7 +43,6 @@ void erase(std::vector<std::shared_ptr<T>>& v, const std::shared_ptr<T>& p)
 } // namespace
 
 Fanout::Fanout() : st_(std::make_shared<State>()) {}
-Fanout::Fanout(boost::asio::io_context&) : Fanout() {}
 
 Fanout::~Fanout() = default;
 
@@ -81,7 +80,7 @@ void Fanout::attach(const std::shared_ptr<Listener>& l)
             e->ids.erase(it);
             auto h = st->down;
             if (h)
-                h(id);
+                h(id, e->l->downInfo().reason, e->l->downInfo().why);
         }
     });
 }
@@ -116,7 +115,7 @@ void Fanout::attach(const std::shared_ptr<Dialer>& d)
             e->id = 0;
             auto h = st->down;
             if (h)
-                h(id);
+                h(id, e->d->downInfo().reason, e->d->downInfo().why);
         }
     });
 }
@@ -171,7 +170,22 @@ void Fanout::publish(const Buf& b)
 
 void Fanout::onPeerUp(PeerUpHook h) { st_->up = std::move(h); }
 
-void Fanout::onPeerDown(std::function<void(uint64_t)> h) { st_->down = std::move(h); }
+void Fanout::onPeerDown(PeerDownHook h) { st_->down = std::move(h); }
+
+void Fanout::closePeer(uint64_t peer)
+{
+    for (const auto& e : st_->listeners)
+        for (const auto& kv : e->ids)
+            if (kv.second == peer) {
+                e->l->close(kv.first);
+                return;
+            }
+    for (const auto& e : st_->dialers)
+        if (e->id == peer) {
+            e->d->stopWithNotice(); // its notification reaches onPeerDown like any loss
+            return;
+        }
+}
 
 std::optional<Fanout::PeerInfo> Fanout::peerInfo(uint64_t peer) const
 {

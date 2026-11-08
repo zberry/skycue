@@ -706,12 +706,12 @@ add_test(NAME decode_differential
     $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(decode_differential PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 
-# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
-skycue_scale_test_timeouts()
-
 # UAT (978 MHz) frame layout, line parser and pure field decoders.
 add_executable(test_decode_uat_frame test_decode_uat_frame.cpp)
 target_link_libraries(test_decode_uat_frame PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_decode_uat_frame PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_decode_uat_frame)
 add_test(NAME decode_uat_frame COMMAND test_decode_uat_frame)
+
+# Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
+skycue_scale_test_timeouts()

@@ -120,10 +120,9 @@ BOOST_AUTO_TEST_CASE(check_inputs_connect_only)
 BOOST_AUTO_TEST_CASE(check_inputs_error_wording)
 {
     const uint16_t p = closedPort();
-    const auto r = checkInputs({{"a", "127.0.0.1", p}, {"b", "no-such-host.invalid", 30047}}, 3s);
+    // A host name getaddrinfo rejects at once, so the wording is exact.
+    const auto r = checkInputs({{"a", "127.0.0.1", p}, {"b", "bad_host!", 30047}}, 3s);
     BOOST_REQUIRE(r.size() == 2u);
     BOOST_TEST(r[0].error == "Connection refused");
-    // A resolver that is slow to answer ends in the deadline instead.
-    BOOST_TEST((r[1].error.rfind("cannot resolve host: ", 0) == 0u || r[1].error == "timed out"),
-               "got: " << r[1].error);
+    BOOST_TEST(r[1].error.rfind("cannot resolve host: ", 0) == 0u, "got: " << r[1].error);
 }

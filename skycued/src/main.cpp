@@ -202,7 +202,9 @@ int run(int argc, char** argv)
         return 2;
     }
     setLogLevel(*level);
-    installNetLogSink();
+    // --check-inputs prints its own lines; the library's log would add noise.
+    if (vm.count("check-inputs") == 0)
+        installNetLogSink();
     if (config_path.empty()) {
         std::cerr << "skycued: --config is required\n";
         return 2;

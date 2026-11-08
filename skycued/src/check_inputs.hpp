@@ -26,8 +26,7 @@ struct InputCheckResult {
 // name lookup cannot be cancelled: one still running at the deadline is
 // reported as timed out and abandoned (its resources are left to the process,
 // so call this a bounded number of times), but it keeps running until libc's
-// resolver gives up. Installs the net log sink for the duration and restores
-// the default (discard) afterwards.
+// resolver gives up.
 std::vector<InputCheckResult> checkInputs(const std::vector<InputCheck>& inputs,
                                           std::chrono::milliseconds timeout);
 

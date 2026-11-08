@@ -41,6 +41,8 @@ struct InputState {
     bool connected = false, receiving = false;
     std::optional<std::chrono::system_clock::time_point> last_data_time;
     InputCounters counters;
+    bool decoding = false;  // runs the 1090 decoder (counters carry its fields)
+    uint64_t decoder_keys = 0;
     std::optional<DeviceStatus> device_status;
     std::optional<double> clock_offset_s;
     std::string last_error;

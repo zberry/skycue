@@ -1,7 +1,9 @@
 #define BOOST_TEST_MODULE skycued_web_server
 #include <boost/test/unit_test.hpp>
 
+#include "decode_test_support.hpp"
 #include "engine_test_support.hpp"
+#include "inputs/beast_raw_input.hpp"
 
 #include "icao_class.hpp"
 #include "inputs/inputs_file.hpp"
@@ -269,6 +271,8 @@ struct WebOptions {
     std::chrono::milliseconds ping_interval{15000};
     bool map_dir = false;  // set wc.map_dir to maps/ (created unless map_dir_missing)
     bool map_dir_missing = false;
+    bool decode_raw = false;  // the one input is a decoding beast_raw (UDP, decode_port) instead of the FakeSource
+    uint16_t decode_port = 0;
 };
 
 struct WebFx {
@@ -294,8 +298,34 @@ struct WebFx {
             writeFile(www + "/index.html", kIndex);
         }
         writeFile(conf, std::string(kConfHead) + o.extra_conf);
-        fx = std::make_unique<EngineFx>(skycued::parseConfigFile(conf), o.replay ? replay(20) : fakeSource(src), 10s,
-                                        rec);
+        if (o.decode_raw) {
+            const uint16_t decode_port = o.decode_port;
+            fx = std::make_unique<EngineFx>(
+                skycued::parseConfigFile(conf),
+                std::function<std::unique_ptr<skycued::InputManager>(asio::io_context&)>([decode_port](asio::io_context& io) {
+                    skycued::InputManagerConfig mc;
+                    mc.decode_raw = true;
+                    mc.receiver_ref = std::make_pair(38.9, -77.0);
+                    auto inputs = std::make_unique<skycued::InputManager>(io, mc);
+                    skycued::InputDef def;
+                    def.id = "readsb";
+                    def.type = skycued::InputType::beast_raw;
+                    def.transport = skycued::InputTransport::udp;
+                    def.bind = "127.0.0.1";
+                    def.port = decode_port;
+                    def.format = "beast";
+                    skycued::RawDecodeOptions decode;
+                    decode.enabled = true;
+                    decode.reference = mc.receiver_ref;
+                    inputs->addBuiltin(std::make_unique<skycued::BeastRawInput>(io, def, skycued::RecordOptions{}, decode));
+                    inputs->load();
+                    return inputs;
+                }),
+                10s, rec);
+        } else {
+            fx = std::make_unique<EngineFx>(skycued::parseConfigFile(conf), o.replay ? replay(20) : fakeSource(src), 10s,
+                                            rec);
+        }
         fx->t.call([&] {
             rc = std::make_unique<RuntimeConfig>(fx->t.io, conf, *fx->engine);
             rc->load();
@@ -2118,6 +2148,39 @@ BOOST_AUTO_TEST_CASE(stats_unknown_path_404)
     const pt::ptree s = parseJson(get(f.port, "/api/stats").body);
     BOOST_TEST(s.get<int>("observations") == 1);
     BOOST_TEST(s.get<int>("tracks_total") == 1);
+}
+
+BOOST_AUTO_TEST_CASE(stats_decoder_object_only_with_decoding_inputs)
+{
+    {  // TRACK_DECODER=readsb: no decoder object
+        WebFx f;
+        const pt::ptree s = parseJson(get(f.port, "/api/stats").body);
+        BOOST_TEST(!s.get_child_optional("decoder"));
+    }
+    WebOptions o;
+    o.decode_raw = true;
+    o.decode_port = freeUdpPort();
+    WebFx f(o);
+    namespace st = skycued::testing;
+    auto frame = [](bool odd) {
+        const auto b = st::df17(0xABC123, st::airbornePosition(11, st::encodeCpr({38.95, -77.05}, odd, false), 10000));
+        return std::string("\x1a\x33") + std::string(7, '\0') + std::string(b.begin(), b.end());
+    };
+    asio::io_context uio;
+    asio::ip::udp::socket sock(uio, asio::ip::udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const asio::ip::udp::endpoint to(asio::ip::make_address("127.0.0.1"), o.decode_port);
+    BOOST_TEST(pollUntil([&] {
+        sock.send_to(asio::buffer(frame(false) + frame(true)), to);
+        return parseJson(get(f.port, "/api/stats").body).get_child_optional("decoder").has_value();
+    }));
+    BOOST_TEST(pollUntil([&] { return parseJson(get(f.port, "/api/stats").body).get<int>("decoder.observations", 0) > 0; }));
+    const pt::ptree s = parseJson(get(f.port, "/api/stats").body);
+    for (const char* k : {"frames", "crc_fail", "crc_fixed", "decoded", "observations", "evicted", "keys",
+                          "rebroadcast_suppressed"})
+        BOOST_TEST(s.get_child("decoder").count(k) == 1u, k);
+    BOOST_TEST(s.get<int>("decoder.frames") >= 2);
+    BOOST_TEST(s.get<int>("decoder.keys") == 1);
+    BOOST_TEST(s.get<int>("decoder.crc_fail") == 0);
 }
 
 // ---- statsReadRoute on a hand-built store ----

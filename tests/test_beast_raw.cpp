@@ -1,6 +1,7 @@
 #define BOOST_TEST_MODULE skycued_beast_raw
 #include <boost/test/unit_test.hpp>
 
+#include "decode_test_support.hpp"
 #include "engine_test_support.hpp"
 #include "hub/raw_tap.hpp"
 #include "inputs/beast_raw_input.hpp"
@@ -11,6 +12,7 @@
 #include "json_lite.hpp"
 #include "raw_formats.hpp"
 #include "retention.hpp"
+#include "web_inputs.hpp"
 
 using namespace enginetest;
 using asio::ip::udp;
@@ -20,6 +22,8 @@ using skycued::RawMessage;
 using skycued::RawTap;
 using skycued::RecordOptions;
 using skycued::UatRawInput;
+using skycued::RawDecodeOptions;
+namespace st = skycued::testing;
 
 namespace {
 
@@ -508,4 +512,384 @@ BOOST_AUTO_TEST_CASE(beast_tcp_listen_peer_filter)
         BOOST_TEST(rig.at(0).bytes == kShortFrame);
         BOOST_TEST(rig.state().counters.rejected_peer == 0u);
     }
+}
+
+// ---- the decoder on beast_raw (TRACK_DECODER=skycued) ----
+
+namespace {
+
+std::string beastFrame(const st::Bytes& b, const std::string& ts = kTs1)
+{
+    return wire(b.size() == 7 ? '2' : '3', ts, std::string(b.begin(), b.end()));
+}
+
+const st::cpr_pos kNear{38.95, -77.05};
+
+st::Bytes posFrame(uint32_t addr, const st::cpr_pos& p, bool odd, int alt = 10000)
+{
+    return st::df17(addr, st::airbornePosition(11, st::encodeCpr(p, odd, false), alt));
+}
+
+st::Bytes tisbFrame(uint32_t addr, const st::cpr_pos& p, bool odd = false)
+{
+    return st::df18(2, addr, st::airbornePosition(11, st::encodeCpr(p, odd, false), 9000));
+}
+
+st::Bytes identFrame(uint32_t addr, const std::string& cs = "ABC123")
+{
+    return st::df17(addr, st::identification(4, 3, cs));
+}
+
+RawDecodeOptions decodeOn(std::optional<std::pair<double, double>> ref = std::nullopt)
+{
+    RawDecodeOptions o;
+    o.enabled = true;
+    o.reference = ref;
+    return o;
+}
+
+// A Rig that also keeps the input's observations.
+struct DecRig : Rig {
+    std::mutex om;
+    std::vector<skycued::TrackObservation> obs;
+    void runInput(std::unique_ptr<BeastRawInput> input)
+    {
+        input->onObservation([this](const skycued::TrackObservation& o) {
+            std::lock_guard<std::mutex> lock(om);
+            obs.push_back(o);
+        });
+        run(std::move(input));
+    }
+    std::size_t obsCount()
+    {
+        std::lock_guard<std::mutex> lock(om);
+        return obs.size();
+    }
+    skycued::TrackObservation obsAt(std::size_t i)
+    {
+        std::lock_guard<std::mutex> lock(om);
+        return obs.at(i);
+    }
+};
+
+// Beast type-3 frames for the ADS-B rows of the committed pyModeS-style CSV (hex in the second column);
+// raw/dump1090-modes1.bin holds IQ samples, not frames.
+std::string fixtureBytes()
+{
+    std::istringstream in(readAll(std::string(SKYCUE_FIXTURE_DIR) + "/raw/pymodes-adsb.csv"));
+    std::string out, line;
+    std::size_t n = 0;
+    while (n < 400 && std::getline(in, line)) {
+        const auto q = line.find('"');
+        if (q == std::string::npos || line.compare(q + 1, 2, "8D") != 0 || line.find('"', q + 1) != q + 29)
+            continue;
+        st::Bytes b;
+        for (std::size_t i = 0; i < 28; i += 2)
+            b.push_back(static_cast<uint8_t>(std::stoul(line.substr(q + 1 + i, 2), nullptr, 16)));
+        out += beastFrame(b);
+        ++n;
+    }
+    return out;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(decoder_off_publishes_only)
+{
+    DecRig rig;
+    const uint16_t port = freeUdpPort();
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("off", "udp", port))));
+    BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+    sendUdp(port, beastFrame(posFrame(0xABC123, kNear, false)) + beastFrame(posFrame(0xABC123, kNear, true)));
+    BOOST_REQUIRE(eventually([&] { return rig.count() == 2; }));
+    std::this_thread::sleep_for(50ms);
+    const auto s = rig.state();
+    BOOST_TEST(rig.obsCount() == 0u);
+    BOOST_TEST(!s.decoding);
+    BOOST_TEST(s.counters.messages == 2u);
+    BOOST_TEST(s.counters.frames == 0u);
+    BOOST_TEST(s.counters.decoded == 0u);
+    BOOST_TEST(s.counters.decoder_observations == 0u);
+    BOOST_TEST(s.counters.observations == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(decoder_on_emits_observations_and_still_publishes)
+{
+    const std::string bin = fixtureBytes();
+    BOOST_REQUIRE(!bin.empty());
+    std::vector<skycued::beast::Frame> all;
+    skycued::beast::FrameSplitter().feed(reinterpret_cast<const uint8_t*>(bin.data()), bin.size(), all);
+    BOOST_REQUIRE(!all.empty());
+
+    DecRig rig;
+    const uint16_t port = freeTcpPort();
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("dec", "tcp_listen", port)), RecordOptions{},
+                                                 decodeOn()));
+    asio::io_context cio;
+    tcp::socket c = connectWhenListening(cio, port);
+    writeAll(c, bin);
+    BOOST_REQUIRE(eventually([&] { return rig.count() == all.size(); }));
+    BOOST_REQUIRE(eventually([&] { return rig.state().counters.frames > 0; }));
+    std::this_thread::sleep_for(100ms);
+    const auto s = rig.state();
+    BOOST_TEST(rig.count() == all.size());
+    BOOST_TEST(s.counters.messages == all.size());
+    BOOST_TEST(s.decoding);
+    BOOST_TEST(s.counters.decoder_observations > 0u,
+               "frames " << s.counters.frames << " crc_fail " << s.counters.crc_fail << " decoded " << s.counters.decoded
+                         << " pending " << s.counters.cpr_pending << " nopos " << s.counters.no_position << " rej "
+                         << s.counters.cpr_rejected << " skipped " << s.counters.modeac_skipped << "/"
+                         << s.counters.other_skipped << "/" << s.counters.mlat_skipped);
+    BOOST_TEST(s.counters.observations == s.counters.decoder_observations);
+    BOOST_TEST(rig.obsCount() == s.counters.observations);
+    for (std::size_t i = 0; i < rig.obsCount(); ++i)
+        BOOST_REQUIRE_EQUAL(rig.obsAt(i).input_id, "dec");
+}
+
+BOOST_AUTO_TEST_CASE(counters_in_state_json)
+{
+    const std::string bin = fixtureBytes();
+    std::vector<skycued::beast::Frame> all;
+    skycued::beast::FrameSplitter().feed(reinterpret_cast<const uint8_t*>(bin.data()), bin.size(), all);
+    DecRig rig;
+    const uint16_t port = freeTcpPort();
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("cj", "tcp_listen", port)), RecordOptions{},
+                                                 decodeOn()));
+    asio::io_context cio;
+    tcp::socket c = connectWhenListening(cio, port);
+    writeAll(c, bin + beastFrame(identFrame(0x111111)));
+    BOOST_REQUIRE(eventually([&] { return rig.count() == all.size() + 1; }));
+    std::this_thread::sleep_for(100ms);
+    const auto s = rig.state();
+    const auto& k = s.counters;
+    BOOST_TEST(k.frames + k.mlat_skipped + k.modeac_skipped + k.other_skipped == k.messages);
+    BOOST_TEST(k.frames > 0u);
+
+    skycued::InputEntry entry;
+    entry.def = defOf(beastDef("cj", "tcp_listen", port));
+    entry.state = s;
+    const std::string text = skycued::webapi::inputJson(entry, std::chrono::system_clock::now());
+    BOOST_REQUIRE(skycued::JsonObject::parse(text));
+    for (const char* name : {"frames", "crc_fail", "crc_fixed", "ap_unconfirmed", "no_position", "cpr_pending",
+                             "cpr_rejected", "decoded", "unmapped", "unknown_type", "evicted", "decoder_observations",
+                             "mlat_skipped", "modeac_skipped", "other_skipped"})
+        BOOST_TEST(text.find(std::string("\"") + name + "\":") != std::string::npos, name);
+}
+
+BOOST_AUTO_TEST_CASE(mlat_marker_frame_counts_mlat_skipped)
+{
+    DecRig rig;
+    const uint16_t port = freeUdpPort();
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("ml", "udp", port)), RecordOptions{},
+                                                 decodeOn()));
+    BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+    const std::string marker("\xff\x00\x4d\x4c\x41\x54", 6);
+    sendUdp(port, beastFrame(identFrame(0x222222), marker));
+    BOOST_REQUIRE(eventually([&] { return rig.count() == 1; }));
+    BOOST_REQUIRE(eventually([&] { return rig.state().counters.mlat_skipped == 1; }));
+    const auto s = rig.state();
+    BOOST_TEST(s.counters.frames == 0u);
+    BOOST_TEST(s.counters.decoder_observations == 0u);
+    BOOST_TEST(rig.obsCount() == 0u);
+    BOOST_TEST(s.counters.messages == 1u);  // still published
+}
+
+BOOST_AUTO_TEST_CASE(crc_bad_frame_counts_crc_fail)
+{
+    DecRig rig;
+    const uint16_t port = freeUdpPort();
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("cf", "udp", port)), RecordOptions{},
+                                                 decodeOn()));
+    BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+    st::Bytes bad = identFrame(0x333333);
+    for (std::size_t i = 4; i < 12; ++i)
+        bad[i] = static_cast<uint8_t>(~bad[i]);  // far beyond a single-bit repair
+    sendUdp(port, beastFrame(bad));
+    BOOST_REQUIRE(eventually([&] { return rig.state().counters.crc_fail == 1; }));
+    const auto s = rig.state();
+    BOOST_TEST(s.counters.frames == 1u);
+    BOOST_TEST(s.counters.decoded == 0u);
+    BOOST_TEST(rig.obsCount() == 0u);
+    BOOST_TEST(rig.count() == 1u);  // published all the same
+}
+
+BOOST_AUTO_TEST_CASE(no_reference_global_decode_only)
+{
+    DecRig rig;
+    const uint16_t port = freeUdpPort();
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("nr", "udp", port)), RecordOptions{},
+                                                 decodeOn()));
+    BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+    sendUdp(port, beastFrame(posFrame(0xABC123, kNear, false)));
+    BOOST_REQUIRE(eventually([&] { return rig.state().counters.frames == 1; }));
+    std::this_thread::sleep_for(50ms);
+    BOOST_TEST(rig.state().counters.cpr_pending + rig.state().counters.no_position >= 1u);
+    for (std::size_t i = 0; i < rig.obsCount(); ++i)
+        BOOST_TEST(!rig.obsAt(i).lat.has_value());
+    sendUdp(port, beastFrame(posFrame(0xABC123, kNear, true)));
+    BOOST_REQUIRE(eventually([&] {
+        for (std::size_t i = 0; i < rig.obsCount(); ++i)
+            if (rig.obsAt(i).lat)
+                return true;
+        return false;
+    }));
+    for (std::size_t i = 0; i < rig.obsCount(); ++i)
+        if (rig.obsAt(i).lat) {
+            BOOST_TEST(*rig.obsAt(i).lat == kNear.lat, boost::test_tools::tolerance(0.001));
+            BOOST_TEST(*rig.obsAt(i).lon == kNear.lon, boost::test_tools::tolerance(0.001));
+        }
+}
+
+BOOST_AUTO_TEST_CASE(reference_from_def_overrides_receiver)
+{
+    // One frame decodes locally against the input's reference: the def's ref_lat/ref_lon when set, else the
+    // receiver's. The right place comes out only for a reference near the aircraft.
+    auto run = [&](const std::string& extra, std::optional<std::pair<double, double>> receiver) {
+        DecRig rig;
+        const uint16_t port = freeUdpPort();
+        skycued::InputManagerConfig cfg;
+        cfg.decode_raw = true;
+        cfg.receiver_ref = receiver;
+        rig.t.call([&] {
+            auto in = skycued::makeInput(rig.t.io, defOf(beastDef("rf", "udp", port, extra)), cfg);
+            in->onObservation([&](const skycued::TrackObservation& o) {
+                std::lock_guard<std::mutex> lock(rig.om);
+                rig.obs.push_back(o);
+            });
+            rig.in = std::move(in);
+            rig.in->setRawTap(&rig.tap);
+            rig.in->start();
+        });
+        BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+        sendUdp(port, beastFrame(posFrame(0xABC123, kNear, false)));
+        BOOST_REQUIRE(eventually([&] { return rig.state().counters.frames == 1; }));
+        std::this_thread::sleep_for(100ms);
+        for (std::size_t i = 0; i < rig.obsCount(); ++i)
+            if (rig.obsAt(i).lat)
+                return *rig.obsAt(i).lat;
+        return 999.0;  // no position
+    };
+    const std::pair<double, double> far{-33.0, 151.0}, near{38.9, -77.0};
+    BOOST_TEST(std::fabs(run("", far) - kNear.lat) > 1.0);                                   // a far receiver is no help
+    BOOST_TEST(run(R"(,"ref_lat":38.9,"ref_lon":-77.0)", far) == kNear.lat, boost::test_tools::tolerance(0.001));
+    BOOST_TEST(run("", near) == kNear.lat, boost::test_tools::tolerance(0.001));
+}
+
+BOOST_AUTO_TEST_CASE(udp_datagram_three_frames_three_decodes)
+{
+    DecRig rig;
+    const uint16_t port = freeUdpPort();
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("u3", "udp", port)), RecordOptions{},
+                                                 decodeOn(std::make_pair(38.9, -77.0))));
+    BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+    sendUdp(port, beastFrame(posFrame(0x100001, kNear, false)) + beastFrame(posFrame(0x100002, kNear, false)) +
+                      beastFrame(posFrame(0x100003, kNear, false)));  // one local decode each
+    BOOST_REQUIRE(eventually([&] { return rig.state().counters.decoded == 3; }));
+    std::this_thread::sleep_for(50ms);
+    const auto s = rig.state();
+    BOOST_TEST(s.counters.frames == 3u);
+    BOOST_TEST(s.counters.decoded == 3u);
+    BOOST_TEST(rig.obsCount() == 3u);
+    BOOST_TEST(rig.count() == 3u);
+}
+
+BOOST_AUTO_TEST_CASE(stop_mid_frames_no_callback_after_stop)
+{
+    DecRig rig;
+    const uint16_t port = freeUdpPort();
+    rig.t.call([&] {
+        rig.tap.setSink([&](const RawMessage&) { rig.in->stop(); }, [](RawKind) { return true; });
+    });
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("sm", "udp", port)), RecordOptions{},
+                                                 decodeOn()));
+    BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+    sendUdp(port, beastFrame(identFrame(0x100001)) + beastFrame(identFrame(0x100002)) + beastFrame(identFrame(0x100003)));
+    BOOST_REQUIRE(eventually([&] { return !rig.connected(); }));
+    std::this_thread::sleep_for(100ms);
+    BOOST_TEST(rig.obsCount() == 0u);
+    BOOST_TEST(rig.state().counters.frames == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(idle_keys_evicted_after_300s)
+{
+    DecRig rig;
+    const uint16_t port = freeUdpPort();
+    auto now = std::make_shared<std::atomic<int64_t>>(1'700'000'000);
+    RawDecodeOptions o = decodeOn();
+    o.clock = [now] { return std::chrono::system_clock::time_point(std::chrono::seconds(now->load())); };
+    rig.runInput(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("ev", "udp", port)), RecordOptions{}, o));
+    BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+    sendUdp(port, beastFrame(identFrame(0x100001)));
+    BOOST_REQUIRE(eventually([&] { return rig.state().counters.decoded == 1; }));
+    BOOST_TEST(rig.state().counters.evicted == 0u);
+    now->store(1'700'000'000 + 301);
+    sendUdp(port, beastFrame(identFrame(0x100002)));
+    BOOST_REQUIRE(eventually([&] { return rig.state().counters.decoded == 2; }));
+    BOOST_TEST(rig.state().counters.evicted == 1u);
+    BOOST_TEST(rig.state().decoder_keys == 1u);
+}
+
+namespace {
+
+// An Engine over beast_raw UDP inputs with the decoder on.
+struct RawEngineFx {
+    std::map<std::string, uint16_t> ports;
+    std::unique_ptr<EngineFx> fx;
+    RawEngineFx(const std::vector<std::string>& ids, std::optional<std::pair<double, double>> ref)
+    {
+        for (const auto& id : ids)
+            ports[id] = freeUdpPort();
+        auto ports_copy = ports;
+        fx = std::make_unique<EngineFx>(
+            baseConfig(), std::function<std::unique_ptr<skycued::InputManager>(asio::io_context&)>(
+                              [ports_copy, ref](asio::io_context& io) {
+                                  auto m = std::make_unique<skycued::InputManager>(io, skycued::InputManagerConfig{});
+                                  for (const auto& kv : ports_copy)
+                                      m->addBuiltin(std::make_unique<BeastRawInput>(
+                                          io, defOf(beastDef(kv.first, "udp", kv.second)), RecordOptions{}, decodeOn(ref)));
+                                  m->load();
+                                  return m;
+                              }));
+    }
+    template <class P> bool wait(P pred)
+    {
+        return eventually([&] { return pred(fx->stats()); });
+    }
+};
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(rebroadcast_flag_reaches_engine)
+{
+    const std::pair<double, double> ref{38.9, -77.0};
+    RawEngineFx e({"rb"}, ref);
+    const uint16_t port = e.ports["rb"];
+    BOOST_REQUIRE(e.wait([](const skycued::EngineStats& s) { return !s.inputs.empty() && s.inputs[0].connected; }));
+    sendUdp(port, beastFrame(posFrame(0xABC123, kNear, false)));
+    BOOST_REQUIRE(e.wait([](const skycued::EngineStats& s) { return s.tracks_total == 1; }));
+    BOOST_TEST(e.fx->stats().rebroadcast_suppressed == 0u);
+    sendUdp(port, beastFrame(tisbFrame(0xABC123, {38.97, -77.03})));  // a TIS-B copy inside 10 s
+    BOOST_REQUIRE(e.wait([](const skycued::EngineStats& s) { return s.rebroadcast_suppressed == 1; }));
+    BOOST_TEST(e.fx->stats().tracks_total == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(two_feeds_one_aircraft_tracks_once)
+{
+    RawEngineFx e({"fa", "fb"}, std::nullopt);
+    BOOST_REQUIRE(e.wait([](const skycued::EngineStats& s) {
+        return s.inputs.size() == 2 && s.inputs[0].connected && s.inputs[1].connected;
+    }));
+    const std::string frames =
+        beastFrame(posFrame(0xABC123, kNear, false)) + beastFrame(posFrame(0xABC123, kNear, true));
+    sendUdp(e.ports["fa"], frames);
+    sendUdp(e.ports["fb"], frames);
+    BOOST_REQUIRE(e.wait([](const skycued::EngineStats& s) {
+        return s.inputs.size() == 2 && s.inputs[0].decoder.decoder_observations >= 1 &&
+               s.inputs[1].decoder.decoder_observations >= 1;
+    }));
+    const auto s = e.fx->stats();
+    BOOST_TEST(s.tracks_total == 1u);  // one aircraft, one track
+    BOOST_TEST(s.inputs[0].decoder.decoder_observations == s.inputs[0].observations);  // counted per input
+    BOOST_TEST(s.inputs[1].decoder.decoder_observations == s.inputs[1].observations);
+    BOOST_TEST(s.observations == s.inputs[0].observations + s.inputs[1].observations);
 }

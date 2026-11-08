@@ -56,7 +56,22 @@ void putCounters(JsonWriter& w, const InputCounters& c)
         .add("raw_unknown_len", num(c.raw_unknown_len))
         .add("status_ok", num(c.status_ok))
         .add("status_fail", num(c.status_fail))
-        .add("capture_dropped", num(c.capture_dropped));
+        .add("capture_dropped", num(c.capture_dropped))
+        .add("frames", num(c.frames))
+        .add("crc_fail", num(c.crc_fail))
+        .add("crc_fixed", num(c.crc_fixed))
+        .add("ap_unconfirmed", num(c.ap_unconfirmed))
+        .add("no_position", num(c.no_position))
+        .add("cpr_pending", num(c.cpr_pending))
+        .add("cpr_rejected", num(c.cpr_rejected))
+        .add("decoded", num(c.decoded))
+        .add("unmapped", num(c.unmapped))
+        .add("unknown_type", num(c.unknown_type))
+        .add("evicted", num(c.evicted))
+        .add("decoder_observations", num(c.decoder_observations))
+        .add("mlat_skipped", num(c.mlat_skipped))
+        .add("modeac_skipped", num(c.modeac_skipped))
+        .add("other_skipped", num(c.other_skipped));
 }
 
 std::string deviceStatusJson(const DeviceStatus& d)

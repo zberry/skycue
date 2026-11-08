@@ -88,8 +88,12 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
     case InputType::dump978:
     case InputType::uat_raw:
         return std::make_unique<UatRawInput>(io, def, record);
-    case InputType::beast_raw:
-        return std::make_unique<BeastRawInput>(io, def, record);
+    case InputType::beast_raw: {
+        RawDecodeOptions decode;
+        decode.enabled = config.decode_raw;
+        decode.reference = inputReference(def, config);
+        return std::make_unique<BeastRawInput>(io, def, record, std::move(decode));
+    }
     case InputType::pingstation_json:
         return std::make_unique<PingJsonInput>(io, def, record);
     case InputType::pingstation_cat021:
@@ -372,7 +376,7 @@ std::vector<InputStatsLine> InputManager::statsLines() const
         const InputEntry e = entry(s);
         out.push_back(InputStatsLine{e.def.id, e.state.connected, e.state.counters.messages,
                                      e.state.counters.observations, e.state.counters.uplinks,
-                                     e.state.counters.rejected});
+                                     e.state.counters.rejected, e.state.decoding, e.state.counters, e.state.decoder_keys});
     }
     return out;
 }

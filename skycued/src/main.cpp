@@ -382,9 +382,13 @@ int run(int argc, char** argv)
         } else {
             if (!vm.count("no-readsb")) {
                 if (mc.decode_raw) {
+                    RawDecodeOptions decode;
+                    decode.enabled = true;
+                    decode.reference = mc.receiver_ref;
                     inputs->addBuiltin(std::make_unique<BeastRawInput>(
                         io, builtinReadsbDef(config, readsb_host),
-                        RecordOptions{mc.record_dir, mc.record_raw, mc.record_max_bytes}));
+                        RecordOptions{mc.record_dir, mc.record_raw, mc.record_max_bytes},
+                        std::move(decode)));
                 } else {
                     const uint16_t port = config.readsb_json_port;
                     inputs->addBuiltin(std::make_unique<SourceInput>(

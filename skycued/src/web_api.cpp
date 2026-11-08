@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cctype>
 #include <chrono>
 #include <map>
@@ -88,6 +89,27 @@ void putStats(JsonWriter& w, const EngineStats& s)
                              .add("rejected", n(in.rejected))
                              .str());
     w.addRaw("inputs", jsonArray(inputs));
+    // The decoder totals over the decoding inputs; absent when none decodes (TRACK_DECODER=readsb).
+    InputCounters sum;
+    std::uint64_t keys = 0;
+    bool any = false;
+    for (const auto& in : s.inputs)
+        if (in.decoding) {
+            sum += in.decoder;
+            keys += in.decoder_keys;
+            any = true;
+        }
+    if (any)
+        w.addRaw("decoder", JsonWriter()
+                                .add("frames", n(sum.frames))
+                                .add("crc_fail", n(sum.crc_fail))
+                                .add("crc_fixed", n(sum.crc_fixed))
+                                .add("decoded", n(sum.decoded))
+                                .add("observations", n(sum.decoder_observations))
+                                .add("evicted", n(sum.evicted))
+                                .add("keys", n(keys))
+                                .add("rebroadcast_suppressed", n(s.rebroadcast_suppressed))
+                                .str());
 }
 
 void putFilters(JsonWriter& w, const RuntimeConfig& rc)

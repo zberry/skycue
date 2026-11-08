@@ -156,6 +156,16 @@ differs.
 | libskycue  | TCP listen          | `Transport::tcp_listen`, bind `host:port`    | any number of skycued connect; one track table |
 | libskycue  | UDP bind            | `Transport::udp`, bind `host:port`           | connection is inferred from traffic (heartbeat timeout) |
 
+skycued's modes are the **cue outputs** of its hub: `CUE_TCP_PORT`,
+`CUE_TCP_CONNECT` and `CUE_UDP_TARGETS` define the built-in ones (`cue-tcp`,
+`cue-connect-N`, `cue-udp-N`), and an output of kind `cue` that you add in the
+inputs file, the page or the API ([operating.md](operating.md#outputs)) is one
+more listener, dialled target or UDP target of the same kind, with its own
+port, host or group. Every cue output serves the same protocol (Hello, a
+keyframe of every track to each new connection, then the normal stream), and
+the Cues tab and `/api/cues/clients` list the sessions of all of them, each
+named by its output. The settings in the table above are the built-in outputs'.
+
 skycued's three modes can be used together; a TCP connection skycued dialled
 is served exactly like one it accepted (Hello, then a keyframe of every
 track, then the normal stream). A listening library merges the frames of all

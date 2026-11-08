@@ -215,6 +215,14 @@ add_test(NAME rawtools
     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_TEST_READSB})
 set_tests_properties(rawtools PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
+# The output hub end to end: a replayed capture through a beast_raw input to
+# TCP and multicast outputs, a stalled consumer cut, an output removed with a
+# backlog. Skips without fixtures/raw (scripts/fixtures/fetch-test-captures.sh).
+add_test(NAME hub
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_hub.sh
+    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+set_tests_properties(hub PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
 add_executable(test_engine test_engine.cpp)
 target_link_libraries(test_engine PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
 target_compile_definitions(test_engine PRIVATE BOOST_TEST_DYN_LINK

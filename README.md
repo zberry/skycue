@@ -44,6 +44,9 @@ Download the `.deb`, the `.rpm` or the source tarball from the
   receiver), as JSON or ASTERIX CAT021 over UDP or TCP. Each one is a named
   input you add in the web page or in the inputs file; several can run at
   once.
+- **Raw decoder output** as `beast_raw` (Beast frames) and `uat_raw`
+  (dump978 lines) inputs, over TCP or UDP and multicast, for a decoder that
+  skycue should only relay and record.
 - **Recordings**, for running without hardware: a JSONL recording skycued
   made earlier (`--replay`), or the decoders' raw output captured with
   `skycue-rawrec`.
@@ -51,6 +54,18 @@ Download the `.deb`, the `.rpm` or the source tarball from the
 Everything merges into one track table, and the page's Receiver tab shows
 the health of every input. Details:
 [docs/operating.md](docs/operating.md#the-inputs-file).
+
+**Outputs.** The same inputs can be served on again, as a hub: add outputs in
+the web page, through the API or in the inputs file, and skycued serves the
+raw Beast frames, the dump978 lines, readsb's JSON, the pingStation texts or
+CAT021 blocks it receives to your own programs over a TCP listener, a TCP
+target or UDP (multicast included), each output with its own consumers and
+counters. A consumer that stops reading is dropped without delaying the
+others. The cue streams are outputs too (`CUE_TCP_PORT`, `CUE_TCP_CONNECT`
+and `CUE_UDP_TARGETS` define the built-in ones). Two new input types,
+`beast_raw` and `uat_raw`, read a decoder's Beast port or raw UAT lines
+directly over TCP or UDP (and `capture: true` records them for
+`skycue-rawplay`). Details: [docs/operating.md](docs/operating.md#outputs).
 
 **Decisions and cues.** For each aircraft skycued decides whether to
 forward it, by range, elevation angle and allow and block lists that you can

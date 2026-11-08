@@ -121,6 +121,26 @@ skycue-rawplay --raw-in 127.0.0.1:30001 --uat-listen 30978 \
     /data/rec/raw-ps-north-20261102-101500.csv /data/rec/raw-ps-north-20261102-101500.txt
 ```
 
+## Raw capture of `beast_raw` and `uat_raw` inputs
+
+An input of type `beast_raw` or `uat_raw` with `"capture": true` (needs `RECORD_DIR`, see
+[operating.md](operating.md#raw-inputs-and-endpoint-keys)) writes the messages it received,
+after framing and before anything else, in the raw tools' formats, directly under
+`RECORD_DIR`, with the rotation (256 MiB / 1 h), write-failure handling and retention above:
+
+- `beast_raw`: `raw-<id>-YYYYMMDD-HHMMSS[-N].bin`, the Beast frames in arrival order, escaped as
+  on the wire, exactly the bytes a `beast` output serves (so a capture and a consumer of the same
+  run are byte-identical). With `"format": "avr"` each AVR line is first turned into a type 2 or
+  3 frame with a zero timestamp and signal byte 0, so the file is Beast either way. skycue-rawplay
+  replays it with `--beast-in` or `--1090-listen`.
+- `uat_raw`: `raw-<id>-YYYYMMDD-HHMMSS[-N].txt`, one line per UAT message as `<epoch_ms> <line>`
+  (the line as dump978 prints it, `-hex;` or `+hex;`, the time skycued's receive time in
+  milliseconds), like the pingStation raw UAT files. skycue-rawplay replays it with `--uat-listen`.
+
+A frame or line that cannot be written is counted in the input's `capture_dropped`. Writes are
+flushed about once a second and when the input stops. Retention keeps the newest file of each
+input and extension, like the other `raw-` files.
+
 ## Common conventions
 
 - Times are ISO-8601 UTC with milliseconds, e.g. `2026-11-01T12:34:56.789Z`, rounded to

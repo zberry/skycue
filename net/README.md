@@ -28,6 +28,19 @@ sinks out, all handled on one io thread.
 | `fanout.hpp` | `Fanout`: owns a dynamic set of listeners, dialers and UDP senders and delivers one `Buf` to all of them. A slow or absent destination drops on its own; `publish()` never blocks. Peer-up and peer-down hooks carry a Fanout-wide peer id and, for peer-up, the remote address and a send-to-that-peer function; `peerInfo(id)` gives that peer's send-side stats. Construct it with `Fanout()`. `closePeer(id)` closes one peer from the host's side. |
 | `log.hpp` | The process-wide log sink (below). |
 
+## How skycued uses it
+
+skycued's hub (`skycued/src/hub/`) is the library's main client. Every input
+and output is a `Dialer`, `Listener`, `UdpReceiver` or `UdpSender` made from
+an `Endpoint`. For outputs the hub keeps one `Fanout` for the stream outputs
+(TCP) and one for the datagram outputs (UDP) of each kind: an input hands a
+message to the hub as a `Buf` once, the hub publishes it to the kind's
+`Fanouts`, and each destination copies nothing and queues, sends or drops on
+its own. A TCP consumer past the send cap is closed by its `Listener`; the
+output's counters (`peers`, `bytes`, `messages`, `dropped`, `last_error`) are
+its destination's counters. The cue outputs use the same pieces through the
+Forwarder, which keeps the protocol duties (Hello, keyframes, heartbeats).
+
 ## Endpoint fields
 
 `parseEndpoint(fields, role)` takes raw strings (empty means absent) and

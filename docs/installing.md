@@ -306,6 +306,42 @@ machine, see [Changing the page's address and port](#changing-the-pages-address-
 receiver, and open the same address). What the page shows is in
 [operating.md](operating.md#the-web-ui).
 
+### 7. Optional: one readsb, several consumers
+
+skycued can hand the decoders' raw output on, so a second program does not
+need a connection of its own to readsb. One readsb serves Beast on port
+30005 (the readsb service does so already); skycued reads that port as a
+`beast_raw` input and serves it again, on a TCP port and on a multicast group,
+next to the JSON it reads for itself. Put this in `skycue.inputs.json` (in
+`/var/lib/skycue`; the page's Receiver tab makes the same entries) and
+leave the built-ins as they are:
+
+```json
+{"version":2,
+ "inputs":[
+  {"id":"beast","name":"readsb Beast","type":"beast_raw","transport":"tcp_connect","host":"127.0.0.1","port":30005}
+ ],
+ "outputs":[
+  {"id":"beast-tcp","name":"Beast for the mapper","kind":"beast","transport":"tcp_listen","bind":"0.0.0.0","port":30105},
+  {"id":"beast-mc","name":"Beast multicast","kind":"beast","transport":"udp","group":"239.255.10.5","port":4978,"interface":"192.0.2.10"}
+ ]}
+```
+
+skycued reloads the file within a couple of seconds. Three consumers then
+read the same frames, each independent of the others (`192.0.2.10` is this
+machine in the example):
+
+```sh
+nc 192.0.2.10 30105 | head -c 1000 | xxd     # any program that reads Beast from TCP
+nc 192.0.2.10 30105 > a.bin                  # a second one on the same port
+socat UDP4-RECVFROM:4978,ip-add-membership=239.255.10.5:192.0.2.10,fork - | head -c 1000 | xxd
+```
+
+A consumer that stops reading is disconnected once 1 MiB is queued for it,
+and the others do not notice. [operating.md](operating.md#outputs) lists the
+output kinds, the counters and the limits; `skycued --check-inputs` tests the
+connection to port 30005 before the daemon is started.
+
 ## RHEL
 
 RHEL 8 and 9 and their rebuilds (Rocky Linux, AlmaLinux), on x86_64. The

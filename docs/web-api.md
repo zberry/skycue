@@ -92,6 +92,11 @@ There is no authentication; see [Security](#security).
 | DELETE | `/api/inputs/{id}` | | `204`, no body |
 | POST | `/api/inputs/{id}/enable`, `/api/inputs/{id}/disable` | `{}` | the input |
 | GET | `/api/inputs/{id}/status` | | the input's status-poll object |
+| GET | `/api/outputs` | | `{"outputs": [output...]}` ([Outputs](#outputs)) |
+| POST | `/api/outputs` | a definition, `id` included | `201`, the output |
+| PUT | `/api/outputs/{id}` | a definition; a built-in: `{"enabled": bool}` only | the output |
+| DELETE | `/api/outputs/{id}` | | `204`, no body |
+| POST | `/api/outputs/{id}/enable`, `/disable` | `{}` | the output |
 | GET | `/api/tiles-available` | | `{"tiles": bool, "minZoom"?: int, "maxZoom"?: int, "overlays": bool}` |
 | GET | `/api/fisb/status` | | the FIS-B status object ([FIS-B](#fis-b)) |
 | GET | `/api/fisb/text?type=&station=` | | `{"records": [...]}`: text records |
@@ -156,11 +161,11 @@ it. Other methods: 405 with `Allow: GET`.
 ```json
 {"tcp": [
   {"endpoint": "127.0.0.1:41822", "direction": "accepted",
-   "connected_since": "2026-11-02T14:03:09.004Z", "bytes_sent": 48213},
+   "connected_since": "2026-11-02T14:03:09.004Z", "bytes_sent": 48213, "output": "cue-tcp"},
   {"endpoint": "10.0.0.7:30600", "direction": "dialled",
-   "connected_since": "2026-11-02T14:03:07.311Z", "bytes_sent": 47950}
+   "connected_since": "2026-11-02T14:03:07.311Z", "bytes_sent": 47950, "output": "cue-connect-1"}
 ],
- "udp": [{"endpoint": "10.0.0.9:30501", "datagrams_sent": 1270}]}
+ "udp": [{"endpoint": "10.0.0.9:30501", "datagrams_sent": 1270, "output": "cue-udp-1"}]}
 ```
 
 `tcp` has one entry per open connection: `direction` is `accepted` for a client that connected to `CUE_TCP_PORT`
@@ -171,10 +176,10 @@ and `dialled` for one of `CUE_TCP_CONNECT`; `endpoint` is the peer
 queued). A closed connection leaves the list. `udp` has every UDP target
 that resolved at startup, in configuration order, with the datagrams sent
 to it without error. The counts start at 0 for each connection and when
-skycued starts. The fields above are the whole object: a later release adds an
-optional `output` field (the id of the cue output the entry belongs to) once
-outputs can be defined at runtime; clients should ignore fields they do not
-know. Other methods: 405 with `Allow: GET`.
+skycued starts. Every `tcp` and `udp` entry also has `output`, the id of the cue output
+it belongs to: `cue-tcp`, `cue-connect-N` or `cue-udp-N` for the built-in
+ones, else the id of an output you added ([Outputs](#outputs)). Clients
+should ignore fields they do not know. Other methods: 405 with `Allow: GET`.
 
 `GET /api/config` shows the configuration skycued runs with and facts
 about the daemon. It is read only: nothing in it can be changed here.
@@ -288,7 +293,8 @@ transparent part is not blank. URLs that 404 are remembered for 60 s. See
   "stats": { ... the stats object ... },
   "tracks": [ ... track objects ... ],
   "fisb": { ... the FIS-B status object ... },
-  "inputs": [ ... input objects ... ]
+  "inputs": [ ... input objects ... ],
+  "outputs": [ ... output objects ... ]
 }
 ```
 
@@ -382,17 +388,19 @@ transport, defaults included (as the inputs file stores it):
 |-----|-------|---------|
 | `id` | all | 1 to 32 characters of `a-z`, `0-9` and `-`; `readsb`, `dump978` and `replay` are reserved |
 | `name` | all | free text for the UI (`""` by default): valid UTF-8, at most 64 characters, no C0 or C1 control character or DEL |
-| `type` | all | `readsb`, `dump978`, `pingstation_json`, `pingstation_cat021` (`replay` is never accepted) |
+| `type` | all | `readsb`, `dump978`, `pingstation_json`, `pingstation_cat021`, `beast_raw`, `uat_raw` (`replay` is never accepted; `dump978` and `uat_raw` are the same input, `dump978` being the built-in's type name) |
 | `enabled` | all | `true` by default |
-| `transport` | `pingstation_cat021` | required, no default: `udp`, `tcp_listen` or `tcp_connect`; left out it is a 400 "transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)" (`readsb`/`dump978` connect over TCP, `pingstation_json` is UDP, and neither takes the key) |
-| `host` | connecting inputs | the address to connect to |
-| `bind` | listening inputs | the local address, `0.0.0.0` by default |
-| `port` | all | 1 to 65535; two enabled inputs may not listen on the same port and protocol |
-| `peer` | listening inputs | only this source address is accepted; `null` for any |
+| `transport` | all | `udp`, `tcp_listen` or `tcp_connect`. Required for `pingstation_cat021` (400 "transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)"); the default is `udp` for `pingstation_json` and `tcp_connect` for the others. Left at its default it is not written for `readsb`, `dump978` and `pingstation_json` |
+| `host` | `tcp_connect` | the address to connect to |
+| `bind` | `tcp_listen`, `udp` | the local address, `0.0.0.0` by default; not with a `group` |
+| `port` | all | 1 to 65535; two enabled listeners (inputs or [outputs](#outputs)) may not use the same port and protocol, except several multicast receivers |
+| `peer` | `tcp_listen`, `udp` | only this source address is accepted; `null` for any |
+| `group`, `interface` | `udp` | join this multicast group (224.0.0.0 to 239.255.255.255) on the local interface address `interface` (the system's choice when left out; `interface` needs a `group`) |
+| `format` | `beast_raw` | `beast` (default) or `avr`: the framing of the stream. Each AVR line becomes a Beast frame |
 | `edition`, `sac`, `sic` | `pingstation_cat021` | the CAT021 edition (`"2.5"`), and the SAC/SIC to expect (counted, never used to drop; `null` for none) |
 | `status_url`, `status_interval_s` | pingStation types | the device's `http://` status endpoint (`null` for none) and how often it is polled. Use the device's IP address, not a hostname: a lookup that hangs cannot be cut short, and while one is outstanding each poll is skipped and counted in `status_fail` (`last_error` "resolve still pending") |
 | `time_mode` | pingStation types | `utc` or `gps`: the clock of the device's timestamps |
-| `capture` | pingStation types | write every datagram or block received to `RECORD_DIR`; without `RECORD_DIR` a write is a 400 "capture needs RECORD_DIR" (in the inputs file the entry is kept, with a WARN, and nothing is captured) |
+| `capture` | pingStation types, `beast_raw`, `uat_raw` | write every datagram or block received (pingStation) or every frame or line (`beast_raw`, `uat_raw`: `raw-<id>-*.bin` / `.txt`) to `RECORD_DIR`; without `RECORD_DIR` a write is a 400 "capture needs RECORD_DIR" (in the inputs file the entry is kept, with a WARN, and nothing is captured) |
 
 `builtin` (`true` for a built-in) and `state` are output only: a body
 with either is a `400`. `state`:
@@ -458,6 +466,75 @@ A request under `/api/inputs` is checked in this order:
 Ids, keys and paths quoted in an error message are cut to 64 bytes followed
 by `...`.
 
+## Outputs
+
+Outputs serve the messages the inputs receive to other programs; what they
+are is in [operating.md](operating.md#outputs). They are kept in the same
+file as the inputs, and every change is written to `skycue.inputs.json`
+before it is applied (a failed write answers `500` and changes nothing).
+
+An output object is the definition, `builtin` and `state`:
+
+```json
+{"id":"beast-mc","name":"","kind":"beast","enabled":true,"transport":"udp","port":4978,
+ "group":"239.255.10.5","interface":"192.0.2.10","ttl":1,"loopback":true,"builtin":false,
+ "state":{"up":true,"peers":0,"bytes":1480221,"messages":81250,"dropped":0,"last_error":""}}
+```
+
+The definition carries `id`, `name`, `kind`, `enabled` and `transport`, then
+the keys of its transport, defaults included: `bind`, `port`, `peer` for
+`tcp_listen`; `host`, `port` for `tcp_connect`; `host`, `port` for `udp` to a
+unicast address; `port`, `group`, `interface`, `ttl`, `loopback` for `udp` to
+a multicast group (`interface` only when set).
+
+| Key | Meaning |
+|-----|---------|
+| `id` | 1 to 32 characters of `a-z`, `0-9` and `-`; the built-in cue ids `cue-tcp`, `cue-connect-N` and `cue-udp-N` are reserved (400 `id 'cue-tcp' is reserved`) |
+| `name` | free text, as for inputs |
+| `kind` | `beast`, `uat`, `json`, `pingstation_json`, `cat021` or `cue` |
+| `enabled` | `true` by default |
+| `transport` | required: `tcp_listen`, `tcp_connect` or `udp` |
+| `bind`, `port`, `peer` | `tcp_listen`: the local address (`0.0.0.0` by default), the port, and the one source address accepted (`null` for any) |
+| `host`, `port` | `tcp_connect` and unicast `udp`: the target (a name or an IPv4 address) |
+| `group`, `interface`, `ttl`, `loopback` | `udp` to a multicast group (224.0.0.0 to 239.255.255.255) instead of `host`: the local interface address, the TTL (1 to 255, default 1) and whether the sending machine's own listeners hear it (default `true`) |
+
+`builtin` (`true` for the cue outputs that `CUE_TCP_PORT`, `CUE_TCP_CONNECT`
+and `CUE_UDP_TARGETS` define) and `state` are output only. `state`:
+
+| Key | Meaning |
+|-----|---------|
+| `up` | a `tcp_listen` output is listening, a `tcp_connect` output is connected, a `udp` output has a usable target |
+| `peers` | consumers connected now (1 or 0 for a dialled target, 0 for `udp`) |
+| `bytes`, `messages` | sent since skycued started; a TCP message sent to three consumers counts three times |
+| `dropped` | consumers disconnected for falling more than 1 MiB behind, `udp` datagrams the kernel could not take or that were too big (65507 bytes), `pingstation_json` texts with a newline dropped from TCP outputs |
+| `last_error` | the latest bind, connect or send error; `""` when none |
+
+Counters last for the output's id: a `PUT` keeps them, a `DELETE` forgets
+them (a built-in's survive being disabled).
+
+Routes:
+
+- `GET /api/outputs`: `{"outputs": [...]}`, the built-in cue outputs first, then the added ones in
+  file order. There is no `GET` of a single output.
+- `POST /api/outputs`: creates an output from a definition naming its `id`. `201` with the output. `400` for a bad
+  definition (the message names the key), a reserved id, or a port clash (`port 30105/tcp is already used by input lab`,
+  `... by output beast-out`, `... by the cue stream (CUE_TCP_PORT)`, `... by the web server (WEB_PORT)`) or a loop to a
+  multicast group an input joins; `409` for an id that is taken.
+- `PUT /api/outputs/{id}`: replaces the definition (the output restarts; the same definition changes nothing). An `id`
+  in the body must be `{id}`. A built-in takes only `{"enabled": bool}`: any other key is `403`. `404` for an unknown id.
+- `DELETE /api/outputs/{id}`: stops and removes the output (consumers still connected are closed); `204`. `403` for a
+  built-in (`output 'cue-tcp' is built in: it can only be enabled or disabled`), `404` unknown.
+- `POST /api/outputs/{id}/enable`, `/disable`: the body is `{}`; works for built-ins too. The output.
+
+Any other path under `/api/outputs/` is `404`; an `{id}` that breaks the id rule is `400` `invalid output id ...`;
+another method is `405` with `Allow`. Writes are checked in the order of the [inputs routes](#inputs):
+`415`, `403` for another origin, `409` `outputs cannot be changed while replaying a recording` under `--replay`
+(where no output runs), then the body.
+
+WebSocket: `{"type":"outputs","outputs":[...]}` ([WebSocket](#websocket-ws)) after an output is added,
+changed, removed, enabled, disabled, starts or stops listening, or gains or loses its error. Counters are not pushed;
+read `GET /api/outputs` for them.
+
 ## WebSocket: `/ws`
 
 The UI's live feed. Every message is one JSON text frame.
@@ -477,6 +554,7 @@ The UI's live feed. Every message is one JSON text frame.
      {"type": "filters", ...filters object...},
      {"type": "lists", ...lists object...},
      {"type": "inputs", "inputs": [...input objects...]},
+     {"type": "outputs", "outputs": [...output objects...]},
      {"type": "fisb_text", ...}, {"type": "fisb_shape", ...}, {"type": "fisb_radar", ...},
      {"type": "fisb_raster", ...}, {"type": "fisb_expired", ...}, {"type": "fisb_location", ...}
    ]}
@@ -520,6 +598,10 @@ The UI's live feed. Every message is one JSON text frame.
      pingStation datagram or its status poll) is not a change: read it from
      `GET /api/inputs/{id}/status` or the next list. The live counters come
      with every `stats` item instead.
+   - `outputs`: an output was added, changed, removed, enabled or
+     disabled, started or stopped, or its `up` or `last_error` changed: the
+     whole list, as `GET /api/outputs` answers it, at most one per message.
+     Counters come from polling `GET /api/outputs`.
    - `fisb_text`, `fisb_shape`, `fisb_radar`, `fisb_raster`,
      `fisb_expired`, `fisb_location`: FIS-B weather and NOTAMs (see
      [FIS-B WebSocket items](#fis-b-websocket-items)).

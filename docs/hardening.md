@@ -694,6 +694,30 @@ its recorded pid (`<out>/*.pid`) on every exit path: TERM, a bounded wait of
 3 s, then KILL. `--out` keeps `A.log`, `B.log`, the client logs,
 `soak.csv` and `verdict.txt`.
 
+### A hub run
+
+`soak.sh` does not run the output hub; do this by hand for a release that
+changes it, for as long as the soak runs (4 hours by default). It needs a
+Beast source that does not end: `skycue-rawplay --1090-listen PORT --loop
+--speed 5` on the 120 s capture fetched by
+`scripts/fixtures/fetch-test-captures.sh`.
+
+1. An inputs file (version 2) with a `beast_raw` input dialling that port, a
+   `beast` output on `tcp_listen`, a `uat` output on `tcp_listen`, and
+   `"capture": true` with `RECORD_DIR` set; skycued started on it with
+   `--no-readsb --no-uat`.
+2. Three consumers on the `beast` output: A and B read to a file, C connects
+   and never reads. A fourth connects to the `uat` output and reads (the
+   capture has no UAT, so it receives nothing).
+3. Sample `GET /api/outputs` and skycued's RSS and fd count every minute.
+
+It passes when C is cut within seconds of connecting (`dropped` 1 or more,
+`peers` back to the live consumers), A's and B's files are byte-identical at
+the end and equal to the capture file in `RECORD_DIR`, the `beast` output's
+`bytes` is twice the size of A's file, the `uat` output is `up` with 0 bytes,
+and skycued's RSS and fd count pass the rule below for the run's window. The
+same shape runs in under a minute as the ctest `hub` (`tests/test_hub.sh`).
+
 ### The pass rule
 
 `tests/soak/soak_eval.py CSV [--growth 0.05] [--fd-tolerance 2]`, per

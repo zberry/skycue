@@ -339,7 +339,7 @@ stored: a change made in the web UI or the API is written there at once
 first change there is no file, and skycued runs the built-ins only. The
 API's `/api/inputs` routes make the same changes and report each input's
 state and counters; they and every definition key are described in
-[web-api.md](web-api.md#inputs).
+[web-api.md](web-api.md#inputs). The same file holds the [outputs](#outputs).
 
 ```json
 {"version":1,
@@ -349,11 +349,22 @@ state and counters; they and every definition key are described in
  "builtin":{"readsb":{"enabled":true},"dump978":{"enabled":true}}}
 ```
 
-`version` must be 1. `inputs` and `builtin` may be left out; a built-in
+`version` is 1 or 2. A version 1 file loads as it always did, and skycued
+writes version 1 back for as long as the file holds nothing from version 2:
+an `outputs` array, an input of type `beast_raw` or `uat_raw`, a `group`,
+`interface` or `format` key, a `transport` key on a `readsb`, `dump978` or
+`pingstation_json` input (version 1 allowed it on `pingstation_cat021` only),
+or a cue output's id in `builtin`. A version 1 header with any of these is
+refused (`'outputs' needs inputs file version 2`), and so is a version above
+2. Adding the first such entry through the page or the API turns the file into
+version 2; removing the last one turns it back into version 1.
+`inputs`, `outputs` and `builtin` may be left out; a built-in
 missing from `builtin` keeps its default (enabled). Each entry follows the
 definition rules of the API (an unknown key, a key that does not apply to
-the type, or a value out of range is an error), and two enabled inputs may
-not listen on the same port and protocol. `"capture":true` needs `RECORD_DIR`:
+the type, or a value out of range is an error), and two enabled listeners,
+inputs or outputs, may not use the same port and protocol, except that
+several multicast receivers may share a port. A listener may not take the
+port of the cue stream (`CUE_TCP_PORT`) or of the web server (`WEB_PORT`). `"capture":true` needs `RECORD_DIR`:
 it writes every datagram (or TCP block) the input receives to
 `RECORD_DIR/capture-<id>-*.jsonl`, one JSON line each. Without `RECORD_DIR`
 the web UI and the API refuse it (400 "capture needs RECORD_DIR"); in the
@@ -391,6 +402,135 @@ text. Three consequences:
 
 skycued writes plain JSON values, so this matters only for a file edited by
 hand. A replay (`skycued --replay`) neither reads nor changes the file.
+
+### Raw inputs and endpoint keys
+
+Every input type takes the endpoint keys of its transport:
+
+| Key | Meaning |
+|-----|---------|
+| `transport` | `tcp_connect` (dial `host`:`port`), `tcp_listen` (accept on `bind`:`port`) or `udp` (receive on `bind`:`port`) |
+| `host`, `port` | the target of `tcp_connect` |
+| `bind`, `port`, `peer` | the local address (default `0.0.0.0`) and port of `tcp_listen` and `udp`; `peer` accepts only that source address |
+| `group`, `interface` | `udp` only: join the multicast group `group` (224.0.0.0 to 239.255.255.255), on the local interface address `interface` (the system's choice when left out); `bind` does not apply with a group |
+
+Which transports a type takes: `readsb` and `dump978` any (the built-ins stay
+`tcp_connect` to `READSB_HOST` and `DUMP978_HOST`; a second `readsb` or
+`dump978` input in the file may listen or receive instead), `pingstation_json`
+any (`udp` by default, as before), `pingstation_cat021` any (required),
+`beast_raw` and `uat_raw` any (`tcp_connect` by default). A UDP datagram of a
+line-based type (readsb, dump978 or `uat_raw`, `pingstation_json`) holds one
+or more lines; the last may lack its newline.
+
+Two types read the decoders' raw output directly:
+
+- **`beast_raw`** takes Beast binary frames from a decoder's Beast port
+  (30005 on a readsb, or `skycue-rawplay --1090-listen`). The frames are cut
+  by the same framer the raw tools use, per TCP connection and, for UDP, per
+  sending address, so a frame may span datagrams and a datagram may hold
+  several. `"format":"avr"` takes AVR text lines (`*8D...;` or `@...;`)
+  instead and turns each into a type 2 or 3 Beast frame with a zero
+  timestamp and signal byte 0; everything downstream, and the capture, sees
+  Beast frames. Skycue does not decode them: the input counts `messages`
+  (frames), `bytes` and `rejected` (bytes the framer skipped, lines that were
+  not Mode S), and the frames go to the `beast` outputs.
+- **`uat_raw`** takes dump978's raw lines. It is the general form of the
+  built-in `dump978`: downlinks are counted and uplinks reach the FIS-B
+  decoder exactly as the built-in's do, a second copy of an uplink another
+  input already delivered is dropped as a duplicate, and the lines go to the
+  `uat` outputs. The built-in keeps its id `dump978`, and `dump978` stays a
+  valid `type` for an input you add (it is the same input class).
+
+`"capture":true` on a `beast_raw` or `uat_raw` input needs `RECORD_DIR` like
+the pingStation capture (the same warning, the same 400 from the API). It
+writes what the input published, in the raw tools' formats, so
+`skycue-rawplay` plays it back: `raw-<id>-YYYYMMDD-HHMMSS.bin` for Beast
+(the bytes of the frames in arrival order, also for an `avr` input) and
+`raw-<id>-YYYYMMDD-HHMMSS.txt` for UAT (`<epoch_ms> <line>`). They rotate and
+count against the retention limit like the other raw files
+([recording-format.md](recording-format.md#raw-capture-of-beast_raw-and-uat_raw-inputs)).
+
+`skycued --check-inputs` dials every enabled `tcp_connect` input of the file,
+`beast_raw` and `uat_raw` included, and reports the other inputs as not
+checked; the file's outputs are validated with the inputs (a port or
+multicast clash is an error, and a loopback output to a port this daemon
+listens on is a `WARN:` line before the check lines).
+
+## Outputs
+
+skycued is also a hub: each input hands the messages it receives, before any
+parsing and in arrival order, to the outputs, which serve them to other
+programs. An output is a TCP listener, a TCP target skycued dials, or a UDP
+sender (unicast or multicast), set up in the page, through
+[the API](web-api.md#outputs) or in the `outputs` array of the inputs file:
+
+```json
+{"version":2,
+ "inputs":[
+  {"id":"lab","type":"beast_raw","transport":"tcp_connect","host":"127.0.0.1","port":30005}
+ ],
+ "outputs":[
+  {"id":"beast-out","name":"Beast to the lab","kind":"beast","transport":"tcp_listen","bind":"0.0.0.0","port":30105},
+  {"id":"beast-mc","kind":"beast","transport":"udp","group":"239.255.10.5","port":4978,"interface":"192.0.2.10","ttl":1},
+  {"id":"cue-ops","kind":"cue","transport":"tcp_connect","host":"192.0.2.30","port":30500}
+ ]}
+```
+
+Keys: `id` (1 to 32 of `a-z`, `0-9`, `-`), `name`, `kind`, `enabled` (default
+true), `transport` (required: `tcp_listen`, `tcp_connect` or `udp`), then by
+transport `bind`, `port` and `peer` (`tcp_listen`; `peer` accepts only that
+address), `host` and `port` (`tcp_connect`; `udp` to a unicast `host`), or
+`group`, `port`, `interface`, `ttl` and `loopback` (`udp` to a multicast
+group: `interface` is the local interface address, `ttl` 1 to 255 defaults to
+1, `loopback` defaults to true so a consumer on the same machine hears it).
+`host` and `group` are exclusive, and `ttl`, `interface` and `loopback` need
+a `group`.
+
+| `kind` | One message | Over TCP | Per UDP datagram |
+|--------|-------------|----------|------------------|
+| `beast` | a Beast frame as received, escapes and timestamp untouched | the byte stream | one frame |
+| `uat` | a dump978 raw line | lines | one line |
+| `json` | a readsb JSON line | lines | one line; a line over 65507 bytes is dropped and counted |
+| `pingstation_json` | a pingStation JSON text | one line each; a text that itself contains a newline is dropped and counted | one text, as received |
+| `cat021` | a CAT021 block as received | the stream (blocks delimit themselves) | one block |
+| `cue` | the skycue protocol frames ([protocol.md](protocol.md)) | as `CUE_TCP_PORT` | as `CUE_UDP_TARGETS` |
+
+An output carries the messages of every enabled input of its kind, merged in
+arrival order: a `beast` output serves the frames of all `beast_raw` inputs.
+Where an input's data arrives from a decoder skycued already reads for
+another purpose, nothing is lost: the `json` output serves what the built-in
+`readsb` input reads, the `uat` output what `dump978` reads, and so on. An
+output with no input of its kind is valid; a listener that has nothing to
+serve yet. (When the 1090 decoder moves into skycued, `TRACK_DECODER=skycued`,
+there is no readsb JSON to republish and the `json` output carries nothing.)
+
+An output is started and stopped like an input: `enabled` turns it off and
+on, and an edit restarts it; a listener or sender that cannot bind retries
+every 5 s and shows the reason as its `last_error`. A TCP consumer that falls
+more than 1 MiB behind is disconnected (counted in `dropped`) and may
+reconnect; the others are not delayed by it. At most 16 consumers are
+served at once on a TCP listener. UDP is best effort: a datagram the kernel
+cannot take is dropped and counted. Two safeguards in validation: an output
+that sends to a multicast group and port one of this daemon's inputs joins
+is refused as a loop, and one that sends to a loopback address and a port
+this daemon listens on gets a `WARN:` in the log.
+
+Each output keeps counters for its lifetime, across edits: `peers`
+(connected consumers), `bytes` and `messages` sent (a TCP message sent to
+three consumers counts three times), `dropped`, and `last_error`. The page
+and `GET /api/outputs` show them.
+
+**The cue outputs.** What `CUE_TCP_PORT`, `CUE_TCP_CONNECT` and
+`CUE_UDP_TARGETS` configure shows up as built-in outputs of kind `cue` with the
+ids `cue-tcp`, `cue-connect-N` and `cue-udp-N` (N counts from 1 in the order
+of the config value), flagged `"builtin":true`. They cannot be edited or
+removed, but can be disabled and enabled, like the built-in inputs; the
+choice is kept in the file's `builtin` object (`"builtin":{"cue-tcp":{"enabled":false}}`,
+which makes the file version 2). Disabling closes the connections and sends
+no drops. The config keys are unchanged and there are no new ones; outputs
+you add are `cue` outputs too, with their own ids, and serve the same
+protocol, Hello and keyframe burst to each new consumer. The Cues tab lists
+the sessions of all of them, and `/api/cues/clients` names the output of each.
 
 **Upgrade note: input names.** A `name` must be valid UTF-8 of at most 64
 characters with no control character. Earlier versions refused only C0
@@ -1107,7 +1247,7 @@ daemon has FIS-B ground stations.
 ### Receiver tab
 
 The side panel's third tab, after Track and Weather; **Receiver** or
-`inputs n/m` in the header opens and closes it. It has three sections.
+`inputs n/m` in the header opens and closes it. It has four sections.
 
 **Inputs**: one card per input (the built-ins first, then the added ones in
 file order) with its name, id and type, where it gets its data
@@ -1152,6 +1292,20 @@ form with an input's definition (the id cannot change) and **Save** replaces
 it, which restarts the input; its counters carry on. Enabled follows the
 card's Disable/Enable while the form is open, so Save never undoes it.
 An input removed and added again under the same id starts as a new one.
+
+**Outputs**: one card per output (the built-in cue outputs first), with its
+name, id and kind, where it serves or sends (`tcp_listen 0.0.0.0:30105`,
+`tcp_connect 192.0.2.30:30500`, `udp 239.255.10.5:4978 via 192.0.2.10 ttl 1`), a status dot (green when it
+is up, amber when it is up but has an error, red when it is not, grey when it
+is disabled) and its counters: `peers`, `bytes`, `dropped` and the latest
+error. **Disable**/**Enable** work on every card; **Edit** and **Remove** only
+on outputs you added. **Add output** at the end of the section opens the form:
+kind, id, name, transport and the fields of that transport; the multicast
+interface, TTL and loopback appear once a group is typed. The form checks the
+same rules as skycued and shows skycued's own words for what it still
+refuses (a port in use, a loop). The counters refresh once a second while the
+tab is open. The Add input form now offers the raw types and, for every type,
+the transport and, for UDP, the multicast group.
 
 **Ground stations**: the FIS-B ground stations heard in the last 60 minutes,
 with position, products received and when last heard; each is a triangle

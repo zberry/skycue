@@ -24,7 +24,8 @@ endif()
 
 add_library(skycue STATIC
   src/protocol.cpp
-  src/client.cpp)
+  src/client.cpp
+  src/ecef.cpp)
 add_library(skycue::skycue ALIAS skycue)
 # Static, but position-independent so it can be linked into a consumer's
 # shared library (a plugin, say).

@@ -314,6 +314,7 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
                 if (v->rate_is_geom) ks.geom_rate.set(r, now_);
                 else ks.baro_rate.set(r, now_);
             }
+            if (v->gnss_baro_diff_ft) ks.gnss_diff.set(*v->gnss_baro_diff_ft, now_);
             // GNSS minus baro difference (design 5.4): only from a fresh baro altitude
             // and when no TC20-22 altitude is fresh.
             if (v->gnss_baro_diff_ft && ks.alt_baro.fresh(now_, kDerivedBaroAge) &&
@@ -486,8 +487,15 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
     const auto ground = ks.on_ground.fresh(now_, kFieldFresh);
     o.on_ground = frame_ground_;
     if (!ground.value_or(false)) o.alt_baro_ft = ks.alt_baro.fresh(now_, kFieldFresh);  // ground suppresses it
+    if (o.alt_baro_ft) o.alt_baro_time = ks.alt_baro.at;
     o.alt_geom_ft = ks.alt_gnss.fresh(now_, kFieldFresh);
-    if (!o.alt_geom_ft) o.alt_geom_ft = ks.alt_derived.fresh(now_, kFieldFresh);
+    if (o.alt_geom_ft) {
+        o.alt_geom_time = ks.alt_gnss.at;
+    } else {
+        o.alt_geom_ft = ks.alt_derived.fresh(now_, kFieldFresh);
+        if (o.alt_geom_ft) o.alt_geom_time = ks.alt_derived.at;
+    }
+    o.geom_minus_baro_ft = ks.gnss_diff.fresh(now_, kFieldFresh);  // set even when the baro was too old to derive a geom
     o.gs_kt = ks.gs.fresh(now_, kFieldFresh);
     o.track_deg = ks.track.fresh(now_, kFieldFresh);
     o.baro_rate_fpm = ks.baro_rate.fresh(now_, kFieldFresh);

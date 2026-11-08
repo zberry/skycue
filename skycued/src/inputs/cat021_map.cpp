@@ -150,6 +150,7 @@ std::optional<TrackObservation> mapCat021Record(const Cat021Record& r, const Cat
         obs.alt_baro_ft = *r.fl145 * kFt145;
     if (r.height140 && *r.height140 != k140GreaterThan)
         obs.alt_geom_ft = static_cast<int32_t>(std::lround(*r.height140 * kFt140));
+    if (obs.alt_baro_ft && obs.alt_geom_ft) obs.geom_minus_baro_ft = *obs.alt_geom_ft - *obs.alt_baro_ft;
 
     if (r.vector160) {
         if (!r.vector160->re) {

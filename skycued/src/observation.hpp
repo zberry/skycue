@@ -21,6 +21,13 @@ struct TrackObservation {
     std::optional<double> lat, lon;                                      // both or neither
     std::optional<bool> on_ground;  // unset: the input did not say
     std::optional<int32_t> alt_baro_ft, alt_geom_ft;
+    // A GNSS-minus-baro difference the source reported (signed, positive: GNSS above
+    // baro), set only when both altitudes came from one message or record, or by a
+    // 1090 TC19 velocity message.
+    std::optional<int32_t> geom_minus_baro_ft;
+    // When each altitude was measured; absent: at received_time. Carried values of the
+    // 1090 decoder (up to 60 s old) set them.
+    std::optional<std::chrono::system_clock::time_point> alt_baro_time, alt_geom_time;
     std::optional<float> gs_kt, track_deg, baro_rate_fpm, geom_rate_fpm;
     std::optional<std::string> callsign, squawk, registration, emergency, category;
     std::optional<uint8_t> nic, nac_p;

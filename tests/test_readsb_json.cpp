@@ -76,6 +76,39 @@ BOOST_AUTO_TEST_CASE(parses_minimal_line)
     BOOST_TEST(obs->raw_line == kMinimal);
 }
 
+BOOST_AUTO_TEST_CASE(alt_geom_and_baro_set_diff)
+{
+    auto obs = parseReadsbLine(kMinimal);
+    BOOST_REQUIRE(obs);
+    BOOST_TEST(obs->geom_minus_baro_ft.value_or(0) == 525);  // 36525 - 36000
+    BOOST_TEST(!obs->alt_baro_time);
+    BOOST_TEST(!obs->alt_geom_time);
+    auto neg = parseReadsbLine(R"({"now":5,"hex":"abcdef","type":"adsb_icao","alt_baro":36000,"alt_geom":35900})");
+    BOOST_REQUIRE(neg);
+    BOOST_TEST(neg->geom_minus_baro_ft.value_or(0) == -100);
+}
+
+BOOST_AUTO_TEST_CASE(no_diff_when_one_missing)
+{
+    auto baro = parseReadsbLine(R"({"now":5,"hex":"abcdef","type":"adsb_icao","alt_baro":36000})");
+    BOOST_REQUIRE(baro);
+    BOOST_TEST(!baro->geom_minus_baro_ft);
+    auto geom = parseReadsbLine(R"({"now":5,"hex":"abcdef","type":"adsb_icao","alt_geom":36525})");
+    BOOST_REQUIRE(geom);
+    BOOST_TEST(!geom->geom_minus_baro_ft);
+    auto ground = parseReadsbLine(R"({"now":5,"hex":"abcdef","type":"adsb_icao","alt_baro":"ground","alt_geom":100})");
+    BOOST_REQUIRE(ground);
+    BOOST_TEST(!ground->geom_minus_baro_ft);
+}
+
+BOOST_AUTO_TEST_CASE(tisb_other_has_no_geom)
+{
+    auto obs = parseReadsbLine(R"({"now":5,"hex":"abcdef","type":"tisb_other","alt_baro":36000})");
+    BOOST_REQUIRE(obs);
+    BOOST_TEST(!obs->alt_geom_ft);
+    BOOST_TEST(!obs->geom_minus_baro_ft);
+}
+
 BOOST_AUTO_TEST_CASE(ground_altitude)
 {
     auto obs = parseReadsbLine(

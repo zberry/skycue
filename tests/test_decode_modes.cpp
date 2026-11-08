@@ -410,6 +410,84 @@ BOOST_AUTO_TEST_CASE(gnss_baro_difference_sets_geom_altitude) {
     BOOST_REQUIRE(r.obs[3].baro_rate_fpm == std::nullopt);
 }
 
+// The TC19 difference and the measurement times of carried values (design 5.4, 7.1).
+BOOST_AUTO_TEST_CASE(tc19_diff_sets_geom_minus_baro) {
+    Rig r;
+    r.feed(air(kP0, false, 10000), 0.0);
+    r.feed(air(kP0, true, 10000), 0.5);
+    r.feed(df17(kAddr, velocity(100, 0, 0, true, 300)), 1.0);
+    r.feed(air(kP0, false, 10000), 2.0);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 2u);
+    const auto& o = r.obs[1];
+    BOOST_REQUIRE(o.geom_minus_baro_ft);
+    BOOST_CHECK_EQUAL(*o.geom_minus_baro_ft, 300);
+    BOOST_CHECK_EQUAL(*o.alt_geom_ft, 10300);
+    BOOST_REQUIRE(o.alt_geom_time && o.alt_baro_time);
+    BOOST_CHECK(*o.alt_geom_time == at(1.0));  // the TC19 arrival
+    BOOST_CHECK(*o.alt_baro_time == at(2.0));  // the baro of this very frame
+    // The first observation had no difference yet.
+    BOOST_CHECK(!r.obs[0].geom_minus_baro_ft);
+    BOOST_CHECK(!r.obs[0].alt_geom_time);
+    BOOST_CHECK(*r.obs[0].alt_baro_time == at(0.5));
+}
+
+BOOST_AUTO_TEST_CASE(tc19_negative_diff) {
+    Rig r;
+    r.feed(air(kP0, false, 10000), 0.0);
+    r.feed(air(kP0, true, 10000), 0.5);
+    r.feed(df17(kAddr, velocity(100, 0, 0, true, -425)), 1.0);
+    r.feed(air(kP0, false, 10000), 2.0);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 2u);
+    BOOST_CHECK_EQUAL(*r.obs[1].geom_minus_baro_ft, -425);
+    BOOST_CHECK_EQUAL(*r.obs[1].alt_geom_ft, 9575);
+}
+
+BOOST_AUTO_TEST_CASE(tc19_diff_without_baro_gives_diff_only_no_geom) {
+    // The baro is 11.5 s old when the TC19 arrives: no geometric altitude is derived (5.4),
+    // but the reported difference still goes out.
+    Rig r;
+    r.feed(air(kP0, false, 10000), 0.0);
+    r.feed(air(kP0, true, 10000), 0.5);
+    r.feed(df17(kAddr, velocity(100, 0, 0, true, 300)), 12.0);
+    r.feed(air(kP0, false, 10000), 12.5);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 2u);
+    BOOST_REQUIRE(r.obs[1].geom_minus_baro_ft);
+    BOOST_CHECK_EQUAL(*r.obs[1].geom_minus_baro_ft, 300);
+    BOOST_CHECK(!r.obs[1].alt_geom_ft);
+    BOOST_CHECK(!r.obs[1].alt_geom_time);
+}
+
+BOOST_AUTO_TEST_CASE(tc2022_sets_alt_geom_time_no_diff) {
+    Rig r;
+    r.feed(air(kP0, false, 10000), 0.0);
+    r.feed(air(kP0, true, 10000), 0.5);
+    r.feed(air(kP0, true, 10600, kAddr, 20), 3.0);
+    r.feed(air(kP0, false, 10000), 3.5);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 3u);  // the TC20 frame emits too
+    const auto& o = r.obs[2];
+    BOOST_CHECK_EQUAL(*o.alt_geom_ft, 10600);
+    BOOST_REQUIRE(o.alt_geom_time);
+    BOOST_CHECK(*o.alt_geom_time == at(3.0));
+    BOOST_CHECK(!o.geom_minus_baro_ft);
+}
+
+BOOST_AUTO_TEST_CASE(carried_value_keeps_its_own_time) {
+    Rig r;
+    r.feed(air(kP0, false, 10000), 0.0);
+    r.feed(air(kP0, true, 10000), 0.5);
+    r.feed(df17(kAddr, velocity(100, 0, 0, true, 300)), 1.0);
+    // 40 s on, a new identity (no altitude in it) emits an observation that carries the old values.
+    r.feed(df17(kAddr, identification(4, 3, "TEST1")), 40.9);
+    r.feed(df17(kAddr, identification(4, 3, "TEST2")), 41.0);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 2u);
+    const auto& o = r.obs.back();
+    BOOST_REQUIRE(o.alt_baro_ft && o.alt_baro_time);
+    BOOST_CHECK(*o.alt_baro_time == at(0.5));
+    BOOST_CHECK(*o.alt_baro_time < o.received_time);
+    BOOST_REQUIRE(o.alt_geom_ft && o.alt_geom_time);
+    BOOST_CHECK(*o.alt_geom_time == at(1.0));
+}
+
 BOOST_AUTO_TEST_CASE(tc0_counts_no_position) {
     Rig r;
     r.feed(df17(kAddr, typeOnly(0)), 0.0);

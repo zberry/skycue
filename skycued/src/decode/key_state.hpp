@@ -83,6 +83,7 @@ struct KeyState {
     // Fields, each with the time it was learned (observations use <= 60 s).
     Timed<std::string> callsign, category, squawk, emergency;
     Timed<int32_t> alt_baro, alt_gnss, alt_derived;
+    Timed<int32_t> gnss_diff;  // last TC19 GNSS-minus-baro difference (signed, positive: GNSS above baro)
     Timed<float> gs, track, baro_rate, geom_rate;
     Timed<uint8_t> nic, nac_p;
     Timed<bool> on_ground;

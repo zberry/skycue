@@ -417,6 +417,22 @@ BOOST_AUTO_TEST_CASE(uat_detail_maps)
     BOOST_TEST((r.raw_frames[0].time == arrival));  // no utcSync
 }
 
+BOOST_AUTO_TEST_CASE(ping_diff_set_when_both_altitudes_in_one_message)
+{
+    auto o = one(R"("altitudeMM":304800,"altitudeType":0,)"
+                 R"("detail":{"secondaryAltType":1,"secondaryAltitudeMM":310896})");  // 1000 and 1020 ft
+    BOOST_TEST(o.geom_minus_baro_ft.value_or(0) == 20);
+    BOOST_TEST(!o.alt_baro_time);
+    BOOST_TEST(!o.alt_geom_time);
+    auto neg = one(R"("altitudeMM":310896,"altitudeType":0,)"
+                   R"("detail":{"secondaryAltType":1,"secondaryAltitudeMM":304800})");
+    BOOST_TEST(neg.geom_minus_baro_ft.value_or(0) == -20);
+    auto single = one(R"("altitudeMM":304800,"altitudeType":0)");
+    BOOST_TEST(!single.geom_minus_baro_ft);
+    auto geom_only = one(R"("altitudeMM":304800,"altitudeType":1)");
+    BOOST_TEST(!geom_only.geom_minus_baro_ft);
+}
+
 BOOST_AUTO_TEST_CASE(secondary_altitude_never_overrides_primary)
 {
     auto o = one(R"("altitudeMM":304800,"altitudeType":0,)"
@@ -831,6 +847,26 @@ BOOST_AUTO_TEST_CASE(cat021_maps_reference_fields)
     auto oq = mapOk(q);
     BOOST_TEST(oq.nic.value_or(0) == 6);
     BOOST_TEST(!oq.nac_p);
+}
+
+BOOST_AUTO_TEST_CASE(cat021_diff_set_when_both_altitudes_in_one_record)
+{
+    Cat021Record r = base();
+    r.fl145 = 1361;     // 34025 ft
+    r.height140 = 5448; // 34050 ft
+    auto both = mapOk(r);
+    BOOST_TEST(both.geom_minus_baro_ft.value_or(0) == 25);
+    BOOST_TEST(!both.alt_baro_time);
+    BOOST_TEST(!both.alt_geom_time);
+    Cat021Record only_baro = r;
+    only_baro.height140.reset();
+    BOOST_TEST(!mapOk(only_baro).geom_minus_baro_ft);
+    Cat021Record only_geom = r;
+    only_geom.fl145.reset();
+    BOOST_TEST(!mapOk(only_geom).geom_minus_baro_ft);
+    Cat021Record greater = r;
+    greater.height140 = 0x7FFF;  // "greater than": no altitude, so no difference
+    BOOST_TEST(!mapOk(greater).geom_minus_baro_ft);
 }
 
 BOOST_AUTO_TEST_CASE(cat021_category_table)

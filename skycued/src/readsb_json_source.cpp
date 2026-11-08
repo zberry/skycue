@@ -150,6 +150,7 @@ std::optional<TrackObservation> parse(const std::string& line)
         obs.alt_baro_ft = feet(alt);
     }
     obs.alt_geom_ft = feet(json->getDouble("alt_geom"));
+    if (obs.alt_baro_ft && obs.alt_geom_ft) obs.geom_minus_baro_ft = *obs.alt_geom_ft - *obs.alt_baro_ft;
     obs.gs_kt = toFloat(json->getDouble("gs"));
     obs.track_deg = toFloat(json->getDouble("track"));
     obs.baro_rate_fpm = toFloat(json->getDouble("baro_rate"));

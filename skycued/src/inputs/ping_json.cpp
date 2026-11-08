@@ -195,6 +195,8 @@ bool mapAircraft(const JsonObject& a, const std::string& text, const PingContext
         }
     }
 
+    if (obs.alt_baro_ft && obs.alt_geom_ft) obs.geom_minus_baro_ft = *obs.alt_geom_ft - *obs.alt_baro_ft;
+
     if (auto v = a.getDouble("horVelocityCMS"); v && *v >= 0 && *v < kMaxSpeedCms)
         obs.gs_kt = static_cast<float>(*v * kKtPerCms);
     // svHeadingType 1 (heading rather than track) is stored as track too.

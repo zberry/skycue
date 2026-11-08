@@ -529,7 +529,7 @@ Routes:
 Any other path under `/api/outputs/` is `404`; an `{id}` that breaks the id rule is `400` `invalid output id ...`;
 another method is `405` with `Allow`. Writes are checked in the order of the [inputs routes](#inputs):
 `415`, `403` for another origin, `409` `outputs cannot be changed while replaying a recording` under `--replay`
-(where no output runs), then the body.
+(built-in cue outputs run under replay; user-defined outputs do not start), then the body.
 
 WebSocket: `{"type":"outputs","outputs":[...]}` ([WebSocket](#websocket-ws)) after an output is added,
 changed, removed, enabled, disabled, starts or stops listening, or gains or loses its error. Counters are not pushed;

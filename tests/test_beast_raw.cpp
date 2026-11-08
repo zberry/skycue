@@ -136,9 +136,13 @@ struct Rig {
 
 void sendUdp(uint16_t port, const std::string& s, const char* from = "127.0.0.1")
 {
-    asio::io_context io;
-    udp::socket sock(io, udp::endpoint(asio::ip::make_address(from), 0));
-    sock.send_to(asio::buffer(s), udp::endpoint(asio::ip::make_address("127.0.0.1"), port));
+    // One socket per source address for the whole run, so a sender keeps its port between calls.
+    static asio::io_context io;
+    static std::map<std::string, udp::socket> socks;
+    auto it = socks.find(from);
+    if (it == socks.end())
+        it = socks.emplace(from, udp::socket(io, udp::endpoint(asio::ip::make_address(from), 0))).first;
+    it->second.send_to(asio::buffer(s), udp::endpoint(asio::ip::make_address("127.0.0.1"), port));
 }
 
 tcp::socket connectWhenListening(asio::io_context& io, uint16_t port)
@@ -276,6 +280,32 @@ BOOST_AUTO_TEST_CASE(beast_udp_two_senders_do_not_splice)
     std::this_thread::sleep_for(30ms);
     sendUdp(port, kLongFrame.substr(half(kLongFrame)), "127.0.0.1");
     sendUdp(port, kEscFrame.substr(half(kEscFrame)), "127.0.0.2");
+    BOOST_REQUIRE(eventually([&] { return rig.count() == 2; }));
+    std::this_thread::sleep_for(50ms);
+    BOOST_TEST(rig.count() == 2u);
+    const std::set<std::string> got{rig.at(0).bytes, rig.at(1).bytes};
+    BOOST_TEST((got == std::set<std::string>{kLongFrame, kEscFrame}));
+    BOOST_TEST(rig.state().counters.rejected == 0u);
+}
+
+BOOST_AUTO_TEST_CASE(beast_udp_two_senders_same_host_do_not_splice)
+{
+    Rig rig;
+    const uint16_t port = freeUdpPort();
+    rig.run(std::make_unique<BeastRawInput>(rig.t.io, defOf(beastDef("bu", "udp", port))));
+    BOOST_REQUIRE(eventually([&] { return rig.connected(); }));
+    asio::io_context io;
+    udp::socket a(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    udp::socket b(io, udp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+    const udp::endpoint to(asio::ip::make_address("127.0.0.1"), port);
+    const auto half = [](const std::string& f) { return f.size() / 2; };
+    a.send_to(asio::buffer(kLongFrame.substr(0, half(kLongFrame))), to);
+    std::this_thread::sleep_for(30ms);
+    b.send_to(asio::buffer(kEscFrame.substr(0, half(kEscFrame))), to);
+    std::this_thread::sleep_for(30ms);
+    a.send_to(asio::buffer(kLongFrame.substr(half(kLongFrame))), to);
+    std::this_thread::sleep_for(30ms);
+    b.send_to(asio::buffer(kEscFrame.substr(half(kEscFrame))), to);
     BOOST_REQUIRE(eventually([&] { return rig.count() == 2; }));
     std::this_thread::sleep_for(50ms);
     BOOST_TEST(rig.count() == 2u);

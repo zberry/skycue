@@ -44,6 +44,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -230,6 +231,7 @@ private:
     RawTap tap_;  // before slots_: the inputs that point at it go first
     std::vector<Slot> slots_;  // built-ins first, then user inputs
     std::size_t builtin_count_ = 0;
+    mutable std::set<std::string> last_warnings_;  // checkSet's previous WARN texts
     std::map<std::string, bool> file_builtin_;     // "builtin" as last read or written
     std::map<std::string, bool> builtin_default_;  // def().enabled at addBuiltin
     std::map<std::string, InputCounters> retired_;

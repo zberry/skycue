@@ -7,7 +7,7 @@
 // RECORD_DIR/raw-<id>-<stamp>.bin (BeastCaptureWriter).
 //
 // format "beast" (default): one beast::FrameSplitter per TCP stream and, for
-// UDP, per source address (a datagram is fed like a TCP chunk, so a frame may
+// UDP, per source address and port (a datagram is fed like a TCP chunk, so a frame may
 // span datagrams of one sender and a datagram may hold several frames); at
 // most 64 senders are tracked, all splitters reset when a 65th appears.
 // `rejected` gains one for every feed that made a splitter skip bytes.
@@ -29,6 +29,7 @@
 
 #include <chrono>
 #include <map>
+#include <utility>
 #include <memory>
 
 namespace skycued {
@@ -57,7 +58,7 @@ private:
     bool avr_;
     bool datagrams_;
     std::map<uint64_t, beast::FrameSplitter> streams_;                      // TCP, per stream
-    std::map<boost::asio::ip::address, beast::FrameSplitter> senders_;      // UDP, per source address
+    std::map<std::pair<boost::asio::ip::address, uint16_t>, beast::FrameSplitter> senders_;  // UDP, per source address and port
     std::vector<beast::Frame> frames_;                                      // scratch
     uint64_t avr_rejected_ = 0;
     std::unique_ptr<BeastCaptureWriter> capture_;  // null unless capture and a record_dir

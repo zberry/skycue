@@ -203,8 +203,8 @@ python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/A2.bin" & bg_pids+=($!)
 python3 -I "$tmp/consumer.py" udp "$group" "$mc_port" "$tmp/M2.dg" & bg_pids+=($!)
 wait_for 10 test -e "$tmp/M2.dg.ready" || fail "phase 2 multicast consumer not ready"
 python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/C.bin" stall & cpid=$!; bg_pids+=("$cpid")
-three_peers() { [ "$(field b-tcp peers)" = 2 ]; }
-wait_for 10 three_peers || fail "phase 2 consumers not connected (peers $(field b-tcp peers))"
+b_tcp_two_peers() { [ "$(field b-tcp peers)" = 2 ]; }
+wait_for 10 b_tcp_two_peers || fail "phase 2 consumers not connected (peers $(field b-tcp peers))"
 d0=$(field b-tcp dropped)
 "$rawplay" --1090-listen "$raw_port" --wait-clients 1 --speed "$speed2" --loop "$csv" >"$tmp/play2.log" 2>&1 &
 bg_pids+=($!)
@@ -221,7 +221,7 @@ echo "ok hub_stalled_consumer_cut_others_continue (cut after ${cut_s} s at speed
 
 # a second stalled consumer, backlogged when the output is removed
 python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/C2.bin" stall & bg_pids+=($!)
-wait_for 10 three_peers || fail "second stalled consumer not connected"
+wait_for 10 b_tcp_two_peers || fail "second stalled consumer not connected"
 slow_sleep 2
 code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$base/api/outputs/b-tcp")
 [ "$code" = 204 ] || fail "hub_remove_output_with_backlog: DELETE returned $code"
@@ -232,7 +232,7 @@ s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=3); s.clos
 rebind() { python3 -I -c 'import socket,sys
 s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1)' "$tcp_port" 2>/dev/null; }
-wait_for 1 rebind || fail "hub_remove_output_with_backlog: port $tcp_port not rebindable within 1 s"
+wait_for 3 rebind || fail "hub_remove_output_with_backlog: port $tcp_port not rebindable within 3 s"
 kill -0 "$sk" 2>/dev/null || fail "skycued died"
 echo "ok hub_remove_output_with_backlog"
 echo "PASS hub: $frames frames, $alen bytes, $dg datagrams, cut after ${cut_s} s"

@@ -161,8 +161,10 @@ InputsFile parseInputsFile(const std::string& text)
 std::string inputsFileJson(const InputsFile& file)
 {
     bool v2 = !file.outputs.empty() || std::any_of(file.inputs.begin(), file.inputs.end(), inputNeedsV2);
+    // Enabled is the default: a cue id that is true carries nothing, so it is not written.
+    const auto cueContent = [](const std::pair<const std::string, bool>& b) { return isReservedCueId(b.first) && !b.second; };
     for (const auto& b : file.builtin_enabled)
-        v2 = v2 || isReservedCueId(b.first);
+        v2 = v2 || cueContent(b);
     std::string out = std::string("{\n  \"version\": ") + (v2 ? "2" : "1") + ",\n  \"inputs\": [";
     for (std::size_t i = 0; i < file.inputs.size(); ++i)
         out += (i ? ",\n    " : "\n    ") + inputDefJson(file.inputs[i]);
@@ -176,12 +178,14 @@ std::string inputsFileJson(const InputsFile& file)
     out += "  \"builtin\": {";
     bool first = true;
     for (const auto& b : file.builtin_enabled) {
+        if (isReservedCueId(b.first) && b.second)
+            continue;
         out += first ? "\n    " : ",\n    ";
         appendJsonString(out, b.first);
         out += std::string(": {\"enabled\": ") + (b.second ? "true" : "false") + "}";
         first = false;
     }
-    out += file.builtin_enabled.empty() ? "}\n" : "\n  }\n";
+    out += first ? "}\n" : "\n  }\n";
     out += "}\n";
     return out;
 }

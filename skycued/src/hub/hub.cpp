@@ -331,6 +331,8 @@ struct Hub::Impl {
     {
         bool changed = force;
         for (const auto& o : outputs) {
+            if (!o)
+                continue;  // apply may hold moved-from slots while it rebuilds the list
             const bool up = upOf(*o);
             const std::string err = errorOf(*o);
             if (up != o->seen_up || err != o->seen_error) {

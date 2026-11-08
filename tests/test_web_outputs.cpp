@@ -432,7 +432,7 @@ BOOST_AUTO_TEST_CASE(outputs_api_crud_status_codes)
 
     // The file: version 2 held only while there is v2 content.
     const std::string file = readAll(f.inputs_file);
-    BOOST_TEST(has(file, "\"cue-tcp\""), file);
+    BOOST_TEST(!has(file, "\"cue-tcp\""), file);  // enabled is the default: not written
 }
 
 BOOST_AUTO_TEST_CASE(outputs_api_writes_409_while_replaying)

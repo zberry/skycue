@@ -36,6 +36,7 @@ struct TransportData {
     std::size_t size;
     uint64_t stream;
     boost::asio::ip::address peer;
+    uint16_t peer_port = 0;  // the sender's port for UDP; 0 when the transport does not say
 };
 
 // State shared by every transport; each transport's Impl derives from it.

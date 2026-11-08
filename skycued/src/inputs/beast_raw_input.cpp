@@ -67,11 +67,12 @@ void BeastRawInput::feedBeast(const TransportData& data)
 {
     beast::FrameSplitter* splitter = nullptr;
     if (datagrams_) {
-        auto it = senders_.find(data.peer);
+        const auto key = std::make_pair(data.peer, data.peer_port);
+        auto it = senders_.find(key);
         if (it == senders_.end()) {
             if (senders_.size() >= kMaxSenders)
                 senders_.clear();  // a partial frame of any sender is forgotten
-            it = senders_.emplace(data.peer, beast::FrameSplitter()).first;
+            it = senders_.emplace(key, beast::FrameSplitter()).first;
         }
         splitter = &it->second;
     } else {

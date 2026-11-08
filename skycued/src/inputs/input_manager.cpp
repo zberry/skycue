@@ -149,6 +149,7 @@ void InputManager::load()
     InputsFile file;
     try {
         file = parseInputsFile(text);
+        last_warnings_.clear();  // a load or reload logs every warning
         checkSet(file.inputs, file.outputs);
     } catch (const InputDefError& e) {
         rejectFile(e.what(), "built-in inputs only");
@@ -405,8 +406,12 @@ void InputManager::checkSet(const std::vector<InputDef>& user, const std::vector
     for (std::size_t i = 0; i < builtin_count_; ++i)
         all.push_back(slots_[i].def);
     all.insert(all.end(), user.begin(), user.end());
-    for (const auto& warning : validateInputSet(all, outputs, config_.reserved_ports))
-        LOG_WARN(warning);
+    auto warnings = validateInputSet(all, outputs, config_.reserved_ports);
+    // A text is logged when it was not in the previous set, so a repeated write does not repeat it.
+    for (const auto& warning : warnings)
+        if (!last_warnings_.count(warning))
+            LOG_WARN(warning);
+    last_warnings_ = std::set<std::string>(warnings.begin(), warnings.end());
 }
 
 OutputDef InputManager::normalizedOutput(const OutputDef& def)
@@ -674,6 +679,7 @@ void InputManager::reloadFromDisk()
     InputsFile file;
     try {
         file = parseInputsFile(text);
+        last_warnings_.clear();  // a load or reload logs every warning
         checkSet(file.inputs, file.outputs);
     } catch (const InputDefError& e) {
         rejectFile(e.what(), "inputs and outputs unchanged");

@@ -998,7 +998,10 @@ BOOST_AUTO_TEST_CASE(v2_file_round_trip)
     BOOST_TEST(back.version == 2);
     BOOST_TEST((back.inputs == f.inputs));
     BOOST_TEST((back.outputs == f.outputs));
-    BOOST_TEST((back.builtin_enabled == f.builtin_enabled));
+    // An enabled cue output is the default and is not written.
+    auto expected = f.builtin_enabled;
+    expected.erase("cue-connect-1");
+    BOOST_TEST((back.builtin_enabled == expected));
     BOOST_TEST(inputsFileJson(back) == text);
     // Errors in an output entry are prefixed.
     const std::string e = inputsFileErr(R"({"version":2,"outputs":[{"id":"o","kind":"beast","port":1}]})");

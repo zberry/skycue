@@ -1614,6 +1614,32 @@ BOOST_AUTO_TEST_CASE(outputs_not_started_and_writes_409_while_replaying)
     BOOST_TEST(!!ec);
 }
 
+// The same WARN on every write is logged once; a changed text is logged again.
+BOOST_AUTO_TEST_CASE(warn_logged_once_until_it_changes)
+{
+    IoThread t;
+    TempDir tmp, logs;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    const uint16_t port = freeTcpPort();
+    m.on([&](InputManager& im) { return im.create(cat021("cat", "tcp_listen", port)); });
+    const auto loop = [&](const std::string& id, uint16_t to) {
+        return outputOf(R"({"id":")" + id + R"(","kind":"beast","transport":"tcp_connect","host":"127.0.0.1","port":)" +
+                        std::to_string(to) + "}");
+    };
+    std::string log;
+    {
+        StderrCapture cap(logs.path + "/stderr");
+        m.on([&](InputManager& im) { return im.createOutput(loop("loop", port)); });
+        m.on([&](InputManager& im) { return im.createOutput(loop("quiet", freeTcpPort())); });
+        m.on([&](InputManager& im) { return im.createOutput(loop("quiet2", freeTcpPort())); });
+        m.on([&](InputManager& im) { return im.createOutput(loop("loop2", port)); });
+        log = cap.text();
+    }
+    BOOST_TEST(countOf(log, "output 'loop' sends to 127.0.0.1:") == 1u, log);
+    BOOST_TEST(countOf(log, "output 'loop2' sends to 127.0.0.1:") == 1u, log);
+}
+
 BOOST_AUTO_TEST_CASE(warn_logged_for_loopback_output_to_own_port)
 {
     IoThread t;
@@ -1668,9 +1694,29 @@ BOOST_AUTO_TEST_CASE(builtin_cue_outputs_only_enable_and_disable)
     BOOST_TEST(w.callbacks.load() == 1);
 
     // A hand edit that flips it back is applied.
-    handWrite(cfg.inputs_file, fileWith({}, {}, {{"cue-tcp", true}}));
+    handWrite(cfg.inputs_file, R"({"version":2,"inputs":[],"outputs":[],"builtin":{"cue-tcp":{"enabled":true}}})");
     BOOST_REQUIRE(eventuallyWithin(3s, [&] { return w.callbacks.load() == 2; }));
     BOOST_TEST(m.on([](InputManager& im) { return im.outputBuiltinStates(); }).at("cue-tcp") == true);
+}
+
+// Enabled is the default: once no cue output is disabled the file is v1 again.
+BOOST_AUTO_TEST_CASE(builtin_cue_toggle_round_trip_rewrites_v1)
+{
+    IoThread t;
+    TempDir tmp;
+    const auto cfg = fileConfig(tmp);
+    Mgr m(t, cfg);
+    m.on([](InputManager& im) { im.setBuiltinOutputIds({"cue-tcp"}); return 0; });
+    m.on([](InputManager& im) { im.setOutputEnabled("cue-tcp", false); return 0; });
+    auto file = skycued::parseInputsFile(readAll(cfg.inputs_file));
+    BOOST_TEST(file.version == 2);
+    BOOST_TEST(file.builtin_enabled.at("cue-tcp") == false);
+    m.on([](InputManager& im) { im.setOutputEnabled("cue-tcp", true); return 0; });
+    const std::string text = readAll(cfg.inputs_file);
+    file = skycued::parseInputsFile(text);
+    BOOST_TEST(file.version == 1);
+    BOOST_TEST(file.builtin_enabled.count("cue-tcp") == 0u);
+    BOOST_TEST(!contains(text, "cue-tcp"), text);
 }
 
 // The file's "builtin" object names the cue outputs too; it must not touch

@@ -18,3 +18,7 @@ knownConditionTrueFalse:*/tools/skycue-pingsim.cpp
 # False positive: the loop runs only while done < n, so count >= 1 and
 # bytes_ holds at least two bytes when write() is called.
 invalidFunctionArg:*/tools/iqgen/iq_writer.cpp
+
+# False positive: Destination::id is a std::string; cppcheck reads the cue library's
+# destination type as a pointer and the OutputDef id as an integer.
+AssignmentAddressToInteger:*/skycued/src/hub/hub.cpp

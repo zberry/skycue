@@ -6,9 +6,14 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
+#include "altitude_fit.hpp"
+#include "decode/uat_decoder.hpp"
 #include "geom_altitude.hpp"
+#include "readsb_json_source.hpp"
 #include "track_table.hpp"
+#include "uat_test_support.hpp"
 
 using namespace skycued;
 using std::chrono::milliseconds;
@@ -452,4 +457,213 @@ BOOST_AUTO_TEST_CASE(tisb_target_gets_fit_estimate)
     BOOST_CHECK(r.source == GeomSource::estimated);
     BOOST_CHECK_EQUAL(*r.alt_geom_ft, std::lround(12000 + 100 + 0.027 * 12000));
     BOOST_CHECK(!r.geom_minus_baro_ft);
+}
+
+// ---- UAT-shaped observations through the engine's altitude path ----
+
+namespace {
+
+using skycued::testing::encodeUat;
+using skycued::testing::UatSpec;
+
+// What Engine::handleObservation does with altitudes, nothing else: merge into the
+// table, learn the track's difference, feed the population fit, resolve on the data clock.
+struct MiniEngine {
+    TrackTable table;
+    AltitudeFit fit;
+    void feed(const TrackObservation& o)
+    {
+        TrackState& s = table.apply(o);
+        if (const auto d = learnGeomDiff(s.geom, o); d && o.alt_baro_ft)
+            fit.add((static_cast<uint64_t>(s.id.type) << 32) | s.id.address, s.geom.diff_time, *o.alt_baro_ft, *d);
+    }
+    TrackState& track(const skycue::TrackId& id) { return *table.find(id); }
+    GeomResult resolve(const skycue::TrackId& id, Clock::time_point now)
+    {
+        return resolveGeomAltitude(track(id), now, fit.fit(now));
+    }
+};
+
+// A UAT feed: frames in, the decoder's observations into a MiniEngine.
+struct UatRig {
+    MiniEngine eng;
+    decode::UatDecoder dec;
+    std::vector<TrackObservation> seen;
+    static decode::DecoderConfig cfg()
+    {
+        decode::DecoderConfig c;
+        c.reference = decode::cpr::Position{52.0, 4.5};
+        return c;
+    }
+    UatRig() : dec(cfg(), "uat1")
+    {
+        dec.onObservation([this](const TrackObservation& o) {
+            seen.push_back(o);
+            eng.feed(o);
+        });
+    }
+    void frame(const UatSpec& s, Clock::time_point at)
+    {
+        decode::uat::UatFrame f;
+        f.bytes = encodeUat(s);
+        dec.feed(f, at);
+    }
+};
+
+UatSpec uatAirborne(uint32_t address, int baro_ft, std::optional<int> geom_ft)
+{
+    UatSpec s;
+    s.type = 1;
+    s.address = address;
+    s.lat = 52.1 + 0.001 * (address & 0xFF);
+    s.lon = 4.6;
+    s.alt_ft = baro_ft;
+    s.nic = 8;
+    s.ns_kt = 100;
+    s.ew_kt = 100;
+    s.call = "TEST1";
+    s.aux_alt_ft = geom_ft;
+    return s;
+}
+
+// GNSS minus baro the synthetic population follows, rounded to the UAT 25 ft step.
+int uatDiff(int baro) { return 25 * static_cast<int>(std::lround((150 + 0.02 * baro) / 25.0)); }
+
+// Twelve UAT aircraft, 3000 ft apart from 3000 ft (33000 ft of span), three
+// long frames each 6 s apart. Returns the time of the last frame.
+Clock::time_point seedUatPopulation(UatRig& rig, Clock::time_point t0)
+{
+    Clock::time_point last = t0;
+    for (int k = 0; k < 3; ++k)
+        for (int i = 0; i < 12; ++i) {
+            last = t0 + seconds(6 * k);
+            const int baro = 3000 + 3000 * i;
+            rig.frame(uatAirborne(0xA00000 + static_cast<uint32_t>(i), baro, baro + uatDiff(baro)), last);
+        }
+    return last;
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(uat_both_altitudes_yield_reported_difference)
+{
+    UatRig rig;
+    const skycue::TrackId id{0xA66EF1, skycue::AddressType::icao};
+    rig.frame(uatAirborne(0xA66EF1, 5000, 5175), kT0);
+    BOOST_REQUIRE_EQUAL(rig.seen.size(), 1u);
+    BOOST_REQUIRE(rig.seen[0].geom_minus_baro_ft);
+    BOOST_CHECK_EQUAL(*rig.seen[0].geom_minus_baro_ft, 175);
+    const auto r = rig.eng.resolve(id, kT0);
+    BOOST_CHECK(r.source == GeomSource::reported);
+    BOOST_REQUIRE(r.alt_geom_ft);
+    BOOST_CHECK_EQUAL(*r.alt_geom_ft, 5175);
+    BOOST_CHECK(!r.uncertainty_ft);
+    BOOST_REQUIRE(r.geom_minus_baro_ft);
+    BOOST_CHECK_EQUAL(*r.geom_minus_baro_ft, 175);
+    BOOST_REQUIRE(rig.seen[0].geom_minus_baro_time);
+    BOOST_CHECK(*rig.seen[0].geom_minus_baro_time == kT0);
+    BOOST_CHECK(rig.eng.track(id).geom.diff_time == kT0);
+}
+
+BOOST_AUTO_TEST_CASE(uat_difference_feeds_the_population_fit)
+{
+    UatRig rig;
+    const auto last = seedUatPopulation(rig, kT0);
+    const auto fit = rig.eng.fit.fit(last);
+    BOOST_REQUIRE(fit);
+    BOOST_CHECK(fit->linear);
+    BOOST_CHECK_GE(fit->samples, 20u);
+    BOOST_CHECK_EQUAL(fit->aircraft, 12u);
+    BOOST_CHECK_CLOSE(fit->b, 0.02, 15.0);
+}
+
+BOOST_AUTO_TEST_CASE(trackfile_target_gets_fit_estimate)
+{
+    UatRig rig;
+    const auto last = seedUatPopulation(rig, kT0);
+    // Qualifier 3: baro only; the aux altitude it would carry must not become a geometric one.
+    UatSpec s = uatAirborne(0x123456, 20000, 20400);
+    s.qualifier = 3;
+    const auto now = last + seconds(1);
+    rig.frame(s, now);
+    const skycue::TrackId id{0x123456, skycue::AddressType::tisb_trackfile};
+    BOOST_REQUIRE(rig.eng.table.find(id));
+    BOOST_CHECK(!rig.seen.back().alt_geom_ft);
+    BOOST_CHECK(!rig.seen.back().geom_minus_baro_ft);
+    const auto fit = rig.eng.fit.fit(now);
+    BOOST_REQUIRE(fit);
+    const auto r = rig.eng.resolve(id, now);
+    BOOST_CHECK(r.source == GeomSource::estimated);
+    BOOST_REQUIRE(r.alt_geom_ft);
+    BOOST_CHECK_SMALL(*r.alt_geom_ft - (20000 + fit->predict(20000)), 1.0);
+    BOOST_CHECK(r.uncertainty_ft);
+    BOOST_CHECK(!r.geom_minus_baro_ft);
+}
+
+BOOST_AUTO_TEST_CASE(trackfile_target_without_fit_gets_none)
+{
+    UatRig rig;
+    UatSpec s = uatAirborne(0x123456, 20000, 20400);
+    s.qualifier = 3;
+    rig.frame(s, kT0);
+    const skycue::TrackId id{0x123456, skycue::AddressType::tisb_trackfile};
+    const auto r = rig.eng.resolve(id, kT0);
+    BOOST_CHECK(r.source == GeomSource::none);
+    BOOST_CHECK(!r.alt_geom_ft);
+    BOOST_CHECK(!r.uncertainty_ft);
+}
+
+BOOST_AUTO_TEST_CASE(uat_geometric_sv_type_reported_without_aux)
+{
+    UatRig rig;
+    const auto last = seedUatPopulation(rig, kT0);  // a fit exists, yet it must not be used
+    UatSpec s;
+    s.type = 0;  // short frame: no aux
+    s.address = 0x777777;
+    s.lat = 52.1;
+    s.lon = 4.6;
+    s.alt_geometric = true;
+    s.alt_ft = 5000;
+    s.nic = 8;
+    s.ns_kt = 100;
+    s.ew_kt = 100;
+    const auto now = last + seconds(1);
+    rig.frame(s, now);
+    BOOST_REQUIRE(!rig.seen.empty());
+    const auto& o = rig.seen.back();
+    BOOST_REQUIRE(o.alt_geom_ft);
+    BOOST_CHECK_EQUAL(*o.alt_geom_ft, 5000);
+    BOOST_CHECK(!o.alt_baro_ft);
+    BOOST_CHECK(!o.geom_minus_baro_ft);
+    const skycue::TrackId id{0x777777, skycue::AddressType::icao};
+    auto r = rig.eng.resolve(id, now);
+    BOOST_CHECK(r.source == GeomSource::reported);
+    BOOST_REQUIRE(r.alt_geom_ft);
+    BOOST_CHECK_EQUAL(*r.alt_geom_ft, 5000);
+    BOOST_CHECK(!r.uncertainty_ft);
+    BOOST_CHECK(!r.geom_minus_baro_ft);
+    // No baro ever arrives, so once the report is stale there is nothing to estimate from.
+    BOOST_CHECK(rig.eng.resolve(id, now + seconds(61)).source == GeomSource::none);
+}
+
+BOOST_AUTO_TEST_CASE(readsb_path_unchanged)
+{
+    // readsb passes dump978's UAT on as ADS-R; alt_geom with alt_baro is the phase 4 shape.
+    const auto parsed = parseReadsbLine(
+        R"({"now":1700000000.0,"hex":"abc123","type":"adsr_icao","alt_baro":30000,"alt_geom":30525,"lat":52.1,"lon":4.6})");
+    BOOST_REQUIRE(parsed);
+    BOOST_CHECK(parsed->source == skycue::Source::uat_978);
+    BOOST_REQUIRE(parsed->geom_minus_baro_ft);
+    BOOST_CHECK_EQUAL(*parsed->geom_minus_baro_ft, 525);
+    MiniEngine eng;
+    eng.feed(*parsed);
+    const skycue::TrackId id{0xABC123, skycue::AddressType::icao};
+    auto r = eng.resolve(id, parsed->received_time);
+    BOOST_CHECK(r.source == GeomSource::reported);
+    BOOST_REQUIRE(r.alt_geom_ft);
+    BOOST_CHECK_EQUAL(*r.alt_geom_ft, 30525);
+    BOOST_REQUIRE(r.geom_minus_baro_ft);
+    BOOST_CHECK_EQUAL(*r.geom_minus_baro_ft, 525);
+    BOOST_CHECK_EQUAL(*eng.track(id).geom.baro_at_diff_ft, 30000);
+    BOOST_CHECK_EQUAL(eng.fit.sampleCount(), 1u);
 }

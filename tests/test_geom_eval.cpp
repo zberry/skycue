@@ -33,6 +33,8 @@
 #include "altitude_fit.hpp"
 #include "coding/bits.hpp"
 #include "decode/modes_decoder.hpp"
+#include "decode/uat_decoder.hpp"
+#include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
 #include "test_slow.hpp"
 
@@ -269,4 +271,41 @@ BOOST_AUTO_TEST_CASE(geom_eval_own_diff_hold_opensky)
         BOOST_CHECK_GE(s.n, 20u);
         BOOST_CHECK_LE(s.p90, lag == 60 ? 200.0 : 400.0);
     }
+}
+
+// UAT long frames carry the AUX altitude (about 0.5 Hz); the spread of the difference they
+// report is logged for the record. No pass threshold: it only has to be non-empty.
+BOOST_AUTO_TEST_CASE(geom_eval_uat_difference_spread)
+{
+    const std::string path = kFixtures + "/raw/uat-sample.txt.gz";
+    if (!std::ifstream(path).good()) {
+        std::cout << "geom_eval: raw/uat-sample.txt.gz is missing, UAT spread not reported\n";
+        return;
+    }
+    skycued::decode::UatDecoder dec(DecoderConfig{}, "geom-eval-uat");
+    std::vector<double> diffs;
+    std::map<uint32_t, int> aircraft;
+    dec.onObservation([&](const TrackObservation& o) {
+        if (!o.geom_minus_baro_ft) return;
+        diffs.push_back(*o.geom_minus_baro_ft);
+        ++aircraft[o.id.address];
+    });
+    {
+        skycued::GzLineReader in(path);
+        std::string line;
+        long n = 0;
+        while (in.getline(line)) {
+            const auto f = skycued::decode::uat::parseDownlinkLine(line);
+            if (!f) continue;  // uplink lines and anything else
+            dec.feed(*f, at(1.7e9 + static_cast<double>(n++)), std::nullopt);  // the capture has no timestamps
+        }
+    }
+    if (diffs.empty()) {
+        std::cout << "geom_eval: the UAT capture has no frame carrying both altitudes\n";
+        return;
+    }
+    std::sort(diffs.begin(), diffs.end());
+    std::cout << std::fixed << std::setprecision(0) << "geom_eval: UAT difference over " << diffs.size() << " frames, "
+              << aircraft.size() << " aircraft: min=" << diffs.front() << " ft median=" << median(diffs)
+              << " ft max=" << diffs.back() << " ft\n";
 }

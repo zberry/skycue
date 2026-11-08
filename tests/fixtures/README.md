@@ -105,8 +105,8 @@ and `nac_p` appear in the golden more often than in the decoder's output.
 
 - Made by `gen_uat_golden.sh DUMP978 IQGEN SAMPLE_GZ OUT_GZ` from the downlink
   lines of `uat-sample.txt.gz`: `skycue-iqgen uat` modulates them to a temporary
-  CU8 file (deleted on exit, about 80 KB per frame), dump978-fa (FlightAware
-  fork, the superbuild's pinned version) demodulates it with `--raw-stdout
+  CU8 file (deleted on exit, about 80 KB per frame), dump978-fa (from the
+  flightaware/dump978 repository, at the commit pinned above for the uat sample, `f40aa9a0d2d0a0067c0c628b44ba316f7049b8ce`) demodulates it with `--raw-stdout
   --json-stdout`, and `gen_uat_golden.py` pairs each raw line with the JSON
   object of the same `received_at`. Both binaries are arguments; nothing in the
   repository knows where they live. The script fails on a JSON key it does not

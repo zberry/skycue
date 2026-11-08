@@ -5,7 +5,9 @@
 #include "engine_test_support.hpp"
 #include "filters.hpp"
 #include "json_lite.hpp"
+#include "decode/uat_decoder.hpp"
 #include "runtime_config.hpp"
+#include "uat_test_support.hpp"
 #include "web_api.hpp"
 
 #include <cmath>
@@ -1078,4 +1080,111 @@ BOOST_AUTO_TEST_CASE(api_stats_altitude_fit_reaches_the_endpoint)
     BOOST_TEST(fit->has("linear"));
     BOOST_TEST(fit->getDouble("aircraft").value_or(0) == 3.0);
     BOOST_TEST(fit->getDouble("a").value_or(0) == 200.0);
+}
+
+// UAT cadence through a real Engine: the decoder's carried altitude times (alt_baro_time,
+// alt_geom_time) reach the track, so the 2 s (a baro more than 2 s newer than the geometric
+// altitude) and 60 s (a reported value's age) rules of the geometric resolution hold end to end.
+BOOST_AUTO_TEST_CASE(uat_cadence_geometric_altitude_rules_hold_end_to_end)
+{
+    using skycued::testing::encodeUat;
+    using skycued::testing::UatSpec;
+    using Tp = std::chrono::system_clock::time_point;
+    Config cfg = baseConfig();
+    cfg.track_timeout_s = 3600;
+    FakeSource* src = nullptr;
+    EngineFx fx(cfg, fakeSource(src));
+    const Tp base = std::chrono::system_clock::now() - std::chrono::minutes(10);
+
+    std::vector<TrackObservation> seen;  // what the decoder produced (io thread only)
+    skycued::decode::UatDecoder dec(skycued::decode::DecoderConfig{}, "uat-cadence");
+    dec.onObservation([&](const TrackObservation& o) {
+        seen.push_back(o);
+        src->emit(o);
+    });
+    auto frame = [&](uint32_t address, unsigned type, unsigned qualifier, int baro, std::optional<int> geom, double at_s) {
+        UatSpec u;
+        u.type = type;
+        u.qualifier = qualifier;
+        u.address = address;
+        u.lat = 38.95;
+        u.lon = -77.0;
+        u.alt_ft = baro;
+        u.nic = 8;
+        u.ns_kt = 100;
+        u.ew_kt = 100;
+        u.call = "UATCAD";
+        u.aux_alt_ft = geom;
+        skycued::decode::uat::UatFrame f;
+        f.bytes = encodeUat(u);
+        dec.feed(f, base + std::chrono::milliseconds(static_cast<long>(at_s * 1000)));
+    };
+    auto track = [&](TrackId id) {
+        const Snapshot snap = fx.t.call([&] { return fx.engine->snapshot(); });
+        const TrackSnapshot* t = find(snap, id);
+        BOOST_REQUIRE(t != nullptr);
+        return *t;
+    };
+    const TrackId a = icao(0xA10001);
+    fx.t.call([&] { src->connection(true); });
+
+    // A long frame: baro and geometric from the same instant.
+    fx.t.call([&] { frame(0xA10001, 1, 0, 20000, 20400, 0.0); });
+    auto t = track(a);
+    BOOST_TEST((t.geom.source == skycued::GeomSource::reported));
+    BOOST_TEST((t.track.alt_geom_ft == std::optional<int32_t>(20400)));
+    BOOST_TEST((t.geom.geom_minus_baro_ft == std::optional<int32_t>(400)));
+
+    // 1 s later a baro-only frame: the carried geometric altitude is only 1 s older than the baro.
+    fx.t.call([&] { frame(0xA10001, 0, 0, 20025, std::nullopt, 1.0); });
+    BOOST_REQUIRE(seen.back().alt_geom_ft && seen.back().alt_geom_time);
+    BOOST_TEST((*seen.back().alt_geom_time == base));  // the carried time, not the arrival
+    t = track(a);
+    BOOST_TEST((t.geom.source == skycued::GeomSource::reported));
+
+    // 4 s: the baro is more than 2 s newer than the geometric altitude: held on the own difference.
+    fx.t.call([&] { frame(0xA10001, 0, 0, 20100, std::nullopt, 4.0); });
+    t = track(a);
+    BOOST_TEST((t.geom.source == skycued::GeomSource::estimated));
+    BOOST_REQUIRE(t.track.alt_geom_ft.has_value());
+    // The own difference: 400 from the long frame, or 375 re-measured by the 1 s frame against its baro.
+    BOOST_TEST(*t.track.alt_geom_ft - 20100 >= 375);
+    BOOST_TEST(*t.track.alt_geom_ft - 20100 <= 410);
+    BOOST_TEST((t.geom.uncertainty_ft == std::optional<int32_t>(75)));
+
+    // The next long frame (2 s cadence of geometric altitudes): reported again, a new difference.
+    fx.t.call([&] { frame(0xA10001, 1, 0, 20150, 20575, 5.0); });
+    t = track(a);
+    BOOST_TEST((t.geom.source == skycued::GeomSource::reported));
+    BOOST_TEST((t.track.alt_geom_ft == std::optional<int32_t>(20575)));
+    BOOST_TEST((t.geom.geom_minus_baro_ft == std::optional<int32_t>(425)));
+
+    // 65 s after the geometric altitude: the decoder no longer carries it, the track's copy is too old to
+    // be reported, and the difference is held (older than 60 s: more uncertain than a fresh one).
+    fx.t.call([&] { frame(0xA10001, 0, 0, 20200, std::nullopt, 70.0); });
+    BOOST_TEST(!seen.back().alt_geom_ft);
+    t = track(a);
+    BOOST_TEST((t.geom.source == skycued::GeomSource::estimated));
+    BOOST_TEST((t.geom.geom_minus_baro_ft == std::optional<int32_t>(425)));
+    BOOST_REQUIRE(t.geom.uncertainty_ft.has_value());
+    BOOST_TEST(*t.geom.uncertainty_ft >= 125);
+
+    // A TIS-B trackfile target carries no geometric altitude: it is never reported, and a population
+    // fit from three other aircraft estimates it.
+    for (int k = 0; k < 3; ++k)
+        for (uint32_t i = 0; i < 3; ++i)
+            fx.t.call([&] {
+                const int baro = 10000 + 5000 * static_cast<int>(i);
+                frame(0xA20000 + i, 1, 0, baro, baro + 300, 100.0 + 6.0 * k);
+            });
+    const TrackId tf{0xA30001, AddressType::tisb_trackfile};
+    fx.t.call([&] { frame(0xA30001, 1, 3, 15000, 15300, 130.0); });
+    BOOST_REQUIRE(!seen.empty());
+    BOOST_TEST(!seen.back().alt_geom_ft);
+    BOOST_TEST(!seen.back().geom_minus_baro_ft);
+    t = track(tf);
+    BOOST_TEST((t.geom.source == skycued::GeomSource::estimated));
+    BOOST_TEST(!t.geom.geom_minus_baro_ft.has_value());
+    BOOST_REQUIRE(t.track.alt_geom_ft.has_value());
+    BOOST_TEST(std::abs(*t.track.alt_geom_ft - 15300) <= 50);
 }

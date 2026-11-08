@@ -14,6 +14,8 @@
 #include "inputs/uat_raw_input.hpp"
 #include "json_lite.hpp"
 #include "raw_formats.hpp"
+#include "restricted_fixtures.hpp"
+#include "uat_test_support.hpp"
 #include "web_inputs.hpp"
 
 #include <algorithm>
@@ -80,10 +82,17 @@ InputDef builtinDump978(uint16_t port)
     return d;
 }
 
+// The captures carry no times and are replayed at wire speed, which a fix-to-fix speed check
+// (spec 5.5 step 4) would take for jumps. The arrival clock therefore advances ten seconds per
+// downlink handed to the decoder. Even so the capture holds jumps no aircraft flew (8.7 and 12.4 NM
+// between successive fixes of ad7233) and the check drops them. It runs on the io thread only.
 RawDecodeOptions decodeOn()
 {
     RawDecodeOptions o;
     o.enabled = true;
+    auto n = std::make_shared<int64_t>(0);
+    const auto base = std::chrono::system_clock::now();
+    o.clock = [n, base] { return base + std::chrono::seconds(10 * (*n)++); };
     return o;
 }
 
@@ -230,7 +239,7 @@ std::string hexOf(const std::string& line)
 
 }  // namespace
 
-BOOST_AUTO_TEST_CASE(decode_off_counts_and_publishes_only)
+BOOST_AUTO_TEST_CASE(decode_off_counts_and_publishes_only, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     BOOST_REQUIRE_EQUAL(f.down.size(), 439u);
@@ -251,7 +260,7 @@ BOOST_AUTO_TEST_CASE(decode_off_counts_and_publishes_only)
     BOOST_TEST(rig.obsCount() == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(builtin_dump978_does_not_decode_under_readsb)
+BOOST_AUTO_TEST_CASE(builtin_dump978_does_not_decode_under_readsb, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     skycued::InputManagerConfig cfg;
@@ -266,7 +275,7 @@ BOOST_AUTO_TEST_CASE(builtin_dump978_does_not_decode_under_readsb)
     BOOST_TEST(rig.published_count() == f.down.size());
 }
 
-BOOST_AUTO_TEST_CASE(builtin_dump978_decodes_under_skycued)
+BOOST_AUTO_TEST_CASE(builtin_dump978_decodes_under_skycued, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     skycued::InputManagerConfig cfg;
@@ -286,7 +295,7 @@ BOOST_AUTO_TEST_CASE(builtin_dump978_decodes_under_skycued)
         BOOST_REQUIRE_EQUAL(o.input_id, "dump978");
 }
 
-BOOST_AUTO_TEST_CASE(user_uat_raw_decodes_under_skycued)
+BOOST_AUTO_TEST_CASE(user_uat_raw_decodes_under_skycued, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     skycued::InputManagerConfig cfg;
@@ -302,7 +311,7 @@ BOOST_AUTO_TEST_CASE(user_uat_raw_decodes_under_skycued)
         BOOST_REQUIRE_EQUAL(o.input_id, "ux");
 }
 
-BOOST_AUTO_TEST_CASE(uplinks_still_go_to_fisb_when_decoding)
+BOOST_AUTO_TEST_CASE(uplinks_still_go_to_fisb_when_decoding, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     BOOST_REQUIRE(!f.up.empty());
@@ -318,7 +327,7 @@ BOOST_AUTO_TEST_CASE(uplinks_still_go_to_fisb_when_decoding)
     BOOST_TEST(rig.uplinks.front() == hexOf(f.up.front()));
 }
 
-BOOST_AUTO_TEST_CASE(rssi_key_reaches_observation)
+BOOST_AUTO_TEST_CASE(rssi_key_reaches_observation, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     // The first downlink that yields an observation on its own.
@@ -356,7 +365,29 @@ BOOST_AUTO_TEST_CASE(bad_length_line_counts_rejected_and_is_still_published)
     BOOST_TEST(rig.obsCount() == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier)
+BOOST_AUTO_TEST_CASE(rs_errors_of_the_line_are_counted)
+{
+    skycued::testing::UatSpec spec;
+    spec.type = 1;
+    spec.lat = 38.95;
+    spec.lon = -77.0;
+    spec.alt_ft = 5000;
+    spec.nic = 8;
+    const std::string hex = skycued::testing::toHex(skycued::testing::encodeUat(spec));
+    Rig rig;
+    const uint16_t port = runUat(rig, "rs", true);
+    feed(rig, port, "-" + hex + ";rs=2;\n-" + hex + ";rs=1;\n-" + hex + ";\n", 3);
+    const auto s = rig.state();
+    BOOST_TEST(s.counters.frames == 3u);
+    BOOST_TEST(s.counters.rs_errors == 3u);
+    skycued::InputEntry entry;
+    entry.def = defOf(listenDef("rs", "uat_raw", port));
+    entry.state = s;
+    BOOST_TEST(skycued::webapi::inputJson(entry, std::chrono::system_clock::now()).find("\"rs_errors\":3") !=
+               std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     std::map<int, int> per_qualifier, per_type;
@@ -392,14 +423,15 @@ BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier)
     BOOST_TEST(per_type[0] == 169);
     BOOST_TEST(per_type[1] == 192);
     BOOST_TEST(per_type[2] == 78);
-    BOOST_TEST(k.decoded == 439u);
+    // The two ad7233 jumps (8.7 and 12.4 NM) fail the speed check; their frames count as no_position.
+    BOOST_TEST(k.decoded == 437u);
     BOOST_TEST(k.unmapped == 0u);
-    BOOST_TEST(k.no_position == 0u);
-    BOOST_TEST(k.cpr_rejected == 0u);
-    BOOST_TEST(k.decoder_observations == 439u);
+    BOOST_TEST(k.no_position == 2u);
+    BOOST_TEST(k.cpr_rejected == 2u);
+    BOOST_TEST(k.decoder_observations == 438u);
 }
 
-BOOST_AUTO_TEST_CASE(stratux_log_decodes)
+BOOST_AUTO_TEST_CASE(stratux_log_decodes, *skycue_test::needs_fixture("raw/stratux-uat-2015.log.gz"))
 {
     const auto f = stratux();
     BOOST_REQUIRE(!f.down.empty());
@@ -407,12 +439,15 @@ BOOST_AUTO_TEST_CASE(stratux_log_decodes)
     const uint16_t port = runUat(rig, "st", true);
     feed(rig, port, joined(f.down) + joined(f.up), f.down.size() + f.up.size());
     const auto s = rig.state();
-    BOOST_TEST(s.counters.decoded > 0u);
+    BOOST_TEST(s.counters.frames == 3760u);  // the golden pairs the same 3,760 frames
+    BOOST_TEST(s.counters.unknown_type == 0u);
+    BOOST_TEST(s.counters.decoded + s.counters.no_position == 3760u);
+    BOOST_TEST(s.counters.decoded == 3756u);  // the rest are fixes dropped by the speed check
     BOOST_TEST(s.counters.frames + s.counters.rejected >= f.down.size());
     BOOST_TEST(rig.uplinkCount() == f.up.size());
 }
 
-BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes)
+BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     int type1 = 0, with_both = 0, type0 = 0;
@@ -438,7 +473,7 @@ BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes)
     BOOST_TEST(with_both == type1);
 }
 
-BOOST_AUTO_TEST_CASE(counters_in_state_json)
+BOOST_AUTO_TEST_CASE(counters_in_state_json, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     Rig rig;
@@ -451,11 +486,11 @@ BOOST_AUTO_TEST_CASE(counters_in_state_json)
     BOOST_REQUIRE(skycued::JsonObject::parse(text));
     for (const char* name : {"frames", "crc_fail", "crc_fixed", "ap_unconfirmed", "no_position", "cpr_pending",
                              "cpr_rejected", "decoded", "unmapped", "unknown_type", "evicted", "decoder_observations",
-                             "mlat_skipped", "modeac_skipped", "other_skipped", "no_raw", "raw_duplicates", "uplinks"})
+                             "mlat_skipped", "modeac_skipped", "other_skipped", "no_raw", "raw_duplicates", "uplinks", "rs_errors"})
         BOOST_TEST(text.find(std::string("\"") + name + "\":") != std::string::npos, name);
 }
 
-BOOST_AUTO_TEST_CASE(stop_mid_stream_no_callback_after_stop)
+BOOST_AUTO_TEST_CASE(stop_mid_stream_no_callback_after_stop, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     Rig rig;
@@ -497,7 +532,7 @@ BOOST_AUTO_TEST_CASE(skycued_with_readsb_uat_json_warns)
     const auto wd = skycued::decoderWarnings({rs, d}, {});
     BOOST_REQUIRE(wd.size() == 1u);
     BOOST_TEST(wd[0].find("'dump978'") != std::string::npos);
-    // Without a uat input (the stack launcher drops uat_in), or with it disabled: nothing.
+    // Without a uat input (no uat input configured), or with it disabled: nothing.
     BOOST_TEST(skycued::decoderWarnings({rs}, {}).empty());
     u.enabled = false;
     BOOST_TEST(skycued::decoderWarnings({rs, u}, {}).empty());
@@ -544,7 +579,7 @@ void sendUdp(uint16_t port, const std::string& s)
 
 }  // namespace
 
-BOOST_AUTO_TEST_CASE(two_feeds_one_aircraft_tracks_once)
+BOOST_AUTO_TEST_CASE(two_feeds_one_aircraft_tracks_once, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
     const auto f = sample();
     // A downlink with a position, and its address.

@@ -50,6 +50,7 @@ run_case() {
   local name=$1 sample=$2 golden=$3 speed=$4 ref=$5 expect=$6 want_fresh=$7
   local d="$tmp/$name" fresh="" gen_pid="" ref_lat ref_lon
   [ -e "$sample" ] && [ -e "$golden" ] || { echo "case $name: skipped, $sample or $golden is not there"; return 0; }
+  ran=$((ran + 1))
   mkdir -p "$d/rec"
   if [ "$ref" = median ]; then
     local med
@@ -166,10 +167,11 @@ EOF
 }
 
 status=0
+ran=0  # cases that were not skipped
 raw="$fixtures/raw"
 run_case sample "$raw/uat-sample.txt.gz" "$raw/uat-sample.golden.jsonl.gz" 1 "37.4 -122.1" 1 1
 run_case stratux "$raw/stratux-uat-2015.log.gz" "$raw/uat-stratux.golden.jsonl.gz" 0 median 0 0
 run_case stratux-b "$raw/stratux-uat-2015b.log.gz" "$raw/uat-stratux-b.golden.jsonl.gz" 0 median 0 0
-[ -e "$raw/uat-sample.txt.gz" ] || { echo "SKIP: the UAT sample is not there"; exit 77; }
 [ "$status" = 0 ] || exit 1
-echo "PASS: decode_differential_uat"
+[ "$ran" -gt 0 ] || { echo "SKIP: every case was skipped (fetch the captures: scripts/fixtures/fetch-test-captures.sh)"; exit 77; }
+echo "PASS: decode_differential_uat ($ran of 3 cases ran)"

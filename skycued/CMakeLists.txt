@@ -43,6 +43,7 @@ add_library(skycued_core STATIC
   src/filters.cpp
   src/forwarder.cpp
   src/geo.cpp
+  src/hub/raw_tap.cpp
   src/icao_class.cpp
   src/inputs/capture_writer.cpp
   src/inputs/cat021_map.cpp
@@ -65,6 +66,7 @@ add_library(skycued_core STATIC
   src/json_lite.cpp
   src/line_client.cpp
   src/log.cpp
+  src/outputs/output_def.cpp
   src/raw_formats.cpp
   src/readsb_json_source.cpp
   src/recorder.cpp

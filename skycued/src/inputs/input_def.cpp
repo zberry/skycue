@@ -17,7 +17,8 @@ constexpr int64_t kMinStatusInterval = 5, kMaxStatusInterval = 3600;
 
 const char* const kKeys[] = {"id",      "name", "type", "enabled",           "transport", "bind",
                              "host",    "port", "peer", "edition",           "sac",       "sic",
-                             "status_url",      "status_interval_s",         "time_mode", "capture"};
+                             "status_url",      "status_interval_s",         "time_mode", "capture",
+                             "group",   "interface",    "format"};
 const char* const kReservedIds[] = {"readsb", "dump978", "replay"};
 const char* const kEditions[] = {"2.2", "2.3", "2.4", "2.5", "2.6", "2.7"};
 
@@ -112,7 +113,6 @@ std::size_t utf8At(const std::string& name, std::size_t i, std::uint32_t& cp)
     return len;
 }
 
-// Dotted decimal, four parts of 0..255 without leading zeros.
 bool isIpv4(const std::string& s)
 {
     int parts = 0;
@@ -162,6 +162,14 @@ bool isHost(const std::string& host)
         start = end + 1;
     }
     return !last_all_digits;
+}
+
+bool isMulticastV4(const std::string& s)
+{
+    if (!isIpv4(s))
+        return false;
+    const int first = std::stoi(s.substr(0, s.find('.')));
+    return first >= 224 && first <= 239;
 }
 
 bool isNull(const JsonObject& o, const char* key)
@@ -215,7 +223,7 @@ std::string getOptionalText(const JsonObject& o, const char* key, const char* wh
 std::optional<InputType> parseType(const std::string& s)
 {
     for (InputType t : {InputType::readsb, InputType::dump978, InputType::pingstation_json,
-                        InputType::pingstation_cat021})  // never replay
+                        InputType::pingstation_cat021, InputType::beast_raw, InputType::uat_raw})  // never replay
         if (s == inputTypeName(t))
             return t;
     return std::nullopt;
@@ -231,21 +239,31 @@ std::optional<InputTransport> parseTransport(const std::string& s)
 
 bool isPingStation(InputType t) { return t == InputType::pingstation_json || t == InputType::pingstation_cat021; }
 bool listens(InputTransport t) { return t != InputTransport::tcp_connect; }
+bool takesCapture(InputType t) { return isPingStation(t) || t == InputType::beast_raw || t == InputType::uat_raw; }
+InputTransport defaultTransport(InputType t)
+{
+    return t == InputType::pingstation_json ? InputTransport::udp : InputTransport::tcp_connect;
+}
 
 // Why `key` does not apply to an input of `type` over `transport`; "" when it does.
 std::string notApplicable(const std::string& key, InputType type, InputTransport transport)
 {
-    if (key == "transport")
-        return type == InputType::pingstation_cat021 ? "" : "transport applies to pingstation_cat021 only";
     if (key == "host")
         return listens(transport) ? std::string("host is not used with ") + transportName(transport) : "";
     if (key == "bind")
         return listens(transport) ? "" : std::string("bind is not used with ") + transportName(transport);
     if (key == "peer")
         return listens(transport) ? "" : "peer applies to udp and tcp_listen only";
+    if (key == "group" || key == "interface")
+        return transport == InputTransport::udp ? "" : key + " applies to udp only";
+    if (key == "format")
+        return type == InputType::beast_raw ? "" : "format applies to beast_raw only";
+    if (key == "capture")
+        return takesCapture(type) ? ""
+                                  : "capture applies to beast_raw, uat_raw, pingstation_json and pingstation_cat021 only";
     if (key == "edition" || key == "sac" || key == "sic")
         return type == InputType::pingstation_cat021 ? "" : key + " applies to pingstation_cat021 only";
-    if (key == "status_url" || key == "status_interval_s" || key == "time_mode" || key == "capture")
+    if (key == "status_url" || key == "status_interval_s" || key == "time_mode")
         return isPingStation(type) ? "" : key + " applies to pingstation_json and pingstation_cat021 only";
     return "";
 }
@@ -275,6 +293,8 @@ const char* inputTypeName(InputType type)
     case InputType::dump978: return "dump978";
     case InputType::pingstation_json: return "pingstation_json";
     case InputType::pingstation_cat021: return "pingstation_cat021";
+    case InputType::beast_raw: return "beast_raw";
+    case InputType::uat_raw: return "uat_raw";
     case InputType::replay: return "replay";
     }
     return "?";
@@ -290,14 +310,22 @@ const char* transportName(InputTransport transport)
     return "?";
 }
 
-bool isTrackType(InputType type) { return type != InputType::dump978; }
+bool isTrackType(InputType type)
+{
+    return type != InputType::dump978 && type != InputType::beast_raw && type != InputType::uat_raw;
+}
+
+bool isIpv4Literal(const std::string& s) { return isIpv4(s); }
+bool isValidHost(const std::string& s) { return isHost(s); }
+bool isIpv4Multicast(const std::string& s) { return isMulticastV4(s); }
 
 bool InputDef::operator==(const InputDef& o) const
 {
     return id == o.id && name == o.name && type == o.type && enabled == o.enabled && transport == o.transport &&
            bind == o.bind && host == o.host && port == o.port && edition == o.edition && sac == o.sac &&
            sic == o.sic && status_url == o.status_url && status_interval_s == o.status_interval_s &&
-           time_mode == o.time_mode && capture == o.capture && peer == o.peer && builtin == o.builtin;
+           time_mode == o.time_mode && capture == o.capture && peer == o.peer && builtin == o.builtin &&
+           group == o.group && iface == o.iface && format == o.format;
 }
 
 InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
@@ -320,17 +348,18 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
         if (d.id == reserved)
             fail("id '" + d.id + "' is reserved");
 
-    const char* const kTypeRule = "type must be one of readsb, dump978, pingstation_json, pingstation_cat021";
+    const char* const kTypeRule =
+        "type must be one of readsb, dump978, pingstation_json, pingstation_cat021, beast_raw, uat_raw";
     if (!o.has("type"))
         fail("type is required");
     const auto type = parseType(getText(o, "type", "a string"));
     if (!type)
         fail(kTypeRule);
     d.type = *type;
-    d.transport = d.type == InputType::pingstation_json ? InputTransport::udp : InputTransport::tcp_connect;
-    if (d.type == InputType::pingstation_cat021) {
-        if (!o.has("transport"))
-            fail("transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)");
+    d.transport = defaultTransport(d.type);
+    if (d.type == InputType::pingstation_cat021 && !o.has("transport"))
+        fail("transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)");
+    if (o.has("transport")) {
         const auto transport = parseTransport(getText(o, "transport", "udp, tcp_connect or tcp_listen"));
         if (!transport)
             fail("transport must be udp, tcp_connect or tcp_listen");
@@ -358,7 +387,21 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
         fail("port is required");
     d.port = static_cast<uint16_t>(getIntIn(o, "port", 1, 65535));
     if (listens(d.transport)) {
+        if (d.transport == InputTransport::udp) {
+            d.group = getOptionalText(o, "group", "a multicast address");
+            if (!d.group.empty() && !isMulticastV4(d.group))
+                fail("group must be a multicast address (224.0.0.0 to 239.255.255.255)");
+            d.iface = getOptionalText(o, "interface", "an IPv4 address");
+            if (!d.iface.empty()) {
+                if (d.group.empty())
+                    fail("interface applies to a multicast group only");
+                if (!isIpv4(d.iface))
+                    fail("interface must be an IPv4 address");
+            }
+        }
         if (o.has("bind")) {
+            if (!d.group.empty())
+                fail("bind does not apply when group is set");
             d.bind = getText(o, "bind", "an IPv4 address");
             if (!isIpv4(d.bind))
                 fail("bind must be an IPv4 address");
@@ -400,8 +443,13 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
             else
                 fail("time_mode must be utc or gps");
         }
-        if (o.has("capture"))
-            d.capture = getFlag(o, "capture");
+    }
+    if (takesCapture(d.type) && o.has("capture"))
+        d.capture = getFlag(o, "capture");
+    if (d.type == InputType::beast_raw && o.has("format")) {
+        d.format = getText(o, "format", "beast or avr");
+        if (d.format != "beast" && d.format != "avr")
+            fail("format must be beast or avr");
     }
     return d;
 }
@@ -412,15 +460,22 @@ std::string inputDefJson(const InputDef& d)
     w.add("id", d.id).add("name", d.name).add("type", inputTypeName(d.type)).add("enabled", d.enabled);
     if (d.type == InputType::replay)
         return w.str();
-    if (d.type == InputType::pingstation_cat021)
+    if (d.type == InputType::pingstation_cat021 || d.type == InputType::beast_raw || d.type == InputType::uat_raw ||
+        d.transport != defaultTransport(d.type))
         w.add("transport", transportName(d.transport));
-    if (listens(d.transport))
-        w.add("bind", d.bind);
-    else
+    if (!listens(d.transport))
         w.add("host", d.host);
+    else if (d.group.empty())
+        w.add("bind", d.bind);
     w.add("port", static_cast<int64_t>(d.port));
     if (listens(d.transport))
         appendOptionalText(w, "peer", d.peer);
+    if (!d.group.empty()) {
+        w.add("group", d.group);
+        appendOptionalText(w, "interface", d.iface);
+    }
+    if (d.type == InputType::beast_raw)
+        w.add("format", d.format);
     if (d.type == InputType::pingstation_cat021) {
         w.add("edition", d.edition);
         appendOptionalOctet(w, "sac", d.sac);
@@ -430,8 +485,9 @@ std::string inputDefJson(const InputDef& d)
         appendOptionalText(w, "status_url", d.status_url);
         w.add("status_interval_s", static_cast<int64_t>(d.status_interval_s));
         w.add("time_mode", d.time_mode == TimeMode::gps ? "gps" : "utc");
-        w.add("capture", d.capture);
     }
+    if (takesCapture(d.type))
+        w.add("capture", d.capture);
     return w.str();
 }
 

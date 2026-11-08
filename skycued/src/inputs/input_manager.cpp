@@ -86,6 +86,8 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
         return std::make_unique<PingJsonInput>(io, def, record);
     case InputType::pingstation_cat021:
         return std::make_unique<PingCat021Input>(io, def, record);
+    case InputType::beast_raw:  // their inputs arrive with the hub's input tasks
+    case InputType::uat_raw:
     case InputType::replay:
         break;
     }

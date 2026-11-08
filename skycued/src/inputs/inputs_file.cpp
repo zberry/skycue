@@ -2,6 +2,8 @@
 
 #include "json_lite.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <set>
 #include <utility>
 
@@ -12,13 +14,44 @@ namespace {
 
 const char* const kBuiltinIds[] = {"readsb", "dump978"};
 
-std::map<std::string, bool> parseBuiltin(const JsonObject& o)
+std::string needsV2(const std::string& key) { return "'" + key + "' needs inputs file version 2"; }
+
+// The first thing in an input entry that only a version 2 file may hold, or "".
+std::string inputV2Key(const JsonObject& e)
+{
+    const auto type = e.getString("type");
+    if (type && (*type == "beast_raw" || *type == "uat_raw"))
+        return *type;
+    for (const char* key : {"group", "interface", "format"})
+        if (e.has(key))
+            return key;
+    if (type && e.has("transport") && (*type == "readsb" || *type == "dump978" || *type == "pingstation_json"))
+        return "transport";
+    return "";
+}
+
+// Whether writing `d` needs a version 2 file.
+bool inputNeedsV2(const InputDef& d)
+{
+    if (d.type == InputType::beast_raw || d.type == InputType::uat_raw || !d.group.empty())
+        return true;
+    const InputTransport v1 =
+        d.type == InputType::pingstation_json ? InputTransport::udp : InputTransport::tcp_connect;
+    return d.type != InputType::pingstation_cat021 && d.transport != v1;
+}
+
+std::map<std::string, bool> parseBuiltin(const JsonObject& o, int version)
 {
     std::map<std::string, bool> out;
     for (const auto& id : o.keys()) {
         bool known = false;
         for (const char* b : kBuiltinIds)
             known |= id == b;
+        if (!known && isReservedCueId(id)) {
+            if (version < 2)
+                fail(needsV2(id));
+            known = true;
+        }
         if (!known)
             fail("builtin: unknown input '" + id + "' (readsb and dump978 only)");
         if (out.count(id))
@@ -63,15 +96,17 @@ InputsFile parseInputsFile(const std::string& text)
         fail("not a JSON object");
     std::set<std::string> seen;
     for (const auto& key : root->keys()) {
-        if (key != "version" && key != "inputs" && key != "builtin")
+        if (key != "version" && key != "inputs" && key != "outputs" && key != "builtin")
             fail("unknown key '" + key + "'");
         if (!seen.insert(key).second)
             fail("duplicate key '" + key + "'");
     }
-    if (root->getInt("version") != std::optional<int64_t>(1))
-        fail("version must be 1");
+    const auto version = root->getInt("version");
+    if (version != std::optional<int64_t>(1) && version != std::optional<int64_t>(2))
+        fail("version must be 1 or 2");
 
     InputsFile out;
+    out.version = static_cast<int>(*version);
     if (root->has("inputs")) {
         const auto entries = root->getObjectArray("inputs");
         if (!entries)
@@ -79,6 +114,11 @@ InputsFile parseInputsFile(const std::string& text)
         for (std::size_t i = 0; i < entries->size(); ++i) {
             const JsonObject& entry = (*entries)[i];
             try {
+                if (out.version < 2) {
+                    const std::string key = inputV2Key(entry);
+                    if (!key.empty())
+                        fail(needsV2(key));
+                }
                 bool repaired = false;
                 out.inputs.push_back(parseInputDef(entry, NameRule::repair, &repaired));
                 if (repaired)
@@ -89,22 +129,50 @@ InputsFile parseInputsFile(const std::string& text)
             }
         }
     }
+    if (root->has("outputs")) {
+        const auto entries = root->getObjectArray("outputs");
+        if (!entries)
+            fail("outputs must be an array of objects");
+        if (out.version < 2 && !entries->empty())
+            fail(needsV2("outputs"));
+        for (std::size_t i = 0; i < entries->size(); ++i) {
+            const JsonObject& entry = (*entries)[i];
+            try {
+                bool repaired = false;
+                out.outputs.push_back(parseOutputDef(entry, NameRule::repair, &repaired));
+                if (repaired)
+                    out.repaired_output_names.push_back(out.outputs.back().id);
+            } catch (const InputDefError& e) {
+                const auto id = entry.getString("id");
+                fail("outputs[" + std::to_string(i) + "] (" + (id ? *id : "?") + "): " + e.what());
+            }
+        }
+    }
     if (root->has("builtin")) {
         const auto builtin = root->getObject("builtin");
         if (!builtin)
             fail("builtin must be an object");
-        out.builtin_enabled = parseBuiltin(*builtin);
+        out.builtin_enabled = parseBuiltin(*builtin, out.version);
     }
-    validateInputSet(out.inputs);
+    out.warnings = validateInputSet(out.inputs, out.outputs);
     return out;
 }
 
 std::string inputsFileJson(const InputsFile& file)
 {
-    std::string out = "{\n  \"version\": 1,\n  \"inputs\": [";
+    bool v2 = !file.outputs.empty() || std::any_of(file.inputs.begin(), file.inputs.end(), inputNeedsV2);
+    for (const auto& b : file.builtin_enabled)
+        v2 = v2 || isReservedCueId(b.first);
+    std::string out = std::string("{\n  \"version\": ") + (v2 ? "2" : "1") + ",\n  \"inputs\": [";
     for (std::size_t i = 0; i < file.inputs.size(); ++i)
         out += (i ? ",\n    " : "\n    ") + inputDefJson(file.inputs[i]);
     out += file.inputs.empty() ? "],\n" : "\n  ],\n";
+    if (v2) {
+        out += "  \"outputs\": [";
+        for (std::size_t i = 0; i < file.outputs.size(); ++i)
+            out += (i ? ",\n    " : "\n    ") + outputDefJson(file.outputs[i]);
+        out += file.outputs.empty() ? "],\n" : "\n  ],\n";
+    }
     out += "  \"builtin\": {";
     bool first = true;
     for (const auto& b : file.builtin_enabled) {
@@ -118,21 +186,87 @@ std::string inputsFileJson(const InputsFile& file)
     return out;
 }
 
-void validateInputSet(const std::vector<InputDef>& defs)
+namespace {
+
+struct Listener {
+    std::string owner;  // "input ps" or "output beast-out"
+    bool multicast;     // a receiver with a group
+};
+
+bool isLoopbackHost(const std::string& host)
+{
+    if (host.compare(0, 4, "127.") == 0 && isIpv4Literal(host))
+        return true;
+    std::string lower = host;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+    if (!lower.empty() && lower.back() == '.')
+        lower.pop_back();
+    return lower == "localhost";
+}
+
+}  // namespace
+
+std::vector<std::string> validateInputSet(const std::vector<InputDef>& inputs, const std::vector<OutputDef>& outputs,
+                                          const std::vector<ReservedPort>& reserved)
 {
     std::set<std::string> ids;
-    std::map<std::pair<std::string, uint16_t>, std::string> listeners;  // (protocol, port) -> id
-    for (const InputDef& d : defs) {
+    for (const InputDef& d : inputs)
         if (!ids.insert(d.id).second)
             fail("duplicate id '" + d.id + "'");
+    std::set<std::string> output_ids;
+    for (const OutputDef& d : outputs)
+        if (!output_ids.insert(d.id).second)
+            fail("duplicate output id '" + d.id + "'");
+
+    std::map<std::pair<std::string, uint16_t>, Listener> listeners;  // (protocol, port) -> the first
+    auto claim = [&](const std::string& protocol, uint16_t port, const std::string& owner, bool multicast) {
+        const auto inserted = listeners.emplace(std::make_pair(protocol, port), Listener{owner, multicast});
+        if (inserted.second)
+            return;
+        if (multicast && inserted.first->second.multicast)
+            return;  // multicast receivers share a port whatever their groups
+        fail("port " + std::to_string(port) + "/" + protocol + " is already used by " + inserted.first->second.owner);
+    };
+    for (const InputDef& d : inputs) {
         const std::string protocol = listenProtocol(d);
-        if (protocol.empty())
-            continue;
-        const auto inserted = listeners.emplace(std::make_pair(protocol, d.port), d.id);
-        if (!inserted.second)
-            fail("port " + std::to_string(d.port) + "/" + protocol + " is already used by input " +
-                 inserted.first->second);
+        if (!protocol.empty())
+            claim(protocol, d.port, "input " + d.id, !d.group.empty());
     }
+    for (const OutputDef& d : outputs) {
+        if (!d.enabled || d.transport != InputTransport::tcp_listen)
+            continue;
+        claim("tcp", d.port, "output " + d.id, false);
+        for (const ReservedPort& r : reserved)
+            if (r.protocol == "tcp" && r.port == d.port)
+                fail("port " + std::to_string(d.port) + "/tcp is already used by " + r.owner);
+    }
+
+    std::vector<std::string> warnings;
+    for (const OutputDef& o : outputs) {
+        if (!o.enabled || o.transport != InputTransport::udp)
+            continue;
+        if (!o.group.empty()) {
+            for (const InputDef& d : inputs)
+                if (d.enabled && d.transport == InputTransport::udp && d.group == o.group && d.port == o.port)
+                    fail("output '" + o.id + "' sends to " + o.group + ":" + std::to_string(o.port) + ", which input '" +
+                         d.id + "' joins (a loop)");
+        }
+    }
+    for (const OutputDef& o : outputs) {
+        if (!o.enabled || o.transport == InputTransport::tcp_listen || !o.group.empty() || !isLoopbackHost(o.host))
+            continue;
+        const std::string protocol = o.transport == InputTransport::udp ? "udp" : "tcp";
+        const auto found = listeners.find(std::make_pair(protocol, o.port));
+        if (found == listeners.end())
+            continue;
+        const std::string& owner = found->second.owner;  // "input x" or "output x"
+        const bool is_input = owner.compare(0, 6, "input ") == 0;
+        const std::string name = owner.substr(is_input ? 6 : 7);
+        warnings.push_back("output '" + o.id + "' sends to " + o.host + ":" + std::to_string(o.port) + ", which " +
+                           (is_input ? "input '" : "output '") + name + "' of this daemon " +
+                           (is_input ? "listens on" : "serves"));
+    }
+    return warnings;
 }
 
 }  // namespace skycued

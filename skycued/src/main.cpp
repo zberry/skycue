@@ -93,6 +93,7 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
 {
     bool readsb_on = check_readsb, dump978_on = check_dump978;
     std::vector<InputDef> user;
+    std::vector<std::string> warnings;
     std::string text;
     if (!inputs_path.empty()) {
         std::ifstream in(inputs_path, std::ios::binary);
@@ -106,7 +107,13 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
             }
             try {
                 const InputsFile file = parseInputsFile(text);
-                validateInputSet(file.inputs);
+                std::vector<ReservedPort> reserved;
+                if (config.cue_tcp_port != 0)
+                    reserved.push_back({"tcp", config.cue_tcp_port, "the cue stream (CUE_TCP_PORT)"});
+                if (config.web_port != 0)
+                    reserved.push_back({"tcp", config.web_port, "the web server (WEB_PORT)"});
+                for (const auto& warning : validateInputSet(file.inputs, file.outputs, reserved))
+                    warnings.push_back(warning);
                 const auto r = file.builtin_enabled.find("readsb");
                 if (r != file.builtin_enabled.end())
                     readsb_on = readsb_on && r->second;
@@ -134,6 +141,8 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
         else
             unchecked.push_back(d.id + ": not checked (listens on " + d.bind + ":" + std::to_string(d.port) + ")");
     }
+    for (const auto& warning : warnings)
+        std::cout << "WARN: " << warning << "\n";
     if (checks.empty() && unchecked.empty()) {
         std::cout << "no inputs to check\n";
         return 0;

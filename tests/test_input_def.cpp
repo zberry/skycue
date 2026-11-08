@@ -4,6 +4,7 @@
 #include "file_util.hpp"
 #include "inputs/input_def.hpp"
 #include "inputs/inputs_file.hpp"
+#include "outputs/output_def.hpp"
 #include "json_lite.hpp"
 
 #include <ftw.h>
@@ -330,9 +331,8 @@ BOOST_AUTO_TEST_CASE(unknown_key_rejected)
 
 BOOST_AUTO_TEST_CASE(field_not_for_type_rejected)
 {
-    BOOST_TEST(err(std::string(kReadsb) + R"(,"transport":"tcp_connect")") ==
-               "transport applies to pingstation_cat021 only");
-    BOOST_TEST(err(std::string(kPsJson) + R"(,"transport":"udp")") == "transport applies to pingstation_cat021 only");
+    BOOST_TEST(err(std::string(kReadsb) + R"(,"transport":"sctp")") == "transport must be udp, tcp_connect or tcp_listen");
+    BOOST_TEST(err(std::string(kReadsb) + R"(,"edition":"2.5")") == "edition applies to pingstation_cat021 only");
     BOOST_TEST(err(std::string(kCatConnect) + R"(,"peer":"192.0.2.1")") == "peer applies to udp and tcp_listen only");
     BOOST_TEST(err(std::string(kReadsb) + R"(,"peer":"192.0.2.1")") == "peer applies to udp and tcp_listen only");
     BOOST_TEST(err(cat(R"("host":"192.0.2.1")")) == "host is not used with udp");
@@ -514,7 +514,7 @@ BOOST_AUTO_TEST_CASE(inputs_file_bad_entry_names_index)
 
 BOOST_AUTO_TEST_CASE(inputs_file_version_and_unknown_key)
 {
-    BOOST_TEST(contains(inputsFileErr(R"({"version":2,"inputs":[]})"), "version"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":3,"inputs":[]})"), "version"));
     BOOST_TEST(contains(inputsFileErr(R"({"inputs":[]})"), "version"));
     BOOST_TEST(contains(inputsFileErr(R"({"version":"x","inputs":[]})"), "version"));
     BOOST_TEST(contains(inputsFileErr(R"({"version":1,"inputs":[],"input":[]})"), "input'"));
@@ -655,4 +655,400 @@ BOOST_AUTO_TEST_CASE(settled_file_needs_two_stable_polls)
     BOOST_TEST(watch.poll());
     BOOST_TEST((FileStamp::of(path) == FileStamp::of(tmp.path + "/none")));
     BOOST_TEST((FileStamp::of(path) != FileStamp::of(tmp.path)));
+}
+
+// ---- v2: endpoint fields, raw input types, outputs in the set --------------
+
+namespace {
+
+const char* const kV1Example =
+    R"({"version":1,"inputs":[{"id":"ps-north","name":"North mast","type":"pingstation_cat021","enabled":true,)"
+    R"("transport":"udp","bind":"0.0.0.0","port":4001,"peer":null,"edition":"2.5","sac":null,"sic":null,)"
+    R"("status_url":null,"status_interval_s":30,"time_mode":"utc","capture":false}],)"
+    R"("builtin":{"readsb":{"enabled":true},"dump978":{"enabled":true}}})";
+const char* const kV1Sim =
+    R"({"version":1,"inputs":[{"id":"sim-json","name":"Simulated JSON","type":"pingstation_json",)"
+    R"("bind":"127.0.0.1","port":4000},{"id":"sim-cat","name":"Simulated CAT021","type":"pingstation_cat021",)"
+    R"("transport":"udp","bind":"127.0.0.1","port":4001}]})";
+
+OutputDef outDef(const std::string& members) { return parseOutputDef(obj("{" + members + "}")); }
+
+std::string setErr3(const std::vector<InputDef>& in, const std::vector<OutputDef>& out,
+                    const std::vector<ReservedPort>& reserved = {})
+{
+    try {
+        validateInputSet(in, out, reserved);
+    } catch (const InputDefError& e) {
+        return e.what();
+    }
+    return "";
+}
+
+const char* const kBeastOut = R"("id":"beast-out","kind":"beast","transport":"tcp_listen","port":30005)";
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(v2_transport_accepted_on_line_types)
+{
+    struct Row {
+        const char* type;
+        InputTransport def;
+    };
+    const Row rows[] = {{"readsb", InputTransport::tcp_connect},
+                        {"dump978", InputTransport::tcp_connect},
+                        {"uat_raw", InputTransport::tcp_connect},
+                        {"beast_raw", InputTransport::tcp_connect},
+                        {"pingstation_json", InputTransport::udp}};
+    for (const Row& r : rows) {
+        const std::string head = std::string(R"("id":"x","type":")") + r.type + R"(","port":4000)";
+        const std::string connect = head + R"(,"host":"192.0.2.1")";
+        BOOST_TEST((def(r.def == InputTransport::udp ? head : connect).transport == r.def), r.type);
+        for (const char* t : {"tcp_connect", "tcp_listen", "udp"}) {
+            const std::string members = head + R"(,"transport":")" + t + '"' +
+                                        (std::string(t) == "tcp_connect" ? R"(,"host":"192.0.2.1")" : "");
+            BOOST_TEST(ok(members), r.type << " " << t << " -> " << err(members));
+            BOOST_TEST(std::string(transportName(def(members).transport)) == t);
+        }
+    }
+    BOOST_TEST(def(R"("id":"x","type":"uat_raw","port":4000,"host":"h")").port == 4000);
+    BOOST_TEST(contains(err(R"("id":"x","type":"beast_raw","port":4000)"), "host is required"));
+}
+
+BOOST_AUTO_TEST_CASE(group_requires_udp_and_multicast_address)
+{
+    const std::string udp = R"("id":"x","type":"beast_raw","transport":"udp","port":4000)";
+    BOOST_TEST(def(udp + R"(,"group":"239.1.1.5")").group == "239.1.1.5");
+    BOOST_TEST(ok(udp + R"(,"group":"224.0.0.0")"));
+    BOOST_TEST(ok(udp + R"(,"group":"239.255.255.255")"));
+    for (const char* bad : {"192.0.2.1", "223.255.255.255", "240.0.0.0", "239.1.1", "ff02::1", "host"})
+        BOOST_TEST(err(udp + R"(,"group":")" + bad + R"(")") ==
+                       "group must be a multicast address (224.0.0.0 to 239.255.255.255)",
+                   bad);
+    BOOST_TEST(err(R"("id":"x","type":"beast_raw","transport":"tcp_listen","port":4000,"group":"239.1.1.5")") ==
+               "group applies to udp only");
+    BOOST_TEST(err(R"("id":"x","type":"readsb","host":"h","port":4000,"group":"239.1.1.5")") ==
+               "group applies to udp only");
+    BOOST_TEST(ok(udp + R"(,"group":null)"));
+}
+
+BOOST_AUTO_TEST_CASE(interface_requires_group)
+{
+    const std::string udp = R"("id":"x","type":"uat_raw","transport":"udp","port":4000)";
+    BOOST_TEST(def(udp + R"(,"group":"239.1.1.5","interface":"192.0.2.10")").iface == "192.0.2.10");
+    BOOST_TEST(err(udp + R"(,"interface":"192.0.2.10")") == "interface applies to a multicast group only");
+    BOOST_TEST(err(udp + R"(,"group":"239.1.1.5","interface":"eth0")") == "interface must be an IPv4 address");
+    BOOST_TEST(err(R"("id":"x","type":"uat_raw","host":"h","port":4000,"interface":"192.0.2.10")") ==
+               "interface applies to udp only");
+}
+
+BOOST_AUTO_TEST_CASE(bind_refused_with_group)
+{
+    const std::string udp = R"("id":"x","type":"beast_raw","transport":"udp","port":4000)";
+    BOOST_TEST(err(udp + R"(,"group":"239.1.1.5","bind":"0.0.0.0")") == "bind does not apply when group is set");
+    BOOST_TEST(ok(udp + R"(,"bind":"192.0.2.10")"));
+}
+
+BOOST_AUTO_TEST_CASE(beast_raw_format_values)
+{
+    const std::string base = R"("id":"x","type":"beast_raw","host":"h","port":4000)";
+    BOOST_TEST(def(base).format == "beast");
+    BOOST_TEST(def(base + R"(,"format":"avr")").format == "avr");
+    BOOST_TEST(def(base + R"(,"format":"beast")").format == "beast");
+    BOOST_TEST(err(base + R"(,"format":"mlat")") == "format must be beast or avr");
+    BOOST_TEST(err(base + R"(,"format":1)") == "format must be beast or avr");
+}
+
+BOOST_AUTO_TEST_CASE(format_only_on_beast_raw)
+{
+    for (const char* line : {kReadsb, kDump978, kPsJson, kCatUdp, R"("id":"u","type":"uat_raw","host":"h","port":1)"})
+        BOOST_TEST(err(std::string(line) + R"(,"format":"avr")") == "format applies to beast_raw only", line);
+}
+
+BOOST_AUTO_TEST_CASE(capture_accepted_on_raw_types)
+{
+    for (const char* type : {"beast_raw", "uat_raw"}) {
+        const std::string base = std::string(R"("id":"x","type":")") + type + R"(","host":"h","port":4000)";
+        BOOST_TEST(!def(base).capture);
+        BOOST_TEST(def(base + R"(,"capture":true)").capture);
+    }
+    BOOST_TEST(def(std::string(kPsJson) + R"(,"capture":true)").capture);
+    BOOST_TEST(contains(err(std::string(kReadsb) + R"(,"capture":true)"), "capture applies to"));
+    BOOST_TEST(contains(err(std::string(kDump978) + R"(,"capture":true)"), "capture applies to"));
+}
+
+BOOST_AUTO_TEST_CASE(track_types_exclude_raw_inputs)
+{
+    BOOST_TEST(!isTrackType(InputType::beast_raw));
+    BOOST_TEST(!isTrackType(InputType::uat_raw));
+    BOOST_TEST(!isTrackType(InputType::dump978));
+    BOOST_TEST(isTrackType(InputType::readsb));
+}
+
+BOOST_AUTO_TEST_CASE(input_json_round_trip_new_types)
+{
+    const char* const members[] = {
+        R"("id":"b1","type":"beast_raw","host":"192.0.2.9","port":30005,"capture":true)",
+        R"("id":"b2","type":"beast_raw","transport":"tcp_listen","bind":"127.0.0.1","port":30006,"peer":"192.0.2.3","format":"avr")",
+        R"("id":"b3","type":"beast_raw","transport":"udp","port":30007,"group":"239.1.1.5","interface":"192.0.2.10")",
+        R"("id":"u1","type":"uat_raw","host":"h.example","port":30978)",
+        R"("id":"u2","type":"uat_raw","transport":"udp","port":30979,"group":"239.1.1.6")",
+        R"("id":"r1","type":"readsb","transport":"udp","port":30047)",
+        R"("id":"r2","type":"readsb","transport":"tcp_listen","port":30048)",
+        R"("id":"d1","type":"dump978","transport":"tcp_listen","port":30049)",
+        R"("id":"j1","type":"pingstation_json","transport":"tcp_connect","host":"h","port":4000)",
+        R"("id":"j2","type":"pingstation_json","port":4001,"group":"239.1.1.7")",
+        R"("id":"c1","type":"pingstation_cat021","transport":"udp","port":4002,"group":"239.1.1.8","capture":true)"};
+    for (const char* m : members) {
+        const InputDef d = def(m);
+        const auto reparsed = parseInputDef(obj(inputDefJson(d)));
+        BOOST_TEST((reparsed == d), m << " -> " << inputDefJson(d));
+    }
+    // Keys that do not apply are not written.
+    BOOST_TEST(!contains(inputDefJson(def(kReadsb)), "group"));
+    BOOST_TEST(!contains(inputDefJson(def(kReadsb)), "transport"));
+    BOOST_TEST(!contains(inputDefJson(def(kPsJson)), "transport"));
+    BOOST_TEST(!contains(inputDefJson(def(members[2])), "bind"));
+}
+
+BOOST_AUTO_TEST_CASE(unicast_and_multicast_udp_same_port_conflict)
+{
+    const InputDef uni = def(R"("id":"uni","type":"beast_raw","transport":"udp","port":4978)");
+    const InputDef multi = def(R"("id":"multi","type":"beast_raw","transport":"udp","port":4978,"group":"239.1.1.5")");
+    BOOST_TEST(setErr({uni, multi}) == "port 4978/udp is already used by input uni");
+    BOOST_TEST(setErr({multi, uni}) == "port 4978/udp is already used by input multi");
+}
+
+BOOST_AUTO_TEST_CASE(two_multicast_receivers_share_port_across_groups)
+{
+    const InputDef a = def(R"("id":"a","type":"beast_raw","transport":"udp","port":4978,"group":"239.1.1.5")");
+    const InputDef b = def(R"("id":"b","type":"uat_raw","transport":"udp","port":4978,"group":"239.1.1.6")");
+    const InputDef c = def(R"("id":"c","type":"uat_raw","transport":"udp","port":4978,"group":"239.1.1.5")");
+    BOOST_TEST(setErr({a, b, c}) == "");
+    BOOST_TEST(setErr({a, b, def(R"("id":"d","type":"uat_raw","transport":"udp","port":4978)")}) ==
+               "port 4978/udp is already used by input a");
+}
+
+BOOST_AUTO_TEST_CASE(output_vs_input_port_conflict)
+{
+    const InputDef ps = def(R"("id":"ps","type":"pingstation_cat021","transport":"tcp_listen","port":30005)");
+    const OutputDef beast = outDef(kBeastOut);
+    BOOST_TEST(setErr3({ps}, {beast}) == "port 30005/tcp is already used by input ps");
+    // The first one named is the input even when the outputs were given first
+    // (inputs before outputs), and an output pair names the first output.
+    const OutputDef second = outDef(R"("id":"second","kind":"uat","transport":"tcp_listen","port":30005)");
+    BOOST_TEST(setErr3({}, {beast, second}) == "port 30005/tcp is already used by output beast-out");
+    // An input after an output: still the input, then the output.
+    BOOST_TEST(setErr3({ps}, {second}) == "port 30005/tcp is already used by input ps");
+    // Different protocols do not conflict.
+    const InputDef udp = def(R"("id":"u","type":"beast_raw","transport":"udp","port":30005)");
+    BOOST_TEST(setErr3({udp}, {beast}) == "");
+    // Duplicate ids: separate namespaces.
+    BOOST_TEST(setErr3({def(R"("id":"beast-out","type":"pingstation_json","port":4000)")}, {beast}) == "");
+    BOOST_TEST(setErr3({}, {beast, beast}) == "duplicate output id 'beast-out'");
+    BOOST_TEST(setErr({ps, ps}) == "duplicate id 'ps'");
+}
+
+BOOST_AUTO_TEST_CASE(output_vs_reserved_cue_port)
+{
+    const std::vector<ReservedPort> reserved = {{"tcp", 30500, "the cue stream (CUE_TCP_PORT)"}};
+    const OutputDef out = outDef(R"("id":"o","kind":"beast","transport":"tcp_listen","port":30500)");
+    BOOST_TEST(setErr3({}, {out}, reserved) == "port 30500/tcp is already used by the cue stream (CUE_TCP_PORT)");
+    BOOST_TEST(setErr3({}, {out}) == "");
+}
+
+BOOST_AUTO_TEST_CASE(input_vs_reserved_port_not_checked)
+{
+    const std::vector<ReservedPort> reserved = {{"tcp", 30500, "the cue stream (CUE_TCP_PORT)"}};
+    const InputDef in = def(R"("id":"i","type":"pingstation_cat021","transport":"tcp_listen","port":30500)");
+    BOOST_TEST(setErr3({in}, {}, reserved) == "");
+}
+
+BOOST_AUTO_TEST_CASE(disabled_entries_do_not_conflict)
+{
+    InputDef ps = def(R"("id":"ps","type":"pingstation_cat021","transport":"tcp_listen","port":30005)");
+    ps.enabled = false;
+    OutputDef beast = outDef(kBeastOut);
+    BOOST_TEST(setErr3({ps}, {beast}) == "");
+    ps.enabled = true;
+    beast.enabled = false;
+    BOOST_TEST(setErr3({ps}, {beast}) == "");
+    OutputDef reserved_out = outDef(R"("id":"o","kind":"beast","transport":"tcp_listen","port":30500,"enabled":false)");
+    BOOST_TEST(setErr3({}, {reserved_out}, {{"tcp", 30500, "x"}}) == "");
+    // A disabled output sending to a joined group is no loop.
+    InputDef join = def(R"("id":"j","type":"beast_raw","transport":"udp","port":4978,"group":"239.1.1.5")");
+    OutputDef send = outDef(R"("id":"s","kind":"beast","transport":"udp","port":4978,"group":"239.1.1.5","enabled":false)");
+    BOOST_TEST(setErr3({join}, {send}) == "");
+}
+
+BOOST_AUTO_TEST_CASE(udp_output_never_conflicts)
+{
+    const InputDef in = def(R"("id":"u","type":"beast_raw","transport":"udp","port":4000)");
+    const OutputDef uni = outDef(R"("id":"s","kind":"beast","transport":"udp","port":4000,"host":"192.0.2.9")");
+    const OutputDef reserved_port = outDef(R"("id":"s2","kind":"beast","transport":"udp","port":30500,"host":"192.0.2.9")");
+    BOOST_TEST(setErr3({in}, {uni, reserved_port}, {{"udp", 30500, "x"}, {"tcp", 30500, "y"}}) == "");
+    const OutputDef connect = outDef(R"("id":"c","kind":"beast","transport":"tcp_connect","port":30005,"host":"192.0.2.9")");
+    BOOST_TEST(setErr3({}, {connect, outDef(kBeastOut)}) == "");
+}
+
+BOOST_AUTO_TEST_CASE(multicast_output_to_joined_group_is_a_loop)
+{
+    const InputDef join = def(R"("id":"y","type":"beast_raw","transport":"udp","port":4978,"group":"239.1.1.5")");
+    const OutputDef send = outDef(R"("id":"x","kind":"beast","transport":"udp","port":4978,"group":"239.1.1.5")");
+    BOOST_TEST(setErr3({join}, {send}) == "output 'x' sends to 239.1.1.5:4978, which input 'y' joins (a loop)");
+    const OutputDef other_group = outDef(R"("id":"x","kind":"beast","transport":"udp","port":4978,"group":"239.1.1.6")");
+    BOOST_TEST(setErr3({join}, {other_group}) == "");
+    const OutputDef other_port = outDef(R"("id":"x","kind":"beast","transport":"udp","port":4979,"group":"239.1.1.5")");
+    BOOST_TEST(setErr3({join}, {other_port}) == "");
+}
+
+BOOST_AUTO_TEST_CASE(loopback_unicast_output_to_own_port_warns_not_throws)
+{
+    const InputDef in = def(R"("id":"y","type":"beast_raw","transport":"tcp_listen","port":4000)");
+    const OutputDef send = outDef(R"("id":"x","kind":"beast","transport":"tcp_connect","port":4000,"host":"127.0.0.1")");
+    const auto warns = validateInputSet({in}, {send});
+    BOOST_REQUIRE(warns.size() == 1u);
+    BOOST_TEST(warns[0] == "output 'x' sends to 127.0.0.1:4000, which input 'y' of this daemon listens on");
+    // localhost, udp, and an output served by this daemon.
+    const InputDef udp_in = def(R"("id":"z","type":"beast_raw","transport":"udp","port":4001)");
+    const OutputDef udp_send = outDef(R"("id":"w","kind":"beast","transport":"udp","port":4001,"host":"localhost")");
+    BOOST_TEST(validateInputSet({udp_in}, {udp_send}).size() == 1u);
+    const OutputDef serve = outDef(kBeastOut);
+    const OutputDef to_serve = outDef(R"("id":"v","kind":"beast","transport":"tcp_connect","port":30005,"host":"127.4.5.6")");
+    const auto w2 = validateInputSet({}, {serve, to_serve});
+    BOOST_REQUIRE(w2.size() == 1u);
+    BOOST_TEST(w2[0] == "output 'v' sends to 127.4.5.6:30005, which output 'beast-out' of this daemon serves");
+    // No warning: another port, a non-loopback host, a disabled input.
+    BOOST_TEST(validateInputSet({in}, {outDef(R"("id":"x","kind":"beast","transport":"tcp_connect","port":4002,"host":"127.0.0.1")")})
+                   .empty());
+    BOOST_TEST(validateInputSet({in}, {outDef(R"("id":"x","kind":"beast","transport":"tcp_connect","port":4000,"host":"192.0.2.1")")})
+                   .empty());
+    InputDef off = in;
+    off.enabled = false;
+    BOOST_TEST(validateInputSet({off}, {send}).empty());
+}
+
+BOOST_AUTO_TEST_CASE(v1_file_loads_unchanged)
+{
+    for (const char* text : {kV1Example, kV1Sim}) {
+        const InputsFile f = parseInputsFile(text);
+        BOOST_TEST(f.version == 1);
+        BOOST_TEST(f.outputs.empty());
+        const std::string back = inputsFileJson(f);
+        BOOST_TEST(contains(back, "\"version\": 1"), back);
+        for (const char* key : {"outputs", "group", "interface", "format"})
+            BOOST_TEST(!contains(back, std::string("\"") + key + "\""), key << " in " << back);
+        const InputsFile again = parseInputsFile(back);
+        BOOST_TEST((again.inputs == f.inputs));
+        BOOST_TEST(inputsFileJson(again) == back);
+    }
+    // A v1 file with an empty outputs list is not v2 content.
+    BOOST_TEST(inputsFileErr(R"({"version":1,"outputs":[]})") == "");
+}
+
+BOOST_AUTO_TEST_CASE(v1_header_with_v2_content_rejected_with_hint)
+{
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"outputs":[{"id":"o","kind":"beast","transport":"tcp_listen","port":1}]})"),
+                        "'outputs' needs inputs file version 2"));
+    const std::string uat = inputsFileErr(R"({"version":1,"inputs":[{"id":"u","type":"uat_raw","host":"h","port":1}]})");
+    BOOST_TEST(uat == "inputs[0] (u): 'uat_raw' needs inputs file version 2", uat);
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"inputs":[{"id":"u","type":"beast_raw","host":"h","port":1}]})"),
+                        "'beast_raw' needs inputs file version 2"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"inputs":[{"id":"u","type":"pingstation_json","port":1,)"
+                                      R"("transport":"udp","group":"239.1.1.5"}]})"),
+                        "'group' needs inputs file version 2"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"inputs":[{"id":"u","type":"readsb","host":"h","port":1,)"
+                                      R"("transport":"tcp_connect"}]})"),
+                        "'transport' needs inputs file version 2"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"inputs":[{"id":"u","type":"dump978","host":"h","port":1,)"
+                                      R"("transport":"tcp_connect"}]})"),
+                        "'transport' needs inputs file version 2"));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"inputs":[{"id":"u","type":"pingstation_json","port":1,)"
+                                      R"("transport":"udp"}]})"),
+                        "'transport' needs inputs file version 2"));
+    // pingstation_cat021 always had transport.
+    BOOST_TEST(inputsFileErr(kV1Example) == "");
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"builtin":{"cue-tcp":{"enabled":false}}})"),
+                        "'cue-tcp' needs inputs file version 2"));
+}
+
+BOOST_AUTO_TEST_CASE(version_3_rejected)
+{
+    BOOST_TEST(inputsFileErr(R"({"version":3})") == "version must be 1 or 2");
+    BOOST_TEST(inputsFileErr(R"({"version":0})") == "version must be 1 or 2");
+    BOOST_TEST(inputsFileErr(R"({"inputs":[]})") == "version must be 1 or 2");
+    BOOST_TEST(inputsFileErr(R"({"version":2})") == "");
+}
+
+BOOST_AUTO_TEST_CASE(v2_file_round_trip)
+{
+    InputsFile f;
+    f.inputs.push_back(def(R"("id":"b","type":"beast_raw","transport":"udp","port":30007,"group":"239.1.1.5","format":"avr")"));
+    f.inputs.push_back(def(R"("id":"r","type":"readsb","transport":"tcp_listen","port":30048)"));
+    f.inputs.push_back(def(kCatUdp));
+    f.outputs.push_back(outDef(kBeastOut));
+    f.outputs.push_back(outDef(R"("id":"m","name":"Mcast","kind":"json","transport":"udp","port":4000,"group":"239.1.1.9","ttl":4,"loopback":false)"));
+    f.outputs.push_back(outDef(R"("id":"c","kind":"cat021","transport":"tcp_connect","port":4100,"host":"192.0.2.77","enabled":false)"));
+    f.builtin_enabled["cue-tcp"] = false;
+    f.builtin_enabled["cue-connect-1"] = true;
+    f.builtin_enabled["cue-udp-2"] = false;
+    f.builtin_enabled["readsb"] = true;
+    const std::string text = inputsFileJson(f);
+    BOOST_TEST(contains(text, "\"version\": 2"), text);
+    const InputsFile back = parseInputsFile(text);
+    BOOST_TEST(back.version == 2);
+    BOOST_TEST((back.inputs == f.inputs));
+    BOOST_TEST((back.outputs == f.outputs));
+    BOOST_TEST((back.builtin_enabled == f.builtin_enabled));
+    BOOST_TEST(inputsFileJson(back) == text);
+    // Errors in an output entry are prefixed.
+    const std::string e = inputsFileErr(R"({"version":2,"outputs":[{"id":"o","kind":"beast","port":1}]})");
+    BOOST_TEST(e == "outputs[0] (o): transport is required for outputs (tcp_listen, tcp_connect or udp)", e);
+    BOOST_TEST(contains(inputsFileErr(R"({"version":2,"outputs":[{"kind":"beast"}]})"), "outputs[0] (?): "));
+    BOOST_TEST(contains(inputsFileErr(R"({"version":2,"outputs":[1]})"), "outputs"));
+    // A set problem in the file is an error, and WARNs are kept.
+    BOOST_TEST(contains(inputsFileErr(R"({"version":2,"inputs":[{"id":"p","type":"pingstation_cat021","transport":"tcp_listen","port":30005}],)"
+                                      R"("outputs":[{"id":"o","kind":"beast","transport":"tcp_listen","port":30005}]})"),
+                        "port 30005/tcp is already used by input p"));
+    const InputsFile warned = parseInputsFile(
+        R"({"version":2,"inputs":[{"id":"p","type":"beast_raw","transport":"tcp_listen","port":4000}],)"
+        R"("outputs":[{"id":"o","kind":"beast","transport":"tcp_connect","host":"127.0.0.1","port":4000}]})");
+    BOOST_TEST(warned.warnings.size() == 1u);
+}
+
+BOOST_AUTO_TEST_CASE(v1_shape_written_when_no_v2_content)
+{
+    // A v2 header with nothing v2 in it is written back as v1.
+    const InputsFile f = parseInputsFile(R"({"version":2,"inputs":[{"id":"ps","type":"pingstation_json","port":4000}],"outputs":[]})");
+    BOOST_TEST(f.version == 2);
+    const std::string text = inputsFileJson(f);
+    BOOST_TEST(contains(text, "\"version\": 1"), text);
+    BOOST_TEST(!contains(text, "outputs"), text);
+    BOOST_TEST(text == inputsFileJson(parseInputsFile(text)));
+    // Removing the last v2 content gives v1 again.
+    InputsFile g = parseInputsFile(R"({"version":2,"outputs":[{"id":"o","kind":"beast","transport":"udp","port":1,"host":"h"}]})");
+    BOOST_TEST(contains(inputsFileJson(g), "\"version\": 2"));
+    g.outputs.clear();
+    BOOST_TEST(contains(inputsFileJson(g), "\"version\": 1"));
+    // An input with a non-default transport keeps the file at v2; the default does not.
+    InputsFile h;
+    h.inputs.push_back(def(kReadsb));
+    BOOST_TEST(contains(inputsFileJson(h), "\"version\": 1"));
+    h.inputs.push_back(def(R"("id":"r2","type":"readsb","transport":"udp","port":30047)"));
+    BOOST_TEST(contains(inputsFileJson(h), "\"version\": 2"));
+}
+
+BOOST_AUTO_TEST_CASE(builtin_cue_ids_v2_only)
+{
+    const InputsFile f = parseInputsFile(
+        R"({"version":2,"builtin":{"readsb":{"enabled":false},"cue-tcp":{"enabled":false},)"
+        R"("cue-connect-3":{"enabled":true},"cue-udp-12":{"enabled":false}}})");
+    BOOST_TEST(f.builtin_enabled.size() == 4u);
+    BOOST_TEST(!f.builtin_enabled.at("cue-tcp"));
+    BOOST_TEST(contains(inputsFileJson(f), "\"version\": 2"));
+    for (const char* bad : {"cue-connect-", "cue-connect-x", "cue-udp-01", "cue-tcp-1", "cue", "cue-other"})
+        BOOST_TEST(contains(inputsFileErr(std::string(R"({"version":2,"builtin":{")") + bad + R"(":{"enabled":true}}})"),
+                            "unknown input"),
+                   bad);
+    BOOST_TEST(contains(inputsFileErr(R"({"version":1,"builtin":{"cue-udp-1":{"enabled":true}}})"),
+                        "'cue-udp-1' needs inputs file version 2"));
 }

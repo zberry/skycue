@@ -405,6 +405,19 @@ target_compile_definitions(test_input_def PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_input_def)
 add_test(NAME input_def COMMAND test_input_def)
 
+# Output definitions (the hub's destinations) and the raw-message tap.
+add_executable(test_output_def test_output_def.cpp)
+target_link_libraries(test_output_def PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_output_def PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_output_def)
+add_test(NAME output_def COMMAND test_output_def)
+
+add_executable(test_raw_tap test_raw_tap.cpp)
+target_link_libraries(test_raw_tap PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_raw_tap PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_raw_tap)
+add_test(NAME raw_tap COMMAND test_raw_tap)
+
 # pingStation transports: UDP listener, TCP connect client, TCP listener.
 add_executable(test_transports test_transports.cpp)
 target_link_libraries(test_transports PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)

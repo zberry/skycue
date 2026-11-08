@@ -16,30 +16,33 @@ namespace skycued {
 
 // `replay` is internal: main builds it for --replay. It is never accepted
 // from the API or the inputs file, so users have the other four.
-enum class InputType { readsb, dump978, pingstation_json, pingstation_cat021, replay };
+enum class InputType { readsb, dump978, pingstation_json, pingstation_cat021, beast_raw, uat_raw, replay };
 enum class InputTransport { tcp_connect, udp, tcp_listen };
 
 const char* inputTypeName(InputType type);            // "pingstation_cat021", ...
 const char* transportName(InputTransport transport);  // "tcp_listen", ...
 // Whether the input is a track input (counts for source_lost, spec §4.4):
-// every type but dump978.
+// every type but dump978, uat_raw and beast_raw.
 bool isTrackType(InputType type);
 
 struct InputDef {
     std::string id, name;
     InputType type = InputType::readsb;
     bool enabled = true;
-    // readsb and dump978 are always tcp_connect, pingstation_json always udp;
-    // pingstation_cat021 chooses.
+    // Every type takes any of the three; the default is udp for
+    // pingstation_json and tcp_connect for the others, and pingstation_cat021
+    // must say.
     InputTransport transport = InputTransport::tcp_connect;
     std::string bind = "0.0.0.0", host;  // bind: udp/tcp_listen; host: tcp_connect
+    std::string group, iface;          // udp: a multicast group to join; iface is the "interface" key
+    std::string format = "beast";      // beast_raw: "beast" or "avr"
     uint16_t port = 0;
     std::string edition = "2.5";       // pingstation_cat021
     std::optional<uint8_t> sac, sic;   // pingstation_cat021
     std::string status_url;            // pingstation_*; "" = none
     int status_interval_s = 30;        // pingstation_*
     TimeMode time_mode = TimeMode::utc;  // pingstation_*
-    bool capture = false;              // pingstation_*
+    bool capture = false;              // pingstation_*, beast_raw, uat_raw
     std::string peer;                  // udp/tcp_listen; "" = any
     bool builtin = false;              // set by the daemon, never parsed
 
@@ -70,6 +73,12 @@ struct InputDefError : std::runtime_error {
 enum class NameRule { strict, repair };
 InputDef parseInputDef(const JsonObject& object, NameRule rule = NameRule::strict, bool* repaired = nullptr);
 
+// Dotted decimal, four parts of 0..255 without leading zeros.
+bool isIpv4Literal(const std::string& s);
+// An IPv4 address, or a hostname by the rules of InputDef::host.
+bool isValidHost(const std::string& s);
+// An IPv4 address from 224.0.0.0 to 239.255.255.255.
+bool isIpv4Multicast(const std::string& s);
 // The id rule: 1 to 32 characters of a-z, 0-9 and '-' (reserved ids pass).
 bool isValidInputId(const std::string& id);
 // The rule for a definition's "name": valid UTF-8, at most 64 characters, no

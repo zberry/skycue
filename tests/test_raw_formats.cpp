@@ -548,3 +548,69 @@ BOOST_AUTO_TEST_CASE(rotating_file_open_failure_retries_the_same_name)
     BOOST_REQUIRE(f.flush());
     BOOST_TEST(slurp(f.currentPath()) == "def");
 }
+
+// ---------------------------------------------------------------- encodeFrame
+
+BOOST_AUTO_TEST_CASE(encode_frame_short_and_long_zero_timestamp)
+{
+    const std::string s = beast::encodeFrame("5D4840D6202CC3", 0);
+    BOOST_TEST(s == bytes({0x1a, '2', 0, 0, 0, 0, 0, 0, 0, 0x5d, 0x48, 0x40, 0xd6, 0x20, 0x2c, 0xc3}));
+    const std::string l = beast::encodeFrame("8d4840d6202cc371c32ce0576098", 0);  // lowercase digits too
+    BOOST_TEST(l == bytes({0x1a, '3', 0, 0, 0, 0, 0, 0, 0, 0x8d, 0x48, 0x40, 0xd6, 0x20, 0x2c, 0xc3, 0x71, 0xc3, 0x2c,
+                           0xe0, 0x57, 0x60, 0x98}));
+    // A non-zero timestamp is big-endian in the six bytes after the type.
+    const std::string t = beast::encodeFrame("5D4840D6202CC3", 0x0102030405FF);
+    BOOST_TEST(t == bytes({0x1a, '2', 1, 2, 3, 4, 5, 0xff, 0, 0x5d, 0x48, 0x40, 0xd6, 0x20, 0x2c, 0xc3}));
+    BOOST_TEST(beast::encodeFrame("5D4840D6202CC3", 0xFFFF000000000001ULL) ==
+               bytes({0x1a, '2', 0, 0, 0, 0, 0, 1, 0, 0x5d, 0x48, 0x40, 0xd6, 0x20, 0x2c, 0xc3}));  // low 48 bits
+}
+
+BOOST_AUTO_TEST_CASE(encode_frame_escapes_1a_in_payload_and_timestamp)
+{
+    const std::string s = beast::encodeFrame("5D1A40D6202C1A", 0x00001a000000);
+    BOOST_TEST(s == bytes({0x1a, '2', 0, 0, 0x1a, 0x1a, 0, 0, 0, 0, 0x5d, 0x1a, 0x1a, 0x40, 0xd6, 0x20, 0x2c, 0x1a, 0x1a}));
+    // The type byte is never doubled, and a timestamp of all 0x1a doubles each.
+    const std::string t = beast::encodeFrame("5D4840D6202CC3", 0x1a1a1a1a1a1a);
+    BOOST_TEST(t.substr(0, 2) == bytes({0x1a, '2'}));
+    BOOST_TEST(t.size() == 2u + 12u + 1u + 7u);
+}
+
+BOOST_AUTO_TEST_CASE(encode_frame_round_trips_through_splitter)
+{
+    std::string stream;
+    const std::string hexes[] = {"8D4840D6202CC371C32CE0576098", "5D1A40D6202C1A", "1A1A1A1A1A1A1A1A1A1A1A1A1A1A"};
+    const uint64_t ticks[] = {0, 0x1a1a1a1a1a1aULL, 0xffffffffffffULL};
+    for (int i = 0; i < 3; ++i)
+        stream += beast::encodeFrame(hexes[i], ticks[i]);
+    FrameSplitter sp;
+    std::vector<Frame> out;
+    sp.feed(reinterpret_cast<const uint8_t*>(stream.data()), stream.size(), out);
+    BOOST_REQUIRE_EQUAL(out.size(), 3u);
+    BOOST_TEST(sp.skippedBytes() == 0u);
+    for (int i = 0; i < 3; ++i) {
+        BOOST_TEST(out[static_cast<std::size_t>(i)].type == (hexes[i].size() == 14 ? '2' : '3'));
+        BOOST_TEST(out[static_cast<std::size_t>(i)].timestamp == ticks[i]);
+        const std::string& body = out[static_cast<std::size_t>(i)].body;
+        BOOST_REQUIRE_EQUAL(body.size(), 7 + hexes[i].size() / 2);
+        BOOST_TEST(body[6] == '\0');  // signal
+        std::string hex;
+        for (std::size_t k = 7; k < body.size(); ++k) {
+            char b[3];
+            std::snprintf(b, sizeof b, "%02X", static_cast<unsigned>(static_cast<uint8_t>(body[k])));
+            hex += b;
+        }
+        BOOST_TEST(hex == hexes[i]);
+        BOOST_TEST(out[static_cast<std::size_t>(i)].raw == beast::encodeFrame(hexes[i], ticks[i]));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(encode_frame_refuses_other_lengths)
+{
+    for (const char* hex : {"", "5D", "0123", "5D4840D6202CC", "5D4840D6202CC3A", "8D4840D6202CC371C32CE057609", "8D4840D6202CC371C32CE0576098AB"})
+        BOOST_TEST(beast::encodeFrame(hex, 0).empty(), hex);
+    BOOST_TEST(beast::encodeFrame("5D4840D6202CCZ", 0).empty());  // not a hex digit
+    // Mode A/C only through the typed form skycue-rawplay uses.
+    BOOST_TEST(beast::encodeFrameOfType('1', "0123", 0) == bytes({0x1a, '1', 0, 0, 0, 0, 0, 0, 0, 0x01, 0x23}));
+    BOOST_TEST(beast::encodeFrameOfType('2', "0123", 0).empty());
+    BOOST_TEST(beast::encodeFrameOfType('9', "0123", 0).empty());
+}

@@ -89,8 +89,8 @@ std::unique_ptr<Transport> makeTransport(boost::asio::io_context& io, const Inpu
     case InputType::pingstation_json:
     case InputType::pingstation_cat021:
     case InputType::uat_raw:
-        break;
     case InputType::beast_raw:
+        break;
     case InputType::replay:
         throw std::invalid_argument(std::string("no transport for input type ") + inputTypeName(def.type));
     }

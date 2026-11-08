@@ -31,7 +31,9 @@ using skycued::InputManagerConfig;
 using skycued::PingCat021Input;
 using skycued::PingJsonInput;
 using skycued::RawFrame;
+using skycued::BeastCaptureWriter;
 using skycued::RawFrameWriter;
+using skycued::UatCaptureWriter;
 using skycued::RecordOptions;
 namespace ax = skycued::asterix;
 
@@ -538,4 +540,32 @@ BOOST_AUTO_TEST_CASE(capture_line_json_is_valid_utf8)
     BOOST_TEST(w("\xED\xA0\x80") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"}");  // surrogate
     BOOST_TEST(w("\xC3\xA9t\xC3\xA9") == "{\"k\":\"\xC3\xA9t\xC3\xA9\"}");                // valid kept
     BOOST_TEST(w("\xE2\x82") == "{\"k\":\"\xEF\xBF\xBD\xEF\xBF\xBD\"}");                  // truncated
+}
+
+BOOST_AUTO_TEST_CASE(beast_and_uat_capture_writers_use_raw_names)
+{
+    TempDir tmp;
+    const std::string frame("\x1a" "2\0\0\0\0\0\1\0\x5d\x48\x40\xd6\x20\x2c\xc3", 16);
+    {
+        BeastCaptureWriter b(tmp.path, "bx", 0);
+        UatCaptureWriter u(tmp.path, "ux", 0);
+        BOOST_TEST(b.currentPath().empty());  // opened on the first write
+        BOOST_TEST(b.write(frame));
+        BOOST_TEST(b.write(frame));
+        const auto at = std::chrono::system_clock::time_point(std::chrono::milliseconds(1793620800123));
+        BOOST_TEST(u.write(at, "-00a1b2;rs=1;"));
+        BOOST_TEST(u.write(std::chrono::system_clock::time_point(std::chrono::milliseconds(-5)), "-skipped;"));  // before 1970
+        BOOST_TEST(u.write(at, "+3c5e8a;"));
+        b.flush();
+        u.flush();
+        BOOST_TEST(b.droppedBytes() == 0u);
+        BOOST_TEST(b.currentPath().find("/raw-bx-") != std::string::npos);
+        BOOST_TEST(b.currentPath().size() > 4);
+    }
+    BOOST_TEST(fileLines(tmp.path, "raw-ux-", ".txt") ==
+               (std::vector<std::string>{"1793620800123 -00a1b2;rs=1;", "1793620800123 +3c5e8a;"}));
+    const auto bins = filesWithSuffix(tmp.path, ".bin");
+    BOOST_REQUIRE_EQUAL(bins.size(), 1u);
+    BOOST_TEST(readAll(bins[0]) == frame + frame);
+    BOOST_TEST(skycued::isRecordingFileName(bins[0].substr(tmp.path.size() + 1)));
 }

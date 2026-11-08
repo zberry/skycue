@@ -203,12 +203,12 @@ BOOST_AUTO_TEST_CASE(capture_and_raw_names_recognised)
 {
     for (const char* ok :
          {"capture-ps-north-20261102-101500.jsonl", "raw-ps-north-20261102-101500-2.csv",
-          "raw-ps-north-20261102-101500.txt", "capture-a-20261102-101500-12.jsonl",
+          "raw-ps-north-20261102-101500.txt", "raw-bc-20261102-101500.bin", "raw-bc-20261102-101500-3.bin", "capture-a-20261102-101500-12.jsonl",
           "raw-0123456789abcdefghijklmnopqrstuv-20261102-101500.csv", "capture-20261101-20261102-101500.jsonl"})
         BOOST_TEST(isRecordingFileName(ok), ok);
     for (const char* bad :
          {"capture-PS-20261102-101500.jsonl", "raw--20261102-101500.csv", "capture-20261102-101500.jsonl",
-          "capture-ps-20261102-101500.csv", "raw-ps-20261102-101500.jsonl", "raw-ps-20261102-101500.bin",
+          "capture-ps-20261102-101500.csv", "raw-ps-20261102-101500.jsonl", "capture-ps-20261102-101500.bin",
           "raw-ps_n-20261102-101500.csv", "raw-0123456789abcdefghijklmnopqrstuvw-20261102-101500.csv",
           "capture-ps-20261102-101500-.jsonl", "capture-ps-2026110-101500.jsonl", "rawx-ps-20261102-101500.csv",
           "capture-ps.jsonl", "beast-ps-20261102-101500.bin"})
@@ -279,4 +279,30 @@ BOOST_AUTO_TEST_CASE(raw_symlink_is_not_followed)
     BOOST_TEST(r.bytes_before == 100u);
     BOOST_TEST(r.deleted.empty());
     BOOST_TEST(elsewhere.has("raw/beast-20200101-000000.bin"));
+}
+
+// The capture of a beast_raw input, raw-<id>-<stamp>.bin, is ordinary
+// retention fare: the oldest goes first and the newest of the input stays.
+BOOST_AUTO_TEST_CASE(raw_bin_files_are_retained_and_never_the_newest)
+{
+    TempDir t;
+    t.file("raw-bc-20261101-090000.bin", 100);
+    t.file("raw-bc-20261101-100000.bin", 100);
+    t.file("raw-bc-20261101-110000.bin", 100);
+    t.file("raw-bc-20261101-120000.txt", 100);  // another extension of the same input: its own newest
+    t.file("raw-other-20261101-080000.bin", 100);  // the newest of its own input: kept
+    const auto r = enforce(t.path, 1, {});
+    const std::vector<std::string> want{"raw-bc-20261101-090000.bin", "raw-bc-20261101-100000.bin"};
+    BOOST_TEST(names(t, r.deleted) == want, boost::test_tools::per_element());
+    BOOST_TEST(t.has("raw-bc-20261101-110000.bin"));
+    BOOST_TEST(t.has("raw-bc-20261101-120000.txt"));
+    BOOST_TEST(t.has("raw-other-20261101-080000.bin"));
+    // A file in open_files stays even when it is the oldest.
+    TempDir u;
+    const std::string open = u.file("raw-bc-20261101-090000.bin", 100);
+    u.file("raw-bc-20261101-100000.bin", 100);
+    u.file("raw-bc-20261101-110000.bin", 100);
+    const auto r2 = enforce(u.path, 1, {open});
+    BOOST_TEST(names(u, r2.deleted) == std::vector<std::string>{"raw-bc-20261101-100000.bin"}, boost::test_tools::per_element());
+    BOOST_TEST(u.has("raw-bc-20261101-090000.bin"));
 }

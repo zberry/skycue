@@ -99,6 +99,38 @@ bool RawFrameWriter::write(const RawFrame& frame)
     return txt_.write(stamp + frame.hex + ";\n");
 }
 
+RawCaptureFile::RawCaptureFile(std::string record_dir, const std::string& input_id, uint64_t max_bytes, const char* ext)
+    : dir_(std::move(record_dir)), max_bytes_(max_bytes), sink_(fileConfig(dir_, "raw-" + input_id, ext), [this] {
+          if (max_bytes_)
+              enforce(dir_, max_bytes_, {sink_.currentPath()});
+      })
+{
+}
+
+BeastCaptureWriter::BeastCaptureWriter(std::string record_dir, const std::string& input_id, uint64_t max_bytes)
+    : RawCaptureFile(std::move(record_dir), input_id, max_bytes, "bin")
+{
+}
+
+bool BeastCaptureWriter::write(std::string_view frame) { return put(std::string(frame)); }
+
+UatCaptureWriter::UatCaptureWriter(std::string record_dir, const std::string& input_id, uint64_t max_bytes)
+    : RawCaptureFile(std::move(record_dir), input_id, max_bytes, "txt")
+{
+}
+
+bool UatCaptureWriter::write(std::chrono::system_clock::time_point time, std::string_view line)
+{
+    const int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count();
+    if (ms < 0)
+        return true;  // before 1970: no line format for it
+    std::string text = std::to_string(ms);
+    text += ' ';
+    text.append(line);
+    text += '\n';
+    return put(text);
+}
+
 void RawFrameWriter::flush()
 {
     csv_.flush();

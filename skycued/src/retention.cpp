@@ -43,7 +43,7 @@ bool isStamp(const std::string& name, std::size_t at)
 }
 
 // A stream prefix and the extensions it may have: a fixed stream (any of the
-// four), capture-<id> (.jsonl) or raw-<id> (.csv, .txt), id [a-z0-9-]{1,32}.
+// four), capture-<id> (.jsonl) or raw-<id> (.csv, .bin, .txt), id [a-z0-9-]{1,32}.
 bool streamAllows(const std::string& stream, const std::string& ext)
 {
     static const char* const kStreams[] = {"received", "sent", "fisb", "beast", "uat"};
@@ -59,7 +59,7 @@ bool streamAllows(const std::string& stream, const std::string& ext)
     if (idAfter("capture-"))
         return ext == "jsonl";
     if (idAfter("raw-"))
-        return ext == "csv" || ext == "txt";
+        return ext == "csv" || ext == "bin" || ext == "txt";
     return false;
 }
 

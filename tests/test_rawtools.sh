@@ -438,6 +438,30 @@ wait "$f1" || fail "(i) a 1090 csv client failed"
 cmp -s "$tmp/i1.out" "$tmp/csv.want" || { od -An -tx1 "$tmp/i1.out" | head -3; od -An -tx1 "$tmp/csv.want" | head -3; fail "(i) .csv not served as Beast frames"; }
 echo "ok (i) rawplay_two_clients_same_frames: UAT lines, .bin frames, .csv as Beast frames"
 
+# (i2) The .csv -> Beast bytes are pinned to what rawplay wrote before the encoder
+# moved into raw_formats (beast::encodeFrame): a short and a long message, a
+# 4-digit Mode A/C line and 0x1a bytes in payload and timestamp, then the whole
+# 120 s fixture (one frame per line, size and SHA-256 of the stream).
+beast_sha() { # beast_sha CSV: sha256 of the Beast stream rawplay serves for it
+  local p out="$tmp/pin.out"
+  p=$(free_port)
+  python3 "$tmp/fetch.py" "$p" "$out" & local f=$!
+  timeout $((60*slowf)) "$rawplay" --1090-listen "$p" --speed 0 "$1" 2>"$tmp/play.err" ||
+    { cat "$tmp/play.err"; fail "(i2) rawplay exit $?"; }
+  wait "$f" || fail "(i2) pin client failed"
+  echo "$(wc -c < "$out") $(sha256sum "$out" | cut -d' ' -f1)"
+}
+printf '1700000000.000000,8D4840D6202CC371C32CE0576098\n1700000000.500000,5D4840D6202CC3\n1700000001.000000,1A1A\n1700000001.250001,200000001a1a1a\n' > "$tmp/pin.csv"
+got=$(beast_sha "$tmp/pin.csv")
+[ "$got" = "71 3e7f537a73b4e6022f4fbe0b0cd03ce5adaf7e2005041d0664618b34fa6a51cd" ] || fail "(i2) pinned frames changed: $got"
+if [ "$have_raw" = 1 ]; then
+  zcat "$csv" > "$tmp/full.csv"
+  got=$(beast_sha "$tmp/full.csv")
+  [ "$got" = "3243746 10d06a99941d59dd4df2e6a9e4f625b80caf02727a59a6dc7b43a45cd6e36aaa" ] || fail "(i2) fixture stream changed: $got"
+  [ "$(wc -l < "$tmp/full.csv")" = 176612 ] || fail "(i2) fixture line count"
+fi
+echo "ok (i2) rawplay csv -> Beast stream byte-identical to the pinned values"
+
 # slow_client_does_not_stall_the_other: one client connects and never reads; 24 MB
 # of lines at 10x the file's 24 s span. The reader gets every line on time; the
 # one that does not read is dropped from, and rawplay says how much.

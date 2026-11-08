@@ -515,6 +515,17 @@ target_include_directories(test_capture PRIVATE ${PROJECT_SOURCE_DIR}/net/tests)
 add_test(NAME capture COMMAND test_capture)
 set_tests_properties(capture PROPERTIES TIMEOUT 60)
 
+# The beast_raw input (Beast and AVR over any transport), its re-encode and the
+# raw captures of beast_raw and uat_raw.
+add_executable(test_beast_raw test_beast_raw.cpp)
+target_link_libraries(test_beast_raw PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_beast_raw PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_beast_raw)
+target_include_directories(test_beast_raw PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
+add_test(NAME beast_raw COMMAND test_beast_raw)
+set_tests_properties(beast_raw PROPERTIES TIMEOUT 60)
+
 # The sanitizer canary (scripts/dev/run-sanitizers.sh --canary); never built by
 # default.
 add_executable(sanitizer_canary EXCLUDE_FROM_ALL sanitizer/canary.cpp)

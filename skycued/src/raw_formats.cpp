@@ -124,6 +124,47 @@ std::string withTimestamp(const Frame& frame, uint64_t timestamp)
     return raw;
 }
 
+std::string encodeFrameOfType(char type, const std::string& hex, uint64_t ticks48)
+{
+    const std::size_t digits = type == '1' ? 4 : type == '2' ? 14 : type == '3' ? 28 : 0;
+    if (digits == 0 || hex.size() != digits)
+        return {};
+    auto nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        return -1;
+    };
+    std::string f;
+    f.reserve(2 * (hex.size() / 2 + 7) + 2);
+    auto put = [&f](uint8_t b) {
+        f += static_cast<char>(b);
+        if (b == kEscape)
+            f += static_cast<char>(b);
+    };
+    f += static_cast<char>(kEscape);
+    f += type;
+    ticks48 &= kTimestampMask;
+    for (int shift = 40; shift >= 0; shift -= 8)
+        put(static_cast<uint8_t>(ticks48 >> shift));
+    put(0);
+    for (std::size_t i = 0; i < hex.size(); i += 2) {
+        const int hi = nibble(hex[i]), lo = nibble(hex[i + 1]);
+        if (hi < 0 || lo < 0)
+            return {};
+        put(static_cast<uint8_t>(hi << 4 | lo));
+    }
+    return f;
+}
+
+std::string encodeFrame(const std::string& hex, uint64_t ticks48)
+{
+    return encodeFrameOfType(hex.size() == 14 ? '2' : hex.size() == 28 ? '3' : '\0', hex, ticks48);
+}
+
 int64_t timestampDelta(uint64_t from, uint64_t to)
 {
     const uint64_t d = (to - from) & kTimestampMask;

@@ -14,21 +14,30 @@
 // before.
 // Lines are cut as TransportInput::feedLines does; on tcp_connect the
 // connection is logged at INFO as it always was.
+//
+// With `capture: true` and a RECORD_DIR every published line is also written,
+// as received, to RECORD_DIR/raw-<id>-<stamp>.txt as "<epoch_ms> <line>"
+// (UatCaptureWriter; skycue-rawrec's form). Flushed on tick() and stop().
 
+#include "inputs/capture_writer.hpp"
 #include "inputs/input.hpp"
 
 #include <boost/asio/io_context.hpp>
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 
 namespace skycued {
 
 class UatRawInput : public TransportInput {
 public:
-    UatRawInput(boost::asio::io_context& io, InputDef def);
+    UatRawInput(boost::asio::io_context& io, InputDef def, const RecordOptions& record = {});
+    ~UatRawInput() override;
 
     InputState state() const override;
+    void stop() override;
+    void tick(std::chrono::system_clock::time_point now) override;
 
     uint64_t downlinkFrames() const { return downlink_; }
     uint64_t uplinkFrames() const { return uplink_; }
@@ -42,6 +51,7 @@ private:
     void handleLine(const uint8_t* line, std::size_t size);
 
     uint64_t downlink_ = 0, uplink_ = 0;
+    std::unique_ptr<UatCaptureWriter> capture_;  // null unless capture and a record_dir
 };
 
 }  // namespace skycued

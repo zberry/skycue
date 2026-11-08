@@ -7,7 +7,8 @@
 // Only our own file names are considered, in `dir` and `dir/raw`:
 //   (received|sent|fisb|beast|uat)-YYYYMMDD-HHMMSS[-N].(jsonl|csv|bin|txt)
 //   capture-<id>-YYYYMMDD-HHMMSS[-N].jsonl     (pingStation capture)
-//   raw-<id>-YYYYMMDD-HHMMSS[-N].(csv|txt)     (pingStation RECORD_RAW frames)
+//   raw-<id>-YYYYMMDD-HHMMSS[-N].(csv|bin|txt) (pingStation RECORD_RAW frames; the
+//                                               capture of a beast_raw or uat_raw input)
 // with <id> an input id, [a-z0-9-]{1,32}; names are parsed from the end, so
 // the stream is everything before the time stamp ("raw-ps-north").
 // (regular files only; anything else is neither counted nor touched). They are

@@ -60,6 +60,16 @@ private:
 // without a timestamp (0xe3) come back unchanged.
 std::string withTimestamp(const Frame& frame, uint64_t timestamp);
 
+// A Mode S message as a Beast frame: type '2' for 14 hex digits, '3' for 28,
+// the 6-byte big-endian 12 MHz timestamp (low 48 bits of ticks48), signal
+// byte 0, the payload, every 0x1a after the type doubled. Empty for any other
+// length or a non-hex digit.
+std::string encodeFrame(const std::string& hex, uint64_t ticks48);
+// The same with the type byte given ('1' is Mode A/C, 4 digits, which
+// skycue-rawplay still plays from a capture); empty when `type` does not fit
+// the number of digits or a digit is not hex.
+std::string encodeFrameOfType(char type, const std::string& hex, uint64_t ticks48);
+
 // to - from as a signed 48-bit difference, so a counter wrap reads as a small
 // positive step.
 int64_t timestampDelta(uint64_t from, uint64_t to);

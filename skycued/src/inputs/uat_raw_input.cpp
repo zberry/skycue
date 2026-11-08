@@ -4,11 +4,33 @@
 
 #include <cctype>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace skycued {
 
-UatRawInput::UatRawInput(boost::asio::io_context& io, InputDef def) : TransportInput(io, std::move(def)) {}
+UatRawInput::UatRawInput(boost::asio::io_context& io, InputDef def, const RecordOptions& record)
+    : TransportInput(io, std::move(def))
+{
+    if (this->def().capture && !record.record_dir.empty())
+        capture_ = std::make_unique<UatCaptureWriter>(record.record_dir, this->def().id, record.max_bytes);
+}
+
+UatRawInput::~UatRawInput() = default;
+
+void UatRawInput::stop()
+{
+    TransportInput::stop();
+    if (capture_)
+        capture_->flush();
+}
+
+void UatRawInput::tick(std::chrono::system_clock::time_point now)
+{
+    TransportInput::tick(now);
+    if (capture_)
+        capture_->flush();
+}
 
 InputState UatRawInput::state() const
 {
@@ -57,6 +79,9 @@ void UatRawInput::handleLine(const uint8_t* line, std::size_t size)
     if (end == 1 || (end < size && line[end] != ';'))
         return;
     publishRaw(RawKind::uat, line, size);
+    if (capture_ &&
+        !capture_->write(std::chrono::system_clock::now(), std::string_view(reinterpret_cast<const char*>(line), size)))
+        ++counters_.capture_dropped;
     if (line[0] == '-') {
         ++downlink_;
         return;

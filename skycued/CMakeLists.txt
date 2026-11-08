@@ -45,6 +45,7 @@ add_library(skycued_core STATIC
   src/hub/hub.cpp
   src/hub/raw_tap.cpp
   src/icao_class.cpp
+  src/inputs/beast_raw_input.cpp
   src/inputs/capture_writer.cpp
   src/inputs/cat021_map.cpp
   src/inputs/device_time.cpp

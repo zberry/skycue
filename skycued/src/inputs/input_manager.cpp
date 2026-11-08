@@ -1,6 +1,7 @@
 #include "inputs/input_manager.hpp"
 
 #include "file_util.hpp"
+#include "inputs/beast_raw_input.hpp"
 #include "inputs/inputs_file.hpp"
 #include "inputs/ping_cat021_input.hpp"
 #include "inputs/ping_json_input.hpp"
@@ -85,12 +86,13 @@ std::unique_ptr<Input> makeInput(boost::asio::io_context& io, const InputDef& de
     }
     case InputType::dump978:
     case InputType::uat_raw:
-        return std::make_unique<UatRawInput>(io, def);
+        return std::make_unique<UatRawInput>(io, def, record);
+    case InputType::beast_raw:
+        return std::make_unique<BeastRawInput>(io, def, record);
     case InputType::pingstation_json:
         return std::make_unique<PingJsonInput>(io, def, record);
     case InputType::pingstation_cat021:
         return std::make_unique<PingCat021Input>(io, def, record);
-    case InputType::beast_raw:  // its input arrives with the hub's beast task
     case InputType::replay:
         break;
     }

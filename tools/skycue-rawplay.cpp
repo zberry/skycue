@@ -467,20 +467,7 @@ std::string beastFrame(int64_t epoch_ns, const std::string& hex)
 {
     const auto ns = static_cast<uint64_t>(epoch_ns);
     const uint64_t ticks = (ns / 250u * 3u + ns % 250u * 3u / 250u) & beast::kTimestampMask;
-    std::string f;
-    auto put = [&f](uint8_t b) {
-        f += static_cast<char>(b);
-        if (b == beast::kEscape)
-            f += static_cast<char>(b);
-    };
-    f += static_cast<char>(beast::kEscape);
-    f += hex.size() == 4 ? '1' : hex.size() == 14 ? '2' : '3';
-    for (int shift = 40; shift >= 0; shift -= 8)
-        put(static_cast<uint8_t>(ticks >> shift));
-    put(0);
-    for (std::size_t i = 0; i + 1 < hex.size(); i += 2)
-        put(static_cast<uint8_t>(std::stoi(hex.substr(i, 2), nullptr, 16)));
-    return f;
+    return beast::encodeFrameOfType(hex.size() == 4 ? '1' : hex.size() == 14 ? '2' : '3', hex, ticks);
 }
 
 // Each play* function plays one file starting at media time `base`, with

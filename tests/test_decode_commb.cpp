@@ -384,17 +384,24 @@ BOOST_AUTO_TEST_CASE(acas_ra_text_pairwise)
     BOOST_CHECK_EQUAL(acasRaText(ra), "clear of conflict");
 }
 
-BOOST_AUTO_TEST_CASE(acas_ra_text_multiple_threat_flags)
+BOOST_AUTO_TEST_CASE(acas_ra_text_multi_threat)
 {
     AcasRa ra;
     ra.mte = true;
     ra.ara = 0x3080;  // bits 1, 2 and 7 are not read in this branch
-    BOOST_CHECK_EQUAL(acasRaText(ra), "");
-    ra.ara = static_cast<uint16_t>((1u << (14 - 8)) | (1u << (14 - 14)));  // ARA bits 8 and 14
-    BOOST_CHECK_EQUAL(acasRaText(ra), "ara bit 8, ara bit 14");
+    BOOST_CHECK_EQUAL(acasRaText(ra), "advisory");
+    ra.ara = static_cast<uint16_t>((1u << (14 - 9)) | (1u << (14 - 12)));  // ARA bits 9 and 12
+    BOOST_CHECK_EQUAL(acasRaText(ra), "climb, crossing");
+    ra.ara = static_cast<uint16_t>((1u << 6) | (1u << 5) | (1u << 4) | (1u << 3) | (1u << 2) | (1u << 1) | 1u);
+    BOOST_CHECK_EQUAL(acasRaText(ra),
+                      "correct upward, climb, correct downward, descend, crossing, sense reversal");
+    ra.ara = 1;  // bit 14 reserved
+    BOOST_CHECK_EQUAL(acasRaText(ra), "advisory");
     ra.mte = false;
-    ra.ara = static_cast<uint16_t>(1u << (14 - 9));  // bit 1 clear
-    BOOST_CHECK_EQUAL(acasRaText(ra), "ara bit 9");
+    ra.ara = static_cast<uint16_t>(1u << (14 - 11));  // bit 1 clear
+    BOOST_CHECK_EQUAL(acasRaText(ra), "descend");
+    ra.rat = true;
+    BOOST_CHECK_EQUAL(acasRaText(ra), "clear of conflict");
 }
 
 BOOST_AUTO_TEST_CASE(acas_ra_tc28_same_decoder)

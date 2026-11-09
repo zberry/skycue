@@ -25,8 +25,8 @@ AcasRa decodeBody(uint64_t f)
     }
     else if (ra.tti == 2) {
         ra.threat_alt_ft = altitudeAc13(field56(f, 31, 13));
-        // Range: (value - 1) / 10 NM; bearing: (value - 1) x 6 deg, relative to
-        // the own heading; 0 = not available. (Not stated in the amendment.)
+        // Range: (value - 1) / 10 NM and bearing (value - 1) x 6 deg, both lower
+        // bounds of the coded interval; 0 = not available.
         if (const uint32_t rng = field56(f, 44, 7); rng != 0)
             ra.threat_range_nm = static_cast<float>(rng - 1) / 10.0f;
         if (const uint32_t brg = field56(f, 51, 6); brg != 0)
@@ -63,8 +63,9 @@ std::optional<AcasRa> decodeAcasRaTc28(const Frame& f)
 //   VSL,       preventive -> "monitor vertical speed"
 // then ", increase" (bit 4, climb/descend only), ", reversal" (5), ", crossing" (6).
 // With MTE = 1 or ARA bit 1 clear the advisory is a multiple-threat one: the
-// text is the set ARA bits 8..14 joined by ", " as "ara bit N" (the amendment
-// does not name them). RAT: "clear of conflict", whatever the ARA says.
+// text is the set ARA bits 8..13 joined by ", ": 8 "correct upward", 9 "climb",
+// 10 "correct downward", 11 "descend", 12 "crossing", 13 "sense reversal"
+// (14 reserved, ignored); none set -> "advisory". RAT: "clear of conflict", whatever the ARA says.
 std::string acasRaText(const AcasRa& ra)
 {
     if (ra.rat)
@@ -85,14 +86,18 @@ std::string acasRaText(const AcasRa& ra)
             s += ", crossing";
         return s;
     }
+    static const char* const kMulti[] = {"correct upward", "climb", "correct downward", "descend", "crossing",
+                                         "sense reversal"};  // ARA bits 8..13; bit 14 is reserved
     std::string s;
-    for (unsigned k = 8; k <= 14; ++k) {
+    for (unsigned k = 8; k <= 13; ++k) {
         if (bit(k)) {
             if (!s.empty())
                 s += ", ";
-            s += "ara bit " + std::to_string(k);
+            s += kMulti[k - 8];
         }
     }
+    if (s.empty())
+        s = "advisory";
     return s;
 }
 

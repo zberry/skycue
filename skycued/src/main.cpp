@@ -374,32 +374,22 @@ std::optional<int> parseOptions(int argc, char** argv, Options& o, po::variables
     return std::nullopt;
 }
 
-int run(int argc, char** argv)
+// The layers (defaults, the file, its overrides file, the environment, --set) and the flags, validated; an exit
+// status when the process should end here (--dump-env, an error), else nullopt.
+std::optional<int> loadDaemonConfig(const Options& o, const po::variables_map& vm, Config& config,
+                                    std::map<std::string, std::string>& env)
 {
-    const auto started = std::chrono::system_clock::now();
-    Options o;
-    po::variables_map vm;
-    if (const auto rc = parseOptions(argc, argv, o, vm))
-        return *rc;
-    auto& config_path = o.config_path;
-    auto& replay_path = o.replay_path;
-    auto& readsb_host = o.readsb_host;
-    auto& dump978_host = o.dump978_host;
-    auto& log_level = o.log_level;
-    auto& www_dir = o.www_dir;
-    auto& web_bind = o.web_bind;
-    auto& inputs_file = o.inputs_file;
-    auto& set_args = o.set_args;
-    auto& replay_speed = o.replay_speed;
-    auto& cue_tcp_port = o.cue_tcp_port;
-    auto& web_port = o.web_port;
-    const bool replaying = vm.count("replay") > 0;
-    const bool check_only = vm.count("check-inputs") > 0;
-
+    const auto& config_path = o.config_path;
+    const auto& set_args = o.set_args;
+    const auto& readsb_host = o.readsb_host;
+    const auto& dump978_host = o.dump978_host;
+    const auto& web_bind = o.web_bind;
+    const auto& inputs_file = o.inputs_file;
+    const auto& cue_tcp_port = o.cue_tcp_port;
+    const auto& web_port = o.web_port;
     // The layers: defaults, the file, its overrides file, the SKYCUE_* environment, --set.
     std::vector<std::string> unknown_env;
-    const auto env = environmentOverrides(&unknown_env);
-    Config config;
+    env = environmentOverrides(&unknown_env);
     try {
         // --dump-env also serves tools that need no receiver position (the map scripts).
         config = loadConfig(config_path, set_args, env, vm.count("dump-env") == 0);
@@ -442,6 +432,35 @@ int run(int argc, char** argv)
             return 2;
         }
     }
+    return std::nullopt;
+}
+
+int run(int argc, char** argv)
+{
+    const auto started = std::chrono::system_clock::now();
+    Options o;
+    po::variables_map vm;
+    if (const auto rc = parseOptions(argc, argv, o, vm))
+        return *rc;
+    auto& config_path = o.config_path;
+    auto& replay_path = o.replay_path;
+    auto& readsb_host = o.readsb_host;
+    auto& dump978_host = o.dump978_host;
+    auto& log_level = o.log_level;
+    auto& www_dir = o.www_dir;
+    auto& web_bind = o.web_bind;
+    auto& inputs_file = o.inputs_file;
+    auto& set_args = o.set_args;
+    auto& replay_speed = o.replay_speed;
+    auto& cue_tcp_port = o.cue_tcp_port;
+    auto& web_port = o.web_port;
+    const bool replaying = vm.count("replay") > 0;
+    const bool check_only = vm.count("check-inputs") > 0;
+
+    std::map<std::string, std::string> env;
+    Config config;
+    if (const auto rc = loadDaemonConfig(o, vm, config, env))
+        return *rc;
     readsb_host = config.readsb_host;
     dump978_host = config.dump978_host;
     const bool use_dump978 = config.dump978_enable;

@@ -19,7 +19,6 @@ using skycue::AddressType;
 using skycue::Source;
 using namespace limits;
 
-constexpr seconds kFieldFresh{60};      // our choice: observations carry fields <= 60 s old
 constexpr seconds kAcasRaFresh{30};     // spec 14 item 8: an RA message keeps the field for 30 s
 constexpr seconds kConfirmFresh{60};    // our choice: an address stays confirmed for 60 s
 constexpr seconds kAirbornePair{10};    // our choice: airborne even/odd pair window

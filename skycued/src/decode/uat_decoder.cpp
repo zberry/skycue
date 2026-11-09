@@ -19,12 +19,11 @@ using std::chrono::seconds;
 using skycue::AddressType;
 using skycue::Source;
 
-constexpr seconds kFieldFresh{60};     // our choice: observations carry fields <= 60 s old
 
 // Sets a timed field; flags a change when it is new, expired or replaced a different value.
 template <typename T>
 void setField(UatKeyState& ks, Timed<T>& f, const T& v, TimePoint now) {
-    if (!f.fresh(now, kFieldFresh) || !(f.value == v)) ks.gate.dirty = true;
+    if (!f.fresh(now, limits::kFieldFresh) || !(f.value == v)) ks.gate.dirty = true;
     f.set(v, now);
 }
 
@@ -83,7 +82,7 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     if (sv.ag == uat::StateVector::Ag::ground) frame_ground = true;
     else if (sv.ag != uat::StateVector::Ag::reserved) frame_ground = false;
     if (frame_ground) setField(ks, ks.on_ground, *frame_ground, now_);
-    const bool ground = ks.on_ground.fresh(now_, kFieldFresh).value_or(false);
+    const bool ground = ks.on_ground.fresh(now_, limits::kFieldFresh).value_or(false);
 
     if (baro) {
         if (ground) ks.alt_baro.set(*baro, now_);  // stored, but a ground target does not report it
@@ -158,26 +157,26 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
         o.position_time = arrival;
     }
     o.on_ground = frame_ground;
-    if (!ground) o.alt_baro_ft = ks.alt_baro.fresh(now_, kFieldFresh);  // ground suppresses it (spec 5.4)
+    if (!ground) o.alt_baro_ft = ks.alt_baro.fresh(now_, limits::kFieldFresh);  // ground suppresses it (spec 5.4)
     if (o.alt_baro_ft) o.alt_baro_time = ks.alt_baro.at;
-    o.alt_geom_ft = ks.alt_geom.fresh(now_, kFieldFresh);
+    o.alt_geom_ft = ks.alt_geom.fresh(now_, limits::kFieldFresh);
     if (o.alt_geom_ft) o.alt_geom_time = ks.alt_geom.at;
     if (frame_diff && o.alt_baro_ft && o.alt_geom_ft) {  // only a difference this frame measured
         o.geom_minus_baro_ft = frame_diff;
         o.geom_minus_baro_time = now_;
     }
-    o.gs_kt = ks.gs.fresh(now_, kFieldFresh);
-    o.track_deg = ks.track.fresh(now_, kFieldFresh);
-    o.heading_mag_deg = ks.heading_mag.fresh(now_, kFieldFresh);
-    o.heading_true_deg = ks.heading_true.fresh(now_, kFieldFresh);
-    o.baro_rate_fpm = ks.baro_rate.fresh(now_, kFieldFresh);
-    o.geom_rate_fpm = ks.geom_rate.fresh(now_, kFieldFresh);
+    o.gs_kt = ks.gs.fresh(now_, limits::kFieldFresh);
+    o.track_deg = ks.track.fresh(now_, limits::kFieldFresh);
+    o.heading_mag_deg = ks.heading_mag.fresh(now_, limits::kFieldFresh);
+    o.heading_true_deg = ks.heading_true.fresh(now_, limits::kFieldFresh);
+    o.baro_rate_fpm = ks.baro_rate.fresh(now_, limits::kFieldFresh);
+    o.geom_rate_fpm = ks.geom_rate.fresh(now_, limits::kFieldFresh);
     o.callsign = ks.callsign.has ? std::optional(ks.callsign.value) : std::nullopt;  // identity: lives with the key
     o.squawk = ks.squawk.has ? std::optional(ks.squawk.value) : std::nullopt;  // identity: lives with the key
     o.emergency = ks.emergency.has ? std::optional(ks.emergency.value) : std::nullopt;  // identity: lives with the key
     o.category = ks.category.has ? std::optional(ks.category.value) : std::nullopt;  // identity: lives with the key
-    o.nic = ks.nic.fresh(now_, kFieldFresh);
-    o.nac_p = ks.nac_p.fresh(now_, kFieldFresh);
+    o.nic = ks.nic.fresh(now_, limits::kFieldFresh);
+    o.nac_p = ks.nac_p.fresh(now_, limits::kFieldFresh);
     o.rssi = ks.rssi.meanDb();
     o.raw_line = "-" + coding::toHex(f.bytes, true) + ";";
     o.input_id = input_id_;

@@ -22,6 +22,7 @@ constexpr double kSpeedCapAirKt = 1200.0;     // our choice
 constexpr double kSpeedCapSurfaceKt = 100.0;  // our choice
 constexpr std::chrono::seconds kNoPositionFor{10};  // design 7.2: change emissions only without a position this recent
 constexpr std::chrono::seconds kChangeInterval{1};  // design 7.2: at most one change emission per second
+constexpr std::chrono::seconds kFieldFresh{60};     // our choice: observations carry fields <= 60 s old
 }  // namespace limits
 
 // Mean signal level over the last kRssiFrames frames that carried one (our choice). Both decoders push linear power.

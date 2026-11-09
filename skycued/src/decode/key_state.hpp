@@ -68,7 +68,42 @@ struct KeyBase {
     std::list<StateKey>::iterator lru;
 };
 
-struct KeyState : KeyBase {
+// The fields both decoders keep the same way: the identity fields live with the key, the
+// others are valid for limits::kFieldFresh.
+struct CommonFields {
+    Timed<std::string> callsign, category, squawk, emergency;
+    Timed<int32_t> alt_baro;
+    Timed<float> gs, track, baro_rate, geom_rate, heading_mag, heading_true;
+    Timed<uint8_t> nic, nac_p;
+    Timed<bool> on_ground;
+    RssiRing rssi;  // level of the last frames that carried one, as mean power
+    EmitGate gate;  // change detection (design section 7.2)
+};
+
+// The identity value when it was ever learned (it outlives limits::kFieldFresh with the key).
+template <typename T>
+std::optional<T> identityOf(const Timed<T>& f) {
+    return f.has ? std::optional<T>(f.value) : std::nullopt;
+}
+
+// Fills the observation fields both decoders produce the same way.
+inline void fillCommon(TrackObservation& o, const CommonFields& c, TimePoint now) {
+    o.gs_kt = c.gs.fresh(now, limits::kFieldFresh);
+    o.track_deg = c.track.fresh(now, limits::kFieldFresh);
+    o.heading_mag_deg = c.heading_mag.fresh(now, limits::kFieldFresh);
+    o.heading_true_deg = c.heading_true.fresh(now, limits::kFieldFresh);
+    o.baro_rate_fpm = c.baro_rate.fresh(now, limits::kFieldFresh);
+    o.geom_rate_fpm = c.geom_rate.fresh(now, limits::kFieldFresh);
+    o.nic = c.nic.fresh(now, limits::kFieldFresh);
+    o.nac_p = c.nac_p.fresh(now, limits::kFieldFresh);
+    o.callsign = identityOf(c.callsign);
+    o.squawk = identityOf(c.squawk);
+    o.emergency = identityOf(c.emergency);
+    o.category = identityOf(c.category);
+    o.rssi = c.rssi.meanDb();
+}
+
+struct KeyState : KeyBase, CommonFields {
     // Address confirmation (design section 5.2): set by clean DF17, DF18 CF 0
     // and DF11 with residual 0; only the (icao, direct) key ever has it.
     Timed<bool> confirmed;
@@ -82,15 +117,11 @@ struct KeyState : KeyBase {
     bool need_global = false;                 // set by a rejection, cleared by a global decode
     std::optional<float> last_gs_kt;
 
-    // Fields, each with the time it was learned (observations use <= 60 s).
-    Timed<std::string> callsign, category, squawk, emergency;
-    Timed<int32_t> alt_baro, alt_gnss, alt_derived;
+    // Fields beyond CommonFields, each with the time it was learned (observations use <= 60 s).
+    Timed<int32_t> alt_gnss, alt_derived;
     Timed<int32_t> gnss_diff;  // last TC19 GNSS-minus-baro difference (signed, positive: GNSS above baro)
-    Timed<float> gs, track, baro_rate, geom_rate;
-    Timed<uint8_t> nic, nac_p;
-    Timed<bool> on_ground;
     // Comm-B, target-state and ACAS fields (see CommBFields).
-    Timed<float> heading_mag, heading_true, tas, mach, roll, track_rate, qnh, sel_heading;
+    Timed<float> tas, mach, roll, track_rate, qnh, sel_heading;
     Timed<uint16_t> ias;
     Timed<int32_t> sel_alt, sel_alt_fms;
     Timed<uint8_t> nav_modes, acas_sl, acas_ri;
@@ -108,26 +139,13 @@ struct KeyState : KeyBase {
         bool nic_c = false;
         bool seen = false;
     } tc31;
-
-    RssiRing rssi;  // level of the last frames that carried a signal byte
-
-    // Change detection (design section 7.2).
-    EmitGate gate;
 };
 
 // Per-key state of the 978 decoder: no CPR, every state vector carries a whole position.
-struct UatKeyState : KeyBase {
+struct UatKeyState : KeyBase, CommonFields {
     std::optional<cpr::Position> first_pos;  // anchor of the range check without a reference
 
-    Timed<std::string> callsign, category, squawk, emergency;
-    Timed<int32_t> alt_baro, alt_geom;
-    Timed<float> gs, track, baro_rate, geom_rate, heading_mag, heading_true;
-    Timed<uint8_t> nic, nac_p;
-    Timed<bool> on_ground;
-
-    RssiRing rssi;  // level (dBFS) of the last frames that carried one, as mean power
-
-    EmitGate gate;  // dirty flag and emission times (spec 7.2)
+    Timed<int32_t> alt_geom;
 };
 
 }  // namespace skycued::decode

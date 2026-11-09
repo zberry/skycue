@@ -703,5 +703,207 @@ test('csvFileName: skycue-<what>-<UTC date>.csv', () => {
   assert.strictEqual(S.csvFileName('aircraft', Date.parse('2026-11-04T23:59:59Z')), 'skycue-aircraft-2026-11-04.csv');
 });
 
+// ---- Flow model ----
+const FLOW_THEME = {
+  tokens: { accent: '#58a6ff', uat: '#d2a8ff', muted: '#8b949e', text: '#e6edf3' },
+  decision: { sent: '#3fb950', allow: '#58a6ff', range: '#aaaaaa', elev: '#f0883e', blocked: '#f85149', unknown: '#d2a8ff' }
+};
+const FLOW_T0 = Date.parse('2026-11-08T12:00:00Z');
+// Snapshot i is 5 s * i after FLOW_T0; every counter grows linearly.
+function flowSnap(i, o) {
+  o = o || {};
+  const stats = {
+    observations: 1000 * i, sent_updates: 400 * i, sent_drops: 75 * i, drops_blocked: 250 * i,
+    drops_out_of_range: 1200 * i, drops_below_elevation: 500 * i, drops_no_position: 50 * i, tracks_total: 40,
+    inputs: [
+      { id: 'readsb', connected: true, messages: 7100 * (i + 1), observations: 100 * i, uplinks: 0, rejected: 1300 * i, crc_fail: 0, frames: 0 },
+      { id: 'dump978', connected: true, messages: 190 * (i + 1), observations: 10 * i, uplinks: 20 * i, rejected: 0, crc_fail: 40 * i, frames: 0 }
+    ]
+  };
+  const inputs = [
+    { id: 'readsb', name: 'Local readsb', type: 'readsb', state: { connected: true, receiving: true, last_data_age_s: 1, messages: 7100 * (i + 1) } },
+    { id: 'dump978', name: 'UAT', type: 'dump978', state: { connected: true, receiving: true, last_data_age_s: 2, messages: 190 * (i + 1), uplinks: 20 * i } }
+  ];
+  const clients = {
+    tcp: [
+      { endpoint: '192.0.2.5:40001', direction: 'accepted', connected_since: '2026-11-08T11:00:00Z', bytes_sent: 3000 * i, output: 'cue-tcp' },
+      { endpoint: '192.0.2.9:5001', direction: 'dialled', connected_since: '2026-11-08T11:00:00Z', bytes_sent: 1000 * i, output: 'cue-connect-0' }
+    ],
+    udp: [{ endpoint: '192.0.2.20:6000', datagrams_sent: 50 * i, output: 'cue-udp-0' }]
+  };
+  const files = [
+    { name: 'skycue-received-2026-11-08.jsonl', stream: 'received', bytes: 900000 * i },
+    { name: 'skycue-sent-2026-11-08.jsonl', stream: 'sent', bytes: 1000 * i }
+  ];
+  const outputs = [{ id: 'beast-out', kind: 'beast', input: 'readsb', state: { up: true, peers: 2, bytes: 5, messages: 5 } },
+                   { id: 'cue-tcp', kind: 'cue', builtin: true, state: { up: true, peers: 2 } }];
+  return Object.assign({ t: FLOW_T0 + 5000 * i, stats, inputs, clients, files, outputs }, o);
+}
+function flowWin(n) {
+  const w = S.flowWindow();
+  for (let i = 0; i < n; i++) S.flowPush(w, flowSnap(i));
+  return w;
+}
+function flowGraphOf(snap, win, width) {
+  const w = win || flowWin(3);
+  const r = S.flowRates(w);
+  return S.flowGraph(r, snap || w.samples[w.samples.length - 1], { width: width || 1000, theme: FLOW_THEME, now: FLOW_T0 + 10000 });
+}
+function flowZero() {
+  const w = S.flowWindow();
+  const a = flowSnap(0), b = flowSnap(0); b.t += 10000;
+  S.flowPush(w, a); S.flowPush(w, b);
+  return w;
+}
+
+test('flowWindow keeps twelve samples and reports the span', () => {
+  const w = flowWin(14);
+  assert.strictEqual(w.samples.length, 12);
+  assert.strictEqual(S.flowRates(w).span_s, 55);
+  assert.strictEqual(S.flowRates(S.flowWindow()), null);
+  assert.strictEqual(S.flowRates(flowWin(1)), null);
+});
+
+test('flowWindow drops a sample after a counter reset', () => {
+  const w = flowWin(3);
+  const s = flowSnap(3); s.stats.sent_updates = 5;
+  S.flowPush(w, s);
+  assert.strictEqual(w.samples.length, 1);
+  assert.strictEqual(S.flowRates(w), null);
+  S.flowPush(w, flowSnap(4));
+  assert.ok(S.flowRates(w));
+});
+
+test('flowRates per-second values from the fixture', () => {
+  const r = S.flowRates(flowWin(3));
+  assert.strictEqual(r.span_s, 10);
+  assert.strictEqual(r.inputs.readsb.msg_s, 1420);
+  assert.strictEqual(r.inputs.dump978.msg_s, 38);
+  assert.strictEqual(r.inputs.dump978.uplinks_s, 4);
+  assert.strictEqual(r.inputs.readsb.rejected_s, 260);
+  assert.strictEqual(r.inputs.dump978.rejected_s, 8);
+  assert.strictEqual(r.decoder.in_s, 1458);
+  assert.strictEqual(r.decoder.rejected_s, 268);
+  assert.strictEqual(r.tracks_s, 1190);
+  assert.deepStrictEqual(r.decisions, { sent: 790, range: 240, elev: 100, blocked: 50, nopos: 10 });
+  assert.strictEqual(r.cues_s, 95);
+  assert.deepStrictEqual(r.clients[0], { key: 'tcp:192.0.2.5:40001', kind: 'tcp', endpoint: '192.0.2.5:40001', direction: 'accepted', per_min_bytes: 36000 });
+  assert.strictEqual(r.clients[1].per_min_bytes, 12000);
+  assert.strictEqual(r.clients[2].kind, 'udp');
+  assert.strictEqual(r.clients[2].per_s_datagrams, 10);
+  assert.deepStrictEqual(r.files[0], { name: 'skycue-received-2026-11-08.jsonl', stream: 'received', bytes: 1800000, bytes_per_s: 180000 });
+});
+
+test('flowGraph node order, colours and copy bands', () => {
+  const r = S.flowRates(flowWin(3));
+  const g = flowGraphOf();
+  assert.deepStrictEqual(g.nodes.map(n => n.name), ['readsb', 'dump978', 'decode', 'rejected', 'tracks',
+    'sent', 'range', 'elev', 'blocked', 'nopos', 'sched', 'tcp:192.0.2.5:40001', 'tcp:192.0.2.9:5001', 'udp:192.0.2.20:6000']);
+  const col = n => g.nodes.find(x => x.name === n).color;
+  assert.strictEqual(col('dump978'), FLOW_THEME.tokens.uat);
+  assert.strictEqual(col('readsb'), FLOW_THEME.tokens.accent);
+  assert.strictEqual(col('rejected'), FLOW_THEME.tokens.muted);
+  assert.strictEqual(col('nopos'), FLOW_THEME.decision.unknown);
+  const link = (s, t) => g.links.find(l => l.source === s && l.target === t);
+  assert.strictEqual(link('tracks', 'range').color, FLOW_THEME.decision.range);
+  assert.strictEqual(link('tracks', 'blocked').color, FLOW_THEME.decision.blocked);
+  assert.strictEqual(link('tracks', 'sent').color, FLOW_THEME.decision.sent);
+  assert.strictEqual(link('dump978', 'decode').color, FLOW_THEME.tokens.uat);
+  ['tcp:192.0.2.5:40001', 'tcp:192.0.2.9:5001', 'udp:192.0.2.20:6000'].forEach(k => assert.strictEqual(link('sched', k).value, r.cues_s));
+  assert.strictEqual(link('readsb', 'decode').value, 1420);
+});
+
+test('flowGraph labels obey two lines and one column', () => {
+  [1000, 600, 1400].forEach(width => {
+    const g = flowGraphOf(null, null, width);
+    const maxCh = Math.floor((width - 230) / 6 / 6.6);
+    g.nodes.forEach(n => {
+      const lines = n.label.split('\n');
+      assert.ok(lines.length <= (n.bandPx >= 45 ? 3 : 2), n.name + ' has ' + lines.length + ' lines');
+      lines.forEach(l => assert.ok(l.length <= maxCh, n.name + ' line too long: ' + l));
+      assert.ok(n.label.indexOf('.jsonl') < 0);
+    });
+  });
+  assert.ok(flowGraphOf().nodes.some(n => n.bandPx >= 45 && n.label.split('\n').length === 3));
+});
+
+test('flowGraph tags: received on tracks, sent on sched, fisb on the uplink input, raw output on its input', () => {
+  const g = flowGraphOf();
+  const tag = n => g.tags.filter(t => t.node === n);
+  assert.strictEqual(tag('tracks').length, 1);
+  assert.ok(/^⏺ recording · 1\.8 MB$/.test(tag('tracks')[0].text) || tag('tracks')[0].text === '⏺');
+  assert.ok(tag('tracks')[0].hover.indexOf('skycue-received-2026-11-08.jsonl') >= 0);
+  assert.ok(tag('tracks')[0].hover.indexOf('180 kB/s') >= 0);
+  assert.strictEqual(tag('sched').length, 1);
+  assert.strictEqual(tag('readsb').length, 1);
+  assert.strictEqual(tag('readsb')[0].text.indexOf('↗ raw output · 2 peers') >= 0, true);
+  const snap = flowSnap(2);
+  snap.files.push({ name: 'skycue-fisb-2026-11-08.jsonl', stream: 'fisb', bytes: 500 });
+  const w = flowWin(2); S.flowPush(w, snap);
+  const g2 = flowGraphOf(snap, w);
+  assert.strictEqual(g2.tags.filter(t => t.node === 'dump978' && t.text.indexOf('⏺') === 0).length, 1);
+  g2.tags.forEach(t => assert.ok(t.text.indexOf('.jsonl') < 0));
+});
+
+test('flowGraph at zero traffic keeps every node', () => {
+  const w = flowZero();
+  const g = flowGraphOf(null, w);
+  assert.strictEqual(g.nodes.length, 14);
+  g.links.forEach(l => assert.strictEqual(l.value, 0.01));
+  g.nodes.forEach(n => assert.ok(/no data( \d+ (s|min|h|d))?$/.test(n.label), n.label));
+  assert.ok(/no data 2 s$/.test(g.nodes.find(n => n.name === 'dump978').label));
+  assert.ok(g.height >= 360);
+});
+
+test('flowGraph forgets an input that left', () => {
+  const w = flowWin(3);
+  const latest = flowSnap(2);
+  latest.inputs = latest.inputs.filter(i => i.id !== 'dump978');
+  const g = flowGraphOf(latest, w);
+  assert.ok(!g.nodes.some(n => n.name === 'dump978'));
+  assert.ok(g.links.every(l => l.source !== 'dump978' && l.target !== 'dump978'));
+});
+
+test('flowGraph height grows with the tallest column', () => {
+  assert.strictEqual(flowGraphOf().height, 360);
+  const snaps = [flowSnap(0), flowSnap(1), flowSnap(2)];
+  snaps.forEach((s, i) => {
+    s.clients.tcp = [];
+    for (let k = 0; k < 8; k++) s.clients.tcp.push({ endpoint: 'h' + k + ':1', direction: 'accepted', bytes_sent: 100 * i, output: 'cue-tcp' });
+  });
+  const w = S.flowWindow(); snaps.forEach(s => S.flowPush(w, s));
+  const g = flowGraphOf(snaps[2], w);
+  assert.ok(g.height >= 9 * 30 + 9, 'height ' + g.height);
+});
+
+test('flowGraph caption names the span when short', () => {
+  assert.ok(/^messages per second, last 60 s/.test(flowGraphOf(null, flowWin(14)).caption));
+  assert.ok(/^messages per second, last 5 s/.test(flowGraphOf(null, flowWin(2)).caption));
+});
+
+test('flowCsvRows two sections', () => {
+  const rows = S.flowCsvRows(S.flowRates(flowWin(3)));
+  assert.deepStrictEqual(rows[0], ['source', 'target', 'rate_per_s']);
+  const i = rows.findIndex(r => r[0] === 'file');
+  assert.ok(i > 1);
+  assert.deepStrictEqual(rows[i], ['file', 'stream', 'bytes', 'bytes_per_s']);
+  assert.deepStrictEqual(rows[i + 1], ['skycue-received-2026-11-08.jsonl', 'received', 1800000, 180000]);
+  assert.deepStrictEqual(rows[1], ['readsb', 'decoder', 1420]);
+});
+
+test('flowTruncate cuts with an ellipsis', () => {
+  assert.strictEqual(S.flowTruncate('abcdef', 100, 6.6), 'abcdef');
+  const t = S.flowTruncate('abcdefghijklmnopqrstuvwxyz', 66, 6.6);
+  assert.strictEqual(t, 'abcdefghi…');
+  assert.ok(t.length * 6.6 <= 66.0001);
+});
+
+test('formatBytes units', () => {
+  assert.strictEqual(S.formatBytes(12), '12 B');
+  assert.strictEqual(S.formatBytes(210000), '210 kB');
+  assert.strictEqual(S.formatBytes(31000000), '31 MB');
+  assert.strictEqual(S.formatBytes(1200000000), '1.2 GB');
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

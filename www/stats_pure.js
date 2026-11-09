@@ -604,6 +604,276 @@
   // 'skycue-<what>-YYYY-MM-DD.csv' (the UTC date of nowMs).
   function csvFileName(what, nowMs) { return 'skycue-' + what + '-' + P.utcDate(nowMs) + '.csv'; }
 
+  // ---- The Flow card's model (pure; the view in stats_view.js draws it) ----
+  // A ring of counter snapshots {t (ms), stats, inputs, clients, files[, outputs]}
+  // -> per-second rates -> Sankey nodes, links and tags.
+  var FLOW_KEEP = 12;
+  var FLOW_COUNTERS = ['observations', 'sent_updates', 'sent_drops', 'drops_blocked', 'drops_out_of_range',
+    'drops_below_elevation', 'drops_no_position'];
+  var FLOW_GAP = 30;          // nodeGap, px
+  var FLOW_MIN_H = 360;       // minimum chart height, px
+  var FLOW_LINE_PX = 15;      // one label line
+  var FLOW_THIN = 0.01;       // the value of a band that carries nothing (about 1 px)
+
+  function num(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
+
+  function flowWindow() { return { samples: [] }; }
+
+  // Append a snapshot, keep the last 12. A counter below the previous sample's
+  // (skycued restarted) replaces the window with the snapshot alone.
+  function flowPush(win, snap) {
+    var prev = win.samples.length ? win.samples[win.samples.length - 1] : null;
+    if (prev) {
+      for (var i = 0; i < FLOW_COUNTERS.length; i++) {
+        var k = FLOW_COUNTERS[i];
+        if (snap.stats && prev.stats && num(snap.stats[k]) < num(prev.stats[k])) { win.samples = []; break; }
+      }
+    }
+    win.samples.push(snap);
+    if (win.samples.length > FLOW_KEEP) win.samples = win.samples.slice(win.samples.length - FLOW_KEEP);
+    return win;
+  }
+
+  function inputCounters(row) {
+    var frames = num(row.frames), msgs = num(row.messages);
+    return { msg: Math.max(frames, msgs), rejected: num(row.rejected) + num(row.crc_fail), uplinks: num(row.uplinks) };
+  }
+  function byId(list) {
+    var m = {};
+    (list || []).forEach(function (r) { if (r && r.id != null) m[r.id] = r; });
+    return m;
+  }
+  function clientList(c) {
+    var out = [];
+    ((c && c.tcp) || []).forEach(function (t) { out.push({ key: 'tcp:' + t.endpoint, kind: 'tcp', row: t }); });
+    ((c && c.udp) || []).forEach(function (u) { out.push({ key: 'udp:' + u.endpoint, kind: 'udp', row: u }); });
+    return out;
+  }
+
+  // Rates over the whole window (oldest to newest sample); null under 2 samples.
+  function flowRates(win) {
+    var s = win && win.samples;
+    if (!s || s.length < 2) return null;
+    var a = s[0], b = s[s.length - 1];
+    var span = (b.t - a.t) / 1000;
+    if (!(span > 0)) return null;
+    var d = function (x, y) { return Math.max(0, num(x) - num(y)) / span; };
+    var sa = a.stats || {}, sb = b.stats || {};
+    var oldIn = byId(sa.inputs);
+    var r = { span_s: span, inputs: {}, decoder: { in_s: 0, rejected_s: 0 }, tracks_s: 0, decisions: {}, cues_s: 0, clients: [], files: [] };
+    (sb.inputs || []).forEach(function (row) {
+      var nc = inputCounters(row), oc = oldIn[row.id] ? inputCounters(oldIn[row.id]) : nc;
+      var o = { msg_s: d(nc.msg, oc.msg), rejected_s: d(nc.rejected, oc.rejected), uplinks_s: d(nc.uplinks, oc.uplinks) };
+      r.inputs[row.id] = o;
+      r.decoder.in_s += o.msg_s;
+      r.decoder.rejected_s += o.rejected_s;
+    });
+    r.tracks_s = Math.max(0, r.decoder.in_s - r.decoder.rejected_s);
+    var dec = {
+      range: d(sb.drops_out_of_range, sa.drops_out_of_range), elev: d(sb.drops_below_elevation, sa.drops_below_elevation),
+      blocked: d(sb.drops_blocked, sa.drops_blocked), nopos: d(sb.drops_no_position, sa.drops_no_position)
+    };
+    dec.sent = Math.max(0, r.tracks_s - (dec.range + dec.elev + dec.blocked + dec.nopos));
+    r.decisions = { sent: dec.sent, range: dec.range, elev: dec.elev, blocked: dec.blocked, nopos: dec.nopos };
+    r.cues_s = d(num(sb.sent_updates) + num(sb.sent_drops), num(sa.sent_updates) + num(sa.sent_drops));
+    var old = {};
+    clientList(a.clients).forEach(function (c) { old[c.key] = c.row; });
+    clientList(b.clients).forEach(function (c) {
+      var o = old[c.key] || {}, e = { key: c.key, kind: c.kind, endpoint: c.row.endpoint };
+      if (c.kind === 'tcp') {
+        e.direction = c.row.direction;
+        e.per_min_bytes = d(c.row.bytes_sent, o.bytes_sent) * 60;
+      } else {
+        e.per_s_datagrams = d(c.row.datagrams_sent, o.datagrams_sent);
+      }
+      r.clients.push(e);
+    });
+    var oldF = {};
+    (a.files || []).forEach(function (f) { oldF[f.name] = f; });
+    (b.files || []).forEach(function (f) {
+      r.files.push({ name: f.name, stream: f.stream, bytes: num(f.bytes), bytes_per_s: oldF[f.name] ? d(f.bytes, oldF[f.name].bytes) : 0 });
+    });
+    return r;
+  }
+
+  function formatBytes(n) {
+    n = num(n);
+    var u = ['B', 'kB', 'MB', 'GB', 'TB'], i = 0;
+    while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+    if (i === 0) return Math.round(n) + ' B';
+    var v = Math.round(n * 10) / 10;
+    return (v >= 10 ? String(Math.round(v)) : String(v)) + ' ' + u[i];
+  }
+
+  // Cut text to at most maxPx at charPx per character, ending in an ellipsis.
+  function flowTruncate(text, maxPx, charPx) {
+    text = String(text);
+    var max = Math.max(1, Math.floor(maxPx / charPx));
+    return text.length <= max ? text : text.slice(0, max - 1) + '…';
+  }
+
+  function ageText(s) {
+    if (typeof s !== 'number' || !isFinite(s) || s < 0) return '';
+    s = Math.round(s);
+    if (s < 60) return s + ' s';
+    if (s < 3600) return Math.floor(s / 60) + ' min';
+    if (s < 86400) return Math.floor(s / 3600) + ' h';
+    return Math.floor(s / 86400) + ' d';
+  }
+  function rateText(v, unit) {
+    var t = v >= 10 ? String(Math.round(v)).replace(/\B(?=(\d{3})+$)/g, ',') : String(Math.round(v * 10) / 10);
+    return t + ' ' + unit;
+  }
+  function isUat(inp) { return /uat|978/i.test(String(inp.type || '') + ' ' + String(inp.id || '')); }
+
+  function flowCsvRows(rates) {
+    var out = [['source', 'target', 'rate_per_s']];
+    if (!rates) return out;
+    Object.keys(rates.inputs).forEach(function (id) { out.push([id, 'decoder', rates.inputs[id].msg_s]); });
+    out.push(['decoder', 'rejected', rates.decoder.rejected_s], ['decoder', 'tracks', rates.tracks_s]);
+    ['sent', 'range', 'elev', 'blocked', 'nopos'].forEach(function (k) { out.push(['tracks', k, rates.decisions[k]]); });
+    out.push(['sent', 'sched', rates.decisions.sent]);
+    rates.clients.forEach(function (c) { out.push(['sched', c.key, rates.cues_s]); });
+    out.push(['file', 'stream', 'bytes', 'bytes_per_s']);
+    rates.files.forEach(function (f) { out.push([f.name, f.stream, f.bytes, f.bytes_per_s]); });
+    return out;
+  }
+
+  // The Sankey: nodes (fixed order), links, tags, height and caption.
+  // Height: ECharts scales every column to fit the same height, so the scale
+  // is the tightest column's (360 - nodes * 30) / sum of its band values; the
+  // height is then max(360, tallestColumnNodes * 30 + that column's bandsPx),
+  // bandsPx being the column's bands in px at that scale (each at least 1 px).
+  function flowGraph(rates, latest, opts) {
+    opts = opts || {};
+    var width = opts.width || 900, th = opts.theme || {};
+    var tk = th.tokens || {}, dc = th.decision || {};
+    var colPx = (width - 230) / 6, charPx = 6.6;
+    var stats = (latest && latest.stats) || {};
+    var inputs = (latest && latest.inputs) || [];
+    var rt = rates || { inputs: {}, decoder: { in_s: 0, rejected_s: 0 }, tracks_s: 0, decisions: {}, cues_s: 0, clients: [], files: [], span_s: 0 };
+    var flowing = rt.decoder.in_s > 0;
+    var newest = null;
+    inputs.forEach(function (i) {
+      var a = i.state && i.state.last_data_age_s;
+      if (typeof a === 'number' && (newest === null || a < newest)) newest = a;
+    });
+    var nodes = [], links = [], byName = {};
+    function addNode(name, depth, color, title, value, detail, age, unit) {
+      var n = { name: name, depth: depth, color: color, value: value, _title: title, _detail: detail, _age: age, _unit: unit };
+      nodes.push(n); byName[name] = n; return n;
+    }
+    function link(s, t, v, color) { links.push({ source: s, target: t, value: v > 0 ? v : FLOW_THIN, color: color }); }
+
+    inputs.forEach(function (inp) {
+      var o = rt.inputs[inp.id] || { msg_s: 0 };
+      var age = inp.state && inp.state.last_data_age_s;
+      addNode(inp.id, 0, isUat(inp) ? tk.uat : tk.accent, inp.name || inp.id, o.msg_s,
+        isUat(inp) ? '978 MHz' : '1090 MHz', age, '/s').own = true;
+    });
+    addNode('decode', 1, tk.accent, 'decoder', rt.decoder.in_s, 'messages in', newest, '/s');
+    addNode('rejected', 2, tk.muted, 'rejected', rt.decoder.rejected_s, 'CRC or parse failed', newest, '/s');
+    addNode('tracks', 2, tk.accent, 'track updates', rt.tracks_s, 'after decoding', newest, '/s');
+    var D = [['sent', 'sent to cues', dc.sent], ['range', 'out of range', dc.range], ['elev', 'below elevation', dc.elev],
+      ['blocked', 'blocked', dc.blocked], ['nopos', 'no position', dc.unknown]];
+    D.forEach(function (x) { addNode(x[0], 3, x[2], x[1], rt.decisions[x[0]] || 0, '', newest, '/s'); });
+    addNode('sched', 4, tk.accent, 'cue scheduler', rt.cues_s, 'cues out', newest, '/s');
+    rt.clients.forEach(function (c) {
+      var detail = c.kind === 'tcp' ? (c.direction || 'tcp') + ' · ' + formatBytes(c.per_min_bytes || 0) + '/min'
+        : 'udp · ' + rateText(c.per_s_datagrams || 0, 'dgrams/s');
+      addNode(c.key, 5, tk.accent, c.endpoint, rt.cues_s, detail, newest, '/s');
+    });
+
+    nodes.forEach(function (n) { if (n.own) link(n.name, 'decode', n.value, n.color); });
+    link('decode', 'rejected', rt.decoder.rejected_s, tk.accent);
+    link('decode', 'tracks', rt.tracks_s, tk.accent);
+    D.forEach(function (x) { link('tracks', x[0], rt.decisions[x[0]] || 0, x[2]); });
+    link('sent', 'sched', rt.decisions.sent || 0, dc.sent);
+    rt.clients.forEach(function (c) { link('sched', c.key, rt.cues_s, tk.accent); });
+
+    // Band sizes: the node's value is what passes through it (the larger side).
+    var inV = {}, outV = {};
+    links.forEach(function (l) { inV[l.target] = (inV[l.target] || 0) + l.value; outV[l.source] = (outV[l.source] || 0) + l.value; });
+    var cols = {};
+    nodes.forEach(function (n) {
+      n.band = Math.max(inV[n.name] || 0, outV[n.name] || 0, FLOW_THIN);
+      (cols[n.depth] = cols[n.depth] || []).push(n);
+    });
+    var scale = Infinity;
+    Object.keys(cols).forEach(function (k) {
+      var sum = 0; cols[k].forEach(function (n) { sum += n.band; });
+      scale = Math.min(scale, Math.max(0, FLOW_MIN_H - cols[k].length * FLOW_GAP) / sum);
+    });
+    var height = FLOW_MIN_H;
+    Object.keys(cols).forEach(function (k) {
+      var px = 0;
+      cols[k].forEach(function (n) { n.bandPx = Math.max(1, n.band * scale); px += n.bandPx; });
+      height = Math.max(height, Math.ceil(cols[k].length * FLOW_GAP + px));
+    });
+
+    // Labels: name, then the rate (or "no data <age>"), a third line on a tall node.
+    nodes.forEach(function (n) {
+      var lines = [n._title];
+      var idle = n.value <= 0 && (n.own || !flowing);
+      if (idle) lines.push('no data' + (n._age !== undefined && n._age !== null && ageText(n._age) ? ' ' + ageText(n._age) : ''));
+      else lines.push(rateText(n.value, n._unit));
+      if (n.bandPx >= 3 * FLOW_LINE_PX && n._detail) lines.splice(1, 0, n._detail);
+      n.label = lines.slice(0, n.bandPx >= 3 * FLOW_LINE_PX ? 3 : 2)
+        .map(function (l) { return flowTruncate(l, colPx, charPx); }).join('\n');
+      n.tall = n.bandPx >= 3 * FLOW_LINE_PX;
+    });
+
+    // Tags: recorders and raw outputs.
+    var tags = [];
+    var up = null, upN = 0;
+    inputs.forEach(function (i) {
+      var row = byId(stats.inputs)[i.id];
+      var u = (rt.inputs[i.id] && rt.inputs[i.id].uplinks_s > 0) || (row && num(row.uplinks) > 0) || (i.state && num(i.state.uplinks) > 0);
+      if (u) { upN++; up = i.id; }
+    });
+    var perNode = {}, order = [];
+    (rt.files || []).forEach(function (f) {
+      var node = f.stream === 'received' ? 'tracks' : f.stream === 'sent' ? 'sched' : f.stream === 'fisb' ? (upN === 1 ? up : 'decode') : null;
+      if (!node || !byName[node]) return;
+      if (!perNode[node]) { perNode[node] = []; order.push(node); }
+      perNode[node].push(f);
+    });
+    order.forEach(function (node) {
+      var fl = perNode[node], bytes = 0;
+      fl.forEach(function (f) { bytes += f.bytes; });
+      tags.push({
+        node: node, text: byName[node].tall ? '⏺ recording · ' + formatBytes(bytes) : '⏺',
+        hover: fl.map(function (f) { return f.name + ': ' + formatBytes(f.bytes) + ', ' + formatBytes(f.bytes_per_s) + '/s'; }).join('\n')
+      });
+    });
+    var outs = (latest && latest.outputs) || [];
+    if (outs.outputs) outs = outs.outputs;
+    var peersBy = {}, outOrder = [];
+    outs.forEach(function (o) {
+      if (!o || o.kind === 'cue' || o.builtin) return;
+      var target = o.input;
+      if (!target) {
+        // GET /api/outputs names no input: the first input of the kind's type.
+        var want = { beast: /beast_raw/, uat: /uat_raw|dump978/, json: /readsb/, pingstation_json: /pingstation_json/, cat021: /pingstation_cat021/ }[o.kind];
+        inputs.some(function (i) { if (want && want.test(String(i.type))) { target = i.id; return true; } return false; });
+      }
+      if (!target || !byName[target]) return;
+      if (peersBy[target] === undefined) { peersBy[target] = 0; outOrder.push(target); }
+      peersBy[target] += num(o.state && o.state.peers);
+    });
+    outOrder.forEach(function (node) {
+      var p = peersBy[node];
+      tags.push({ node: node, text: '↗ raw output · ' + p + (p === 1 ? ' peer' : ' peers'), hover: 'raw output, ' + p + (p === 1 ? ' peer' : ' peers') });
+    });
+
+    var span = Math.round(rt.span_s || 0);
+    var caption = 'messages per second, last ' + (rt.span_s && rt.span_s < 55 ? span : 60) + ' s · a thin band carries nothing';
+    return {
+      nodes: nodes.map(function (n) { return { name: n.name, label: n.label, color: n.color, depth: n.depth, bandPx: n.bandPx, tall: n.tall }; }),
+      links: links, tags: tags, height: height, caption: caption
+    };
+  }
+
   var api = {
     RANGES: RANGES, DEFAULT_RANGE: DEFAULT_RANGE, rangeKey: rangeKey, rangeQuery: rangeQuery,
     seriesTimes: seriesTimes, sliceSeries: sliceSeries, spark: spark, DROP_FIELDS: DROP_FIELDS,
@@ -619,7 +889,9 @@
     categoryFilter: categoryFilter, classFilter: classFilter, countryFilter: countryFilter, keyHex: keyHex,
     csvText: csvText, LEDGER_CSV_COLS: LEDGER_CSV_COLS, LEDGER_EXPORT_PAGE: LEDGER_EXPORT_PAGE,
     ledgerCsvRows: ledgerCsvRows, ledgerExportQuery: ledgerExportQuery, SERIES_CSV_COLS: SERIES_CSV_COLS,
-    seriesCsvRows: seriesCsvRows, coverageCsvRows: coverageCsvRows, csvFileName: csvFileName
+    seriesCsvRows: seriesCsvRows, coverageCsvRows: coverageCsvRows, csvFileName: csvFileName,
+    flowWindow: flowWindow, flowPush: flowPush, flowRates: flowRates, flowGraph: flowGraph,
+    flowCsvRows: flowCsvRows, flowTruncate: flowTruncate, formatBytes: formatBytes
   };
   if (root) root.skycueStatsPure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

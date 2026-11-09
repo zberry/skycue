@@ -14,6 +14,7 @@
   --elev: #f0883e;
   --blocked: #f85149;
   --unknown: #d2a8ff;
+  --uat: #d2a8ff;   /* 978 MHz inputs (the Flow card) */
   --gutter: 16px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;

@@ -24,7 +24,7 @@
       line: token(cs, '--line', '#30363d'), text: token(cs, '--text', '#e6edf3'), muted: token(cs, '--muted', '#8b949e'),
       accent: token(cs, '--accent', '#58a6ff'), sent: token(cs, '--sent', '#3fb950'), allow: token(cs, '--allow', '#58a6ff'),
       range: token(cs, '--range', '#8b949e'), elev: token(cs, '--elev', '#f0883e'), blocked: token(cs, '--blocked', '#f85149'),
-      unknown: token(cs, '--unknown', '#d2a8ff')
+      unknown: token(cs, '--unknown', '#d2a8ff'), uat: token(cs, '--uat', '#d2a8ff')
     };
     var axis = function () {
       return {

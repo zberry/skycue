@@ -1640,7 +1640,38 @@
       if (P.signalLevel(v) === null) return { text: '—', title: 'no signal level from the decoder' };
       return v.toFixed(1) + ' dBFS';
     }],
-    ['first_seen', 'First seen', fmtTime], ['last_seen', 'Last seen', fmtTime]
+    ['first_seen', 'First seen', fmtTime], ['last_seen', 'Last seen', fmtTime],
+    // A '#' entry is a group heading, shown only when a row after it is.
+    ['#air', 'Air data'],
+    ['heading_mag_deg', 'Heading (mag)', function (v) { return P.formatNum(v, 1, '°'); }],
+    ['heading_true_deg', 'Heading (true)', function (v) { return P.formatNum(v, 1, '°'); }],
+    ['ias_kt', 'IAS', function (v) { return P.formatNum(v, 0, ' kt'); }],
+    ['tas_kt', 'TAS', function (v) { return P.formatNum(v, 0, ' kt'); }],
+    ['mach', 'Mach', function (v) { return P.formatNum(v, 3); }],
+    ['roll_deg', 'Roll', function (v) { return P.formatNum(v, 1, '°'); }],
+    ['track_rate_dps', 'Track rate', function (v) { return P.formatNum(v, 2, ' °/s'); }],
+    ['#intent', 'Intent'],
+    ['sel_alt_ft', 'Selected altitude (MCP)', function (v) { return P.thousands(v) + ' ft'; }],
+    ['sel_alt_fms_ft', 'Selected altitude (FMS)', function (v) { return P.thousands(v) + ' ft'; }],
+    ['sel_heading_deg', 'Selected heading', function (v) { return P.formatNum(v, 1, '°'); }],
+    ['qnh_mb', 'QNH', function (v) { return P.formatNum(v, 1, ' mb'); }],
+    ['nav_modes', 'Nav modes', P.formatNavModes],
+    ['#acas', 'ACAS'],
+    ['acas_ra', 'Resolution advisory', function (v) {
+      var text = P.formatAcasRa(v);
+      var parts = [];
+      if (typeof v.ara === 'number') parts.push('ARA 0x' + v.ara.toString(16));
+      if (typeof v.rac === 'number') parts.push('RAC ' + v.rac);
+      if (v.rat === true) parts.push('RA terminated');
+      if (v.mte === true) parts.push('multiple threats');
+      var th = v.threat;
+      if (th && th.type === 'address') parts.push('threat ' + th.address);
+      else if (th) parts.push('threat ' + [P.formatNum(th.range_nm, 1, ' nm'), P.formatNum(th.bearing_deg, 0, '°'),
+        P.formatNum(th.alt_ft, 0, ' ft')].join(' '));
+      return { text: text, title: parts.join(', '),
+        html: v.active ? '<span class="ra-active">' + esc(text) + '</span>' : esc(text) };
+    }],
+    ['acas_sl', 'ACAS sensitivity level'], ['acas_ri', 'ACAS reply information']
   ];
 
   function renderDetails() {
@@ -1662,10 +1693,13 @@
     $('details-title').textContent = (t.callsign || t.hex) + (t.registration ? ' · ' + t.registration : '');
     var known = {};
     var rows = [];
+    var heading = null;
     FIELDS.forEach(function (f) {
       known[f[0]] = true;
+      if (f[0].charAt(0) === '#') { heading = [f[0], f[1]]; return; }
       var v = t[f[0]];
       if (v === undefined || v === null) return;
+      if (heading) { rows.push([heading[0], heading[1], null, null, null, true]); heading = null; }
       var shown = f[2] ? f[2](v, t) : String(v);   // a string, or {text, title}
       if (typeof shown === 'string') rows.push([f[0], f[1], shown]);
       else rows.push([f[0], f[1], shown.text, shown.title, shown.html]);
@@ -1676,6 +1710,7 @@
       rows.push([k, k, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
     });
     $('details-fields').tBodies[0].innerHTML = rows.map(function (row) {
+      if (row[5]) return '<tr class="group"><th scope="rowgroup" colspan="2">' + esc(row[1]) + '</th></tr>';
       return '<tr><th scope="row">' + esc(row[1]) + '</th><td data-field="' + esc(row[0]) + '"' +
         (row[3] ? ' title="' + esc(row[3]) + '"' : '') + '>' + (row[4] || esc(row[2])) + '</td></tr>';
     }).join('');

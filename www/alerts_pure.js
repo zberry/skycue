@@ -14,6 +14,7 @@
   // The rules in the config panel's order, with their defaults.
   var RULES = [
     { id: 'emergency', title: 'Emergency', enabled: true, sound: true, pattern: 'double', params: {} },
+    { id: 'acas_ra', title: 'ACAS RA', enabled: true, sound: true, pattern: 'double', params: {} },
     { id: 'military_new', title: 'Military', enabled: true, sound: false, pattern: 'single', params: {} },
     { id: 'sent_new', title: 'Sent', enabled: true, sound: false, pattern: 'single', params: {} },
     { id: 'input_lost', title: 'Input lost', enabled: true, sound: true, pattern: 'double', params: {} },
@@ -417,6 +418,9 @@
       clock(nowMs);
       var out = [], key = P.trackKey(t), label = trackLabel(t), rules = cfg.rules;
       state('emergency', key, P.isEmergency(t), false, nowMs, label, function () { return emergencyDetail(t); }, out);
+      state('acas_ra', key, !!t.acas_ra && t.acas_ra.active === true, false, nowMs, label, function () {
+        return P.formatAcasRa(t.acas_ra);
+      }, out);
       if (P.trackClass(t) === 'military') firstSeen('military_new', seen.military, key, key, nowMs, label, 'first seen military', out);
       if (t.decision === 'send' || t.decision === 'allow_listed') {
         firstSeen('sent_new', seen.sent, key, key, nowMs, label,

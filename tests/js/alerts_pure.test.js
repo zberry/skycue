@@ -49,6 +49,7 @@ function one(rows) {
 test('normalizeConfig: defaults', () => {
   assert.deepStrictEqual(A.RULES.map((r) => [r.id, r.title, r.enabled, r.sound, r.pattern, r.params]), [
     ['emergency', 'Emergency', true, true, 'double', {}],
+    ['acas_ra', 'ACAS RA', true, true, 'double', {}],
     ['military_new', 'Military', true, false, 'single', {}],
     ['sent_new', 'Sent', true, false, 'single', {}],
     ['input_lost', 'Input lost', true, true, 'double', {}],
@@ -335,6 +336,24 @@ test('altitude_below: airborne, low, near', () => {
   assert.deepStrictEqual(e.track(tr({ hex: 'c00002', alt_baro_ft: 1000, range_nm: 5 }), T0), []);
   assert.strictEqual(one(e.track(tr({ hex: 'c00003', alt_baro_ft: 999, range_nm: 10 }), T0)).detail,
     'below 1,000 ft within 10 nm (999 ft, 10.0 nm)');
+});
+
+test('acas_ra: raised when active turns true, cleared when it ends or the track goes', () => {
+  const e = fresh({ acas_ra: { enabled: true } });
+  assert.deepStrictEqual(e.track(tr({ acas_ra: { active: false, text: 'clear of conflict' } }), T0), []);
+  like(one(e.track(tr({ acas_ra: { active: true, text: 'climb' } }), T0 + 1000)),
+    { rule: 'acas_ra', title: 'ACAS RA', label: 'UAL123', detail: 'RA: climb', key: 'a1b2c3|icao', pattern: 'double' });
+  // still active: no second row
+  assert.deepStrictEqual(e.track(tr({ acas_ra: { active: true, text: 'climb' } }), T0 + 2000), []);
+  // ended, then a new advisory after the first row was acknowledged and the quiet period passed
+  assert.deepStrictEqual(e.track(tr({ acas_ra: { active: false, text: 'clear of conflict' } }), T0 + 3000), []);
+  const rows = e.rows();
+  e.ack(rows[0].id, T0 + 3000);
+  like(one(e.track(tr({ acas_ra: { active: true, text: 'descend' } }), T0 + 3000 + 300000)),
+    { rule: 'acas_ra', detail: 'RA: descend' });
+  // the track dropping re-arms the pair
+  e.trackGone('a1b2c3|icao');
+  assert.deepStrictEqual(e.track(tr({}), T0 + 700000), []);
 });
 
 test('new_country: first per engine', () => {

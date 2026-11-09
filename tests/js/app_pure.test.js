@@ -2100,5 +2100,15 @@ test('rulerLabel formats', () => {
   assert.strictEqual(P.rulerLabel({ nm: NaN, km: NaN, bearing: 0 }), '');
 });
 
+test('formatNavModes and formatAcasRa', () => {
+  assert.strictEqual(P.formatNavModes(['autopilot', 'vnav']), 'autopilot, vnav');
+  assert.strictEqual(P.formatNavModes([]), '—');
+  assert.strictEqual(P.formatNavModes(null), '—');
+  assert.strictEqual(P.formatAcasRa({ active: true, text: 'climb' }), 'RA: climb');
+  assert.strictEqual(P.formatAcasRa({ active: false, text: 'clear of conflict' }), 'RA ended: clear of conflict');
+  assert.strictEqual(P.formatAcasRa({ active: true }), 'RA');
+  assert.strictEqual(P.formatAcasRa(null), '—');
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

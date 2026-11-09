@@ -637,7 +637,7 @@ test('side_panel_tabs_one_row_and_recent_decisions_fit', async ({ page }) => {
 // engine in alerts_pure.js). Each case names the rules it runs with
 // (alertsOnly), so the default-on rules on the live replay add no rows.
 const ALERT_RULES = ['emergency', 'military_new', 'sent_new', 'input_lost', 'range_enter', 'altitude_below',
-  'new_country', 'watch', 'drop_filtered'];
+  'new_country', 'watch', 'drop_filtered', 'acas_ra'];
 // skycue.alerts before the first load only (a reload keeps what the page stored).
 async function alertsOnly(page, on, extra) {
   await page.addInitScript(([on, all, extra]) => {
@@ -5448,4 +5448,37 @@ test('box_shows_est_marker', async ({ page }) => {
   await expect(panel.locator('[data-field="hex"]')).toHaveText('fff6e2');
   await expect(cell).toHaveText('12,300 ft');
   await expect(cell.locator('small')).toHaveCount(0);
+});
+
+// ---- ACAS resolution advisory ------------------------------------------------------
+// The "acas" daemon replays tests/fixtures/acas-ra.jsonl: one aircraft with an
+// active RA, air data and intent. The aircraft box shows the grouped rows and
+// the RA line in the blocked colour; the Alerts strip counts one acas_ra alert.
+test.describe('acas replay', () => {
+  test.use({ baseURL: process.env.SKYCUE_ACAS_URL });
+test('acas_ra_aircraft_box_and_alert', async ({ page }, testInfo) => {
+  test.skip(!process.env.SKYCUE_ACAS_URL, 'no acas daemon');
+  const errors = watchErrors(page);
+  await alertsOnly(page, ['acas_ra']);
+  await openPage(page);
+  await waitMarkers(page, 1);
+  await page.locator('.ac-marker[data-hex="4ca001"] .ac-glyph').click();
+  const panel = page.locator('#details');
+  await expect(panel).toBeVisible();
+  const ra = panel.locator('[data-field="acas_ra"]');
+  await expect(ra).toHaveText('RA: climb');
+  await expect(ra.locator('.ra-active')).toBeVisible();
+  const color = (sel) => page.evaluate((q) => { const e = document.createElement('span'); e.style.color = 'var(--blocked)';
+    document.body.appendChild(e); const c = getComputedStyle(e).color; e.remove(); return c; }, sel);
+  expect(await ra.locator('.ra-active').evaluate((e) => getComputedStyle(e).color)).toBe(await color());
+  await expect(panel.locator('[data-field="sel_alt_ft"]')).toHaveText('11,000 ft');
+  await expect(panel.locator('[data-field="nav_modes"]')).toHaveText('autopilot, vnav');
+  await expect(panel.locator('[data-field="ias_kt"]')).toHaveText('240 kt');
+  await expect(panel.locator('tr.group th')).toHaveText(['Air data', 'Intent', 'ACAS']);
+  await expect(page.locator('#alerts-count')).toHaveText('1');
+  await expect(page.locator('#alerts-line .al-kind')).toHaveText('ACAS RA');
+  await expect(page.locator('#alerts-line .al-detail')).toHaveText('RA: climb');
+  await panel.screenshot({ path: testInfo.outputPath(`skycue-acas-box-${testInfo.project.name}.png`) });
+  expect(errors).toEqual([]);
+});
 });

@@ -388,30 +388,54 @@ every such input produces observations. What changes:
 The default keeps readsb's own decoding and its JSON. The decoder follows the
 public Mode S layouts and was compared with readsb on the same capture.
 
-**Comm-B and ACAS.** The Comm-B field of DF 20 and 21 replies does not say
-which register it holds, so skycued decodes it as BDS 4,0 (selected altitude,
-pressure setting, VNAV, altitude hold, approach), 5,0 (roll, true track, ground
-speed, track angle rate, true airspeed) and 6,0 (magnetic heading, indicated
-airspeed, Mach, barometric and inertial vertical rate) and accepts a register
-only when exactly one passes its range and reserved-bit checks; when two pass,
-the track's known state (track, ground speed and barometric rate) decides,
-and when that does not settle it the reply is counted `commb_ambiguous` and
-nothing is set. Replies that are empty, another register (identification, data
-link capability) or none of the three count in `commb_empty`, `commb_other` and
-`commb_unknown`; the accepted ones in `commb_bds40`, `commb_bds50` and
-`commb_bds60`. Like altitude and squawk, a Comm-B reply is used only for an
-address confirmed in the last 60 s. The values are kept for 60 s with the other
-dynamic fields; track, ground speed and the vertical rates from a Comm-B
-reply never replace a value an ADS-B message set in the last 60 s, and a
-change of the selected altitude, pressure setting, selected heading or
-autopilot modes is reported at once. ACAS resolution advisories come from DF 16 (`acas_ra`) and from
-the ADS-B status message (`acas_ra_tc28`); the advisory is reported as active
-for 30 s after its last message, a message that ends it reports "clear of
-conflict" for 30 s, and then the field is dropped. The ADS-B target-state
-message (selected altitude, pressure setting, selected heading, autopilot and
-other modes) and the heading/airspeed form of the ADS-B velocity message are
-decoded as well. The Feeds tab line adds `Comm-B 4,0 · 5,0 · 6,0 · RA` counts
-once any is non-zero.
+**Comm-B, target state and ACAS.** Under `inputs.decoder = "skycued"` the
+decoder also reads the replies and messages that carry air data and intent.
+
+- **Comm-B inference.** The Comm-B field of DF 20 and 21 replies does not say
+  which register it holds, so skycued tries BDS 4,0 (selected altitude,
+  pressure setting, VNAV, altitude hold, approach), 5,0 (roll, true track,
+  ground speed, track angle rate, true airspeed) and 6,0 (magnetic heading,
+  indicated airspeed, Mach, barometric and inertial vertical rate) and accepts
+  a register only when exactly one passes its range and reserved-bit checks.
+  When two pass, the track's known state (track, ground speed and barometric
+  rate) decides; when that does not settle it the reply is counted
+  `commb_ambiguous` and nothing is set. Like altitude and squawk, a Comm-B
+  reply is used only for an address confirmed in the last 60 s.
+- **Precedence.** ADS-B wins over Comm-B for a field both supply: track,
+  ground speed and the vertical rates from a Comm-B reply are applied only
+  when no ADS-B value for that field is under 60 s old, and a later ADS-B
+  value replaces the Comm-B one at once. The same holds for the intent fields:
+  the ADS-B target-state message (TC 29) outranks BDS 4,0 for the selected
+  altitude (MCP and FMS), pressure setting and selected heading for 60 s, and
+  the autopilot modes are replaced as a whole, not merged. The target-state
+  message's NACp is decoded but not applied to `nac_p`. The values are kept
+  for 60 s with the other dynamic fields, and a change of the selected
+  altitude, pressure setting, selected heading or autopilot modes is reported
+  at once. The heading/airspeed form of the ADS-B velocity message (subtypes 3
+  and 4) is decoded too.
+- **ACAS resolution advisories** come from DF 16 and from the ADS-B status
+  message (TC 28 subtype 2). The advisory is reported as active for 30 s after
+  its last message; a message that ends it reports "clear of conflict" for
+  30 s, and then the field is dropped. DF 0 and DF 16 also give the
+  sensitivity level and reply information (`acas_sl`, `acas_ri`).
+- **Counters.** Per decoding input: `commb_bds40`, `commb_bds50` and
+  `commb_bds60` (accepted replies), `commb_ambiguous`, `commb_other` (another
+  register, such as identification or data link capability), `commb_empty`
+  (all zero), `commb_unknown` (matches none), `acas_ra` (from DF 16) and
+  `acas_ra_tc28` (from the status message). The Feeds tab line adds
+  `Comm-B 4,0 · 5,0 · 6,0 · RA` counts once any is non-zero. Their meaning is
+  in [web-api.md](web-api.md#inputs).
+- **The aircraft box.** Selecting an aircraft on the map shows, after the
+  usual rows, three groups when the track has any of their fields: *Air data*
+  (magnetic and true heading, IAS, TAS, Mach, roll, track rate), *Intent*
+  (selected altitude from the MCP and from the FMS, selected heading, QNH, nav
+  modes) and *ACAS* (the resolution advisory, sensitivity level and reply
+  information). An active advisory reads "RA: climb" in red; once it ends it
+  reads "RA ended: clear of conflict" in the normal colour. Hover the line for
+  the raw advisory fields and the threat. The Alerts strip has an **ACAS RA**
+  rule (on by default, with sound) that raises one alert when a track's
+  advisory becomes active and re-arms when it ends or the track is dropped;
+  see [Alerts](#alerts) to turn it off in the Alert settings.
 
 ### UAT (978 MHz) in skycued
 
@@ -1346,6 +1370,7 @@ The rules, in the order of the settings panel:
 | Rule | Fires when | Parameters | Default |
 |------|------------|------------|---------|
 | Emergency | an aircraft squawks 7500, 7600 or 7700 or declares an emergency | — | on, sound on (double beep) |
+| ACAS RA | a track's ACAS resolution advisory becomes active (detail "RA: climb") | — | on, sound on (double beep) |
 | Military | an aircraft estimated military is seen for the first time | — | on |
 | Sent | an aircraft is `sent` or `allow_listed` for the first time | — | on |
 | Input lost | an enabled input has been disconnected for 10 s, or the page has lost skycued for 10 s | — | on, sound on (double beep) |
@@ -1366,8 +1391,8 @@ marked "quiet period", but neither raises the strip nor sounds.
 When the page opens, and after every reconnect, the aircraft already there
 are a silent baseline: they are seen and their range and altitude noted,
 but Military, Sent, Range, Low altitude, New country and Filtered drop do
-not fire for them. Emergency and Watch do: an aircraft already squawking
-7700 when the page opens is shown at once.
+not fire for them. Emergency, ACAS RA and Watch do: an aircraft already squawking
+7700, or with an advisory active, when the page opens is shown at once.
 
 Input lost waits 10 s (the hold-off) before it fires, so an input that
 reconnects within that time raises nothing; the same holds for the page's

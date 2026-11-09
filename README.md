@@ -81,7 +81,7 @@ internet. It shows:
 - a ruler for distances, and range and elevation rings around the receiver;
 - one toolbar on the map whose buttons fold out the map style, the aircraft trails, the weather layers and the radar controls, so the map stays clear until you need them;
 - saved views that bring back a set of filters and map settings with one key;
-- a track table, and a side panel for the selected aircraft;
+- a track table, and a side panel for the selected aircraft, with Comm-B registers (heading, airspeed, Mach, roll), target state (selected altitude, heading, QNH, autopilot modes) and ACAS resolution advisories when skycued decodes the frames;
 - alerts, a statistics view, and a Feeds tab with the health of every input;
 - offline map tiles and overlays that you bake once.
 

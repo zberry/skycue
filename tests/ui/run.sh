@@ -14,6 +14,8 @@
 # fixture to (with a device status every 2 s), one beast tcp_listen output
 # (beast-out, port in SKYCUE_RX_OUTPUT_PORT) and one cue UDP target, for the
 # Receiver tab cases;
+# the "acas" skycued, replaying tests/fixtures/acas-ra.jsonl (an active ACAS
+# resolution advisory);
 # and the "stats" skycued, the readsb fixture at 20x with its statistics in
 # a stats.json, which the ledger case restarts.
 # usage: run.sh SKYCUED FIXTURE_DIR WWW_STAGE PINGSIM [PLAYWRIGHT ARGS...]
@@ -316,6 +318,20 @@ for (( i=0; i<100; i++ )); do
 done
 [ "$up" = 1 ] || fail "stats skycued did not come up"
 
+# ACAS: one more skycued replaying acas-ra.jsonl (one aircraft with an active
+# resolution advisory and air data, three records 2 s apart), looping, for the
+# aircraft-box and alert case.
+acas_port=$(free_port)
+write_conf "$tmp/acas.toml" "$acas_port" 0 ""
+bash -c "echo \$\$ > '$tmp/acas.pid'; exec '$skycued' --replay '$fixtures/acas-ra.jsonl' --replay-speed 1 --replay-loop --config '$tmp/acas.toml' --www-dir '$www' >>'$tmp/acas.log' 2>&1" </dev/null >/dev/null 2>&1 &
+acas_base="http://127.0.0.1:$acas_port"
+up=0
+for (( i=0; i<100; i++ )); do
+  python3 -I -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)' "$acas_base/api/stats" 2>/dev/null && { up=1; break; }
+  sleep 0.1
+done
+[ "$up" = 1 ] || fail "acas skycued did not come up"
+
 out_dir=$(dirname "$www")/ui-test-results
 rm -rf "$out_dir"
 export SKYCUE_BASE_URL="$base"
@@ -329,6 +345,7 @@ export SKYCUE_OVERLAYS_URL="$ov_base"
 export SKYCUE_RECEIVERS_URL="$rx_base"
 export SKYCUE_RX_OUTPUT_PORT="$rx_out_port"
 export SKYCUE_STATS_URL="$st_base"
+export SKYCUE_ACAS_URL="$acas_base"
 export SKYCUE_STATS_START_CMD="$st_start_cmd"
 export SKYCUE_STATS_PID_FILE="$tmp/stats.pid"
 export SKYCUE_STATS_LOG="$tmp/stats.log"

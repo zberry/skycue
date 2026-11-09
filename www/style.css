@@ -360,6 +360,8 @@ input.invalid { border-color: var(--blocked); }
 #details-fields { width: 100%; border-collapse: collapse; font-size: 13px; }
 #details-fields th { text-align: left; color: var(--muted); font-weight: normal; padding: 3px 8px 3px 0; vertical-align: top; white-space: nowrap; }
 #details-fields td { padding: 3px 0; font-variant-numeric: tabular-nums; word-break: break-word; }
+#details-fields tr.group th { padding-top: 10px; color: var(--text); font-weight: 600; border-bottom: 1px solid var(--line); }
+#details-fields .ra-active { color: var(--blocked); font-weight: 600; }
 
 /* side panel tabs */
 .tabs { display: flex; align-items: center; justify-content: space-between; margin: -4px 0 12px; border-bottom: 1px solid var(--line); }

@@ -166,6 +166,17 @@
     if (typeof v !== 'number' || !isFinite(v)) return '—';
     return v.toFixed(digits) + (unit || '');
   }
+  // The nav_modes list as 'autopilot, vnav'; a dash when empty or absent.
+  function formatNavModes(list) {
+    return Array.isArray(list) && list.length ? list.join(', ') : '—';
+  }
+  // An ACAS resolution advisory: 'RA: climb' while active, 'RA ended: clear of
+  // conflict' once it is not.
+  function formatAcasRa(ra) {
+    if (!ra || typeof ra !== 'object') return '—';
+    var text = typeof ra.text === 'string' && ra.text ? ': ' + ra.text : '';
+    return (ra.active ? 'RA' : 'RA ended') + text;
+  }
   function formatAge(fromMs, nowMs) {
     var s = Math.max(0, Math.round((nowMs - fromMs) / 1000));
     if (s < 60) return s + ' s ago';
@@ -2204,7 +2215,7 @@
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
-    decisionColor: decisionColor, formatAlt: formatAlt, formatGeomAlt: formatGeomAlt, formatNum: formatNum, formatAge: formatAge,
+    decisionColor: decisionColor, formatAlt: formatAlt, formatGeomAlt: formatGeomAlt, formatNum: formatNum, formatNavModes: formatNavModes, formatAcasRa: formatAcasRa, formatAge: formatAge,
     thousands: thousands, trackKey: trackKey, markerLabel: markerLabel, listHas: listHas,
     sortTracks: sortTracks, graticuleStep: graticuleStep, parentTile: parentTile,
     tileBounds: tileBounds, tileInsideRegions: tileInsideRegions,

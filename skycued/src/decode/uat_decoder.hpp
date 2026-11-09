@@ -12,7 +12,6 @@
 // accepted one and at most once per second (spec 7.2). Callsign,
 // category, squawk and emergency live with the key; all other fields expire at 60 s.
 
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>

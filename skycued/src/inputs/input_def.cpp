@@ -290,7 +290,6 @@ bool isTrackType(InputType type)
     return type != InputType::dump978 && type != InputType::beast_raw && type != InputType::uat_raw;
 }
 
-
 bool InputDef::operator==(const InputDef& o) const
 {
     return id == o.id && name == o.name && type == o.type && enabled == o.enabled && transport == o.transport &&
@@ -529,7 +528,6 @@ std::optional<HttpUrl> parseHttpUrl(const std::string& url)
         out.target = url[end] == '/' ? url.substr(end) : "/" + url.substr(end);
     return out;
 }
-
 
 std::string repairInputName(const std::string& name)
 {

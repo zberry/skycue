@@ -1,17 +1,12 @@
 #include "decode/frame_source.hpp"
 
+#include "hex.hpp"
+
 namespace skycued::decode {
 
 namespace {
 
 constexpr uint64_t kMlatMarker = 0xFF004D4C4154ULL;
-
-int hexVal(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-    return -1;
-}
 
 }  // namespace
 
@@ -54,7 +49,7 @@ std::optional<RawFrame> fromAvrLine(const std::string& line, FrameSourceCounters
     RawFrame r;
     r.bytes.reserve(m->hex.size() / 2);
     for (std::size_t i = 0; i < m->hex.size(); i += 2) {
-        int hi = hexVal(m->hex[i]), lo = hexVal(m->hex[i + 1]);
+        int hi = hexDigitValue(m->hex[i]), lo = hexDigitValue(m->hex[i + 1]);
         if (hi < 0 || lo < 0) {
             ++c.bad_avr;
             return std::nullopt;

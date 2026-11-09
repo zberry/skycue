@@ -2,6 +2,8 @@
 
 #include <skycue/types.hpp>
 
+#include "hex.hpp"
+
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
@@ -51,17 +53,6 @@ constexpr unsigned kEmergencyBit = 184;           // confirmed by the synthetic 
 constexpr unsigned kNacpBit = 200;                // confirmed against the dump978-fa golden
 constexpr unsigned kCsidBit = 214;                // set for call signs, clear for squawks (golden); was 213
 constexpr unsigned kAuxBit = 232;                 // DO-282B AUX SV: byte 29
-
-int hexVal(char c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
 
 std::optional<int32_t> altitudeFt(uint32_t raw)
 {
@@ -147,7 +138,7 @@ std::optional<UatFrame> parseDownlinkLine(std::string_view line)
     UatFrame f;
     f.bytes.reserve(hex.size() / 2);
     for (std::size_t i = 0; i < hex.size(); i += 2) {
-        const int hi = hexVal(hex[i]), lo = hexVal(hex[i + 1]);
+        const int hi = hexDigitValue(hex[i]), lo = hexDigitValue(hex[i + 1]);
         if (hi < 0 || lo < 0)
             return std::nullopt;
         f.bytes.push_back(static_cast<uint8_t>(hi * 16 + lo));

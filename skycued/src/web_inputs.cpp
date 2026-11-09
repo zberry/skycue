@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <utility>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -79,8 +80,9 @@ std::string deviceStatusJson(const DeviceStatus& d)
         w.addExact("lon", *d.lon);
     if (d.alt_m)
         w.add("alt_m", *d.alt_m);
-    for (const auto& kv : {std::make_pair("alt_type", &d.alt_type), std::make_pair("gps_status", &d.gps_status),
-                           std::make_pair("receiver_status", &d.receiver_status)})
+    const std::pair<const char*, const std::optional<int>*> fields[] = {
+        {"alt_type", &d.alt_type}, {"gps_status", &d.gps_status}, {"receiver_status", &d.receiver_status}};
+    for (const auto& kv : fields)
         if (*kv.second)
             w.add(kv.first, static_cast<int64_t>(**kv.second));
     if (!d.version.empty())

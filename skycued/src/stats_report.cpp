@@ -1094,8 +1094,9 @@ std::string formatStatsJson(const StatsReport& rep)
         const auto& sp = rep.speed;
         JsonWriter w;
         w.add("gs_samples", i64(sp.gs_samples));
-        for (const auto& kv : {std::make_pair("gs_min_kt", sp.gs_min), std::make_pair("gs_median_kt", sp.gs_median),
-                               std::make_pair("gs_max_kt", sp.gs_max)}) {
+        const std::pair<const char*, double> gs_fields[] = {
+            {"gs_min_kt", sp.gs_min}, {"gs_median_kt", sp.gs_median}, {"gs_max_kt", sp.gs_max}};
+        for (const auto& kv : gs_fields) {
             if (sp.gs_samples)
                 w.add(kv.first, kv.second);
             else

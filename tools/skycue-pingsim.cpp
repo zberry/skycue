@@ -248,8 +248,7 @@ private:
         if (listener_)
             listener_->stop();
         io_.restart();
-        boost::system::error_code ignored;
-        io_.poll(ignored);
+        io_.poll();
     }
 
     static constexpr uint64_t kBacklog = 256 * 1024;

@@ -1,0 +1,45 @@
+usage: skycued --config PATH [--replay FILE [--replay-speed N] [--replay-loop]] [options]
+Forwards readsb's aircraft tracks to skycue clients:
+  -h [ --help ]           show this help
+  --version               print the version
+  -c [ --config ] arg     skycue.toml (required)
+  --set KEY=VALUE         override a config key for this run, e.g. --set 
+                          inputs.readsb.host=10.0.0.2 (repeatable, a later one 
+                          wins; above the SKYCUE_* environment)
+  --dump-env              print the effective configuration (all layers and 
+                          flags applied) as shell assignments 
+                          SKYCUE_INPUTS_READSB_HOST='...', one per key, and 
+                          exit; nothing is printed on an error (status 2)
+  --convert-conf FILE     print the skycue.toml equivalent of an old 
+                          skycue.conf (or skycue.overrides.conf) and exit
+  --replay arg            play back a received-stream JSONL recording (or a 
+                          readsb JSON capture) instead of connecting to readsb;
+                          no UAT
+  --replay-speed arg (=1) replay pacing: 1 = real time, 0 = unpaced
+  --replay-loop           restart the replay at the end of the file
+  --readsb-host arg       host of readsb's JSON port (overrides 
+                          inputs.readsb.host)
+  --dump978-host arg      host of dump978's raw port (overrides 
+                          inputs.dump978.host)
+  --no-uat                do not connect to dump978 (overrides 
+                          inputs.dump978.enable)
+  --no-readsb             do not connect to readsb (overrides 
+                          inputs.readsb.enable)
+  --inputs-file arg       override inputs.file (default: skycue.inputs.json in 
+                          paths.state_dir, else next to the config; empty: not 
+                          persisted)
+  --cue-tcp-port arg      override cues.tcp_port (0: no listener)
+  --www-dir arg           the web UI's files (default: 
+                          <bin>/../share/skycue/www)
+  --web-bind arg          override web.bind (numeric address)
+  --web-port arg          override web.port (0: no web UI)
+  --check-inputs          connect once to each configured TCP input (readsb, 
+                          dump978, tcp_connect inputs of the inputs file), 
+                          print one line per input, exit 0 when all connected, 
+                          1 when one is not, 2 on a usage or configuration 
+                          error; starts nothing else. Each check gives up after
+                          3 s; a name lookup cannot be cancelled, so one that 
+                          is still running then is abandoned and ends on the 
+                          system resolver's own timeout
+  --log-level arg (=info) debug, info, warn or error
+

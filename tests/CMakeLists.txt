@@ -511,6 +511,12 @@ skycue_add_unit_test(toml_lite DEFS SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}
 
 skycue_add_unit_test(log TIMEOUT 60)
 
+# skycued's command line: --help, --version, usage errors, a clean start and stop.
+skycue_add_script_test(skycued_cli
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_skycued_cli.sh
+  ARGS $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${PROJECT_VERSION}
+  TIMEOUT 60)
+
 # skycued's configuration command line: --dump-env, --set, --convert-conf, the legacy flags.
 skycue_add_script_test(config_cli
   SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_config_cli.sh
@@ -546,7 +552,7 @@ endfunction()
 skycue_label_existing(unit web_server)
 skycue_label_existing(integration icao_tables_current package_conf soak_eval)
 skycue_label_existing(integration
-  hub dump pingsim stats_cli config_cli web_ui rawtools fisb_cli iqgen_cli
+  hub dump pingsim stats_cli config_cli skycued_cli web_ui rawtools fisb_cli iqgen_cli
   decode_differential decode_differential_uat icao_tables_generator)
 skycue_label_existing(needs-fixtures
   rawtools hub fisb_cli iqgen_cli geom_eval decode_acas_opensky decode_uat_golden

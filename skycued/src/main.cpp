@@ -237,14 +237,30 @@ int runCheckInputs(const Config& config, const std::string& inputs_path, bool ch
     return ok ? 0 : 1;
 }
 
-int run(int argc, char** argv)
-{
-    const auto started = std::chrono::system_clock::now();
+// The command line.
+struct Options {
     std::string config_path, convert_path, replay_path, readsb_host, dump978_host, log_level, www_dir, web_bind,
         inputs_file;
     std::vector<std::string> set_args;
     double replay_speed = 1.0;
     unsigned cue_tcp_port = 0, web_port = 0;
+};
+
+po::options_description makeOptionTable(Options& o)
+{
+    auto& config_path = o.config_path;
+    auto& convert_path = o.convert_path;
+    auto& replay_path = o.replay_path;
+    auto& readsb_host = o.readsb_host;
+    auto& dump978_host = o.dump978_host;
+    auto& log_level = o.log_level;
+    auto& www_dir = o.www_dir;
+    auto& web_bind = o.web_bind;
+    auto& inputs_file = o.inputs_file;
+    auto& set_args = o.set_args;
+    auto& replay_speed = o.replay_speed;
+    auto& cue_tcp_port = o.cue_tcp_port;
+    auto& web_port = o.web_port;
     po::options_description desc(
         "usage: skycued --config PATH [--replay FILE [--replay-speed N] [--replay-loop]] [options]\n"
         "Forwards readsb's aircraft tracks to skycue clients");
@@ -278,7 +294,23 @@ int run(int argc, char** argv)
         "gives up after 3 s; a name lookup cannot be cancelled, so one that is still running then is "
         "abandoned and ends on the system resolver's own timeout")(
         "log-level", po::value(&log_level)->default_value("info"), "debug, info, warn or error");
-    po::variables_map vm;
+    return desc;
+}
+
+// An exit status when the process should end here (help, version, --convert-conf, a usage error: 0 or 2),
+// else nullopt.
+std::optional<int> parseOptions(int argc, char** argv, Options& o, po::variables_map& vm)
+{
+    auto& config_path = o.config_path;
+    auto& convert_path = o.convert_path;
+    auto& readsb_host = o.readsb_host;
+    auto& dump978_host = o.dump978_host;
+    auto& log_level = o.log_level;
+    auto& web_bind = o.web_bind;
+    auto& replay_speed = o.replay_speed;
+    auto& cue_tcp_port = o.cue_tcp_port;
+    auto& web_port = o.web_port;
+    const po::options_description desc = makeOptionTable(o);
     try {
         po::store(po::parse_command_line(argc, argv, desc), vm);
         po::notify(vm);
@@ -339,6 +371,30 @@ int run(int argc, char** argv)
         std::cerr << "skycued: --replay-speed must be 0 (unpaced) or positive\n";
         return 2;
     }
+    return std::nullopt;
+}
+
+int run(int argc, char** argv)
+{
+    const auto started = std::chrono::system_clock::now();
+    Options o;
+    po::variables_map vm;
+    if (const auto rc = parseOptions(argc, argv, o, vm))
+        return *rc;
+    auto& config_path = o.config_path;
+    auto& replay_path = o.replay_path;
+    auto& readsb_host = o.readsb_host;
+    auto& dump978_host = o.dump978_host;
+    auto& log_level = o.log_level;
+    auto& www_dir = o.www_dir;
+    auto& web_bind = o.web_bind;
+    auto& inputs_file = o.inputs_file;
+    auto& set_args = o.set_args;
+    auto& replay_speed = o.replay_speed;
+    auto& cue_tcp_port = o.cue_tcp_port;
+    auto& web_port = o.web_port;
+    const bool replaying = vm.count("replay") > 0;
+    const bool check_only = vm.count("check-inputs") > 0;
 
     // The layers: defaults, the file, its overrides file, the SKYCUE_* environment, --set.
     std::vector<std::string> unknown_env;

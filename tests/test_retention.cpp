@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include "retention.hpp"
+#include "temp_dir.hpp"
 
 #include <ftw.h>
 #include <sys/stat.h>
@@ -22,22 +23,8 @@ using skycued::isRecordingFileName;
 
 namespace {
 
-int removeEntry(const char* path, const struct stat*, int, struct FTW*) { return std::remove(path); }
-
-struct TempDir {
-    std::string path;
-    TempDir()
-    {
-        const char* base = std::getenv("TMPDIR");
-        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/skycue-retention-XXXXXX";
-        std::vector<char> buf(tmpl.begin(), tmpl.end());
-        buf.push_back('\0');
-        if (!::mkdtemp(buf.data()))
-            throw std::runtime_error("mkdtemp failed");
-        path = buf.data();
-        ::mkdir((path + "/raw").c_str(), 0755);
-    }
-    ~TempDir() { ::nftw(path.c_str(), removeEntry, 16, FTW_DEPTH | FTW_PHYS); }
+struct TempDir : skycue_test::TempDir {
+    TempDir() : skycue_test::TempDir("retention") { ::mkdir((path + "/raw").c_str(), 0755); }
 
     // A file of `size` bytes at path/rel, last modified `age_s` seconds ago
     // (default: a day, well outside kRecentWindow); returns the full path.

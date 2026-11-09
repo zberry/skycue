@@ -6,6 +6,7 @@
 #include "recorder.hpp"
 #include "geom_altitude.hpp"
 #include "replay_source.hpp"
+#include "temp_dir.hpp"
 #include "track_table.hpp"
 #include "time_util.hpp"
 
@@ -50,23 +51,7 @@ const std::string kSentHeader =
     "time,event,hex,addr_type,source,pos_time,lat,lon,on_ground,alt_is_geom,alt_baro_ft,alt_geom_ft,gs_kt,"
     "track_deg,vrate_fpm,callsign,squawk,registration,nic,nac_p,keyframe,drop_reason,note";
 
-int removeEntry(const char* path, const struct stat*, int, struct FTW*) { return ::remove(path); }
-
-// A fresh directory under $TMPDIR (or /tmp), removed with its contents.
-struct TempDir {
-    std::string path;
-    TempDir()
-    {
-        const char* base = std::getenv("TMPDIR");
-        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/skycue-recorder-XXXXXX";
-        std::vector<char> buf(tmpl.begin(), tmpl.end());
-        buf.push_back('\0');
-        if (!::mkdtemp(buf.data()))
-            throw std::runtime_error("mkdtemp failed");
-        path = buf.data();
-    }
-    ~TempDir() { ::nftw(path.c_str(), removeEntry, 16, FTW_DEPTH | FTW_PHYS); }
-};
+using skycue_test::TempDir;
 
 std::vector<std::string> filesWithSuffix(const std::string& dir, const std::string& suffix)
 {

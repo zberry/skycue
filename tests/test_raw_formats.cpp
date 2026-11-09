@@ -3,6 +3,7 @@
 
 #include "raw_formats.hpp"
 #include "rotating_file.hpp"
+#include "temp_dir.hpp"
 
 #include <dirent.h>
 #include <ftw.h>
@@ -65,20 +66,8 @@ std::vector<Frame> splitAll(const std::string& stream, std::size_t chunk)
     return out;
 }
 
-struct TempDir {
-    std::string path;
-    TempDir()
-    {
-        char tmpl[] = "/tmp/skycue-rawfmt-XXXXXX";
-        const char* p = ::mkdtemp(tmpl);
-        BOOST_REQUIRE(p);
-        path = p;
-    }
-    ~TempDir()
-    {
-        ::nftw(path.c_str(), [](const char* f, const struct stat*, int, struct FTW*) { return ::remove(f); }, 8,
-               FTW_DEPTH | FTW_PHYS);
-    }
+struct TempDir : skycue_test::TempDir {
+    TempDir() : skycue_test::TempDir("rawfmt") {}
     std::vector<std::string> list() const
     {
         std::vector<std::string> names;

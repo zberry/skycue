@@ -13,6 +13,7 @@
 #include "observation.hpp"
 #include "recorder.hpp"
 #include "replay_source.hpp"
+#include "temp_dir.hpp"
 #include "test_slow.hpp"
 
 #include <skycue/client.hpp>
@@ -70,22 +71,7 @@ using steady = std::chrono::steady_clock;
 inline const std::chrono::milliseconds kWait = slow(5s);
 inline const std::string kFixture = std::string(SKYCUE_FIXTURE_DIR) + "/readsb-sample.jsonl";
 
-inline int removeEntry(const char* p, const struct stat*, int, struct FTW*) { return ::remove(p); }
-
-struct TempDir {
-    std::string path;
-    TempDir()
-    {
-        const char* base = std::getenv("TMPDIR");
-        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/skycue-engine-XXXXXX";
-        std::vector<char> buf(tmpl.begin(), tmpl.end());
-        buf.push_back('\0');
-        if (!::mkdtemp(buf.data()))
-            throw std::runtime_error("mkdtemp failed");
-        path = buf.data();
-    }
-    ~TempDir() { ::nftw(path.c_str(), removeEntry, 16, FTW_DEPTH | FTW_PHYS); }
-};
+using skycue_test::TempDir;
 
 inline std::vector<std::string> filesWithSuffix(const std::string& dir, const std::string& suffix)
 {

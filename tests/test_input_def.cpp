@@ -6,6 +6,7 @@
 #include "inputs/inputs_file.hpp"
 #include "outputs/output_def.hpp"
 #include "json_lite.hpp"
+#include "temp_dir.hpp"
 
 #include <ftw.h>
 #include <stdio.h>
@@ -78,22 +79,7 @@ std::string setErr(const std::vector<InputDef>& set)
     return "";
 }
 
-int removeEntry(const char* p, const struct stat*, int, struct FTW*) { return ::remove(p); }
-
-struct TempDir {
-    std::string path;
-    TempDir()
-    {
-        const char* base = std::getenv("TMPDIR");
-        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/skycue-input-def-XXXXXX";
-        std::vector<char> buf(tmpl.begin(), tmpl.end());
-        buf.push_back('\0');
-        if (!::mkdtemp(buf.data()))
-            throw std::runtime_error("mkdtemp failed");
-        path = buf.data();
-    }
-    ~TempDir() { ::nftw(path.c_str(), removeEntry, 16, FTW_DEPTH | FTW_PHYS); }
-};
+using skycue_test::TempDir;
 
 }  // namespace
 

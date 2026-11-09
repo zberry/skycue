@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include "restricted_fixtures.hpp"
+#include "temp_dir.hpp"
 
 #include "gz_line_reader.hpp"
 
@@ -808,27 +809,12 @@ std::vector<int64_t> starts(const Placement& p)
 }
 
 // A fresh directory, removed (with its files) at scope exit.
-struct TempDir {
-    std::string path;
-    std::vector<std::string> files;
-    TempDir()
-    {
-        const char* base = std::getenv("TMPDIR");
-        std::string tmpl = std::string(base && *base ? base : "/tmp") + "/test_iqgen.XXXXXX";
-        BOOST_REQUIRE(mkdtemp(&tmpl[0]) != nullptr);
-        path = tmpl;
-    }
-    ~TempDir()
-    {
-        for (const auto& f : files)
-            ::unlink(f.c_str());
-        ::rmdir(path.c_str());
-    }
+struct TempDir : skycue_test::TempDir {
+    TempDir() : skycue_test::TempDir("iqgen") {}
     std::string write(const std::string& name, const std::string& bytes)
     {
         const std::string p = path + "/" + name;
         std::ofstream(p, std::ios::binary) << bytes;
-        files.push_back(p);
         return p;
     }
 };

@@ -43,46 +43,11 @@ void setField(KeyState& ks, Timed<T>& f, const T& v, TimePoint now, bool track) 
 }  // namespace
 
 ModesDecoder::ModesDecoder(DecoderConfig cfg, std::string input_id)
-    : cfg_(cfg), input_id_(std::move(input_id)) {}
+    : cfg_(cfg), input_id_(std::move(input_id)), keys_(cfg.max_keys, cfg.idle_evict, counters_.evicted) {}
 
 void ModesDecoder::onObservation(std::function<void(const TrackObservation&)> h) { handler_ = std::move(h); }
 const DecodeCounters& ModesDecoder::counters() const { return counters_; }
 std::size_t ModesDecoder::keys() const { return keys_.size(); }
-
-KeyState* ModesDecoder::find(const StateKey& k) {
-    const auto it = keys_.find(k);
-    return it == keys_.end() ? nullptr : &it->second;
-}
-
-KeyState& ModesDecoder::obtain(const StateKey& k, Source src) {
-    KeyState* ks = find(k);
-    if (!ks) {
-        if (cfg_.max_keys > 0 && keys_.size() >= cfg_.max_keys && !lru_.empty()) {
-            keys_.erase(lru_.front());  // oldest first when full
-            lru_.pop_front();
-            ++counters_.evicted;
-        }
-        lru_.push_back(k);
-        ks = &keys_[k];
-        ks->key = k;
-        ks->lru = std::prev(lru_.end());
-    } else {
-        lru_.splice(lru_.end(), lru_, ks->lru);
-    }
-    ks->last_seen = now_;
-    ks->source = src;
-    return *ks;
-}
-
-void ModesDecoder::evictIdle() {
-    while (!lru_.empty()) {
-        const auto it = keys_.find(lru_.front());
-        if (it != keys_.end() && now_ - it->second.last_seen <= cfg_.idle_evict) break;
-        if (it != keys_.end()) keys_.erase(it);
-        lru_.pop_front();
-        ++counters_.evicted;
-    }
-}
 
 void ModesDecoder::feed(const std::vector<uint8_t>& bytes, Clock::time_point arrival,
                         std::optional<uint8_t> signal) {
@@ -98,7 +63,7 @@ void ModesDecoder::feed(const std::vector<uint8_t>& bytes, Clock::time_point arr
         now_ = arrival;
         have_now_ = true;
     }
-    evictIdle();
+    keys_.evictIdle(now_);
 
     switch (f->df) {
     case 17:
@@ -169,12 +134,12 @@ void ModesDecoder::onDf11(const Frame& f, uint32_t residual, std::optional<uint8
     key.address = (uint32_t{f.bytes[1]} << 16) | (uint32_t{f.bytes[2]} << 8) | f.bytes[3];
     KeyState* ks = nullptr;
     if (residual == 0) {
-        ks = &obtain(key, Source::adsb_1090);
+        ks = &keys_.obtain(key, Source::adsb_1090, now_);
     } else if (residual <= 79) {
         // An interrogator id in the parity only refreshes an address that is already confirmed.
-        ks = find(key);
+        ks = keys_.find(key);
         if (ks && ks->confirmed.fresh(now_, kConfirmFresh)) {
-            ks = &obtain(key, ks->source);
+            ks = &keys_.obtain(key, ks->source, now_);
         } else {
             ks = nullptr;
         }
@@ -284,12 +249,12 @@ void ModesDecoder::onAp(const Frame& f, Clock::time_point arrival, std::optional
     const uint32_t residual = coding::modesCrcResidual(f.bytes);  // the AP field: the address
     StateKey key;
     key.address = residual & 0xFFFFFFu;
-    KeyState* ks = find(key);
+    KeyState* ks = keys_.find(key);
     if (!ks || !ks->confirmed.fresh(now_, kConfirmFresh)) {
         ++counters_.ap_unconfirmed;
         return;
     }
-    ks = &obtain(key, ks->source);
+    ks = &keys_.obtain(key, ks->source, now_);
     if (signal) ks->rssi.pushPower(RssiRing::fromBeastByte(*signal));
 
     switch (f.df) {
@@ -331,7 +296,7 @@ void ModesDecoder::onAp(const Frame& f, Clock::time_point arrival, std::optional
 
 void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::time_point arrival,
                         std::optional<uint8_t> signal) {
-    KeyState& ks = obtain(key, src);
+    KeyState& ks = keys_.obtain(key, src, now_);
     // Confirmation: clean/fixed DF17 and DF18 CF 0 only; DF18 CF 1 is the non-ICAO key and
     // the rebroadcast classes have their own keys, which no AP reply ever looks up.
     if (f.df == 17 || (f.df == 18 && f.bits(5, 3) == 0)) ks.confirmed.set(true, now_);

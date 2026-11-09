@@ -7,10 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <list>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "decode/acas.hpp"
@@ -19,6 +17,7 @@
 #include "decode/decoder_types.hpp"
 #include "decode/frame.hpp"
 #include "decode/key_state.hpp"
+#include "decode/key_table.hpp"
 #include "observation.hpp"
 
 namespace skycued::decode {
@@ -36,9 +35,6 @@ public:
     void setReference(std::optional<cpr::Position> reference) { cfg_.reference = reference; }
 
 private:
-    KeyState* find(const StateKey& k);
-    KeyState& obtain(const StateKey& k, skycue::Source src);  // find or create, then mark as seen
-    void evictIdle();
     void onEs(const Frame& f, const StateKey& key, skycue::Source src, Clock::time_point arrival,
               std::optional<uint8_t> signal);
     void applyAcasRa(KeyState& ks, const AcasRa& ra);
@@ -57,8 +53,7 @@ private:
     TimePoint now_{};  // max-so-far arrival time
     bool have_now_ = false;
     std::optional<bool> frame_ground_;  // what the frame being processed said about on_ground
-    std::unordered_map<StateKey, KeyState, StateKeyHash> keys_;
-    std::list<StateKey> lru_;  // oldest first
+    KeyTable<KeyState> keys_;
 };
 
 }  // namespace skycued::decode

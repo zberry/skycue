@@ -29,6 +29,16 @@ target_compile_definitions(test_config PRIVATE BOOST_TEST_DYN_LINK
 skycue_set_warnings(test_config)
 add_test(NAME config COMMAND test_config)
 
+get_filename_component(_skycue_docs_dir "${CMAKE_CURRENT_SOURCE_DIR}/../docs" ABSOLUTE)
+add_executable(test_config_keys test_config_keys.cpp)
+target_link_libraries(test_config_keys PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_config_keys PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}"
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+  SKYCUE_DOCS_DIR="${_skycue_docs_dir}")
+skycue_set_warnings(test_config_keys)
+add_test(NAME config_keys COMMAND test_config_keys)
+
 add_executable(test_conf_convert test_conf_convert.cpp)
 target_link_libraries(test_conf_convert PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_conf_convert PRIVATE BOOST_TEST_DYN_LINK)
@@ -125,7 +135,6 @@ target_include_directories(test_forwarder PRIVATE ${PROJECT_SOURCE_DIR}/net/test
 add_test(NAME forwarder COMMAND test_forwarder)
 set_tests_properties(forwarder PROPERTIES TIMEOUT 60)
 
-get_filename_component(_skycue_docs_dir "${CMAKE_CURRENT_SOURCE_DIR}/../docs" ABSOLUTE)
 add_executable(test_recorder test_recorder.cpp)
 target_link_libraries(test_recorder PRIVATE skycued_core Boost::unit_test_framework)
 target_compile_definitions(test_recorder PRIVATE BOOST_TEST_DYN_LINK

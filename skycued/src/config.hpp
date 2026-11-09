@@ -132,6 +132,17 @@ struct KeySpec {
     double lo, hi;                    // numeric range, inclusive; +-HUGE_VAL = none
     std::vector<std::string> values;  // enum values (string) or allowed set (strings); empty = any
 };
+// Adding a config key. Touch, in order:
+//   1. keySpecs() and the Converter for the key, both in config.cpp.
+//   2. configValueText in config.cpp (the key's text form).
+//   3. kRestartKeys in runtime_config.cpp, for a restart-class key.
+//   4. conf_convert.cpp mappings and conf_legacy.cpp knownKeys, unless the key is
+//      new and has no old-format name.
+//   5. packaging/skycue.toml.example, with its comment (feeds exampleComments and
+//      the web schema); keep tests/fixtures/skycue_example.toml byte-identical.
+//   6. docs/operating.md.
+//   7. The round-trip table in tests/test_config.cpp.
+// tests/test_config_keys.cpp fails when one of these places is missed.
 // Every key, in packaging/skycue.toml.example order: the one source of a key's
 // class, range and enum values.
 const std::vector<KeySpec>& keySpecs();

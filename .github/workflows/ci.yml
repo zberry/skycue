@@ -55,5 +55,7 @@ jobs:
         run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON
       - name: Build
         run: cmake --build build -j"$(nproc)"
+      - name: Node version
+        run: node --version
       - name: Web page tests
         run: ctest --test-dir build -R '^web_ui$' --output-on-failure

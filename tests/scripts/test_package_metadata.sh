@@ -110,4 +110,10 @@ grep -qx '%systemd_postun_with_restart skycued.service' "$s" || fail "spec: upgr
 for r in python3 python3-pillow curl unzip; do
   grep -Eq "^Recommends:.*(^|[ ,:])$r([ ,]|\$)" "$s" || fail "spec Recommends lacks $r"
 done
+# The version in the install guide and the README.
+[ "$(sed -n 3p "$here/docs/installing.md")" = "For skycue $v." ] || fail "docs/installing.md line 3 is not 'For skycue $v.'"
+nv=$(grep -c '^v=' "$here/docs/installing.md")
+[ "$nv" -ge 4 ] || fail "docs/installing.md has $nv v= lines, expected at least four"
+[ "$(grep -c "^v=$v\$" "$here/docs/installing.md")" = "$nv" ] || fail "docs/installing.md: a v= line is not v=$v"
+grep -q "^Version $v," "$here/README.md" || fail "README.md has no line starting 'Version $v,'"
 echo PASS

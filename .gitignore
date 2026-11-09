@@ -1,4 +1,5 @@
 /build*/
+/.superpowers/
 /sources/
 /dist/
 *.tar.gz

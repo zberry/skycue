@@ -11,6 +11,7 @@
 #include "inputs/uat_raw_input.hpp"
 #include "json_lite.hpp"
 #include "raw_formats.hpp"
+#include "test_util.hpp"
 #include "retention.hpp"
 #include "web_inputs.hpp"
 
@@ -592,6 +593,13 @@ std::string fixtureBytes()
     return out;
 }
 
+// The CSV is a fetched capture (scripts/fixtures/fetch-test-captures.sh); without it the cases that
+// replay it skip, the rest of the module still runs.
+bool fixtureFetched()
+{
+    return skycue_test::fileExists(std::string(SKYCUE_FIXTURE_DIR) + "/raw/pymodes-adsb.csv");
+}
+
 }  // namespace
 
 BOOST_AUTO_TEST_CASE(decoder_off_publishes_only)
@@ -615,6 +623,10 @@ BOOST_AUTO_TEST_CASE(decoder_off_publishes_only)
 
 BOOST_AUTO_TEST_CASE(decoder_on_emits_observations_and_still_publishes)
 {
+    if (!fixtureFetched()) {
+        BOOST_TEST_MESSAGE("skipping: fixture raw/pymodes-adsb.csv not fetched");
+        return;
+    }
     const std::string bin = fixtureBytes();
     BOOST_REQUIRE(!bin.empty());
     std::vector<skycued::beast::Frame> all;
@@ -675,6 +687,10 @@ BOOST_AUTO_TEST_CASE(avr_lines_with_decoder_emit_observations)
 
 BOOST_AUTO_TEST_CASE(counters_in_state_json)
 {
+    if (!fixtureFetched()) {
+        BOOST_TEST_MESSAGE("skipping: fixture raw/pymodes-adsb.csv not fetched");
+        return;
+    }
     const std::string bin = fixtureBytes();
     std::vector<skycued::beast::Frame> all;
     skycued::beast::FrameSplitter().feed(reinterpret_cast<const uint8_t*>(bin.data()), bin.size(), all);

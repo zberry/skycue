@@ -300,6 +300,25 @@ BOOST_AUTO_TEST_CASE(ps_mixed_bands_in_one_datagram)
     BOOST_TEST(rig.observations().size() == 1u);  // the UAT frame
 }
 
+BOOST_AUTO_TEST_CASE(ps_state_counters_sum_the_two_decoders)
+{
+    Rig rig;
+    rig.run(R"(,"source":"decode")");
+    const std::string text = R"({"aircraft":[)" + aircraft(hexOf(air1090(false))) + "," + aircraft(hexOf(uatLong())) + "]}";
+    rig.send(text, kT0);
+    const auto s = rig.state();
+    BOOST_TEST(s.decoding);
+    BOOST_TEST(s.counters.frames == 2u);  // one per decoder
+    BOOST_TEST(s.counters.cpr_pending == 1u);
+    BOOST_TEST(s.counters.decoded == 2u);  // the 1090 frame (position pending) and the UAT frame
+    BOOST_TEST(s.counters.decoder_observations == 1u);
+    const auto again = rig.state();  // reading twice does not accumulate
+    BOOST_TEST(again.counters.frames == s.counters.frames);
+    BOOST_TEST(again.counters.cpr_pending == s.counters.cpr_pending);
+    BOOST_TEST(again.counters.decoded == s.counters.decoded);
+    BOOST_TEST(again.counters.decoder_observations == s.counters.decoder_observations);
+}
+
 BOOST_AUTO_TEST_CASE(ps_bad_length_counts_raw_unknown_len)
 {
     Rig rig;

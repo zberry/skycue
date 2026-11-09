@@ -729,21 +729,23 @@
   function flowCsvRows(rates) {
     var out = [['source', 'target', 'rate_per_s']];
     if (!rates) return out;
-    Object.keys(rates.inputs).forEach(function (id) { out.push([id, 'decoder', rates.inputs[id].msg_s]); });
-    out.push(['decoder', 'rejected', rates.decoder.rejected_s], ['decoder', 'tracks', rates.tracks_s]);
-    ['sent', 'range', 'elev', 'blocked', 'nopos'].forEach(function (k) { out.push(['tracks', k, rates.decisions[k]]); });
-    out.push(['sent', 'sched', rates.decisions.sent]);
-    rates.clients.forEach(function (c) { out.push(['sched', c.key, rates.cues_s]); });
+    var r2 = function (v) { return Math.round(v * 100) / 100; };
+    // source and target are the graph's node ids
+    Object.keys(rates.inputs).forEach(function (id) { out.push([id, 'decode', r2(rates.inputs[id].msg_s)]); });
+    out.push(['decode', 'rejected', r2(rates.decoder.rejected_s)], ['decode', 'tracks', r2(rates.tracks_s)]);
+    ['sent', 'range', 'elev', 'blocked', 'nopos'].forEach(function (k) { out.push(['tracks', k, r2(rates.decisions[k])]); });
+    out.push(['sent', 'sched', r2(rates.decisions.sent)]);
+    rates.clients.forEach(function (c) { out.push(['sched', c.key, r2(rates.cues_s)]); });
     out.push(['file', 'stream', 'bytes', 'bytes_per_s']);
-    rates.files.forEach(function (f) { out.push([f.name, f.stream, f.bytes, f.bytes_per_s]); });
+    rates.files.forEach(function (f) { out.push([f.name, f.stream, f.bytes, r2(f.bytes_per_s)]); });
     return out;
   }
 
   // The Sankey: nodes (fixed order), links, tags, height and caption.
-  // Height: ECharts scales every column to fit the same height, so the scale
-  // is the tightest column's (360 - nodes * 30) / sum of its band values; the
-  // height is then max(360, tallestColumnNodes * 30 + that column's bandsPx),
-  // bandsPx being the column's bands in px at that scale (each at least 1 px).
+  // Height depends on the node set only, never on the rates (a chart that
+  // resized with traffic would jump): max(360, tallest column's nodes * 42),
+  // 42 = nodeGap 30 + a 12 px minimum visual band. bandPx (the label's room)
+  // is the band at the 360 px scale and may vary with rates.
   function flowGraph(rates, latest, opts) {
     opts = opts || {};
     var width = opts.width || 900, th = opts.theme || {};
@@ -752,7 +754,6 @@
     var stats = (latest && latest.stats) || {};
     var inputs = (latest && latest.inputs) || [];
     var rt = rates || { inputs: {}, decoder: { in_s: 0, rejected_s: 0 }, tracks_s: 0, decisions: {}, cues_s: 0, clients: [], files: [], span_s: 0 };
-    var flowing = rt.decoder.in_s > 0;
     var newest = null;
     inputs.forEach(function (i) {
       var a = i.state && i.state.last_data_age_s;
@@ -804,18 +805,19 @@
       var sum = 0; cols[k].forEach(function (n) { sum += n.band; });
       scale = Math.min(scale, Math.max(0, FLOW_MIN_H - cols[k].length * FLOW_GAP) / sum);
     });
-    var height = FLOW_MIN_H;
+    var nMax = 0;
     Object.keys(cols).forEach(function (k) {
-      var px = 0;
-      cols[k].forEach(function (n) { n.bandPx = Math.max(1, n.band * scale); px += n.bandPx; });
-      height = Math.max(height, Math.ceil(cols[k].length * FLOW_GAP + px));
+      cols[k].forEach(function (n) { n.bandPx = Math.max(1, n.band * scale); });
+      nMax = Math.max(nMax, cols[k].length);
     });
+    var height = Math.max(FLOW_MIN_H, nMax * 42);
 
     // Labels: name, then the rate (or "no data <age>"), a third line on a tall node.
     nodes.forEach(function (n) {
       var lines = [n._title];
-      var idle = n.value <= 0 && (n.own || !flowing);
-      if (idle) lines.push('no data' + (n._age !== undefined && n._age !== null && ageText(n._age) ? ' ' + ageText(n._age) : ''));
+      n.idle = !(n.value > 0);
+      if (n.idle && n.own) lines.push('no data' + (ageText(n._age) ? ' ' + ageText(n._age) : ''));
+      else if (n.idle) lines.push('0/s');
       else lines.push(rateText(n.value, n._unit));
       if (n.bandPx >= 3 * FLOW_LINE_PX && n._detail) lines.splice(1, 0, n._detail);
       n.label = lines.slice(0, n.bandPx >= 3 * FLOW_LINE_PX ? 3 : 2)
@@ -849,17 +851,20 @@
     var outs = (latest && latest.outputs) || [];
     if (outs.outputs) outs = outs.outputs;
     var peersBy = {}, outOrder = [];
+    var addPeers = function (target, p) {
+      if (peersBy[target] === undefined) { peersBy[target] = 0; outOrder.push(target); }
+      peersBy[target] += p;
+    };
     outs.forEach(function (o) {
       if (!o || o.kind === 'cue' || o.builtin) return;
-      var target = o.input;
-      if (!target) {
-        // GET /api/outputs names no input: the first input of the kind's type.
-        var want = { beast: /beast_raw/, uat: /uat_raw|dump978/, json: /readsb/, pingstation_json: /pingstation_json/, cat021: /pingstation_cat021/ }[o.kind];
-        inputs.some(function (i) { if (want && want.test(String(i.type))) { target = i.id; return true; } return false; });
-      }
-      if (!target || !byName[target]) return;
-      if (peersBy[target] === undefined) { peersBy[target] = 0; outOrder.push(target); }
-      peersBy[target] += num(o.state && o.state.peers);
+      var p = num(o.state && o.state.peers);
+      if (o.input && byName[o.input]) { addPeers(o.input, p); return; }
+      // GET /api/outputs names no input: a Hub output serves a kind, so it
+      // taps every input of that kind's type; none matches: the decoder.
+      var want = { beast: /beast_raw/, uat: /uat_raw|dump978/, json: /readsb/, pingstation_json: /pingstation_json/, cat021: /pingstation_cat021/ }[o.kind];
+      var hit = 0;
+      inputs.forEach(function (i) { if (want && want.test(String(i.type))) { addPeers(i.id, p); hit++; } });
+      if (!hit) addPeers('decode', p);
     });
     outOrder.forEach(function (node) {
       var p = peersBy[node];
@@ -867,9 +872,9 @@
     });
 
     var span = Math.round(rt.span_s || 0);
-    var caption = 'messages per second, last ' + (rt.span_s && rt.span_s < 55 ? span : 60) + ' s · a thin band carries nothing';
+    var caption = 'messages per second, last ' + (!rt.span_s ? 0 : rt.span_s < 55 ? span : 60) + ' s · a thin band carries nothing';
     return {
-      nodes: nodes.map(function (n) { return { name: n.name, label: n.label, color: n.color, depth: n.depth, bandPx: n.bandPx, tall: n.tall }; }),
+      nodes: nodes.map(function (n) { return { name: n.name, label: n.label, color: n.color, depth: n.depth, bandPx: n.bandPx, tall: n.tall, idle: n.idle }; }),
       links: links, tags: tags, height: height, caption: caption
     };
   }

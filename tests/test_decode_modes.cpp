@@ -627,6 +627,50 @@ BOOST_AUTO_TEST_CASE(keys_idle_and_full_eviction) {
     BOOST_CHECK_EQUAL(r.dec.keys(), 2u);
 }
 
+BOOST_AUTO_TEST_CASE(key_state_survives_other_keys_and_lru_touch) {
+    DecoderConfig cfg;
+    cfg.max_keys = 3;
+    Rig r(cfg);
+    const uint32_t a = kAddr, b = kAddr + 1, c = kAddr + 2, d = kAddr + 3;
+    r.feed(df17(a, identification(4, 3, "KEYA")), 0.0);
+    r.feed(df17(b, identification(4, 3, "KEYB")), 1.0);
+    r.feed(df17(c, identification(4, 3, "KEYC")), 2.0);
+    BOOST_CHECK_EQUAL(r.dec.keys(), 3u);
+    BOOST_CHECK_EQUAL(r.c().evicted, 0u);
+    r.feed(df17(a, identification(4, 3, "KEYA")), 3.0);  // touch: A is the young end
+    r.feed(df17(d, identification(4, 3, "KEYD")), 4.0);  // evicts B, not A
+    BOOST_CHECK_EQUAL(r.dec.keys(), 3u);
+    BOOST_CHECK_EQUAL(r.c().evicted, 1u);
+
+    r.obs.clear();
+    r.feed(air(kP0, false, 38000, a), 5.0);
+    r.feed(air(kP0, true, 38000, a), 5.5);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
+    BOOST_REQUIRE(r.obs[0].callsign);
+    BOOST_CHECK_EQUAL(*r.obs[0].callsign, "KEYA");
+
+    r.obs.clear();
+    r.feed(air(kP0, false, 38000, b), 6.0);
+    r.feed(air(kP0, true, 38000, b), 6.5);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
+    BOOST_CHECK(!r.obs[0].callsign);  // B restarted as a new key
+}
+
+BOOST_AUTO_TEST_CASE(idle_eviction_boundary_is_300_s) {
+    {
+        Rig r;
+        r.feed(df11(0x111111), 0.0);
+        r.feed(df11(0x222222), 300.0);
+        BOOST_CHECK_EQUAL(r.dec.keys(), 2u);
+        BOOST_CHECK_EQUAL(r.c().evicted, 0u);
+    }
+    Rig r;
+    r.feed(df11(0x111111), 0.0);
+    r.feed(df11(0x222222), 301.0);
+    BOOST_CHECK_EQUAL(r.dec.keys(), 1u);
+    BOOST_CHECK_EQUAL(r.c().evicted, 1u);
+}
+
 BOOST_AUTO_TEST_CASE(decoder_marks_rebroadcast_class) {
     for (int cf : {2, 5, 6}) {
         Rig r;

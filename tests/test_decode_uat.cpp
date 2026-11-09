@@ -529,6 +529,47 @@ BOOST_AUTO_TEST_CASE(eviction_idle_300s_and_max_keys)
     BOOST_CHECK_EQUAL(m.dec.counters().evicted, 3u);
 }
 
+BOOST_AUTO_TEST_CASE(key_state_survives_other_keys_and_lru_touch)
+{
+    DecoderConfig cfg;
+    cfg.max_keys = 3;
+    Rig r(cfg);
+    auto at = [](uint32_t addr, const char* call) {
+        auto s = airborne();
+        s.address = addr;
+        s.call = call;
+        return s;
+    };
+    r.feed(at(0x100001, "KEYA"), 0.0);
+    r.feed(at(0x100002, "KEYB"), 1.0);
+    r.feed(at(0x100003, "KEYC"), 2.0);
+    BOOST_CHECK_EQUAL(r.dec.keys(), 3u);
+    BOOST_CHECK_EQUAL(r.dec.counters().evicted, 0u);
+    r.feed(at(0x100001, "KEYA"), 3.0);  // touch: A is the young end
+    r.feed(at(0x100004, "KEYD"), 4.0);  // evicts B, not A
+    BOOST_CHECK_EQUAL(r.dec.keys(), 3u);
+    BOOST_CHECK_EQUAL(r.dec.counters().evicted, 1u);
+
+    // A kept its callsign: a frame without one still reports KEYA.
+    auto na = at(0x100001, "");
+    r.feed(na, 5.0);
+    BOOST_REQUIRE(r.last().callsign);
+    BOOST_CHECK_EQUAL(*r.last().callsign, "KEYA");
+    // B restarted as a new key: no callsign.
+    auto nb = at(0x100002, "");
+    r.feed(nb, 6.0);
+    BOOST_CHECK(!r.last().callsign);
+
+    Rig i;
+    i.feed(at(0x100001, "KEYA"), 0.0);
+    i.feed(at(0x100002, "KEYB"), 300.0);
+    BOOST_CHECK_EQUAL(i.dec.keys(), 2u);
+    Rig j;
+    j.feed(at(0x100001, "KEYA"), 0.0);
+    j.feed(at(0x100002, "KEYB"), 301.0);
+    BOOST_CHECK_EQUAL(j.dec.keys(), 1u);
+}
+
 BOOST_AUTO_TEST_CASE(counters_add_up)
 {
     Rig r(withRef());

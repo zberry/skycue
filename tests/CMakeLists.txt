@@ -306,6 +306,9 @@ skycue_add_unit_test(decode_fields)
 # CPR position math: global, surface and local decoding with NL.
 skycue_add_unit_test(decode_cpr FIXTURE_DIR)
 
+# KeyTable: pointer stability, LRU order, idle eviction.
+skycue_add_unit_test(key_table)
+
 # The 1090 decoder: address confirmation, CPR pairing, observation production.
 skycue_add_unit_test(decode_modes)
 

@@ -1,6 +1,6 @@
 #pragma once
 
-// Per-key state of the 1090 decoder. A key is (address, address type, class):
+// Per-key state of the 1090 and 978 decoders. A key is (address, address type, class):
 // a DF17 even frame never pairs with a DF18 TIS-B odd one (design section 3).
 
 #include <array>
@@ -60,12 +60,15 @@ struct CprHalf {
     bool has = false;
 };
 
-struct KeyState {
+// What KeyTable keeps for every key; the decoders' states derive from it.
+struct KeyBase {
     StateKey key;
-    skycue::Source source = skycue::Source::adsb_1090;
+    skycue::Source source{};
     TimePoint last_seen{};
     std::list<StateKey>::iterator lru;
+};
 
+struct KeyState : KeyBase {
     // Address confirmation (design section 5.2): set by clean DF17, DF18 CF 0
     // and DF11 with residual 0; only the (icao, direct) key ever has it.
     Timed<bool> confirmed;

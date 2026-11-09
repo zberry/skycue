@@ -30,6 +30,7 @@ find_package(Threads REQUIRED)
 include(GNUInstallDirs)
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Hardening.cmake)
+include(cmake/SkycueTests.cmake)
 
 enable_testing()
 

@@ -172,6 +172,9 @@ For contributors:
 | [asterix-cat021-reference.md](docs/asterix-cat021-reference.md) | you work on the pingStation ASTERIX CAT021 decoding |
 | [hardening.md](docs/hardening.md) | you run the sanitizer, fuzz, static-analysis and soak checks |
 | [releasing.md](docs/releasing.md) | you cut a release and build the packages |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | you send a change |
+| [SECURITY.md](SECURITY.md) | you report a vulnerability or want to know what the web page exposes |
+| [tests/README.md](tests/README.md) | you run one test or wonder why a test skipped |
 
 ## Repository layout
 
@@ -183,12 +186,12 @@ For contributors:
 | `tools/` | the command-line tools (`skycue-dump`, `-rawrec`, `-rawplay`, `-pingsim`, `-stats`, `-fisb`; `iqgen/` for `skycue-iqgen`) |
 | `www/` | the web page (Leaflet and ECharts are added from `sources/` at build time) |
 | `cmake/` | CMake modules |
-| `examples/` | three client demos (minimal, ECEF with callbacks, ECEF with `takeChanges()`) and a parent-project example |
+| `examples/` | three client demos (minimal, ECEF with callbacks, ECEF with `takeChanges()`) and a parent-project example; see [examples/README.md](examples/README.md) |
 | `docs/` | the documentation |
 | `packaging/` | the `skycue.toml` example, systemd unit, RPM spec, container build and verify scripts, source tarball script |
 | `debian/` | Debian packaging |
 | `scripts/` | `maps/` (map tiles and overlays), `dev/` (sanitizers, fuzzing, static analysis), `fixtures/` (test captures and generated tables), `lib/` |
-| `tests/` | unit and script tests; `tests/fuzz/` holds the libFuzzer harnesses, seeds and findings |
+| `tests/` | unit and script tests; `tests/fuzz/` holds the libFuzzer harnesses, seeds and findings; see [tests/README.md](tests/README.md) |
 
 ## Status
 
@@ -198,14 +201,8 @@ what changed.
 
 ## Contributing
 
-Issues and pull requests are welcome on GitHub. A git clone has no `sources/`:
-run [`scripts/dev/fetch-web-libs.sh`](scripts/dev/fetch-web-libs.sh) once (it
-fetches the two web libraries, see
-[Building from a git clone](docs/installing.md#building-from-a-git-clone)),
-then build as described in [docs/installing.md](docs/installing.md#build) with
-`cmake -S . -B build`, and run `ctest --test-dir build` before sending a change; some tests skip themselves when an optional tool or
-capture is missing. The sanitizer, fuzzing and static-analysis runs are in
-[docs/hardening.md](docs/hardening.md).
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Report security problems as described in [SECURITY.md](SECURITY.md).
 
 ## Licence
 

@@ -22,6 +22,7 @@ C++17, Boost, CMake; web page in plain JavaScript. Everything is built from sour
 - JS tests run through the ctest `web_ui` (needs `node`; skipped without).
 - Browser suite: ctest `ui_playwright`, on by default (`-DSKYCUE_UI_TESTS=OFF` removes it). It skips
   (exit 77) without `node_modules/@playwright/test`; see `tests/ui/README.md` for setup.
+- Test families, variables and the reasons tests skip: `tests/README.md`. Contributor rules: `CONTRIBUTING.md`.
 - Skips are normal: ctest reports exit 77 as Skipped. A skip is not a pass; say which tests skipped.
 - Fetched fixtures: `scripts/fixtures/fetch-test-captures.sh`. Tests using `tests/fixtures/raw`,
   `fisb/tg30.978` and the UAT/Stratux captures skip without them (`decode_differential*`, `rawtools`,

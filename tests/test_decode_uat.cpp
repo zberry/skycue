@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "decode/uat_decoder.hpp"
+#include "decode_test_support.hpp"
 #include "uat_test_support.hpp"
 
 using namespace skycued;
@@ -46,14 +47,9 @@ UatSpec airborne()
     return s;
 }
 
-struct Rig {
-    DecoderConfig cfg;
-    std::vector<TrackObservation> out;
-    UatDecoder dec;
-    explicit Rig(DecoderConfig c = {}) : cfg(c), dec(c, "uat1")
-    {
-        dec.onObservation([this](const TrackObservation& o) { out.push_back(o); });
-    }
+struct Rig : skycued::testing::DecoderRig<UatDecoder> {
+    std::vector<TrackObservation>& out = obs;
+    explicit Rig(DecoderConfig c = {}) : DecoderRig<UatDecoder>(c, "uat1") {}
     void feed(const UatSpec& s, double at_s = 0.0, std::optional<double> rssi = std::nullopt)
     {
         dec.feed(frameOf(s, rssi), t0 + std::chrono::milliseconds(static_cast<long>(at_s * 1000)));

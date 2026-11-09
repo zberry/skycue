@@ -9,12 +9,15 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "coding/modes_crc.hpp"
 #include "decode/acas.hpp"
 #include "decode/cpr.hpp"
+#include "decode/decoder_types.hpp"
 #include "decode/frame.hpp"
+#include "observation.hpp"
 
 namespace skycued::testing {
 
@@ -279,5 +282,17 @@ inline Me typeOnly(int tc) {
     me.set(0, 5, static_cast<uint64_t>(tc));
     return me;
 }
+
+// A decoder with its observations collected into obs; a test derives from it and adds its own feed().
+template <class Dec>
+struct DecoderRig {
+    explicit DecoderRig(skycued::decode::DecoderConfig cfg = {}, std::string input_id = "in1")
+        : dec(cfg, std::move(input_id))
+    {
+        dec.onObservation([this](const skycued::TrackObservation& o) { obs.push_back(o); });
+    }
+    Dec dec;
+    std::vector<skycued::TrackObservation> obs;
+};
 
 }  // namespace skycued::testing

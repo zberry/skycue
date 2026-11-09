@@ -29,14 +29,10 @@ ModesDecoder::Clock::time_point at(double s) {
     return ModesDecoder::Clock::time_point(duration_cast<ModesDecoder::Clock::duration>(duration<double>(1.7e9 + s)));
 }
 
-struct Rig {
-    explicit Rig(DecoderConfig cfg = {}) : dec(cfg, "in1") {
-        dec.onObservation([this](const TrackObservation& o) { obs.push_back(o); });
-    }
+struct Rig : DecoderRig<ModesDecoder> {
+    explicit Rig(DecoderConfig cfg = {}) : DecoderRig<ModesDecoder>(cfg, "in1") {}
     void feed(const Bytes& b, double t, std::optional<uint8_t> sig = std::nullopt) { dec.feed(b, at(t), sig); }
     const skycued::decode::DecodeCounters& c() const { return dec.counters(); }
-    ModesDecoder dec;
-    std::vector<TrackObservation> obs;
 };
 
 std::string rawOf(const Bytes& b) { return "*" + skycued::coding::toHex(b, true) + ";"; }

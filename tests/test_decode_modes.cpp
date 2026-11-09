@@ -1202,6 +1202,133 @@ BOOST_AUTO_TEST_CASE(sel_alt_fms_precedence_tc29_over_bds40) {
     BOOST_CHECK_EQUAL(*r.obs.back().sel_alt_fms_ft, 35008);
 }
 
+namespace {
+// One shielded field: its ADS-B source, its Comm-B source (two register contents, so a Comm-B
+// value can change), the value each yields, and where the observation carries it.
+struct ShieldedField {
+    const char* name;
+    Bytes (*adsb)();
+    uint64_t (*commb)(bool changed);
+    std::optional<double> (*seen)(const TrackObservation&);
+    double adsb_value, commb_value, commb_changed_value;
+};
+
+Mb bds50Variant(bool changed) {  // track 271.4 / 289.0, GS 452 / 460
+    Mb m = bds50Mb();
+    if (changed) m.at(13, 11, 1644).at(25, 10, 230);
+    return m;
+}
+Mb bds60Variant(bool changed) {  // baro -1216 / -960, inertial -1184 / -960
+    Mb m = bds60Mb();
+    if (changed) m.sat(36, 10, -30).sat(47, 10, -30);
+    return m;
+}
+Mb bds40Variant(bool changed) {  // MCP 36000 / 34992, FMS 35008 / 34992, QNH 1013.2 / 1010.0, VNAV+ALTHOLD (+APPROACH)
+    Mb m = bds40Mb();
+    if (changed) m.at(2, 12, 2187).at(15, 12, 2187).at(28, 12, 2100).at(51, 1, 1);
+    return m;
+}
+Bytes adsbTrackGs() { return df17(kAddr, velocity(-141, -141)); }  // track 225, GS 199.4
+Bytes adsbBaroRate() { return df17(kAddr, velocity(0, 0, 640, true)); }
+Bytes adsbGeomRate() { return df17(kAddr, velocity(0, 0, 320, false)); }
+Bytes adsbSelAlt() {
+    skycued::decode::TargetState t;
+    t.sel_alt_ft = 36992;
+    t.modes_valid = false;
+    return df17(kAddr, targetState(t));
+}
+Bytes adsbSelAltFms() {
+    skycued::decode::TargetState t;
+    t.sel_alt_fms_ft = 36992;
+    t.modes_valid = false;
+    return df17(kAddr, targetState(t));
+}
+Bytes adsbQnh() {
+    skycued::decode::TargetState t;
+    t.qnh_mb = 1013.6;
+    t.modes_valid = false;
+    return df17(kAddr, targetState(t));
+}
+Bytes adsbNavModes() { return df17(kAddr, targetState(tsOf(true, false, false, true, false, 0))); }  // LNAV only
+
+template <class F>
+std::optional<double> asDouble(const std::optional<F>& v) {
+    if (!v) return std::nullopt;
+    return static_cast<double>(*v);
+}
+}  // namespace
+
+// Every field that ADS-B and Comm-B both set: the ADS-B value, no older than 60 s, outranks Comm-B.
+BOOST_AUTO_TEST_CASE(commb_origin_matrix_for_every_shielded_field) {
+    const ShieldedField fields[] = {
+        {"track", adsbTrackGs, [](bool c) { return bds50Variant(c).v; },
+         [](const TrackObservation& o) { return asDouble(o.track_deg); }, 225.0, 271.4, 289.0},
+        {"gs", adsbTrackGs, [](bool c) { return bds50Variant(c).v; },
+         [](const TrackObservation& o) { return asDouble(o.gs_kt); }, 199.4, 452.0, 460.0},
+        {"baro_rate", adsbBaroRate, [](bool c) { return bds60Variant(c).v; },
+         [](const TrackObservation& o) { return asDouble(o.baro_rate_fpm); }, 640.0, -1216.0, -960.0},
+        {"geom_rate", adsbGeomRate, [](bool c) { return bds60Variant(c).v; },
+         [](const TrackObservation& o) { return asDouble(o.geom_rate_fpm); }, 320.0, -1184.0, -960.0},
+        {"sel_alt", adsbSelAlt, [](bool c) { return bds40Variant(c).v; },
+         [](const TrackObservation& o) { return asDouble(o.sel_alt_ft); }, 36992.0, 36000.0, 34992.0},
+        {"sel_alt_fms", adsbSelAltFms, [](bool c) { return bds40Variant(c).v; },
+         [](const TrackObservation& o) { return asDouble(o.sel_alt_fms_ft); }, 36992.0, 35008.0, 34992.0},
+        {"qnh", adsbQnh, [](bool c) { return bds40Variant(c).v; },
+         [](const TrackObservation& o) { return asDouble(o.qnh_mb); }, 1013.6, 1013.2, 1010.0},
+        {"nav_modes", adsbNavModes, [](bool c) { return bds40Variant(c).v; },
+         [](const TrackObservation& o) { return asDouble(o.nav_modes); }, kNavLnav, kNavVnav | kNavAltHold,
+         kNavVnav | kNavAltHold | skycued::kNavApproach},
+    };
+    for (const auto& f : fields) {
+        BOOST_TEST_CONTEXT(f.name) {
+            // Feeds one Comm-B reply at t: the key stays confirmed, the altitude is fresh and changes,
+            // so the reply emits (step n: the altitude goes 35000+25n to 35025+25n). Returns the field as the last observation shows it.
+            auto commb = [&](Rig& r, double t, bool changed, int step) {
+                r.feed(df17(kAddr, identification(4, 3, "KLM1023")), t - 0.0002);
+                r.feed(df4(kAddr, ac13Alt(35000 + 25 * step)), t - 0.0001);
+                r.obs.clear();
+                r.feed(df20(kAddr, ac13Alt(35025 + 25 * step), f.commb(changed)), t);
+                BOOST_REQUIRE(!r.obs.empty());
+                const auto v = f.seen(r.obs.back());
+                BOOST_REQUIRE(v);
+                return *v;
+            };
+            const double eps = 0.5;
+            {  // (1) 59.9 s later: shielded
+                Rig r;
+                confirmedWithAlt(r, 35000, 0.0);
+                r.feed(f.adsb(), 2.0);
+                BOOST_CHECK_SMALL(commb(r, 61.9, false, 0) - f.adsb_value, eps);
+            }
+            {  // (2) exactly 60 s later: still shielded
+                Rig r;
+                confirmedWithAlt(r, 35000, 0.0);
+                r.feed(f.adsb(), 2.0);
+                BOOST_CHECK_SMALL(commb(r, 62.0, false, 0) - f.adsb_value, eps);
+            }
+            {  // (3) 60.001 s later: Comm-B takes over
+                Rig r;
+                confirmedWithAlt(r, 35000, 0.0);
+                r.feed(f.adsb(), 2.0);
+                BOOST_CHECK_SMALL(commb(r, 62.001, false, 0) - f.commb_value, eps);
+            }
+            {  // (4) a Comm-B value, replaced by a later ADS-B one, which then shields again
+                Rig r;
+                confirmedWithAlt(r, 35000, 0.0);
+                BOOST_CHECK_SMALL(commb(r, 2.0, false, 0) - f.commb_value, eps);
+                r.feed(f.adsb(), 12.0);
+                BOOST_CHECK_SMALL(commb(r, 22.0, true, 1) - f.adsb_value, eps);
+            }
+            {  // (5) a Comm-B value is replaced by a changed Comm-B value
+                Rig r;
+                confirmedWithAlt(r, 35000, 0.0);
+                BOOST_CHECK_SMALL(commb(r, 2.0, false, 0) - f.commb_value, eps);
+                BOOST_CHECK_SMALL(commb(r, 7.0, true, 1) - f.commb_changed_value, eps);
+            }
+        }
+    }
+}
+
 BOOST_AUTO_TEST_CASE(no_ra_record_is_inactive) {
     Rig r;
     r.feed(df17(kAddr, velocity(0, 0)), 0.0);

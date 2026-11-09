@@ -636,33 +636,13 @@ ApiResponse postListRoute(ListKind kind, const std::string& body, const Engine& 
 }
 
 // A small regular file's text; nullopt when it cannot be read, is not a
-// regular file or is larger. O_NONBLOCK keeps open() from waiting for a
-// writer when the path is a FIFO (that would stall the io thread); it is
-// cleared once the file is known to be regular.
+// regular file or is larger than max_bytes.
 std::optional<std::string> readSmallFile(const std::string& path, size_t max_bytes)
 {
-    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
-    if (fd < 0)
-        return std::nullopt;
-    struct stat st{};
-    const int flags = ::fcntl(fd, F_GETFL);
-    if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || flags < 0 ||
-        ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0) {
-        ::close(fd);
-        return std::nullopt;
-    }
     std::string text;
-    char buf[4096];
-    for (;;) {
-        const ssize_t n = ::read(fd, buf, sizeof buf);
-        if (n <= 0 || text.size() + static_cast<size_t>(n) > max_bytes) {
-            ::close(fd);
-            if (n == 0)
-                return text;
-            return std::nullopt;
-        }
-        text.append(buf, static_cast<size_t>(n));
-    }
+    if (readRegularFile(path, max_bytes, text) != ReadStatus::ok)
+        return std::nullopt;
+    return text;
 }
 
 std::string lower(std::string s)

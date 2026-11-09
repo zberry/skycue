@@ -1197,6 +1197,7 @@ test('configDisabledTitle for set, env and bootstrap', () => {
   assert.strictEqual(P.configDisabledTitle({ key: 'stats.save_s', source: 'set', editable: false }), 'set by --set');
   assert.strictEqual(P.configDisabledTitle({ key: 'web.bind', source: 'env', editable: false }), 'set by SKYCUE_WEB_BIND');
   assert.strictEqual(P.configDisabledTitle({ key: 'inputs.readsb.host', source: 'env', editable: false }), 'set by SKYCUE_INPUTS_READSB_HOST');
+  assert.strictEqual(P.configDisabledTitle({ key: 'inputs.readsb.enable', source: 'flag', editable: false }), 'set by a command-line flag');
   assert.strictEqual(P.configDisabledTitle({ key: 'web.bind', source: 'default', cls: 'bootstrap', editable: false }), 'edit skycue.toml and restart');
   assert.strictEqual(P.configDisabledTitle({ key: 'receiver.lat', source: 'conf', cls: 'restart', editable: true }), '');
 });

@@ -20,8 +20,15 @@ There is no authentication; see [Security](#security).
   when `web.allow_restart` is on, `POST /api/restart` stops skycued so that
   its supervisor starts it again. It is the same trust model: whoever may
   change the filters may change the receiver position, the outputs and the
-  inputs, and may restart the daemon. `web.allow_restart` is off by default and
-  cannot be turned on from the page.
+  inputs, and may restart the daemon. An unauthenticated client on the trusted
+  network can change every non-bootstrap key. The path keys (`inputs.file`,
+  `stats.file`, `recording.dir`, `paths.map_dir`, `paths.locations_file`,
+  `filters.allow_list_file`, `filters.block_list_file`) take, from the UI, only a
+  relative name without `..` under `paths.state_dir` (an absolute path or a
+  `..` is `403`); editing the files by hand is not restricted. The network keys
+  (hosts, ports and cue targets) are editable, as the inputs editor already
+  lets a client point an input at another host. The restart is an opt-in:
+  `web.allow_restart` is off by default and cannot be turned on from the page.
 - `web.bind` defaults to `127.0.0.1`: only programs on the same machine
   can connect. Set it to another address (or `0.0.0.0` for every
   interface) only when every host that can reach the port may change the
@@ -281,9 +288,10 @@ read the overrides file, so they are set in `skycue.toml`, by `--set`, the
 environment or a flag, and nowhere else); `editable`, whether `PUT
 /api/config` may change it (false for a bootstrap key and for a key pinned by
 the environment, `--set` or a flag); `default`, the built-in default, spelled
-like `value`; and `file_value`, what the files alone give, when they set it
-(`skycue.toml` with `skycue.overrides.toml` over it, before the environment,
-`--set`, flags and the runtime overlay).
+like `value`; and `file_value`, what the main file (`skycue.toml`) alone gives,
+when it sets it, in the same text form as `value` (strings unquoted, arrays
+joined by spaces, numbers in their shortest form), whatever the overrides file,
+the environment, `--set`, flags and the runtime overlay put above it.
 
 For a `live` key `value` is the effective value, as above. For every other
 key `value` is the value *configured*: what the files and layers say now,
@@ -305,8 +313,9 @@ skycued and nothing starts it again. Other methods: 405 with `Allow: GET`.
 `key`, `type` (`int`, `float`, `bool`, `string`, `enum`, `string_set`,
 `host_port_list` or `path`), `class` (as above), `default`, `doc` (one line of
 help), and where they apply `min` and `max` (numbers) and `values` (the
-allowed strings of an `enum` or the allowed entries of a `string_set`). It
-does not change while skycued runs; the page asks once. Other methods: 405
+allowed strings of an `enum` or the allowed entries of a `string_set`), and
+`"relative_only": true` on a path key that `PUT /api/config` takes only as a
+relative name under `paths.state_dir`. It does not change while skycued runs; the page asks once. Other methods: 405
 with `Allow: GET`.
 
 ### `PUT /api/config`
@@ -323,8 +332,9 @@ the key falls back to `skycue.toml`'s value or the default. A request that
 changes nothing does not touch the file. Everything is applied or nothing is.
 
 - **200** `{"ok": true, "applied": [key...], "pending_restart": [...],
-  "external": [key...]}`: `applied` the `live` keys now in effect;
-  `pending_restart` as in `GET /api/config`, after the save; `external` the
+  "external": [key...]}`: `applied` every key whose configured value changed;
+  `pending_restart` the whole list, as in `GET /api/config`, after the save
+  (keys waiting from earlier saves too, not just this request's); `external` the
   `[sdr]` keys saved, which the launcher reads when it next starts readsb and
   dump978-fa. A `PUT` of a filter key also removes that key's value from the
   runtime overlay, so the saved value is the running one and the overlay does
@@ -334,13 +344,18 @@ changes nothing does not touch the file. Everything is applied or nothing is.
   (`"cues.tcp_port: expected int"`), out of range, or failing a cross-key
   check. The message is the one `skycue.toml` would give, without the file
   name; `key` is there when one key is at fault.
-- **403** `{"error": "...", "key": "..."}`: a bootstrap key.
+- **403** `{"error": "...", "key": "..."}`: a bootstrap key, or a path key set
+  to an absolute path or a name with a `..` component (`"error": "<key>: only a
+  relative name under paths.state_dir can be set from the web UI"`).
+  These checks, and the `409` one, come before the check of the value's type.
 - **409** `{"error": "...", "key": "...", "source": "..."}`: the key is
   pinned by `env`, `set` or `flag`; the file would not change what skycued
   uses.
 - **500**: the overrides file could not be written. The message names the path
   and says to set `paths.state_dir`, as a [save as baseline](#save-as-baseline)
-  does.
+  does; or the file holds a key the page does not write (a hand-written
+  bootstrap key): the message names the file and the key, and says to fix it
+  by hand.
 
 Other methods: 405 with `Allow: GET, PUT`.
 

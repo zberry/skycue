@@ -1094,9 +1094,19 @@ test('config_tab_edits_stage_apply_and_pending_restart', async ({ page }, testIn
   expect(cfg.keys.find((k) => k.key === 'web.trail_seconds').source).toBe('overrides');
   expect(cfg.keys.find((k) => k.key === 'web.trail_seconds').value).toBe('300');
   expect(cfg.pending_restart).toEqual([{ key: 'web.trail_seconds', running: '120', configured: '300' }]);
+  // A second edit (a live key) leaves the first one's banner in place.
+  const range = page.locator('#cfg-filters-max_range_nm');
+  await range.fill('77');
+  await range.dispatchEvent('change');
+  await page.locator('#config-apply').click();
+  await expect(page.locator('#config-msg')).toHaveText('Applied');
+  await expect(banner).toBeVisible();
+  await expect(page.locator('#config-pending-list')).toContainText('web.trail_seconds');
+  await expect(page.locator('#config-pending-list li')).toHaveCount(1);
   // Reset: back to skycue.toml, and the restart note goes away.
   await row.locator('.cfg-reset').click();
-  await expect(page.locator('#config-bar-text')).toHaveText('1 change');
+  await page.locator('#pane-config tr[data-key="filters.max_range_nm"] .cfg-reset').click();
+  await expect(page.locator('#config-bar-text')).toHaveText('2 changes');
   await page.locator('#config-apply').click();
   await expect(banner).toBeHidden();
   expect((await api('/api/config')).body.pending_restart).toEqual([]);
@@ -1118,6 +1128,32 @@ test('config_tab_bootstrap_and_pinned_rows_disabled', async ({ page }) => {
   const bind = page.locator('#cfg-web-bind');
   await expect(bind).toBeDisabled();
   await expect(bind).toHaveAttribute('title', 'edit skycue.toml and restart');
+  // Titles that say what a control does.
+  await expect(page.locator('#cfg-sdr-gain_1090')).toHaveAttribute('title', 'read by the programs that start the decoders, not by skycued');
+  await expect(page.locator('#cfg-recording-dir')).toHaveAttribute('title', 'relative name under paths.state_dir');
+  await expect(page.locator('#config-restart')).toHaveAttribute('title', 'nothing restarts skycued here; it will exit');
+});
+
+test('config_tab_server_error_clears_when_the_staged_set_changes', async ({ page }) => {
+  await openPage(page);
+  await page.route('**/api/config', (route) => route.request().method() === 'PUT'
+    ? route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'web.trail_seconds: refused', key: 'web.trail_seconds' }) })
+    : route.continue());
+  await page.locator('#cfg-toggle').click();
+  await expect(page.locator('#config-groups table').first()).toBeVisible();
+  const ctl = page.locator('#cfg-web-trail_seconds');
+  await ctl.fill('300');
+  await ctl.dispatchEvent('change');
+  await page.locator('#config-apply').click();
+  const err = page.locator('#pane-config tr[data-key="web.trail_seconds"] .cfg-err');
+  await expect(err).toHaveText('web.trail_seconds: refused');
+  await expect(page.locator('#config-apply')).toBeDisabled();
+  // Editing a row changes the set: the refusal no longer applies.
+  const other = page.locator('#cfg-web-trail_seconds');
+  await other.fill('301');
+  await other.dispatchEvent('change');
+  await expect(err).toBeHidden();
+  await expect(page.locator('#config-apply')).toBeEnabled();
 });
 
 // ---- FIS-B ---------------------------------------------------------------------

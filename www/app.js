@@ -3386,6 +3386,7 @@
       ul.appendChild(el('li', null, p.key + ' (running ' + p.running + ', configured ' + p.configured + ')'));
     });
     $('config-restart').hidden = !d.allow_restart;
+    $('config-restart').title = d.supervisor === 'none' ? 'nothing restarts skycued here; it will exit' : '';
     $('config-restart-note').textContent = d.allow_restart ? '' : 'restart skycued to apply';
     $('config-supervisor').textContent = 'Supervisor: ' + (d.supervisor || 'none');
   }
@@ -3473,6 +3474,15 @@
     return cur === v;
   }
   function stageConfig(key, raw) {
+    // Editing any row changes the staged set: the server's earlier refusal
+    // (a 400 marked on a row) no longer describes it.
+    Object.keys(config.rows).forEach(function (k) {
+      if (config.rows[k].serverError) {
+        config.rows[k].serverError = false;
+        config.rows[k].error = '';
+        paintConfigRow(k);
+      }
+    });
     var r = config.rows[key], res = P.configParse(r.row.spec, raw);
     if (res.error) {
       r.error = res.error;
@@ -3513,6 +3523,8 @@
             if (ctl.tagName === 'SPAN') Array.prototype.forEach.call(ctl.querySelectorAll('input'), function (b) { b.disabled = true; });
             else ctl.disabled = true;
           } else {
+            if (r.cls === 'external') ctl.title = 'read by the programs that start the decoders, not by skycued';
+            if (r.spec.relative_only) ctl.title = 'relative name under paths.state_dir';
             ctl.addEventListener('change', function () { stageConfig(r.key, configRaw(r.spec, ctl)); });
           }
           td.appendChild(ctl);
@@ -3524,7 +3536,9 @@
           pin.title = off || 'edit skycue.toml and restart';
           meta.appendChild(pin);
         } else {
-          meta.appendChild(el('span', 'badge ' + r.cls, r.cls === 'external' ? 'launcher' : r.cls));
+          var badge = el('span', 'badge ' + r.cls, r.cls === 'external' ? 'launcher' : r.cls);
+          if (r.cls === 'external') badge.title = 'read by the programs that start the decoders, not by skycued';
+          meta.appendChild(badge);
         }
         meta.appendChild(el('span', 'badge src', P.configSourceLabel(r.source)));
         meta.appendChild(hint);
@@ -3557,7 +3571,8 @@
     config.data = c;
     renderConfigDaemon(c.daemon || {});
     renderConfigGroups(c.keys || [], config.schema);
-    renderPendingRestart(pending || c.pending_restart || [], c.daemon || {});
+    // An empty list from PUT is an answer too: nothing waits.
+    renderPendingRestart(Array.isArray(pending) ? pending : c.pending_restart || [], c.daemon || {});
     showFilterPins(c.keys || []);
     $('config-copy').disabled = false;
   }
@@ -3611,6 +3626,7 @@
     }).catch(function (e) {
       if (e.status === 400 && e.key !== undefined && config.rows[e.key]) {
         config.rows[e.key].error = e.message;
+        config.rows[e.key].serverError = true;
         paintConfigRow(e.key);
         updateConfigBar();
         return;

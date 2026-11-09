@@ -1745,7 +1745,10 @@ them together (`PUT /api/config`); if any is refused (a number out of range,
 message names the key. Where a key has a value in a file, its **↺** button
 clears the saved value, so the key goes back to `skycue.toml`'s value or the
 default; a `file: …` hint shows what the files give when the row shows
-something else.
+something else. From the page, the path keys (`inputs.file`, `stats.file`,
+`recording.dir`, `paths.map_dir`, `paths.locations_file` and the two list
+files) take only a relative name without `..`, which is read under
+`paths.state_dir`; set an absolute path in `skycue.toml`.
 
 **Badges.** `live` (a filter key: applies the moment it is saved), `restart`
 (read when skycued starts), `launcher` (an `[sdr]` key: skycued does not read
@@ -1776,6 +1779,13 @@ Below the banner a `Supervisor:` line names what will start skycued again:
 `systemd`, `launcher` (`skycue-start.sh`) or `none`. Under `systemd` and `launcher` the
 Restart button brings skycued back; with `none` it ends and stays stopped until
 you start it, so leave `web.allow_restart` off for a skycued started by hand.
+
+**If skycued does not come back.** A saved value can pass the checks and still
+fail when skycued starts, for example a port already in use or a recording
+directory that cannot be created, and then the daemon stays down. Fix or delete
+that key in `skycue.overrides.toml` (packaged:
+`/var/lib/skycue/skycue.overrides.toml`) and start skycued again; the journal
+(or the log) names the key.
 
 **Where saves go.** Into `skycue.overrides.toml`, never `skycue.toml`. Under the
 packages that is `/var/lib/skycue/skycue.overrides.toml` (`paths.state_dir`),

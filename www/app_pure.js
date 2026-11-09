@@ -451,6 +451,7 @@
   function configDisabledTitle(row) {
     if (row.source === 'set') return 'set by --set';
     if (row.source === 'env') return 'set by ' + configEnvName(row.key);
+    if (row.source === 'flag') return 'set by a command-line flag';
     if (row.editable === false) return 'edit skycue.toml and restart';
     return '';
   }

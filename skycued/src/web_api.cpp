@@ -2,6 +2,7 @@
 
 #include "config.hpp"
 #include "engine.hpp"
+#include "hex.hpp"
 #include "json_lite.hpp"
 #include "observation_json.hpp"
 #include "recorder.hpp"
@@ -282,17 +283,6 @@ struct JsonScalar {
     std::vector<std::string> items;
 };
 
-int hexDigit(char c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
-
 class BodyReader {
 public:
     explicit BodyReader(const std::string& s) : s_(s) {}
@@ -415,7 +405,7 @@ private:
                     return false;
                 unsigned cp = 0;
                 for (int k = 0; k < 4; ++k) {
-                    const int h = hexDigit(s_[i_++]);
+                    const int h = hexDigitValue(s_[i_++]);
                     if (h < 0)
                         return false;
                     cp = cp * 16 + static_cast<unsigned>(h);
@@ -680,17 +670,6 @@ std::optional<std::string> readSmallFile(const std::string& path, size_t max_byt
     }
 }
 
-int hexValue(char c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
-
 std::string lower(std::string s)
 {
     for (auto& ch : s)
@@ -788,8 +767,8 @@ std::map<std::string, std::string> queryParams(const std::string& query)
             const char c = s[i];
             if (c == '+') {
                 out += ' ';
-            } else if (c == '%' && i + 2 < s.size() && hexValue(s[i + 1]) >= 0 && hexValue(s[i + 2]) >= 0) {
-                out += static_cast<char>(hexValue(s[i + 1]) * 16 + hexValue(s[i + 2]));
+            } else if (c == '%' && i + 2 < s.size() && hexDigitValue(s[i + 1]) >= 0 && hexDigitValue(s[i + 2]) >= 0) {
+                out += static_cast<char>(hexDigitValue(s[i + 1]) * 16 + hexDigitValue(s[i + 2]));
                 i += 2;
             } else {
                 out += c;
@@ -1122,7 +1101,7 @@ std::optional<std::string> staticPath(const std::string& target)
         if (c == '%') {
             if (i + 2 >= raw.size())
                 return std::nullopt;
-            const int hi = hexValue(raw[i + 1]), lo = hexValue(raw[i + 2]);
+            const int hi = hexDigitValue(raw[i + 1]), lo = hexDigitValue(raw[i + 2]);
             if (hi < 0 || lo < 0)
                 return std::nullopt;
             c = static_cast<char>(hi * 16 + lo);

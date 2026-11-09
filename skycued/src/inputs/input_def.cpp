@@ -179,36 +179,20 @@ bool isIpv4Multicast(const std::string& s)
     return first >= 224 && first <= 239;
 }
 
+std::optional<InputTransport> parseTransport(const std::string& s)
+{
+    for (InputTransport t : {InputTransport::tcp_connect, InputTransport::udp, InputTransport::tcp_listen})
+        if (s == transportName(t))
+            return t;
+    return std::nullopt;
+}
+
 namespace {
 
 bool isNull(const JsonObject& o, const char* key)
 {
     const auto text = o.getString(key);
     return text && *text == "null";
-}
-
-std::string getText(const JsonObject& o, const char* key, const char* what)
-{
-    const auto text = o.getString(key);
-    if (!text)
-        fail(std::string(key) + " must be " + what);
-    return *text;
-}
-
-int64_t getIntIn(const JsonObject& o, const char* key, int64_t lo, int64_t hi)
-{
-    const auto value = o.getInt(key);
-    if (!value || *value < lo || *value > hi)
-        fail(std::string(key) + " must be an integer from " + std::to_string(lo) + " to " + std::to_string(hi));
-    return *value;
-}
-
-bool getFlag(const JsonObject& o, const char* key)
-{
-    const auto value = o.getBool(key);
-    if (!value)
-        fail(std::string(key) + " must be true or false");
-    return *value;
 }
 
 std::optional<uint8_t> getOctet(const JsonObject& o, const char* key)
@@ -221,27 +205,11 @@ std::optional<uint8_t> getOctet(const JsonObject& o, const char* key)
     return static_cast<uint8_t>(*value);
 }
 
-// Absent, null and "" all mean unset.
-std::string getOptionalText(const JsonObject& o, const char* key, const char* what)
-{
-    if (!o.has(key) || isNull(o, key))
-        return "";
-    return getText(o, key, what);
-}
-
 std::optional<InputType> parseType(const std::string& s)
 {
     for (InputType t : {InputType::readsb, InputType::dump978, InputType::pingstation_json,
                         InputType::pingstation_cat021, InputType::beast_raw, InputType::uat_raw})  // never replay
         if (s == inputTypeName(t))
-            return t;
-    return std::nullopt;
-}
-
-std::optional<InputTransport> parseTransport(const std::string& s)
-{
-    for (InputTransport t : {InputTransport::tcp_connect, InputTransport::udp, InputTransport::tcp_listen})
-        if (s == transportName(t))
             return t;
     return std::nullopt;
 }
@@ -289,14 +257,6 @@ void appendOptionalOctet(JsonWriter& w, const char* key, std::optional<uint8_t> 
         w.add(key, static_cast<int64_t>(*v));
     else
         w.addRaw(key, "null");
-}
-
-void appendOptionalText(JsonWriter& w, const char* key, const std::string& v)
-{
-    if (v.empty())
-        w.addRaw(key, "null");
-    else
-        w.add(key, v);
 }
 
 }  // namespace
@@ -354,7 +314,7 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
     InputDef d;
     if (!o.has("id"))
         fail("id is required");
-    d.id = getText(o, "id", "a string");
+    d.id = json_get::text<InputDefError>(o, "id", "a string");
     if (!isValidInputId(d.id))
         fail("id must be 1 to 32 characters of a-z, 0-9 and -");
     for (const char* reserved : kReservedIds)
@@ -365,7 +325,7 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
         "type must be one of readsb, dump978, pingstation_json, pingstation_cat021, beast_raw, uat_raw";
     if (!o.has("type"))
         fail("type is required");
-    const auto type = parseType(getText(o, "type", "a string"));
+    const auto type = parseType(json_get::text<InputDefError>(o, "type", "a string"));
     if (!type)
         fail(kTypeRule);
     d.type = *type;
@@ -373,7 +333,7 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
     if (d.type == InputType::pingstation_cat021 && !o.has("transport"))
         fail("transport is required for pingstation_cat021 (udp, tcp_connect or tcp_listen)");
     if (o.has("transport")) {
-        const auto transport = parseTransport(getText(o, "transport", "udp, tcp_connect or tcp_listen"));
+        const auto transport = parseTransport(json_get::text<InputDefError>(o, "transport", "udp, tcp_connect or tcp_listen"));
         if (!transport)
             fail("transport must be udp, tcp_connect or tcp_listen");
         d.transport = *transport;
@@ -385,7 +345,7 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
     }
 
     if (o.has("name")) {
-        d.name = getText(o, "name", "a string");
+        d.name = json_get::text<InputDefError>(o, "name", "a string");
         if (!isValidInputName(d.name)) {
             if (rule != NameRule::repair)
                 fail("name must be at most 64 printable characters");
@@ -395,16 +355,16 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
         }
     }
     if (o.has("enabled"))
-        d.enabled = getFlag(o, "enabled");
+        d.enabled = json_get::flag<InputDefError>(o, "enabled");
     if (!o.has("port"))
         fail("port is required");
-    d.port = static_cast<uint16_t>(getIntIn(o, "port", 1, 65535));
+    d.port = static_cast<uint16_t>(json_get::intIn<InputDefError>(o, "port", 1, 65535));
     if (listens(d.transport)) {
         if (d.transport == InputTransport::udp) {
-            d.group = getOptionalText(o, "group", "a multicast address");
+            d.group = json_get::optionalText<InputDefError>(o, "group", "a multicast address");
             if (!d.group.empty() && !isIpv4Multicast(d.group))
                 fail("group must be a multicast address (224.0.0.0 to 239.255.255.255)");
-            d.iface = getOptionalText(o, "interface", "an IPv4 address");
+            d.iface = json_get::optionalText<InputDefError>(o, "interface", "an IPv4 address");
             if (!d.iface.empty()) {
                 if (d.group.empty())
                     fail("interface applies to a multicast group only");
@@ -415,23 +375,23 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
         if (o.has("bind")) {
             if (!d.group.empty())
                 fail("bind does not apply when group is set");
-            d.bind = getText(o, "bind", "an IPv4 address");
+            d.bind = json_get::text<InputDefError>(o, "bind", "an IPv4 address");
             if (!isIpv4Literal(d.bind))
                 fail("bind must be an IPv4 address");
         }
-        d.peer = getOptionalText(o, "peer", "an IPv4 address");
+        d.peer = json_get::optionalText<InputDefError>(o, "peer", "an IPv4 address");
         if (!d.peer.empty() && !isIpv4Literal(d.peer))
             fail("peer must be an IPv4 address");
     } else {
         if (!o.has("host"))
             fail("host is required");
-        d.host = getText(o, "host", "a string");
+        d.host = json_get::text<InputDefError>(o, "host", "a string");
         if (!isValidHost(d.host))
             fail("host must be an IPv4 address or a hostname of at most 253 characters");
     }
     if (d.type == InputType::pingstation_cat021) {
         if (o.has("edition")) {
-            d.edition = getText(o, "edition", "a string");
+            d.edition = json_get::text<InputDefError>(o, "edition", "a string");
             if (std::find(std::begin(kEditions), std::end(kEditions), d.edition) == std::end(kEditions))
                 fail("edition must be one of 2.2, 2.3, 2.4, 2.5, 2.6, 2.7");
         }
@@ -441,14 +401,14 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
             d.sic = getOctet(o, "sic");
     }
     if (isPingStation(d.type)) {
-        d.status_url = getOptionalText(o, "status_url", "a string");
+        d.status_url = json_get::optionalText<InputDefError>(o, "status_url", "a string");
         if (!d.status_url.empty() && !parseHttpUrl(d.status_url))
             fail("status_url must be an http:// URL without userinfo, with a port of 1 to 65535");
         if (o.has("status_interval_s"))
             d.status_interval_s =
-                static_cast<int>(getIntIn(o, "status_interval_s", kMinStatusInterval, kMaxStatusInterval));
+                static_cast<int>(json_get::intIn<InputDefError>(o, "status_interval_s", kMinStatusInterval, kMaxStatusInterval));
         if (o.has("time_mode")) {
-            const std::string mode = getText(o, "time_mode", "utc or gps");
+            const std::string mode = json_get::text<InputDefError>(o, "time_mode", "utc or gps");
             if (mode == "utc")
                 d.time_mode = TimeMode::utc;
             else if (mode == "gps")
@@ -458,7 +418,7 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
         }
     }
     if (d.type == InputType::pingstation_json && o.has("source")) {
-        const std::string source = getText(o, "source", "device or decode");
+        const std::string source = json_get::text<InputDefError>(o, "source", "device or decode");
         if (source == "device")
             d.source = PingSource::device;
         else if (source == "decode")
@@ -467,9 +427,9 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
             fail("source must be device or decode");
     }
     if (takesCapture(d.type) && o.has("capture"))
-        d.capture = getFlag(o, "capture");
+        d.capture = json_get::flag<InputDefError>(o, "capture");
     if (d.type == InputType::beast_raw && o.has("format")) {
-        d.format = getText(o, "format", "beast or avr");
+        d.format = json_get::text<InputDefError>(o, "format", "beast or avr");
         if (d.format != "beast" && d.format != "avr")
             fail("format must be beast or avr");
     }
@@ -506,10 +466,10 @@ std::string inputDefJson(const InputDef& d)
         w.add("bind", d.bind);
     w.add("port", static_cast<int64_t>(d.port));
     if (listens(d.transport))
-        appendOptionalText(w, "peer", d.peer);
+        w.addOptionalText("peer", d.peer);
     if (!d.group.empty()) {
         w.add("group", d.group);
-        appendOptionalText(w, "interface", d.iface);
+        w.addOptionalText("interface", d.iface);
     }
     if (d.type == InputType::beast_raw)
         w.add("format", d.format);
@@ -521,7 +481,7 @@ std::string inputDefJson(const InputDef& d)
         appendOptionalOctet(w, "sic", d.sic);
     }
     if (isPingStation(d.type)) {
-        appendOptionalText(w, "status_url", d.status_url);
+        w.addOptionalText("status_url", d.status_url);
         w.add("status_interval_s", static_cast<int64_t>(d.status_interval_s));
         w.add("time_mode", d.time_mode == TimeMode::gps ? "gps" : "utc");
     }

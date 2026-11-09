@@ -1,6 +1,7 @@
 #include "toml_lite.hpp"
 
 #include "json_lite.hpp"  // formatRoundTrip
+#include "hex.hpp"
 
 #include <charconv>
 #include <cmath>
@@ -18,17 +19,6 @@ bool isKeyChar(char c)
 }
 
 bool isDigit(char c) { return c >= '0' && c <= '9'; }
-
-int hexValue(char c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
 
 void appendUtf8(std::string& out, unsigned cp)
 {
@@ -250,7 +240,7 @@ private:
             case 'u': {
                 unsigned cp = 0;
                 for (int i = 0; i < 4; ++i) {
-                    const int h = atEnd() ? -1 : hexValue(peek());
+                    const int h = atEnd() ? -1 : hexDigitValue(peek());
                     if (h < 0)
                         fail("\\u needs four hexadecimal digits");
                     cp = cp * 16 + static_cast<unsigned>(h);

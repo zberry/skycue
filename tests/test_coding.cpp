@@ -7,6 +7,7 @@
 
 #include "coding/bits.hpp"
 #include "coding/modes_crc.hpp"
+#include "hex.hpp"
 
 using namespace skycued::coding;
 
@@ -85,4 +86,16 @@ BOOST_AUTO_TEST_CASE(syndrome_fix_refuses_short_frames)
     const auto before = f;
     BOOST_TEST(!syndromeFix1(f));
     BOOST_TEST(f == before);
+}
+
+BOOST_AUTO_TEST_CASE(hex_digit_value_table)
+{
+    for (char c = '0'; c <= '9'; ++c)
+        BOOST_CHECK_EQUAL(skycued::hexDigitValue(c), c - '0');
+    for (char c = 'a'; c <= 'f'; ++c) {
+        BOOST_CHECK_EQUAL(skycued::hexDigitValue(c), c - 'a' + 10);
+        BOOST_CHECK_EQUAL(skycued::hexDigitValue(static_cast<char>(c - 'a' + 'A')), c - 'a' + 10);
+    }
+    for (char c : {'g', 'G', ' ', '\0', '/', ':', '@', '`'})
+        BOOST_CHECK_EQUAL(skycued::hexDigitValue(c), -1);
 }

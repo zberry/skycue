@@ -12,43 +12,6 @@ const char* const kKeys[] = {"id",   "name",  "kind", "enabled", "transport", "b
 
 [[noreturn]] void fail(const std::string& message) { throw OutputDefError(message); }
 
-bool isNull(const JsonObject& o, const char* key)
-{
-    const auto text = o.getString(key);
-    return text && *text == "null";
-}
-
-std::string getText(const JsonObject& o, const char* key, const char* what)
-{
-    const auto text = o.getString(key);
-    if (!text)
-        fail(std::string(key) + " must be " + what);
-    return *text;
-}
-
-int64_t getIntIn(const JsonObject& o, const char* key, int64_t lo, int64_t hi)
-{
-    const auto value = o.getInt(key);
-    if (!value || *value < lo || *value > hi)
-        fail(std::string(key) + " must be an integer from " + std::to_string(lo) + " to " + std::to_string(hi));
-    return *value;
-}
-
-bool getFlag(const JsonObject& o, const char* key)
-{
-    const auto value = o.getBool(key);
-    if (!value)
-        fail(std::string(key) + " must be true or false");
-    return *value;
-}
-
-std::string getOptionalText(const JsonObject& o, const char* key, const char* what)
-{
-    if (!o.has(key) || isNull(o, key))
-        return "";
-    return getText(o, key, what);
-}
-
 bool allDigitsNoLeadingZero(const std::string& s)
 {
     if (s.empty() || s.size() > 6 || (s.size() > 1 && s[0] == '0'))
@@ -63,22 +26,6 @@ std::optional<OutputKind> parseKind(const std::string& s)
         if (s == outputKindName(k))
             return k;
     return std::nullopt;
-}
-
-std::optional<InputTransport> parseTransport(const std::string& s)
-{
-    for (InputTransport t : {InputTransport::tcp_listen, InputTransport::tcp_connect, InputTransport::udp})
-        if (s == transportName(t))
-            return t;
-    return std::nullopt;
-}
-
-void appendOptionalText(JsonWriter& w, const char* key, const std::string& v)
-{
-    if (v.empty())
-        w.addRaw(key, "null");
-    else
-        w.add(key, v);
 }
 
 }  // namespace
@@ -128,19 +75,19 @@ OutputDef parseOutputDef(const JsonObject& o, NameRule rule, bool* repaired)
     OutputDef d;
     if (!o.has("id"))
         fail("id is required");
-    d.id = getText(o, "id", "a string");
+    d.id = json_get::text<OutputDefError>(o, "id", "a string");
     if (!isValidInputId(d.id))
         fail("id must be 1 to 32 characters of a-z, 0-9 and -");
     if (isReservedCueId(d.id))
         fail("id '" + d.id + "' is reserved");
 
-    const auto kind = o.has("kind") ? parseKind(getText(o, "kind", "a string")) : std::nullopt;
+    const auto kind = o.has("kind") ? parseKind(json_get::text<OutputDefError>(o, "kind", "a string")) : std::nullopt;
     if (!kind)
         fail("kind must be one of beast, uat, json, pingstation_json, cat021, cue");
     d.kind = *kind;
     if (!o.has("transport"))
         fail("transport is required for outputs (tcp_listen, tcp_connect or udp)");
-    const auto transport = parseTransport(getText(o, "transport", "tcp_listen, tcp_connect or udp"));
+    const auto transport = parseTransport(json_get::text<OutputDefError>(o, "transport", "tcp_listen, tcp_connect or udp"));
     if (!transport)
         fail("transport must be tcp_listen, tcp_connect or udp");
     d.transport = *transport;
@@ -158,7 +105,7 @@ OutputDef parseOutputDef(const JsonObject& o, NameRule rule, bool* repaired)
     }
 
     if (o.has("name")) {
-        d.name = getText(o, "name", "a string");
+        d.name = json_get::text<OutputDefError>(o, "name", "a string");
         if (!isValidInputName(d.name)) {
             if (rule != NameRule::repair)
                 fail("name must be at most 64 printable characters");
@@ -168,30 +115,30 @@ OutputDef parseOutputDef(const JsonObject& o, NameRule rule, bool* repaired)
         }
     }
     if (o.has("enabled"))
-        d.enabled = getFlag(o, "enabled");
+        d.enabled = json_get::flag<OutputDefError>(o, "enabled");
     if (!o.has("port"))
         fail("port is required");
-    d.port = static_cast<uint16_t>(getIntIn(o, "port", 1, 65535));
+    d.port = static_cast<uint16_t>(json_get::intIn<OutputDefError>(o, "port", 1, 65535));
 
     if (listen) {
         if (o.has("bind")) {
-            d.bind = getText(o, "bind", "an IPv4 address");
+            d.bind = json_get::text<OutputDefError>(o, "bind", "an IPv4 address");
             if (!isIpv4Literal(d.bind))
                 fail("bind must be an IPv4 address");
         }
-        d.peer = getOptionalText(o, "peer", "an IPv4 address");
+        d.peer = json_get::optionalText<OutputDefError>(o, "peer", "an IPv4 address");
         if (!d.peer.empty() && !isIpv4Literal(d.peer))
             fail("peer must be an IPv4 address");
     }
     if (connect || udp) {
-        d.host = getOptionalText(o, "host", "a string");
+        d.host = json_get::optionalText<OutputDefError>(o, "host", "a string");
         if (connect && d.host.empty())
             fail("host is required");
         if (!d.host.empty() && !isValidHost(d.host))
             fail("host must be an IPv4 address or a hostname of at most 253 characters");
     }
     if (udp) {
-        d.group = getOptionalText(o, "group", "a multicast address");
+        d.group = json_get::optionalText<OutputDefError>(o, "group", "a multicast address");
         if (!d.group.empty() && !isIpv4Multicast(d.group))
             fail("group must be a multicast address (224.0.0.0 to 239.255.255.255)");
         if (d.host.empty() && d.group.empty())
@@ -204,13 +151,13 @@ OutputDef parseOutputDef(const JsonObject& o, NameRule rule, bool* repaired)
             fail(std::string(key) + " applies to a multicast group only");
     }
     if (!d.group.empty()) {
-        d.iface = getOptionalText(o, "interface", "an IPv4 address");
+        d.iface = json_get::optionalText<OutputDefError>(o, "interface", "an IPv4 address");
         if (!d.iface.empty() && !isIpv4Literal(d.iface))
             fail("interface must be an IPv4 address");
         if (o.has("ttl"))
-            d.ttl = static_cast<int>(getIntIn(o, "ttl", 1, 255));
+            d.ttl = static_cast<int>(json_get::intIn<OutputDefError>(o, "ttl", 1, 255));
         if (o.has("loopback"))
-            d.loopback = getFlag(o, "loopback");
+            d.loopback = json_get::flag<OutputDefError>(o, "loopback");
     }
     return d;
 }
@@ -223,7 +170,7 @@ std::string outputDefJson(const OutputDef& d)
     switch (d.transport) {
     case InputTransport::tcp_listen:
         w.add("bind", d.bind).add("port", static_cast<int64_t>(d.port));
-        appendOptionalText(w, "peer", d.peer);
+        w.addOptionalText("peer", d.peer);
         break;
     case InputTransport::tcp_connect:
         w.add("host", d.host).add("port", static_cast<int64_t>(d.port));
@@ -233,7 +180,7 @@ std::string outputDefJson(const OutputDef& d)
             w.add("host", d.host).add("port", static_cast<int64_t>(d.port));
         } else {
             w.add("port", static_cast<int64_t>(d.port)).add("group", d.group);
-            appendOptionalText(w, "interface", d.iface);
+            w.addOptionalText("interface", d.iface);
             w.add("ttl", static_cast<int64_t>(d.ttl)).add("loopback", d.loopback);
         }
         break;

@@ -23,6 +23,8 @@ enum class PingSource { device, decode };
 
 const char* inputTypeName(InputType type);            // "pingstation_cat021", ...
 const char* transportName(InputTransport transport);  // "tcp_listen", ...
+// The transport named by `s` (as transportName() spells it); nullopt for anything else.
+std::optional<InputTransport> parseTransport(const std::string& s);
 // Whether the input is a track input (counts for source_lost, spec §4.4):
 // every type but dump978, uat_raw and beast_raw.
 bool isTrackType(InputType type);

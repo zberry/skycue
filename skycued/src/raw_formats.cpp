@@ -1,5 +1,7 @@
 #include "raw_formats.hpp"
 
+#include "hex.hpp"
+
 #include <cstdio>
 
 namespace skycued {
@@ -178,17 +180,6 @@ namespace {
 
 bool isDigit(char c) { return c >= '0' && c <= '9'; }
 
-int hexValue(char c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
-
 std::string chomp(const std::string& line)
 {
     std::size_t end = line.size();
@@ -236,7 +227,7 @@ std::optional<CsvMessage> parseCsvMessage(const std::string& raw)
         return std::nullopt;
     m.hex.reserve(n);
     for (std::size_t k = comma + 1; k < line.size(); ++k) {
-        const int v = hexValue(line[k]);
+        const int v = hexDigitValue(line[k]);
         if (v < 0)
             return std::nullopt;
         m.hex.push_back("0123456789ABCDEF"[v]);
@@ -276,7 +267,7 @@ std::optional<AvrMessage> parseAvrLine(const std::string& raw)
     uint64_t ticks = 0;
     m.hex.reserve(n);
     for (std::size_t i = 1; i + 1 < line.size(); ++i) {
-        const int v = hexValue(line[i]);
+        const int v = hexDigitValue(line[i]);
         if (v < 0)
             return std::nullopt;
         if (timed && i <= 12)

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -103,6 +104,8 @@ public:
     JsonWriter& addFinite(const char* key, double value);
     template <class T> JsonWriter& addOpt(const char* key, const std::optional<T>& v)
     {
+        static_assert(std::is_integral_v<T>,
+                      "addOpt: integral optionals only; float and string have their own overloads");
         if (v)
             add(key, static_cast<int64_t>(*v));
         return *this;
@@ -131,5 +134,46 @@ std::string jsonArray(const std::vector<std::string>& values);
 // "329.67"). Locale-independent; non-finite values give "null".
 std::string formatRoundTrip(double value);
 std::string formatRoundTrip(float value);
+
+// Typed members of a JsonObject for definition parsers. Err is the exception type to throw
+// (constructible from std::string), so each caller keeps its own.
+namespace json_get {
+
+template <class Err> std::string text(const JsonObject& o, const char* key, const char* what)
+{
+    const auto value = o.getString(key);
+    if (!value)
+        throw Err(std::string(key) + " must be " + what);
+    return *value;
+}
+
+template <class Err> int64_t intIn(const JsonObject& o, const char* key, int64_t lo, int64_t hi)
+{
+    const auto value = o.getInt(key);
+    if (!value || *value < lo || *value > hi)
+        throw Err(std::string(key) + " must be an integer from " + std::to_string(lo) + " to " + std::to_string(hi));
+    return *value;
+}
+
+template <class Err> bool flag(const JsonObject& o, const char* key)
+{
+    const auto value = o.getBool(key);
+    if (!value)
+        throw Err(std::string(key) + " must be true or false");
+    return *value;
+}
+
+// Absent, null and "" all mean unset.
+template <class Err> std::string optionalText(const JsonObject& o, const char* key, const char* what)
+{
+    if (!o.has(key))
+        return "";
+    const auto value = o.getString(key);
+    if (value && *value == "null")
+        return "";
+    return text<Err>(o, key, what);
+}
+
+}  // namespace json_get
 
 }  // namespace skycued

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 using skycue::AddressType;
@@ -520,4 +521,30 @@ BOOST_AUTO_TEST_CASE(json_writer_add_opt_and_finite)
     BOOST_CHECK_EQUAL(JsonWriter().addFinite("d", 2.0).str(), R"({"d":2})");
     BOOST_CHECK_EQUAL(JsonWriter().addOptionalText("t", "").str(), R"({"t":null})");
     BOOST_CHECK_EQUAL(JsonWriter().addOptionalText("t", "a b").str(), R"({"t":"a b"})");
+}
+
+namespace {
+struct JsonGetError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(json_get_helpers_throw_the_given_type_with_the_exact_text)
+{
+    namespace jg = skycued::json_get;
+    const auto o = JsonObject::parse(R"({"n":5,"s":"x","b":true,"z":null})");
+    BOOST_REQUIRE(o);
+    BOOST_CHECK_EQUAL(jg::text<JsonGetError>(*o, "s", "a string"), "x");
+    BOOST_CHECK_EXCEPTION(jg::text<JsonGetError>(*o, "q", "a string"), JsonGetError,
+                          [](const JsonGetError& e) { return std::string(e.what()) == "q must be a string"; });
+    BOOST_CHECK_EQUAL(jg::intIn<JsonGetError>(*o, "n", 1, 9), 5);
+    BOOST_CHECK_EXCEPTION(jg::intIn<JsonGetError>(*o, "n", 6, 9), JsonGetError, [](const JsonGetError& e) {
+        return std::string(e.what()) == "n must be an integer from 6 to 9";
+    });
+    BOOST_CHECK(jg::flag<JsonGetError>(*o, "b"));
+    BOOST_CHECK_EXCEPTION(jg::flag<JsonGetError>(*o, "s"), JsonGetError,
+                          [](const JsonGetError& e) { return std::string(e.what()) == "s must be true or false"; });
+    BOOST_CHECK_EQUAL(jg::optionalText<JsonGetError>(*o, "q", "a string"), "");
+    BOOST_CHECK_EQUAL(jg::optionalText<JsonGetError>(*o, "z", "a string"), "");
+    BOOST_CHECK_EQUAL(jg::optionalText<JsonGetError>(*o, "s", "a string"), "x");
 }

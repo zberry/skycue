@@ -442,6 +442,47 @@ Track v2Track()
     return t;
 }
 
+std::vector<uint8_t> fromHex(const char* hex)
+{
+    auto nibble = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
+    std::vector<uint8_t> out;
+    for (const char* p = hex; p[0] != '\0' && p[1] != '\0'; p += 2)
+        out.push_back(static_cast<uint8_t>((nibble(p[0]) << 4) | nibble(p[1])));
+    return out;
+}
+
+// Computed independently from docs/protocol.md (not from this encoder): fullTrack() with the v2 fields and
+// alt_geom_uncertainty_ft = 600, so presence = 0x03FFFFFF (bits 0-25); 127 bytes.
+const char* const kV2AllHex =
+    "534b594302027700c3b2a100000107007b448e99a101000040ab2f17a80215d2ffffff03b888000050fbffff00c0e14300a0874300"
+    "00c0c40655414c3132330431323030064e3132333435080a58025b2a4f00c0874300208743fa00ae0114ae473f000048c19cffffff"
+    "a08c000000507d440000b4422b000040c006024133";
+// The same header and position with no optional field: presence 0, 36 bytes.
+const char* const kV2EmptyHex = "534b594302021c00c3b2a100000107007b448e99a101000040ab2f17a80215d200000000";
+
+Track allFieldsTrack()
+{
+    Track t = v2Track();
+    t.alt_geom_uncertainty_ft = static_cast<uint16_t>(600);
+    return t;
+}
+
+// fullTrack()'s id, source, position and the three flags; every optional field left empty.
+Track bareTrack()
+{
+    const Track f = fullTrack();
+    Track t;
+    t.id = f.id;
+    t.source = f.source;
+    t.position_time = f.position_time;
+    t.lat_deg = f.lat_deg;
+    t.lon_deg = f.lon_deg;
+    t.on_ground = f.on_ground;
+    t.keyframe = f.keyframe;
+    t.alt_is_geom = f.alt_is_geom;
+    return t;
+}
+
 void checkV2(const Track& a, const Track& b)
 {
     checkEqual(a, b);
@@ -580,4 +621,66 @@ BOOST_AUTO_TEST_CASE(v2_bytes_of_acas_ias_nav_modes_category)
     const std::vector<uint8_t> expect{0x00, 0x48, 0x40, 0x02, 0x5B, 0x2A, 0x4F, 0xFA, 0x00, 0x2B, 0x02, 0x41, 0x33};
     BOOST_REQUIRE(f.payload.size() == 24u + expect.size());
     BOOST_TEST(std::vector<uint8_t>(f.payload.begin() + 24, f.payload.end()) == expect, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(track_golden_bytes_v2_every_optional_field)
+{
+    const std::vector<uint8_t> got = encodeTrackUpdate(allFieldsTrack());
+    BOOST_TEST(got == fromHex(kV2AllHex), boost::test_tools::per_element());
+    Track out;
+    BOOST_REQUIRE(decodeTrackUpdate(decodeOne(fromHex(kV2AllHex)), out));
+    checkV2(allFieldsTrack(), out);
+    BOOST_TEST((out.alt_geom_uncertainty_ft == std::optional<uint16_t>(600)));
+}
+
+BOOST_AUTO_TEST_CASE(track_golden_bytes_v2_no_optional_field)
+{
+    const std::vector<uint8_t> got = encodeTrackUpdate(bareTrack());
+    BOOST_TEST(got == fromHex(kV2EmptyHex), boost::test_tools::per_element());
+    const Frame f = decodeOne(got);
+    BOOST_TEST(f.payload.size() == 28u);
+    Track out = allFieldsTrack(); // decode must clear every optional that is absent
+    BOOST_REQUIRE(decodeTrackUpdate(f, out));
+    checkV2(bareTrack(), out);
+    BOOST_TEST(!out.alt_geom_uncertainty_ft.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(track_golden_v1_cutoff_stops_at_bit_11)
+{
+    std::vector<uint8_t> b = encodeTrackUpdate(fullTrack());
+    b[4] = 1;
+    b.erase(b.begin() + kHeaderSize + 26, b.begin() + kHeaderSize + 28); // the u32 presence becomes a u16
+    b[kHeaderSize + 25] = static_cast<uint8_t>(b[kHeaderSize + 25] | 0x08); // presence bit 11, unknown to version 1
+    b.insert(b.end(), {0x5B, 0x2A, 0x4F});
+    const uint16_t len = static_cast<uint16_t>(b.size() - kHeaderSize);
+    b[6] = static_cast<uint8_t>(len & 0xFF);
+    b[7] = static_cast<uint8_t>(len >> 8);
+
+    const Frame f = decodeOne(b);
+    BOOST_TEST(f.version == 1);
+    Track out;
+    BOOST_REQUIRE(decodeTrackUpdate(f, out));
+    checkEqual(fullTrack(), out);
+    BOOST_TEST(!out.acas_ra.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(unknown_enum_bytes_pass_through_the_codec)
+{
+    Track t = fullTrack();
+    t.id.type = static_cast<AddressType>(200);
+    t.source = static_cast<Source>(201);
+    const Frame f = decodeOne(encodeTrackUpdate(t));
+    BOOST_REQUIRE(f.payload.size() > 5u);
+    BOOST_TEST(int(f.payload[4]) == 200);
+    BOOST_TEST(int(f.payload[5]) == 201);
+    Track out;
+    BOOST_REQUIRE(decodeTrackUpdate(f, out));
+    BOOST_TEST(int(out.id.type) == 200);
+    BOOST_TEST(int(out.source) == 201);
+
+    const TrackDrop d{TrackId{1, static_cast<AddressType>(77)}, static_cast<DropReason>(99)};
+    TrackDrop back{};
+    BOOST_REQUIRE(decodeTrackDrop(decodeOne(encodeTrackDrop(d)), back));
+    BOOST_TEST(int(back.id.type) == 77);
+    BOOST_TEST(int(back.reason) == 99);
 }

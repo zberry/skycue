@@ -209,7 +209,6 @@ void ModesDecoder::onDf11(const Frame& f, uint32_t residual, std::optional<uint8
 }
 
 // The three mode bits BDS 4,0 can state; autopilot, LNAV and TCAS (TC29 only) are kept.
-constexpr uint8_t kBds40ModeMask = kNavVnav | kNavAltHold | kNavApproach;
 
 void ModesDecoder::applyAcasRa(KeyState& ks, const AcasRa& ra) {
     AcasRaState st;
@@ -253,16 +252,23 @@ void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
     case CommbKind::bds40:
         ++counters_.commb_bds40;
         if (r.b40) {
-            // Intent fields mark the key dirty when the value changes (like identity).
-            if (r.b40->sel_alt_mcp_ft) setField(ks, ks.sel_alt, *r.b40->sel_alt_mcp_ft, now_, true);
-            if (r.b40->sel_alt_fms_ft) setField(ks, ks.sel_alt_fms, *r.b40->sel_alt_fms_ft, now_, true);
-            if (r.b40->qnh_mb) setField(ks, ks.qnh, *r.b40->qnh_mb, now_, true);
-            if (r.b40->modes_valid) {
-                uint8_t m = ks.nav_modes.fresh(now_, kFieldFresh).value_or(0) & ~kBds40ModeMask;
+            // Intent fields mark the key dirty when the value changes (like identity). A TC29
+            // value under 60 s old outranks BDS 4,0 (which readsb prefers, too); a later TC29
+            // replaces a 4,0 value at once.
+            const auto setIntent = [&](auto& field, bool& from_commb, const auto& v) {
+                if (field.fresh(now_, kFieldFresh) && !from_commb) return;
+                setField(ks, field, v, now_, true);
+                from_commb = true;
+            };
+            if (r.b40->sel_alt_mcp_ft) setIntent(ks.sel_alt, ks.sel_alt_commb, *r.b40->sel_alt_mcp_ft);
+            if (r.b40->sel_alt_fms_ft) setIntent(ks.sel_alt_fms, ks.sel_alt_fms_commb, *r.b40->sel_alt_fms_ft);
+            if (r.b40->qnh_mb) setIntent(ks.qnh, ks.qnh_commb, *r.b40->qnh_mb);
+            if (r.b40->modes_valid) {  // replaces the whole set, no merging (as readsb)
+                uint8_t m = 0;
                 if (r.b40->vnav) m |= kNavVnav;
                 if (r.b40->althold) m |= kNavAltHold;
                 if (r.b40->approach) m |= kNavApproach;
-                setField(ks, ks.nav_modes, m, now_, true);
+                setIntent(ks.nav_modes, ks.nav_modes_commb, m);
             }
         }
         break;
@@ -456,9 +462,9 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
         }
     } else if (tc == 29) {
         if (const auto t = decodeTargetState(f)) {
-            if (t->sel_alt_ft) setField(ks, ks.sel_alt, *t->sel_alt_ft, now_, true);
-            if (t->sel_alt_fms_ft) setField(ks, ks.sel_alt_fms, *t->sel_alt_fms_ft, now_, true);
-            if (t->qnh_mb) setField(ks, ks.qnh, *t->qnh_mb, now_, true);
+            if (t->sel_alt_ft) { setField(ks, ks.sel_alt, *t->sel_alt_ft, now_, true); ks.sel_alt_commb = false; }
+            if (t->sel_alt_fms_ft) { setField(ks, ks.sel_alt_fms, *t->sel_alt_fms_ft, now_, true); ks.sel_alt_fms_commb = false; }
+            if (t->qnh_mb) { setField(ks, ks.qnh, *t->qnh_mb, now_, true); ks.qnh_commb = false; }
             if (t->sel_heading_deg) setField(ks, ks.sel_heading, *t->sel_heading_deg, now_, true);
             // NACp stays TC31-only: taking the TC29 value drops nac_p agreement with readsb below its floor.
             if (t->modes_valid) {  // the flags mean nothing while the status bit is 0
@@ -470,6 +476,7 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
                 if (t->lnav) m |= kNavLnav;
                 if (t->tcas) m |= kNavTcas;
                 setField(ks, ks.nav_modes, m, now_, true);
+                ks.nav_modes_commb = false;
             }
             ++counters_.decoded;
         } else {

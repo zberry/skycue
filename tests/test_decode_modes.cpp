@@ -925,7 +925,8 @@ BOOST_AUTO_TEST_CASE(intent_change_emits_without_position) {
     BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
     BOOST_CHECK_EQUAL(*r.obs[0].sel_alt_ft, 36992);
     // A BDS 4,0 change emits on its own as well.
-    r.feed(df20(kAddr, ac13Alt(35000), bds40Mb().v), 5.0);  // MCP 36000: changes 36992 -> 36000
+    confirmedWithAlt(r, 35000, 69.0);  // keeps the key confirmed and the altitude fresh
+    r.feed(df20(kAddr, ac13Alt(35000), bds40Mb().v), 70.0);  // TC29 (t=3) is stale: MCP 36000 changes 36992 -> 36000
     BOOST_REQUIRE_EQUAL(r.obs.size(), 2u);
     BOOST_CHECK_EQUAL(*r.obs[1].sel_alt_ft, 36000);
 }
@@ -1023,25 +1024,43 @@ BOOST_AUTO_TEST_CASE(tc29_sets_selected_altitude_and_modes) {
     BOOST_CHECK(q.obs.back().sel_alt_ft);
 }
 
-BOOST_AUTO_TEST_CASE(nav_modes_merge_rules) {
-    // 4,0 keeps the bits it cannot state (autopilot, lnav, tcas) from a TC29.
+BOOST_AUTO_TEST_CASE(nav_modes_replace_rules) {
+    // The whole set is replaced by the last message with valid mode bits; no merging.
+    // A TC29 under 60 s old outranks BDS 4,0 for the intent fields.
     Rig r;
     ready(r);
     r.feed(df17(kAddr, targetState(tsOf(true, true, false, true, true))), 1.0);
-    r.feed(df20(kAddr, ac13Alt(35025), bds40Mb().v), 2.0);  // vnav + althold
+    r.feed(df20(kAddr, ac13Alt(35025), bds40Mb().v), 2.0);  // vnav + althold, ignored: TC29 is fresh
     BOOST_REQUIRE(!r.obs.empty());
-    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavAutopilot | kNavLnav | kNavTcas | kNavVnav | kNavAltHold);
+    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavAutopilot | kNavLnav | kNavTcas);
+    BOOST_CHECK_EQUAL(*r.obs.back().sel_alt_ft, 36000);
+    BOOST_CHECK_EQUAL(r.c().commb_bds40, 1u);
     // A TC29 with the status set and a mode off replaces the whole set.
     r.obs.clear();
     r.feed(df17(kAddr, targetState(tsOf(true, true, false, false, false))), 4.0);
-    BOOST_REQUIRE(!r.obs.empty());  // nav_modes changed: emitted on its own
+    BOOST_REQUIRE(!r.obs.empty());
     BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavAutopilot);
+    // Once the TC29 is 60 s old, a BDS 4,0 replaces the whole set (autopilot is gone, not merged).
+    r.obs.clear();
+    confirmedWithAlt(r, 35050, 69.0);
+    r.obs.clear();
+    r.feed(df20(kAddr, ac13Alt(35050), bds40Mb().v), 71.0);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavVnav | kNavAltHold);
     // A 4,0 whose mode status bit is clear leaves nav_modes untouched.
     Mb m = bds40Mb();
     m.at(48, 1, 0).at(49, 1, 0).at(50, 1, 0);
     r.obs.clear();
-    r.feed(df20(kAddr, ac13Alt(35050), m.v), 6.0);
-    BOOST_CHECK_EQUAL(r.c().commb_bds40, 2u);
+    r.feed(df20(kAddr, ac13Alt(35050), m.v), 73.0);
+    BOOST_CHECK_EQUAL(r.c().commb_bds40, 3u);
+    r.feed(df4(kAddr, ac13Alt(35200)), 74.5);  // an altitude change emits an observation
     BOOST_REQUIRE(!r.obs.empty());
-    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavAutopilot);
+    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavVnav | kNavAltHold);
+    // A later TC29 replaces a 4,0 value at once.
+    r.obs.clear();
+    r.feed(df17(kAddr, targetState(tsOf(true, false, false, true, false, 36992))), 75.0);
+    r.feed(df4(kAddr, ac13Alt(35100)), 76.0);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavLnav);
+    BOOST_CHECK_EQUAL(*r.obs.back().sel_alt_ft, 36992);
 }

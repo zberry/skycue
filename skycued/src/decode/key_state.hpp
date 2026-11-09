@@ -108,6 +108,8 @@ struct KeyState {
     // Track, ground speed and the two vertical rates are set by ADS-B velocity messages and by
     // Comm-B; the flag says the stored value came from Comm-B, which never replaces a fresh ADS-B one.
     bool track_commb = false, gs_commb = false, baro_rate_commb = false, geom_rate_commb = false;
+    // Intent fields whose current value came from BDS 4,0 (a TC29 value under 60 s old outranks it).
+    bool sel_alt_commb = false, sel_alt_fms_commb = false, qnh_commb = false, nav_modes_commb = false;
 
     // TC31 (kept for the key's life, applied to later position messages).
     struct Tc31 {

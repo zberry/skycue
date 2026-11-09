@@ -268,7 +268,7 @@ BOOST_AUTO_TEST_CASE(csv_lines)
     for (const char* bad : {"", "# c", "timestamp,hex", "1.5,", ",5F406A936F50F0", "1.5,5F406A936F50F",
                             "1.5,5F406A936F50FG", "1.5;5F406A936F50F0", "-1.5,5F406A936F50F0", "1..5,5F406A936F50F0",
                             "1.5,5F406A936F50F0,x"})
-        BOOST_TEST(!parseCsvMessage(bad).has_value(), "accepted: " << bad);
+        BOOST_TEST_CONTEXT("accepted: " << bad) { BOOST_TEST(!parseCsvMessage(bad).has_value()); }
 }
 
 // Found by fuzz_raw_formats (mode 2): parseCsvMessage multiplied every
@@ -283,7 +283,7 @@ BOOST_AUTO_TEST_CASE(fuzz_raw_formats_csv_seconds_overflow)
     BOOST_TEST(!parseCsvMessage(payload).has_value());
     BOOST_TEST(!parseCsvMessage("178396343000000005369,5F406A936F50F0").has_value());
     for (const char* bad : {"9999999999.5,5F406A936F50F0", "9223372036,5F406A936F50F0"})
-        BOOST_TEST(!parseCsvMessage(bad).has_value(), "accepted: " << bad);
+        BOOST_TEST_CONTEXT("accepted: " << bad) { BOOST_TEST(!parseCsvMessage(bad).has_value()); }
     // The largest accepted epoch is still exact.
     const auto m = parseCsvMessage("9223372035.999999999,5F406A936F50F0");
     BOOST_REQUIRE(m.has_value());
@@ -326,7 +326,7 @@ BOOST_AUTO_TEST_CASE(avr_input_lines)
     BOOST_TEST(m->hex == "8D4840D6202CC371C32CE0576098");
     BOOST_TEST(parseAvrLine(avrLine(1783963099005369000LL, "5D486258DD7987"))->hex == "5D486258DD7987");
     for (const char* bad : {"", "@12;", "*ABC;", "@000000B71B005F406A936F50F0", "#x", "*5F406A936F50FZ;"})
-        BOOST_TEST(!parseAvrLine(bad).has_value(), "accepted: " << bad);
+        BOOST_TEST_CONTEXT("accepted: " << bad) { BOOST_TEST(!parseAvrLine(bad).has_value()); }
     // Mode A/C (4 digits) is not a Mode S frame.
     BOOST_TEST(!parseAvrLine("@000000B71B001234;").has_value());
     BOOST_TEST(!parseAvrLine("*1234;").has_value());
@@ -343,7 +343,7 @@ BOOST_AUTO_TEST_CASE(uat_lines)
     BOOST_TEST(*u->epoch_ms == 1793536496789LL);
     BOOST_TEST(u->text == "+3514c952;rs=3;");
     for (const char* bad : {"", "\n", "# comment", "123 x;", "123", "123 ", "abc -00;", " -00;", "12a -00;"})
-        BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+        BOOST_TEST_CONTEXT("accepted: " << bad) { BOOST_TEST(!parseUatLine(bad).has_value()); }
     BOOST_TEST(!parseUatLine("1793536496789 +3514c952;")->offset_ns.has_value());
 }
 
@@ -355,11 +355,11 @@ BOOST_AUTO_TEST_CASE(stratux_uat_lines)
     BOOST_TEST(*u->offset_ns == 1441566520123456789LL);
     BOOST_TEST(u->text == "-00a66ef135445d525a0c0519119021204800;rs=2;");
     for (const char* bad : {"123,", "123,x;", ",+00;", "12a,+00;"})
-        BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+        BOOST_TEST_CONTEXT("accepted: " << bad) { BOOST_TEST(!parseUatLine(bad).has_value()); }
     // The stratux log's session header, and an <ns> past int64_t.
     for (const char* bad : {"START,Wed Sep 2 04:23:37 +0000 UTC 2015", "9223372036854775808,+00;",
                             "12345678901234567890,+00;"})
-        BOOST_TEST(!parseUatLine(bad).has_value(), "accepted: " << bad);
+        BOOST_TEST_CONTEXT("accepted: " << bad) { BOOST_TEST(!parseUatLine(bad).has_value()); }
     u = parseUatLine("9223372036854775807,+00;");
     BOOST_REQUIRE(u);
     BOOST_TEST(*u->offset_ns == INT64_MAX);

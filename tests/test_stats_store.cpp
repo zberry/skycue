@@ -1412,7 +1412,7 @@ BOOST_AUTO_TEST_CASE(not_regular_file_left_alone)
         const std::string before = st.toJson();
         BOOST_TEST((loadStatsFile(path, st) == StatsLoad::not_regular), path);
         BOOST_TEST(fileExists(path), path);
-        BOOST_TEST(!fileExists(path + ".bad"), path);
+        BOOST_TEST_CONTEXT(path) { BOOST_TEST(!fileExists(path + ".bad")); }
         BOOST_TEST(st.toJson() == before, path);
     }
 }

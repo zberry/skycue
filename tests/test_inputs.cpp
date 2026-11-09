@@ -977,7 +977,7 @@ BOOST_AUTO_TEST_CASE(bad_name_in_file_repaired_at_load)
     }
     BOOST_TEST(contains(log, "ERROR"), log);
     BOOST_TEST(contains(log, "input 'b': name repaired"), log);
-    BOOST_TEST(!contains(log, "input 'a'"), log);
+    BOOST_TEST_CONTEXT(log) { BOOST_TEST(!contains(log, "input 'a'")); }
 }
 
 BOOST_AUTO_TEST_CASE(capture_without_record_dir_in_file_keeps_inputs)
@@ -1720,7 +1720,7 @@ BOOST_AUTO_TEST_CASE(builtin_cue_toggle_round_trip_rewrites_v1)
     file = skycued::parseInputsFile(text);
     BOOST_TEST(file.version == 1);
     BOOST_TEST(file.builtin_enabled.count("cue-tcp") == 0u);
-    BOOST_TEST(!contains(text, "cue-tcp"), text);
+    BOOST_TEST_CONTEXT(text) { BOOST_TEST(!contains(text, "cue-tcp")); }
 }
 
 // The file's "builtin" object names the cue outputs too; it must not touch
@@ -1857,7 +1857,7 @@ BOOST_AUTO_TEST_CASE(skycued_with_readsb_input_warns)
         Mgr m(t2, cfg2, [&](InputManager& im) { im.addBuiltin(fakeReadsb(hub)); });
         log2 = cap.text();
     }
-    BOOST_TEST(!contains(log2, "inputs.decoder"), log2);
+    BOOST_TEST_CONTEXT(log2) { BOOST_TEST(!contains(log2, "inputs.decoder")); }
 }
 
 BOOST_AUTO_TEST_CASE(json_output_idle_under_skycued_warns)

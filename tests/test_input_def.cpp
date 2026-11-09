@@ -424,20 +424,20 @@ BOOST_AUTO_TEST_CASE(json_round_trip_each_user_type)
 
     for (const InputDef& d : defs) {
         const std::string json = inputDefJson(d);
-        BOOST_TEST(!contains(json, "builtin"), json);
+        BOOST_TEST_CONTEXT(json) { BOOST_TEST(!contains(json, "builtin")); }
         const InputDef back = parseInputDef(obj(json));
         BOOST_TEST((back == d), json);
     }
     // Only the keys that apply, defaults included.
     const std::string rb = inputDefJson(defs[0]);
-    BOOST_TEST(!contains(rb, "transport"), rb);
-    BOOST_TEST(!contains(rb, "edition"), rb);
+    BOOST_TEST_CONTEXT(rb) { BOOST_TEST(!contains(rb, "transport")); }
+    BOOST_TEST_CONTEXT(rb) { BOOST_TEST(!contains(rb, "edition")); }
     BOOST_TEST(contains(rb, "\"enabled\":false"), rb);
     const std::string udp = inputDefJson(def(kCatUdp));
     BOOST_TEST(contains(udp, "\"edition\":\"2.5\""), udp);
     BOOST_TEST(contains(udp, "\"bind\":\"0.0.0.0\""), udp);
     BOOST_TEST(contains(udp, "\"status_interval_s\":30"), udp);
-    BOOST_TEST(!contains(udp, "\"host\""), udp);
+    BOOST_TEST_CONTEXT(udp) { BOOST_TEST(!contains(udp, "\"host\"")); }
 }
 
 BOOST_AUTO_TEST_CASE(builtin_and_state_keys_rejected)
@@ -945,7 +945,7 @@ BOOST_AUTO_TEST_CASE(v1_file_loads_unchanged)
         const std::string back = inputsFileJson(f);
         BOOST_TEST(contains(back, "\"version\": 1"), back);
         for (const char* key : {"outputs", "group", "interface", "format"})
-            BOOST_TEST(!contains(back, std::string("\"") + key + "\""), key << " in " << back);
+            BOOST_TEST_CONTEXT(key << " in " << back) { BOOST_TEST(!contains(back, std::string("\"") + key + "\"")); }
         const InputsFile again = parseInputsFile(back);
         BOOST_TEST((again.inputs == f.inputs));
         BOOST_TEST(inputsFileJson(again) == back);
@@ -1034,7 +1034,7 @@ BOOST_AUTO_TEST_CASE(v1_shape_written_when_no_v2_content)
     BOOST_TEST(f.version == 2);
     const std::string text = inputsFileJson(f);
     BOOST_TEST(contains(text, "\"version\": 1"), text);
-    BOOST_TEST(!contains(text, "outputs"), text);
+    BOOST_TEST_CONTEXT(text) { BOOST_TEST(!contains(text, "outputs")); }
     BOOST_TEST(text == inputsFileJson(parseInputsFile(text)));
     // Removing the last v2 content gives v1 again.
     InputsFile g = parseInputsFile(R"({"version":2,"outputs":[{"id":"o","kind":"beast","transport":"udp","port":1,"host":"h"}]})");

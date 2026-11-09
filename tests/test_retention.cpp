@@ -70,7 +70,7 @@ BOOST_AUTO_TEST_CASE(file_name_rule)
           "received-20261101-120000.jsonl.bak", "received-20261101-120000.json", "other-20261101-120000.jsonl",
           "Received-20261101-120000.jsonl", "received-20261101-120000-.jsonl", "received-20261101-120000-x.jsonl",
           "xreceived-20261101-120000.jsonl", "received-20261101-120000.csv.gz", "skycue.runtime.json", ""})
-        BOOST_TEST(!isRecordingFileName(bad), bad);
+        BOOST_TEST_CONTEXT(bad) { BOOST_TEST(!isRecordingFileName(bad)); }
 }
 
 BOOST_AUTO_TEST_CASE(zero_cap_is_a_no_op)
@@ -198,7 +198,7 @@ BOOST_AUTO_TEST_CASE(capture_and_raw_names_recognised)
           "raw-ps_n-20261102-101500.csv", "raw-0123456789abcdefghijklmnopqrstuvw-20261102-101500.csv",
           "capture-ps-20261102-101500-.jsonl", "capture-ps-2026110-101500.jsonl", "rawx-ps-20261102-101500.csv",
           "capture-ps.jsonl", "beast-ps-20261102-101500.bin"})
-        BOOST_TEST(!isRecordingFileName(bad), bad);
+        BOOST_TEST_CONTEXT(bad) { BOOST_TEST(!isRecordingFileName(bad)); }
 }
 
 // The newest file of each input's stream is protected on its own: raw-a's

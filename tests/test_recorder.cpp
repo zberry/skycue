@@ -192,7 +192,7 @@ BOOST_AUTO_TEST_CASE(fuzz_recording_iso8601_out_of_range)
     using skycued::parseIso8601Ms;
     for (const char* bad : {"1013-11-02T10:15:00.123Z", "0000-01-01T00:00:00Z", "9999-12-31T23:59:59.999Z",
                             "2262-04-11T23:47:16.855Z", "1677-09-21T00:12:43.145Z"})
-        BOOST_TEST(!parseIso8601Ms(bad).has_value(), "accepted: " << bad);
+        BOOST_TEST_CONTEXT("accepted: " << bad) { BOOST_TEST(!parseIso8601Ms(bad).has_value()); }
     // The ends of the range still parse, exactly.
     const auto last = parseIso8601Ms("2262-04-11T23:47:16.854Z");
     BOOST_REQUIRE(last);
@@ -345,9 +345,9 @@ BOOST_AUTO_TEST_CASE(csv_empty_for_absent_optionals)
     for (std::size_t i = 0; i < cols.size(); ++i) {
         const std::string& c = cols[i];
         if (c == "time" || c == "type" || c == "hex" || c == "addr_type" || c == "source" || c == "on_ground" ||
-            c == "callsign")
-            BOOST_TEST(!row[i].empty(), c);
-        else
+            c == "callsign") {
+            BOOST_TEST_CONTEXT(c) { BOOST_TEST(!row[i].empty()); }
+        } else
             BOOST_TEST(row[i].empty(), c);
     }
     BOOST_TEST(row[column(kReceivedHeader, "callsign")] == "A,\"B\"");

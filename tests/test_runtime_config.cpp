@@ -220,7 +220,7 @@ BOOST_AUTO_TEST_CASE(overlay_missing_is_a_fresh_start)
     f.start();
     err.restore();
     BOOST_TEST(f.filters().max_range_nm == 150.0);
-    BOOST_TEST(!has(err.text(), "ERROR"), err.text());
+    BOOST_TEST_CONTEXT(err.text()) { BOOST_TEST(!has(err.text(), "ERROR")); }
     BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
     BOOST_TEST(!fileExists(f.path("skycue.runtime.json.rejected")));
 }
@@ -962,8 +962,8 @@ BOOST_AUTO_TEST_CASE(conf_edit_masked_by_overrides_logs_info)
     const std::string text = err.text();
     BOOST_TEST(countOf(text, "INFO  runtime: filters.max_range_nm edited in skycue.toml but skycue.overrides.toml sets it "
                              "(90); that value stays") == 1u, text);
-    BOOST_TEST(!has(text, "filters.min_elevation_deg edited"), text);
-    BOOST_TEST(!has(text, "WARN"), text);
+    BOOST_TEST_CONTEXT(text) { BOOST_TEST(!has(text, "filters.min_elevation_deg edited")); }
+    BOOST_TEST_CONTEXT(text) { BOOST_TEST(!has(text, "WARN")); }
 }
 
 BOOST_AUTO_TEST_CASE(overrides_edit_overridden_by_overlay_names_the_overrides_file)
@@ -983,7 +983,7 @@ BOOST_AUTO_TEST_CASE(overrides_edit_overridden_by_overlay_names_the_overrides_fi
     const std::string text = err.text();
     BOOST_TEST(countOf(text, "WARN  runtime: filters.max_range_nm edited in skycue.overrides.toml but overridden by "
                              "skycue.runtime.json (use the UI or \"save as baseline\")") == 1u, text);
-    BOOST_TEST(!has(text, "edited in skycue.toml"), text);
+    BOOST_TEST_CONTEXT(text) { BOOST_TEST(!has(text, "edited in skycue.toml")); }
     BOOST_TEST(f.filters().max_range_nm == 40.0);
 }
 
@@ -1074,7 +1074,7 @@ BOOST_AUTO_TEST_CASE(promote_skips_pinned_keys)
     BOOST_TEST(skipped[0].first == "filters.max_range_nm");
     BOOST_TEST(skipped[0].second == "set");
     const std::string overrides = readAll(f.path("skycue.overrides.toml"));
-    BOOST_TEST(!has(overrides, "max_range_nm"), overrides);
+    BOOST_TEST_CONTEXT(overrides) { BOOST_TEST(!has(overrides, "max_range_nm")); }
     BOOST_TEST(has(overrides, "min_elevation_deg = 6.0"), overrides);
     BOOST_TEST(f.overlay().empty());
     BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
@@ -1112,7 +1112,7 @@ BOOST_AUTO_TEST_CASE(watcher_warns_pinned_by_set)
     writeFile(f.conf, headConf({{"filters.max_range_nm", "99"}, {"filters.min_elevation_deg", "5"}, {"web.port", "8081"}}));
     BOOST_TEST(f.waitFor([&] { return has(err2.text(), "requires restart"); }, 2600ms));
     err2.restore();
-    BOOST_TEST(!has(err2.text(), "pinned by"), err2.text());
+    BOOST_TEST_CONTEXT(err2.text()) { BOOST_TEST(!has(err2.text(), "pinned by")); }
 }
 
 BOOST_AUTO_TEST_CASE(overlay_left_next_to_the_config_warns_when_state_dir_is_set)
@@ -1139,7 +1139,7 @@ BOOST_AUTO_TEST_CASE(overlay_left_next_to_the_config_warns_when_state_dir_is_set
     StderrCapture err2(g.path("stderr.txt"));
     g.start();
     err2.restore();
-    BOOST_TEST(!has(err2.text(), "skycue.runtime.json"), err2.text());
+    BOOST_TEST_CONTEXT(err2.text()) { BOOST_TEST(!has(err2.text(), "skycue.runtime.json")); }
 }
 
 BOOST_AUTO_TEST_CASE(apply_config_path_keys_take_only_relative_names)

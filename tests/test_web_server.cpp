@@ -630,7 +630,7 @@ BOOST_AUTO_TEST_CASE(path_traversal_rejected)
                                "/vendor/..%2f..%2fsecret.txt", "/a\\..\\secret.txt"}) {
         const Reply r = get(f.port, target);
         BOOST_TEST(r.status == 400u, target);
-        BOOST_TEST(!has(r.body, "SECRET"), target);
+        BOOST_TEST_CONTEXT(target) { BOOST_TEST(!has(r.body, "SECRET")); }
     }
     BOOST_TEST(get(f.port, "/index.html").status == 200u);  // still serving
     BOOST_TEST(get(f.port, "/%69ndex.html").body == kIndex);  // percent-decoding of a harmless byte
@@ -1234,7 +1234,7 @@ BOOST_AUTO_TEST_CASE(bad_json_400)
         const Reply r = request(f.port, http::verb::put, "/api/filters", body);
         BOOST_TEST(r.status == 400u, body);
         BOOST_TEST(r.content_type == "application/json", body);
-        BOOST_TEST(!parseJson(r.body).get<std::string>("error").empty(), body);
+        BOOST_TEST_CONTEXT(body) { BOOST_TEST(!parseJson(r.body).get<std::string>("error").empty()); }
     }
     BOOST_TEST(get(f.port, "/api/filters").body == "{\"max_range_nm\":150,\"min_elevation_deg\":0,\"overlay_active\":false}");
     BOOST_TEST(!fileExists(f.tmp.path + "/skycue.runtime.json"));

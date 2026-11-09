@@ -654,7 +654,7 @@ BOOST_AUTO_TEST_CASE(inputs_routes_unchanged_for_v1_clients)
         BOOST_TEST(with[i] == without[i]);
     BOOST_TEST(file_with == file_without);
     BOOST_TEST(has(file_with, "\"version\": 1"), file_with);
-    BOOST_TEST(!has(file_with, "outputs"), file_with);
-    BOOST_TEST(!has(file_with, "cue-"), file_with);
+    BOOST_TEST_CONTEXT(file_with) { BOOST_TEST(!has(file_with, "outputs")); }
+    BOOST_TEST_CONTEXT(file_with) { BOOST_TEST(!has(file_with, "cue-")); }
     BOOST_TEST(has(with.front(), "{\"inputs\":[{\"id\":\"readsb\",\"name\":\"\",\"type\":\"readsb\",\"enabled\":true"), with.front());
 }

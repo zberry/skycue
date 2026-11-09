@@ -466,7 +466,7 @@ BOOST_AUTO_TEST_CASE(schema_lists_every_key_with_type_and_class)
                "let the web UI restart skycued; only under a supervisor that starts it again");
     BOOST_TEST(keys.by_key.at("web.trail_seconds").getString("default").value_or("") == "120");
     for (const auto& [name, entry] : keys.by_key) {
-        BOOST_TEST(!entry.getString("doc").value_or("").empty(), name);
+        BOOST_TEST_CONTEXT(name) { BOOST_TEST(!entry.getString("doc").value_or("").empty()); }
         BOOST_TEST(entry.has("default"), name);
     }
     BOOST_TEST(request(f.port, http::verb::put, "/api/config/schema", "{}").status == 405u);

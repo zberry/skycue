@@ -993,7 +993,7 @@ BOOST_AUTO_TEST_CASE(inputs_path_id_invalid_400)
         for (const auto& rt : routes) {
             const auto r = a.call(rt.first, rt.second, R"({"enabled":true})");
             BOOST_TEST(r.status == 400u, rt.first << " " << bad.substr(0, 10));
-            BOOST_TEST(!has(r.body, bad), r.body);
+            BOOST_TEST_CONTEXT(r.body) { BOOST_TEST(!has(r.body, bad)); }
             BOOST_TEST(r.body.size() < 100u);
         }
     }
@@ -1032,7 +1032,7 @@ BOOST_AUTO_TEST_CASE(inputs_error_messages_clipped)
     const std::string longer(5000, 'b');
     auto r = a.call("PUT", "/api/inputs/ps-a", psJson(longer, freeUdpPort()));
     BOOST_TEST(r.status == 400u);
-    BOOST_TEST(!has(r.body, longer), r.body.size());
+    BOOST_TEST_CONTEXT(r.body.size()) { BOOST_TEST(!has(r.body, longer)); }
     BOOST_TEST(has(r.body, std::string(64, 'b') + "..."), r.body);
     BOOST_TEST(r.body.size() < 200u);
     r = a.call("POST", "/api/inputs", psJson("ps-b", freeUdpPort(), ",\"" + longer + "\":1"));

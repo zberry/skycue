@@ -264,7 +264,7 @@ BOOST_AUTO_TEST_CASE(capture_line_rejects_bad_hex_and_missing_keys)
              "",
     };
     for (const auto& bad : bads)
-        BOOST_TEST(!skycued::parseCaptureLine(bad), bad);
+        BOOST_TEST_CONTEXT(bad) { BOOST_TEST(!skycued::parseCaptureLine(bad)); }
 }
 
 // Found by fuzz_recording (mode 1): a time outside system_clock's int64

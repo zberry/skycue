@@ -294,7 +294,7 @@ BOOST_AUTO_TEST_CASE(truncated_payload_rejected)
     for (size_t n = 0; n < full.payload.size(); ++n) {
         Frame f{full.type, std::vector<uint8_t>(full.payload.begin(), full.payload.begin() + static_cast<long>(n))};
         Track out;
-        BOOST_TEST(!decodeTrackUpdate(f, out), "prefix of " << n << " bytes accepted");
+        BOOST_TEST_CONTEXT("prefix of " << n << " bytes accepted") { BOOST_TEST(!decodeTrackUpdate(f, out)); }
     }
     Frame hf = decodeOne(encodeHello(Hello{1000, 2000, "skycued"}));
     hf.payload.pop_back();

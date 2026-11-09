@@ -438,7 +438,7 @@ BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes, *skycue_test::needs_fixtu
                                       [](const skycued::TrackObservation& o) { return o.geom_minus_baro_ft.has_value(); });
         if (fr->payload_type() == 0) {
             ++type0;
-            BOOST_TEST(!both, hexOf(l));
+            BOOST_TEST_CONTEXT(hexOf(l)) { BOOST_TEST(!both); }
         } else if (fr->payload_type() == 1 && fr->qualifier() != uat::AddressQualifier::tisb_trackfile) {
             ++type1;
             with_both += both ? 1 : 0;

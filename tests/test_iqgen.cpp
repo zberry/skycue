@@ -248,7 +248,7 @@ BOOST_AUTO_TEST_CASE(rs_corrupted_codeword_has_nonzero_syndrome, *skycue_test::n
                 auto bad = cw;
                 bad[i] = static_cast<uint8_t>(bad[i] ^ e);
                 const auto syn = rs.syndromes(bad.data(), bad.size());
-                BOOST_TEST(!allZero(syn), "kind " << static_cast<int>(kind) << " byte " << i);
+                BOOST_TEST_CONTEXT("kind " << static_cast<int>(kind) << " byte " << i) { BOOST_TEST(!allZero(syn)); }
             }
         }
     }

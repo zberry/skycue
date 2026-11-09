@@ -49,7 +49,7 @@ Shape polyline(std::vector<LatLon> points) { return shape(Shape::polyline, std::
 
 BOOST_AUTO_TEST_CASE(airport_style_ids) {
     for (const char* ok : {"KBOS", "K2G4", "CYXU", "PANC", "PHOG"}) BOOST_TEST(airportStyleId(ok), ok);
-    for (const char* no : {"", "BOS", "ZAU", "KBOSX", "PPGX", "EGLL", "kbos", "K-OS"}) BOOST_TEST(!airportStyleId(no), no);
+    for (const char* no : {"", "BOS", "ZAU", "KBOSX", "PPGX", "EGLL", "kbos", "K-OS"}) BOOST_TEST_CONTEXT(no) { BOOST_TEST(!airportStyleId(no)); }
 }
 BOOST_AUTO_TEST_CASE(learns_point_and_reports_new_once) {
     LocationIndex s;

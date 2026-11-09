@@ -133,7 +133,7 @@ BOOST_AUTO_TEST_CASE(fuzz_pingstation_device_time_out_of_range)
 {
     for (const char* bad : {"4044-11-02T11:59:58Z", "9999-12-31T23:59:59.999999999Z", "0000-01-01T00:00:00Z",
                             "1677-12-31T23:59:59Z", "2262-01-01T00:00:00Z", "2262-04-11T23:47:16.854775807Z"})
-        BOOST_TEST(!parseDeviceTime(bad), "accepted: " << bad);
+        BOOST_TEST_CONTEXT("accepted: " << bad) { BOOST_TEST(!parseDeviceTime(bad)); }
     BOOST_TEST(epochNs(parseDeviceTime("2261-12-31T23:59:59.999999999Z").value()) ==
                epochNs(utc(2261, 12, 31, 23, 59, 59, 999999999)));
     BOOST_TEST(parseDeviceTime("1678-01-01T00:00:00Z").has_value());
@@ -587,7 +587,7 @@ BOOST_AUTO_TEST_CASE(squawk_raw_value_dropped)
     for (const char* raw : {"8000", "1288", "-1", "12345", "1305.0", "\"12a\""}) {
         const auto r = parse(std::string(R"({"icaoAddress":"ABCDEF","squawk":)") + raw + "}");
         BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
-        BOOST_TEST(!r.observations[0].squawk, raw);
+        BOOST_TEST_CONTEXT(raw) { BOOST_TEST(!r.observations[0].squawk); }
         BOOST_TEST(r.bad_squawk, raw);
     }
     const auto ok = parse(R"({"icaoAddress":"ABCDEF","squawk":7700})");
@@ -631,7 +631,7 @@ BOOST_AUTO_TEST_CASE(oversize_and_not_json_rejected)
         BOOST_CHECK_NO_THROW(bad = parse(text));
         BOOST_TEST(bad.rejected == 1u, text);
         BOOST_TEST(bad.observations.empty(), text);
-        BOOST_TEST(!bad.status, text);
+        BOOST_TEST_CONTEXT(text) { BOOST_TEST(!bad.status); }
     }
 }
 
@@ -879,7 +879,7 @@ BOOST_AUTO_TEST_CASE(cat021_category_table)
     for (auto [v, s] : table)
         BOOST_TEST(category020(static_cast<uint8_t>(v)).value_or("") == s, "ecat " << v);
     for (int v : {0, 7, 8, 9, 17, 18, 19, 25, 255})
-        BOOST_TEST(!category020(static_cast<uint8_t>(v)), "ecat " << v);
+        BOOST_TEST_CONTEXT("ecat " << v) { BOOST_TEST(!category020(static_cast<uint8_t>(v))); }
     Cat021Record r = base();
     r.ecat = 25;
     BOOST_TEST(!mapOk(r).category);
@@ -1318,8 +1318,8 @@ BOOST_AUTO_TEST_CASE(cat021_encode_round_trip_through_map)
         TrackObservation in = fullObservation();
         in.category = cat;
         const Cat021Record r = cat021FromObservation(in, 0, 0, kEncStamp);
-        BOOST_TEST(!r.ecat, cat);
-        BOOST_TEST(!viaCat021(in).category, cat);
+        BOOST_TEST_CONTEXT(cat) { BOOST_TEST(!r.ecat); }
+        BOOST_TEST_CONTEXT(cat) { BOOST_TEST(!viaCat021(in).category); }
     }
 }
 

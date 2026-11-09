@@ -459,7 +459,7 @@ BOOST_AUTO_TEST_CASE(not_regular_stats_file_disables_persistence)
         fx.t.call([&] { src->emit(nearbyObservation(0xA00001, 0)); });
         std::this_thread::sleep_for(1500ms);  // a tick or more: no save is attempted
         fx.stop();
-        BOOST_TEST(!fileExists(path + ".bad"), path);
+        BOOST_TEST_CONTEXT(path) { BOOST_TEST(!fileExists(path + ".bad")); }
         BOOST_TEST(fileExists(path), path);
     }
 }

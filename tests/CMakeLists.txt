@@ -46,12 +46,15 @@ if(_skycue_icao_skip)
   skycue_skip_test(icao_tables_current "${_skycue_icao_skip}")
   skycue_skip_test(icao_tables_generator "${_skycue_icao_skip}")
 else()
+  # Hand-written: runs python3 directly, not a shell script.
   add_test(NAME icao_tables_current
     COMMAND ${SKYCUE_PYTHON3} -I ${_skycue_gen_icao} --check ${_skycue_app_pure} ${_skycue_icao_inc})
-  add_test(NAME icao_tables_generator
-    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_icao_generator.sh ${SKYCUE_PYTHON3}
-      ${_skycue_gen_icao} ${_skycue_app_pure} ${_skycue_icao_inc} ${CMAKE_CURRENT_BINARY_DIR}/icao-generator)
-  set_tests_properties(icao_tables_current icao_tables_generator PROPERTIES TIMEOUT 60)
+  set_tests_properties(icao_tables_current PROPERTIES TIMEOUT 60)
+  skycue_add_script_test(icao_tables_generator
+    SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_icao_generator.sh
+    ARGS ${SKYCUE_PYTHON3} ${_skycue_gen_icao} ${_skycue_app_pure} ${_skycue_icao_inc}
+      ${CMAKE_CURRENT_BINARY_DIR}/icao-generator
+    TIMEOUT 60)
 endif()
 
 skycue_add_unit_test(registration)
@@ -71,47 +74,35 @@ skycue_add_unit_test(retention)
 # Builds a tiny consumer against libskycue through add_subdirectory(),
 # through find_package() on an install of it, and linked into a shared
 # library with SKYCUE_INSTALL=OFF.
-add_test(NAME consumer_smoke
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/consumer_smoke.sh
-    ${PROJECT_SOURCE_DIR}/libskycue
-    ${CMAKE_CURRENT_SOURCE_DIR}/consumer-smoke
+skycue_add_script_test(consumer_smoke
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/consumer_smoke.sh
+  ARGS ${PROJECT_SOURCE_DIR}/libskycue ${CMAKE_CURRENT_SOURCE_DIR}/consumer-smoke
     ${CMAKE_CURRENT_BINARY_DIR}/consumer-smoke-work
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set(_smoke_boost_dir "")
-if(Boost_DIR)
-  set(_smoke_boost_dir "${Boost_DIR}")
-endif()
-string(REPLACE ";" "\\;" _smoke_prefix_path "${CMAKE_PREFIX_PATH}")
-set_tests_properties(consumer_smoke PROPERTIES
-  TIMEOUT 300
-  ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
+  TIMEOUT 300 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} NESTED_CMAKE)
 
 # examples/parent-project (a separate project using add_subdirectory on the
 # whole source tree) built against a copy of it in a temp dir.
 # Skipped (77) when the cmake it is given is not found.
-add_test(NAME parent_project
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_parent_project.sh
-    ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/parent-project-work
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(parent_project PROPERTIES
-  TIMEOUT 300
-  SKIP_RETURN_CODE 77
-  ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
+skycue_add_script_test(parent_project
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_parent_project.sh
+  ARGS ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/parent-project-work
+  TIMEOUT 300 SKIPPABLE WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} NESTED_CMAKE)
 
 # install_layout: `cmake --install` of this build tree into a DESTDIR, checked
 # against what this tree's configuration should produce (default source
 # install, package build with SKYCUE_PACKAGE_CONFIG and absolute
 # SKYCUE_SYSTEMD_UNITDIR, or SKYCUE_INSTALL_SYSTEM_FILES=OFF as a parent build).
-add_test(NAME install_layout
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_install_layout.sh ${CMAKE_COMMAND}
-    ${PROJECT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/install-layout-work
+skycue_add_script_test(install_layout
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_install_layout.sh
+  ARGS ${CMAKE_COMMAND} ${PROJECT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/install-layout-work
     ${CMAKE_INSTALL_PREFIX} ${CMAKE_INSTALL_FULL_BINDIR} ${CMAKE_INSTALL_FULL_SYSCONFDIR}
-    ${SKYCUE_INSTALL_SYSTEM_FILES} ${SKYCUE_PACKAGE_CONFIG} ${SKYCUE_SYSTEMD_UNITDIR})
-set_tests_properties(install_layout PROPERTIES TIMEOUT 120)
+    ${SKYCUE_INSTALL_SYSTEM_FILES} ${SKYCUE_PACKAGE_CONFIG} ${SKYCUE_SYSTEMD_UNITDIR}
+  TIMEOUT 120)
 
 # package_conf: cmake/PackageConfig.cmake on the example, and skycued on what
 # it writes. It picks a closed port with python3, so it is skipped (exit 77)
 # without one.
+# Hand-written: the quoted python3 argument may be empty, which ARGS would drop.
 add_test(NAME package_conf
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_package_conf.sh ${CMAKE_COMMAND}
     ${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake ${_skycue_example_conf}
@@ -120,25 +111,23 @@ set_tests_properties(package_conf PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 # package_postinst: the upgrade step in debian/skycue.postinst and the spec
 # (skycue.conf -> skycue.toml), run against a fake root with the built skycued.
-add_test(NAME package_postinst
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_package_postinst.sh ${CMAKE_COMMAND}
-    ${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake ${_skycue_example_conf}
+skycue_add_script_test(package_postinst
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_package_postinst.sh
+  ARGS ${CMAKE_COMMAND} ${PROJECT_SOURCE_DIR}/cmake/PackageConfig.cmake ${_skycue_example_conf}
     $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skycue_example_old.conf
-    ${CMAKE_CURRENT_BINARY_DIR}/package-postinst-work)
-set_tests_properties(package_postinst PROPERTIES TIMEOUT 60)
+    ${CMAKE_CURRENT_BINARY_DIR}/package-postinst-work
+  TIMEOUT 60)
 
 # SKYCUE_TEST_SLOW_FACTOR outside sanitizer and fuzz builds: two configures
 # of this tree (no build), their registered timeouts and environments compared.
 if(NOT SKYCUE_PYTHON3)
   skycue_skip_test(slow_factor "python3 not found")
 else()
-  add_test(NAME slow_factor
-    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_slow_factor.sh
-      ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/slow-factor-work ${SKYCUE_PYTHON3}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-  set_tests_properties(slow_factor PROPERTIES
-    TIMEOUT 300
-    ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CTEST=${CMAKE_CTEST_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
+  skycue_add_script_test(slow_factor
+    SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_slow_factor.sh
+    ARGS ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/slow-factor-work ${SKYCUE_PYTHON3}
+    TIMEOUT 300 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} NESTED_CMAKE
+    ENVIRONMENT CTEST=${CMAKE_CTEST_COMMAND})
 endif()
 
 skycue_add_unit_test(raw_formats)
@@ -147,19 +136,19 @@ skycue_add_unit_test(raw_formats)
 # feeds a real readsb when SKYCUE_TEST_READSB names one.
 set(SKYCUE_TEST_READSB "" CACHE FILEPATH
   "readsb used by the rawtools full-stack check (skipped when missing)")
-add_test(NAME rawtools
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_rawtools.sh
-    $<TARGET_FILE:skycue-rawrec> $<TARGET_FILE:skycue-rawplay>
-    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_TEST_READSB})
-set_tests_properties(rawtools PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+skycue_add_script_test(rawtools
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_rawtools.sh
+  ARGS $<TARGET_FILE:skycue-rawrec> $<TARGET_FILE:skycue-rawplay>
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_TEST_READSB}
+  TIMEOUT 120 SKIPPABLE)
 
 # The output hub end to end: a replayed capture through a beast_raw input to
 # TCP and multicast outputs, a stalled consumer cut, an output removed with a
 # backlog. Skips without fixtures/raw (scripts/fixtures/fetch-test-captures.sh).
-add_test(NAME hub
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_hub.sh
-    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(hub PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+skycue_add_script_test(hub
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_hub.sh
+  ARGS $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+  TIMEOUT 180 SKIPPABLE)
 
 skycue_add_unit_test(engine LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT TIMEOUT 120)
 
@@ -175,32 +164,32 @@ add_dependencies(test_check_inputs skycued)
 target_compile_definitions(test_check_inputs PRIVATE SKYCUED_EXE="$<TARGET_FILE:skycued>")
 
 # skycue-dump against a skycued replaying the readsb JSON fixture, TCP and UDP.
-add_test(NAME dump
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_dump.sh
-    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-dump> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(dump PROPERTIES TIMEOUT 60)
+skycue_add_script_test(dump
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_dump.sh
+  ARGS $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-dump> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+  TIMEOUT 60)
 
 # skycue-pingsim (CAT021, JSON with status, capture replay, --tcp-listen) into
 # one skycued, and skycue-dump --capture on the capture file.
-add_test(NAME pingsim
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pingsim.sh
-    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-pingsim> $<TARGET_FILE:skycue-dump>
-    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(pingsim PROPERTIES TIMEOUT 120)
+skycue_add_script_test(pingsim
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_pingsim.sh
+  ARGS $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-pingsim> $<TARGET_FILE:skycue-dump>
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+  TIMEOUT 120)
 
 skycue_add_unit_test(stats)
 
 # skycue-stats on the readsb JSON fixture and on recordings of a skycued replaying it.
-add_test(NAME stats_cli
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_stats_cli.sh
-    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-stats> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(stats_cli PROPERTIES TIMEOUT 120)
+skycue_add_script_test(stats_cli
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_stats_cli.sh
+  ARGS $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-stats> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+  TIMEOUT 120)
 
 # skycue-fisb on the FIS-B fixtures, including the tg30 golden output.
-add_test(NAME fisb_cli
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_fisb_cli.sh
-    $<TARGET_FILE:skycue-fisb> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(fisb_cli PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+skycue_add_script_test(fisb_cli
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_fisb_cli.sh
+  ARGS $<TARGET_FILE:skycue-fisb> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+  TIMEOUT 60 SKIPPABLE)
 
 # Hand-written: SKYCUED_EXE needs a generator expression and a target dependency.
 add_executable(test_web_server test_web_server.cpp)
@@ -229,21 +218,21 @@ skycue_add_unit_test(fisb_web LIBS skycued_core Threads::Threads FIXTURE_DIR NET
 
 # The web UI as skycued serves it from the staged www directory, plus the
 # page's pure helpers under node when node is installed.
-add_test(NAME web_ui
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_web_ui.sh
-    $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/js)
-set_tests_properties(web_ui PROPERTIES TIMEOUT 60)
+skycue_add_script_test(web_ui
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_web_ui.sh
+  ARGS $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/js
+  TIMEOUT 60)
 
 # Headless Chromium against a live skycued (dev machines only; see
 # tests/ui/README.md). Says SKIP and exits 77 (skipped) without
 # node_modules/@playwright/test or a staged Leaflet.
 if(SKYCUE_UI_TESTS)
-  add_test(NAME ui_playwright
-    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/ui/run.sh
-      $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
-      $<TARGET_FILE:skycue-pingsim>)
-  set_tests_properties(ui_playwright PROPERTIES TIMEOUT 720 SKIP_RETURN_CODE 77)
+  skycue_add_script_test(ui_playwright
+    SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/ui/run.sh
+    ARGS $<TARGET_FILE:skycued> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${SKYCUE_WWW_STAGE}
+      $<TARGET_FILE:skycue-pingsim>
+    TIMEOUT 720 SKIPPABLE)
 endif()
 
 # FIS-B uplink frame, APDU header and DLAC parsers on hand-built vectors and
@@ -272,10 +261,10 @@ skycue_add_unit_test(fisb_decoder LIBS skycued_core ZLIB::ZLIB Threads::Threads 
 # Mode S CRC, UAT Reed-Solomon and framing for the IQ generators, on
 # hand-built vectors and the raw UAT fixture.
 skycue_add_unit_test(iqgen LIBS skycue_iqgen_core FIXTURE_DIR)
-add_test(NAME iqgen_cli
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
-    $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+skycue_add_script_test(iqgen_cli
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
+  ARGS $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+  TIMEOUT 180 SKIPPABLE)
 
 # ASTERIX CAT021 decoder, test encoder and TCP stream framer (pure).
 skycue_add_unit_test(cat021 LIBS skycued_asterix)
@@ -342,6 +331,7 @@ skycue_add_unit_test(beast_raw LIBS skycued_core Threads::Threads FIXTURE_DIR NE
 add_executable(sanitizer_canary EXCLUDE_FROM_ALL sanitizer/canary.cpp)
 target_link_libraries(sanitizer_canary PRIVATE Threads::Threads)
 
+# Hand-written: the fuzz_bins fixture pair is not expressible in the helpers.
 # fuzz_smoke: every libFuzzer harness for 5 s on its seeds, through
 # scripts/dev/run-fuzz.sh. fuzz_build (fixture setup) builds the harnesses first,
 # since ctest has no target dependencies.
@@ -382,13 +372,14 @@ elseif(NOT SKYCUE_CLANG_TIDY)
 elseif(NOT EXISTS "${_skycue_run_static}")
   skycue_skip_test(static_analysis "scripts/dev/run-static.sh not found")
 else()
-  add_test(NAME static_analysis
-    COMMAND bash ${_skycue_run_static} --tidy-only
-      --build-dir ${CMAKE_CURRENT_BINARY_DIR}/static-analysis)
-  set_tests_properties(static_analysis PROPERTIES TIMEOUT 1800 SKIP_RETURN_CODE 77)
+  skycue_add_script_test(static_analysis
+    SCRIPT ${_skycue_run_static}
+    ARGS --tidy-only --build-dir ${CMAKE_CURRENT_BINARY_DIR}/static-analysis
+    TIMEOUT 1800 SKIPPABLE)
 endif()
 
 # soak_eval: the soak pass rule (tests/soak/soak_eval.py) on synthetic series.
+# Hand-written: runs python3 directly, not a shell script.
 add_test(NAME soak_eval
   COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/soak/soak_eval.py --self-test)
 set_tests_properties(soak_eval PROPERTIES TIMEOUT 60)
@@ -399,16 +390,16 @@ set_tests_properties(soak_eval PROPERTIES TIMEOUT 60)
 if(NOT SKYCUE_SOAK_TESTS)
   skycue_skip_test(soak_short "SKYCUE_SOAK_TESTS is OFF")
 else()
-  add_test(NAME soak_short
-    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/soak/soak.sh
-      --skycued $<TARGET_FILE:skycued>
+  skycue_add_script_test(soak_short
+    SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/soak/soak.sh
+    ARGS --skycued $<TARGET_FILE:skycued>
       --pingsim $<TARGET_FILE:skycue-pingsim>
       --dump $<TARGET_FILE:skycue-dump>
       --www ${SKYCUE_WWW_STAGE}
       --fixtures ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
       --minutes 2 --interval 5 --growth 1.0
-      --out ${CMAKE_CURRENT_BINARY_DIR}/soak-short)
-  set_tests_properties(soak_short PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
+      --out ${CMAKE_CURRENT_BINARY_DIR}/soak-short
+    TIMEOUT 400 SKIPPABLE)
 endif()
 
 # Script tests: every tests/scripts/test_*.sh runs as ctest "script_<name>" (exit
@@ -421,18 +412,13 @@ file(GLOB _script_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/t
 list(FILTER _script_tests EXCLUDE REGEX "/test_package_postinst\\.sh$")  # registered above (takes arguments)
 foreach(f IN LISTS _script_tests)
   get_filename_component(name "${f}" NAME_WE)
-  add_test(NAME script_${name} COMMAND bash ${f})
-  set_tests_properties(script_${name} PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+  if(name STREQUAL "test_net_standalone")
+    # Configures and builds a copy of net/ alone with this build's cmake and compiler.
+    skycue_add_script_test(script_${name} SCRIPT ${f} TIMEOUT 300 SKIPPABLE NESTED_CMAKE)
+  else()
+    skycue_add_script_test(script_${name} SCRIPT ${f} TIMEOUT 900 SKIPPABLE)
+  endif()
 endforeach()
-
-# script_test_net_standalone (registered by the glob above) configures and
-# builds a copy of net/ alone: the cmake and compiler of this build, a
-# timeout of 300 s.
-if(TEST script_test_net_standalone)
-  set_tests_properties(script_test_net_standalone PROPERTIES
-    TIMEOUT 300
-    ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
-endif()
 
 # Beast and AVR frames as decoder input.
 skycue_add_unit_test(decode_frame_source)
@@ -465,10 +451,10 @@ skycue_add_unit_test(geom_eval LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR TIMEOUT 
 # skycued's own decoder against readsb, live: the 120 s capture replayed at speed 1
 # through a beast_raw input under inputs.decoder = "skycued", compared with the committed
 # golden and, with SKYCUE_READSB set, a fresh readsb run. Skips without fixtures/raw.
-add_test(NAME decode_differential
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential.sh
-    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(decode_differential PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
+skycue_add_script_test(decode_differential
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential.sh
+  ARGS $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+  TIMEOUT 400 SKIPPABLE)
 
 # UAT (978 MHz) frame layout, line parser and pure field decoders.
 skycue_add_unit_test(decode_uat_frame)
@@ -505,22 +491,23 @@ skycue_add_unit_test(uat_raw_decode LIBS skycued_core Threads::Threads ZLIB::ZLI
 # skycued's own UAT decoder against dump978-fa, live: the 439-downlink sample replayed at speed 1
 # (about 2 minutes), then the Stratux captures, through a uat_raw input under inputs.decoder = "skycued", compared per address with
 # the committed golden and, with SKYCUE_DUMP978 set, a fresh dump978-fa run. Skips without fixtures.
-add_test(NAME decode_differential_uat
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential_uat.sh
-    $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
-    $<TARGET_FILE:skycue-iqgen>)
-set_tests_properties(decode_differential_uat PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
+skycue_add_script_test(decode_differential_uat
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential_uat.sh
+  ARGS $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+    $<TARGET_FILE:skycue-iqgen>
+  TIMEOUT 400 SKIPPABLE)
 
 skycue_add_unit_test(toml_lite DEFS SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}" TIMEOUT 60)
 
 skycue_add_unit_test(log TIMEOUT 60)
 
 # skycued's configuration command line: --dump-env, --set, --convert-conf, the legacy flags.
-add_test(NAME config_cli
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_config_cli.sh
-    $<TARGET_FILE:skycued> ${_skycue_example_conf}
-    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skycue_example_old.conf ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
-set_tests_properties(config_cli PROPERTIES TIMEOUT 60)
+skycue_add_script_test(config_cli
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_config_cli.sh
+  ARGS $<TARGET_FILE:skycued> ${_skycue_example_conf}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skycue_example_old.conf
+    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+  TIMEOUT 60)
 
 skycue_add_unit_test(ecef LIBS skycue::skycue TIMEOUT 60)
 

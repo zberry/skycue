@@ -15,6 +15,11 @@ function(skycue_net_unit_test name source)
   if(COMMAND skycue_set_warnings)
     skycue_set_warnings(test_net_${name})
   endif()
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # Boost.Test 1.90's assertion_result conversion trips -Wconversion under
+    # GCC 15 at every BOOST_TEST with a message; product code keeps it.
+    target_compile_options(test_net_${name} PRIVATE -Wno-conversion)
+  endif()
   add_test(NAME net_${name} COMMAND test_net_${name})
   set_tests_properties(net_${name} PROPERTIES TIMEOUT 60 LABELS unit)
 endfunction()

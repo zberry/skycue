@@ -51,6 +51,11 @@ function(skycue_add_unit_test name)
     target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/net/tests)
   endif()
   skycue_set_warnings(${target})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # Boost.Test 1.90's assertion_result conversion trips -Wconversion under
+    # GCC 15 at every BOOST_TEST with a message; product code keeps it.
+    target_compile_options(${target} PRIVATE -Wno-conversion)
+  endif()
   add_test(NAME ${name} COMMAND ${target})
 
   set(props)

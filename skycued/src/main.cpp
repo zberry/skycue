@@ -435,63 +435,73 @@ std::optional<int> loadDaemonConfig(const Options& o, const po::variables_map& v
     return std::nullopt;
 }
 
-int run(int argc, char** argv)
+ForwarderConfig forwarderConfig(const Config& config)
 {
-    const auto started = std::chrono::system_clock::now();
-    Options o;
-    po::variables_map vm;
-    if (const auto rc = parseOptions(argc, argv, o, vm))
-        return *rc;
-    auto& config_path = o.config_path;
-    auto& replay_path = o.replay_path;
-    auto& readsb_host = o.readsb_host;
-    auto& dump978_host = o.dump978_host;
-    auto& log_level = o.log_level;
-    auto& www_dir = o.www_dir;
-    auto& web_bind = o.web_bind;
-    auto& inputs_file = o.inputs_file;
-    auto& set_args = o.set_args;
-    auto& replay_speed = o.replay_speed;
-    auto& cue_tcp_port = o.cue_tcp_port;
-    auto& web_port = o.web_port;
-    const bool replaying = vm.count("replay") > 0;
-    const bool check_only = vm.count("check-inputs") > 0;
-
-    std::map<std::string, std::string> env;
-    Config config;
-    if (const auto rc = loadDaemonConfig(o, vm, config, env))
-        return *rc;
-    readsb_host = config.readsb_host;
-    dump978_host = config.dump978_host;
-    const bool use_dump978 = config.dump978_enable;
-    const bool use_readsb = config.inputs_readsb_enable;
-    if (!vm.count("www-dir"))
-        www_dir = defaultWwwDir();
-
-    if (check_only)
-        return runCheckInputs(config, vm.count("inputs-file") ? inputs_file : resolveInputsFile(config, config_path),
-                              use_readsb, readsb_host, use_dump978, dump978_host);
-
-    boost::asio::io_context io;
-    // Registered before anything is logged or started: a SIGINT/SIGTERM that arrives during startup (a
-    // supervisor stopping a unit that is still coming up, a test killing on the first log line) is held
-    // by asio until async_wait below and then shuts down cleanly, instead of the default action ending
-    // the process with status 143/130.
-    boost::asio::signal_set signals(io, SIGINT, SIGTERM);
-
     ForwarderConfig fc;
     fc.tcp_port = config.cue_tcp_port;
     fc.tcp_connect_targets = config.cue_tcp_connect_targets;
     fc.udp_targets = config.cue_udp_targets;
     fc.keyframe_interval =
         std::chrono::milliseconds(std::max<long long>(1, std::llround(config.keyframe_interval_s * 1000)));
-    Forwarder forwarder(io, fc);
+    return fc;
+}
+
+// What run() builds and the loops use. The members are declared in the order the locals of run() were, so they
+// are destroyed in the same order (the Hub before the Forwarder it republishes through, the io_context last).
+struct Stack {
+    explicit Stack(const Config& config)
+        : signals(io, SIGINT, SIGTERM), forwarder(io, forwarderConfig(config)), hub(io, &forwarder)
+    {
+    }
+
+    boost::asio::io_context io;
+    // Registered before anything is logged or started: a SIGINT/SIGTERM that arrives during startup (a
+    // supervisor stopping a unit that is still coming up, a test killing on the first log line) is held
+    // by asio until async_wait below and then shuts down cleanly, instead of the default action ending
+    // the process with status 143/130.
+    boost::asio::signal_set signals;
+    Forwarder forwarder;
     // The hub republishes raw messages to the operator's outputs; the cue
     // stream's destinations are its built-in outputs. After the Forwarder, so
     // it is destroyed first.
-    Hub hub(io, &forwarder);
-
+    Hub hub;
     std::unique_ptr<Recorder> received, sent, fisb;
+    std::unique_ptr<Engine> engine;
+    std::unique_ptr<RuntimeConfig> runtime;
+    DaemonInfo daemon;
+    std::unique_ptr<WebServer> web;
+};
+
+// The hub, recorders, inputs, engine and runtime configuration; an exit status when startup fails, else nullopt.
+std::optional<int> buildEngine(Stack& st, const Options& o, const po::variables_map& vm, const Config& config,
+                               const std::map<std::string, std::string>& env,
+                               const std::chrono::system_clock::time_point& started)
+{
+    auto& io = st.io;
+    auto& forwarder = st.forwarder;
+    auto& hub = st.hub;
+    auto& received = st.received;
+    auto& sent = st.sent;
+    auto& fisb = st.fisb;
+    auto& engine = st.engine;
+    auto& runtime = st.runtime;
+    auto& daemon = st.daemon;
+    const auto& config_path = o.config_path;
+    const auto& replay_path = o.replay_path;
+    const auto& readsb_host = o.readsb_host;
+    const auto& dump978_host = o.dump978_host;
+    const auto& log_level = o.log_level;
+    const auto& www_dir = o.www_dir;
+    const auto& web_bind = o.web_bind;
+    const auto& inputs_file = o.inputs_file;
+    const auto& set_args = o.set_args;
+    const auto& replay_speed = o.replay_speed;
+    const auto& cue_tcp_port = o.cue_tcp_port;
+    const auto& web_port = o.web_port;
+    const bool replaying = vm.count("replay") > 0;
+    const bool use_dump978 = config.dump978_enable;
+    const bool use_readsb = config.inputs_readsb_enable;
+
     if (!config.record_dir.empty()) {
         RecorderConfig rc;
         rc.dir = config.record_dir;
@@ -593,7 +603,6 @@ int run(int argc, char** argv)
     // stream's enabled states; later changes arrive through onOutputsChanged.
     hub.apply(inputs->outputs(), inputs->outputBuiltinStates());
 
-    std::unique_ptr<Engine> engine;
     try {
         engine = std::make_unique<Engine>(io, config, std::move(inputs), forwarder, received.get(), sent.get(),
                                           fisb.get());
@@ -618,7 +627,6 @@ int run(int argc, char** argv)
     }
     // The runtime overlay (skycue.runtime.json in paths.state_dir, else next to the
     // config) on top of skycue.toml, and hot reload of both and of the list files.
-    std::unique_ptr<RuntimeConfig> runtime;
     try {
         runtime = std::make_unique<RuntimeConfig>(io, config_path, *engine);
         runtime->setLayers(set_args, env);
@@ -628,7 +636,6 @@ int run(int argc, char** argv)
         return 2;
     }
     // What GET /api/config reports besides the configuration.
-    DaemonInfo daemon;
     daemon.version = kVersion;
     daemon.started = started;
     daemon.config_path = config_path;
@@ -674,8 +681,55 @@ int run(int argc, char** argv)
     }
     daemon.readsb = !replaying && use_readsb;
     daemon.dump978 = !replaying && use_dump978;
+    return std::nullopt;
+}
+
+int run(int argc, char** argv)
+{
+    const auto started = std::chrono::system_clock::now();
+    Options o;
+    po::variables_map vm;
+    if (const auto rc = parseOptions(argc, argv, o, vm))
+        return *rc;
+    auto& config_path = o.config_path;
+    auto& replay_path = o.replay_path;
+    auto& readsb_host = o.readsb_host;
+    auto& dump978_host = o.dump978_host;
+    auto& www_dir = o.www_dir;
+    auto& inputs_file = o.inputs_file;
+    const bool replaying = vm.count("replay") > 0;
+    const bool check_only = vm.count("check-inputs") > 0;
+
+    std::map<std::string, std::string> env;
+    Config config;
+    if (const auto rc = loadDaemonConfig(o, vm, config, env))
+        return *rc;
+    readsb_host = config.readsb_host;
+    dump978_host = config.dump978_host;
+    const bool use_dump978 = config.dump978_enable;
+    const bool use_readsb = config.inputs_readsb_enable;
+    if (!vm.count("www-dir"))
+        www_dir = defaultWwwDir();
+
+    if (check_only)
+        return runCheckInputs(config, vm.count("inputs-file") ? inputs_file : resolveInputsFile(config, config_path),
+                              use_readsb, readsb_host, use_dump978, dump978_host);
+
+    Stack st(config);
+    if (const auto rc = buildEngine(st, o, vm, config, env, started))
+        return *rc;
+    auto& io = st.io;
+    auto& signals = st.signals;
+    auto& forwarder = st.forwarder;
+    auto& hub = st.hub;
+    auto& received = st.received;
+    auto& sent = st.sent;
+    auto& fisb = st.fisb;
+    auto& engine = st.engine;
+    auto& runtime = st.runtime;
+    auto& daemon = st.daemon;
     // The web UI (web.bind:web.port); web.port=0: none.
-    std::unique_ptr<WebServer> web;
+    auto& web = st.web;
     int exit_code = 0;
     bool shutting_down = false;
     boost::asio::steady_timer restart_timer(io);

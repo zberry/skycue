@@ -1,0 +1,36 @@
+name: setup-build
+description: Install build dependencies, restore the ccache cache and fetch the web libraries
+
+inputs:
+  packages:
+    description: Extra apt packages to install
+    required: false
+    default: ''
+  ccache-key:
+    description: Cache key prefix, one per build flavour
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install packages
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends cmake ninja-build g++ ccache libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl ${{ inputs.packages }}
+    - name: Restore ccache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.ccache
+        key: ccache-${{ inputs.ccache-key }}-${{ github.sha }}
+        restore-keys: |
+          ccache-${{ inputs.ccache-key }}-
+    - name: Configure ccache
+      shell: bash
+      run: |
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+        echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+        ccache --max-size=500M
+    - name: Fetch web libraries
+      shell: bash
+      run: scripts/dev/fetch-web-libs.sh

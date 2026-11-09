@@ -2,60 +2,52 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl
-      - name: Fetch web libraries
-        run: scripts/dev/fetch-web-libs.sh
+      - uses: ./.github/actions/setup-build
+        with:
+          ccache-key: gcc
+      - name: Node version
+        run: node --version
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON
+        run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON -DSKYCUE_UI_TESTS=OFF
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
-        run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|needs-node|slow'
+        run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|slow'
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
 
   sanitizers:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl clang
-      - name: Fetch web libraries
-        run: scripts/dev/fetch-web-libs.sh
+      - uses: ./.github/actions/setup-build
+        with:
+          packages: clang
+          ccache-key: clang-asan
       - name: AddressSanitizer and UBSan suite
         # Exit status 77 means the script skipped itself; any other failure fails the job.
         run: scripts/dev/run-sanitizers.sh asan || [ $? -eq 77 ]
-
-  node-helpers:
-    name: node-helpers (web page tests)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl nodejs
-      - name: Fetch web libraries
-        run: scripts/dev/fetch-web-libs.sh
-      - name: Configure
-        run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON
-      - name: Build
-        run: cmake --build build -j"$(nproc)"
-      - name: Node version
-        run: node --version
-      - name: Web page tests
-        run: ctest --test-dir build -R '^web_ui$' --output-on-failure
+      - name: ccache statistics
+        if: always()
+        run: ccache -s

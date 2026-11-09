@@ -51,7 +51,7 @@ C++17, Boost, CMake; web page in plain JavaScript. Everything is built from sour
 - Goldens: `tests/fixtures/gen_raw_golden.sh` (readsb, Mode S), `gen_uat_golden.sh` (dump978-fa),
   `fisb/gen_*.py` and `docs/fisb-golden.md` (FIS-B). Regenerate only when behaviour change is intended,
   and say so in the commit. Differential tests: `tests/test_decode_differential*.sh`.
-- Keep in step: `packaging/skycue.toml.example` and `tests/fixtures/skycue_example.toml` byte-identical;
+- Keep in step: `packaging/skycue.toml.example` is the single example config, which the tests read directly;
   `docs/protocol.md` with the encoder in `libskycue/`; `docs/recording-format.md` with the recorder key
   tables; `docs/web-api.md` with the routes; `tests/fixtures/config-copy.toml` with `configText` in
   `www/app_pure.js`; `skycued/src/icao_tables.inc` via `scripts/fixtures/gen-icao-tables.py`.

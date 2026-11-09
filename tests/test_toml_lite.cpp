@@ -307,11 +307,11 @@ BOOST_AUTO_TEST_CASE(string_as_tomlString_in_app_pure_js_emits_it)
 
 BOOST_AUTO_TEST_CASE(design_example_file_parses)
 {
-    std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/skycue_example.toml", std::ios::binary);
+    std::ifstream in(SKYCUE_EXAMPLE_CONF, std::ios::binary);
     BOOST_REQUIRE(in);
     std::stringstream ss;
     ss << in.rdbuf();
-    const Document d = parse(ss.str(), "skycue_example.toml");
+    const Document d = parse(ss.str(), "skycue.toml.example");
     BOOST_CHECK_EQUAL(flt(d, "receiver.lat"), 0.0);
     BOOST_CHECK_EQUAL(str(d, "inputs.decoder"), "readsb");
     BOOST_CHECK_EQUAL(num(d, "inputs.readsb.json_port"), 30047);

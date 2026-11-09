@@ -139,7 +139,7 @@ struct KeySpec {
 //   4. conf_convert.cpp mappings and conf_legacy.cpp knownKeys, unless the key is
 //      new and has no old-format name.
 //   5. packaging/skycue.toml.example, with its comment (feeds exampleComments and
-//      the web schema); keep tests/fixtures/skycue_example.toml byte-identical.
+//      the web schema); it is the one example config, which the tests read directly.
 //   6. docs/operating.md.
 //   7. The round-trip table in tests/test_config.cpp.
 // tests/test_config_keys.cpp checks items 1, 3, 4 (conversion), 5 and 6, and only that

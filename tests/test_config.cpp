@@ -148,11 +148,6 @@ const RoundTrip kRoundTrips[] = {
 
 // ---- the example and the key table ----------------------------------------------
 
-BOOST_AUTO_TEST_CASE(example_matches_the_parser_fixture)
-{
-    BOOST_TEST(readExample() == slurp(std::string(SKYCUE_FIXTURE_DIR) + "/skycue_example.toml"));
-}
-
 BOOST_AUTO_TEST_CASE(config_copy_text_parses)
 {
     // What the web Config tab's "Copy as text" writes (tests/js/app_pure.test.js

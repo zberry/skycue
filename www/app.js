@@ -1515,7 +1515,7 @@
 
   // ---- selection panel ---------------------------------------------------------
   // The side panel: a Track tab (the selected aircraft), a Weather tab
-  // (FIS-B text reports and the clicked airspace shape), a Receiver tab
+  // (FIS-B text reports and the clicked airspace shape), a Feeds tab
   // (inputs, ground stations, decoder health) and a Cues tab (what was sent
   // and dropped, filter changes, cue clients). The tabs are the panel's
   // [role=tab] buttons, tab-<name> showing pane-<name>; a header button with
@@ -1523,7 +1523,7 @@
   // draws a tab when it is shown. A new tab: its markup and one entry here.
   var TAB_SHOWN = {
     weather: function () { renderWx(true); },
-    receiver: function () { renderReceiver(); pollOutputs(); fetchCueClients(); },
+    receiver: function () { renderReceiver(); pollOutputs(); fetchCueClients(); ensureConfigData(); },
     cues: showCues,
     config: showConfig
   };
@@ -2725,7 +2725,7 @@
     pre.hidden = !r.text;
     card.hidden = false;
   }
-  // The list's "show": pans to the report's position (as the Receiver tab's).
+  // The list's "show": pans to the report's position (as the Feeds tab's).
   function showWxPos(key) {
     var r = fisb.text.get(key), ll = r && wxPlotPos(r);
     if (!ll || !map) return;
@@ -2893,7 +2893,7 @@
     }
   }
 
-  // ---- Receiver tab ------------------------------------------------------------------
+  // ---- Feeds tab ------------------------------------------------------------------
   // docs/web-api.md, Inputs. The list comes with the snapshot, the `inputs`
   // items (a change) and GET /api/inputs every INPUTS_POLL_MS (device status,
   // status poll failures and data ages are not changes); the live counters
@@ -2902,7 +2902,7 @@
   var INPUTS_POLL_MS = 5000;
   var SHOW_MIN_ZOOM = 6;            // "Show" zooms in to this from further out
   var NUMERIC_FIELDS = { port: true, sac: true, sic: true, status_interval_s: true, ttl: true };
-  var OUTPUTS_POLL_MS = 1000;       // GET /api/outputs while the Receiver tab is shown (the counters)
+  var OUTPUTS_POLL_MS = 1000;       // GET /api/outputs while the Feeds tab is shown (the counters)
   var DOT_TITLES = { green: 'connected, receiving', amber: 'connected, no data for 30 s',
     red: 'disconnected, or the status poll failed 3 times', grey: 'disabled' };
   var ACT_LABELS = { toggle: 'Disable', edit: 'Edit', remove: 'Remove', show: 'Show' };
@@ -3391,6 +3391,17 @@
     });
   }
   // A response that an answer to a later request overtook is not shown.
+  // The Feeds summary's recording files come from GET /api/config: fetched
+  // once when the Config tab has not been shown.
+  function ensureConfigData() {
+    if (config.data || config.ensuring) return;
+    config.ensuring = true;
+    request('GET', 'api/config').then(function (c) {
+      config.ensuring = false;
+      if (!config.data) config.data = c;
+      renderFeedsSummary();
+    }).catch(function () { config.ensuring = false; });
+  }
   function showConfig() {
     var seq = ++config.seq;
     // A fresh load: the last copy's status and fallback text no longer apply.
@@ -4093,7 +4104,7 @@
       });
       return out;
     },
-    // The map centre, to 4 decimals (the Receiver tab's "show").
+    // The map centre, to 4 decimals (the Feeds tab's "show").
     center: function () {
       var c = map.getCenter();
       return { lat: Math.round(c.lat * 1e4) / 1e4, lon: Math.round(c.lng * 1e4) / 1e4 };

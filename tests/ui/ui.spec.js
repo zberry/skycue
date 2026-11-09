@@ -607,7 +607,7 @@ test('header_buttons_open_each_panel_tab', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await expectPressed(null);
-  // The inputs counter still opens the Receiver tab, and presses Receiver.
+  // The inputs counter still opens the Feeds tab, and presses Feeds.
   await page.locator('#stat-inputs').click();
   await expect(page.locator('#tab-receiver')).toHaveAttribute('aria-selected', 'true');
   await expectPressed('#rx-toggle');
@@ -2841,7 +2841,7 @@ test.describe('overlays without tiles', () => {
   });
 });
 
-// ---- Receiver tab ----------------------------------------------------------------
+// ---- Feeds tab ----------------------------------------------------------------
 // Against the "receivers" skycued run.sh starts: no built-in decoder inputs,
 // one pingstation_json input ps-sim that skycue-pingsim feeds (a device
 // status every 2 s at 38.9 N 77.0 W). Every case leaves only ps-sim, enabled.
@@ -3191,7 +3191,7 @@ test.describe('receiver tab (pingsim)', () => {
   });
 });
 
-// ---- Receiver tab: input endpoint fields and Outputs ----
+// ---- Feeds tab: input endpoint fields and Outputs ----
 const RX_OUT_PORT = Number(process.env.SKYCUE_RX_OUTPUT_PORT);
 const rxOutputs = async () => (await rxApi('GET', '/api/outputs')).body.outputs;
 const outputCard = (page, id) => page.locator(`#outputs-list .output-card[data-id="${id}"]`);

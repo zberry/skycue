@@ -63,7 +63,7 @@ ground station, 40.04 N 86.26 W, inside both mosaics) as
 `<build>/fisb-screenshots/` (override with
 `SKYCUE_FISB_SCREENSHOTS`).
 
-For the Receiver tab cases it starts one more skycued, `--no-readsb
+For the Feeds tab cases it starts one more skycued, `--no-readsb
 --no-uat` with a temporary `recording.dir` and an inputs file holding one
 `pingstation_json` input, `ps-sim`, on a free UDP port, and
 `skycue-pingsim` sending the readsb fixture to it as pingStation JSON
@@ -138,11 +138,11 @@ half, which lies outside its region's bbox.
     itself over the same parent (`tile-underlay`), since it is on its
     region's edge; no page error.
 
-Receiver tab, against the receivers skycued (`SKYCUE_RECEIVERS_URL`, ps-sim
+Feeds tab, against the receivers skycued (`SKYCUE_RECEIVERS_URL`, ps-sim
 fed by skycue-pingsim), each case removing what it added:
 
 20. `inputs_header_opens_receiver_tab`: `#stat-inputs` reads `1/1`; a click
-    opens the Receiver tab, the tabs switch, and a second click closes it.
+    opens the Feeds tab, the tabs switch, and a second click closes it.
 21. `receiver_tab_lists_inputs_with_live_counts`: the ps-sim card turns
     green, shows its endpoint, obs/s above 0 and the device line (GPS 3D
     fix, receiver normal, firmware 1.0.0); its `.device-marker` is on the
@@ -159,7 +159,7 @@ fed by skycue-pingsim), each case removing what it added:
 25. `input_name_is_text_not_html`: a name and a server error made of an
     `<img onerror>` tag show as text; no `img` element, no script ran.
 
-Receiver tab, against the 2015 FIS-B skycued:
+Feeds tab, against the 2015 FIS-B skycued:
 
 26. `ground_stations_listed`: one station row (id, position, products) and
     one `.station-marker`.

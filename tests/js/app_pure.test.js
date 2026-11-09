@@ -505,7 +505,7 @@ test('overlayOffer: toggles from overlays/meta.json', () => {
   assert.deepStrictEqual(P.overlayOffer({ files: 'x' }), { borders: false, cities: false });
 });
 
-// ---- Receiver tab -------------------------------------------------------------
+// ---- Feeds tab -------------------------------------------------------------
 // The messages are parseInputDef's (skycued/src/inputs/input_def.cpp).
 const CAT021_UDP = { id: 'ps-north', name: 'North mast', type: 'pingstation_cat021', enabled: true, transport: 'udp',
   bind: '0.0.0.0', port: 4001, peer: '', edition: '2.5', sac: null, sic: null, status_url: 'http://192.0.2.10/api/v1/status',

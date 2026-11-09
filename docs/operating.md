@@ -1419,7 +1419,7 @@ updates, which split by decision (sent to cues, out of range, below
 elevation, blocked, no position); the sent band goes through the cue
 scheduler to one node per cue connection. Band widths are messages per
 second over the last minute, and the cue connections show the copies after
-the scheduler (one per connection). A thin band carries nothing. A ⏺ marks a
+the scheduler (one per connection). A thin band carries nothing. A ● marks a
 node a recording file is written from (hover for the file, its size and
 write rate) and ↗ one a raw output serves. Click an input or a cue
 connection to open its card in the [Feeds tab](#feeds-tab). It

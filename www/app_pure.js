@@ -667,7 +667,7 @@
     return String(station || '').toUpperCase().indexOf(String(prefix).toUpperCase()) === 0;
   }
 
-  // ---- Receiver tab: input definitions (docs/web-api.md, Inputs) ----
+  // ---- Feeds tab: input definitions (docs/web-api.md, Inputs) ----
   // The rules and messages of skycued's parseInputDef
   // (skycued/src/inputs/input_def.cpp), for the fields the add form has.
   var INPUT_TYPES = ['readsb', 'dump978', 'pingstation_json', 'pingstation_cat021', 'beast_raw', 'uat_raw'];
@@ -813,7 +813,7 @@
     return { ok: Object.keys(errors).length === 0, errors: errors };
   }
 
-  // ---- Receiver tab: output definitions (docs/web-api.md, Outputs) ----
+  // ---- Feeds tab: output definitions (docs/web-api.md, Outputs) ----
   // The rules and messages of skycued's parseOutputDef
   // (skycued/src/outputs/output_def.cpp).
   var OUTPUT_KINDS = ['beast', 'uat', 'json', 'pingstation_json', 'cat021', 'cue'];

@@ -847,7 +847,7 @@
       var fl = perNode[node], bytes = 0;
       fl.forEach(function (f) { bytes += f.bytes; });
       tags.push({
-        node: node, text: byName[node].tall ? '⏺ recording · ' + formatBytes(bytes) : '⏺',
+        node: node, text: byName[node].tall ? '● recording · ' + formatBytes(bytes) : '●',
         hover: fl.map(function (f) { return f.name + ': ' + formatBytes(f.bytes) + ', ' + formatBytes(f.bytes_per_s) + '/s'; }).join('\n')
       });
     });
@@ -875,7 +875,7 @@
     });
 
     var span = Math.round(rt.span_s || 0);
-    var caption = 'messages per second, last ' + (!rt.span_s ? 0 : rt.span_s < 55 ? span : 60) + ' s · after the scheduler every output receives every cue, so those bands are copies · ⏺ marks a recorder; hover for the file · a thin band carries nothing';
+    var caption = 'messages per second, last ' + (!rt.span_s ? 0 : rt.span_s < 55 ? span : 60) + ' s · after the scheduler every output receives every cue, so those bands are copies · ● marks a recorder; hover for the file · a thin band carries nothing';
     return {
       nodes: nodes.map(function (n) { return { name: n.name, label: n.label, color: n.color, depth: n.depth, bandPx: n.bandPx, tall: n.tall, idle: n.idle }; }),
       links: links, tags: tags, height: height, top: top, bottom: top, caption: caption

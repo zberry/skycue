@@ -832,14 +832,14 @@ test('flowGraph tags: received on tracks, sent on sched, fisb on the uplink inpu
   const tag = n => g.tags.filter(t => t.node === n);
   assert.strictEqual(tag('tracks').length, 1);
   assert.ok(g.nodes.find(n => n.name === 'tracks').tall);
-  assert.strictEqual(tag('tracks')[0].text, '⏺ recording · 1.8 MB');
+  assert.strictEqual(tag('tracks')[0].text, '● recording · 1.8 MB');
   assert.strictEqual(tag('sched').length, 1);
   // a thin tracks band (nearly everything rejected) gets the bare mark
   const thin = S.flowWindow();
   for (let i = 0; i < 3; i++) { const s = flowSnap(i); s.stats.inputs[0].rejected = 7090 * i; s.stats.drops_out_of_range = s.stats.drops_below_elevation = s.stats.drops_blocked = s.stats.drops_no_position = 0; S.flowPush(thin, s); }
   const gt = flowGraphOf(null, thin);
   assert.ok(!gt.nodes.find(n => n.name === 'tracks').tall);
-  assert.strictEqual(gt.tags.filter(t => t.node === 'tracks')[0].text, '⏺');
+  assert.strictEqual(gt.tags.filter(t => t.node === 'tracks')[0].text, '●');
   assert.ok(tag('tracks')[0].hover.indexOf('skycue-received-2026-11-08.jsonl') >= 0);
   assert.ok(tag('tracks')[0].hover.indexOf('180 kB/s') >= 0);
   assert.strictEqual(tag('sched').length, 1);
@@ -849,7 +849,7 @@ test('flowGraph tags: received on tracks, sent on sched, fisb on the uplink inpu
   snap.files.push({ name: 'skycue-fisb-2026-11-08.jsonl', stream: 'fisb', bytes: 500 });
   const w = flowWin(2); S.flowPush(w, snap);
   const g2 = flowGraphOf(snap, w);
-  assert.strictEqual(g2.tags.filter(t => t.node === 'dump978' && t.text.indexOf('⏺') === 0).length, 1);
+  assert.strictEqual(g2.tags.filter(t => t.node === 'dump978' && t.text.indexOf('●') === 0).length, 1);
   g2.tags.forEach(t => assert.ok(t.text.indexOf('.jsonl') < 0));
 });
 
@@ -926,7 +926,7 @@ test('flowGraph raw output tags every input of the kind, else the decoder', () =
 
 test('flowGraph caption names the span when short', () => {
   assert.ok(/^messages per second, last 60 s/.test(flowGraphOf(null, flowWin(14)).caption));
-  assert.ok(/ · after the scheduler every output receives every cue, so those bands are copies · ⏺ marks a recorder; hover for the file/.test(flowGraphOf().caption));
+  assert.ok(/ · after the scheduler every output receives every cue, so those bands are copies · ● marks a recorder; hover for the file/.test(flowGraphOf().caption));
   assert.ok(/last 0 s/.test(S.flowGraph(null, flowSnap(0), { width: 1000, theme: FLOW_THEME }).caption));
   assert.ok(/^messages per second, last 5 s/.test(flowGraphOf(null, flowWin(2)).caption));
 });

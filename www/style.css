@@ -668,3 +668,4 @@ label.check input { width: auto; margin: 0; }
 #view-set-menu button:hover:not(:disabled) { background: var(--panel); }
 #settings-import-text { color: var(--text); overflow-wrap: anywhere; }
 .est { color: var(--muted); font-size: 11px; }
+.stats-grid [data-card="traffic-flow"] .card-caption { white-space: normal; overflow: visible; }

@@ -2,6 +2,7 @@
 
 #include "fisb/bit_reader.hpp"
 #include "fisb/products.hpp"
+#include "hex.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -66,17 +67,6 @@ bool forEachInfoFrame(const uint8_t* payload, std::size_t n, const std::function
 
 namespace {
 
-int hexValue(char c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
-
 bool isSpace(char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; }
 
 // [b, e) with surrounding whitespace and any "<digits> " epoch prefix removed.
@@ -125,8 +115,8 @@ bool hexToBytes(const std::string& line, std::vector<uint8_t>& out)
         return false;
     out.reserve(len / 2);
     for (std::size_t i = b; i < hex_end; i += 2) {
-        const int hi = hexValue(line[i]);
-        const int lo = hexValue(line[i + 1]);
+        const int hi = hexDigitValue(line[i]);
+        const int lo = hexDigitValue(line[i + 1]);
         if (hi < 0 || lo < 0) {
             out.clear();
             return false;

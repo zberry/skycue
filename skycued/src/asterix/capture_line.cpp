@@ -1,5 +1,6 @@
 #include "asterix/capture_line.hpp"
 
+#include "hex.hpp"
 #include "json_escape.hpp"
 #include "json_nesting.hpp"
 #include "time_util.hpp"
@@ -14,17 +15,6 @@ namespace skycued {
 namespace {
 
 constexpr int kMaxCaptureLineDepth = 32;
-
-int hexValue(char c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
 
 // The string value of a top-level key; nullopt when missing or an object/array.
 std::optional<std::string> stringKey(const boost::property_tree::ptree& tree, const char* key)
@@ -87,7 +77,7 @@ std::optional<CaptureLine> parseCaptureLine(const std::string& text)
     line.transport = *transport;
     line.bytes.reserve(hex->size() / 2);
     for (std::size_t i = 0; i < hex->size(); i += 2) {
-        const int hi = hexValue((*hex)[i]), lo = hexValue((*hex)[i + 1]);
+        const int hi = hexDigitValue((*hex)[i]), lo = hexDigitValue((*hex)[i + 1]);
         if (hi < 0 || lo < 0)
             return std::nullopt;
         line.bytes.push_back(static_cast<uint8_t>(hi << 4 | lo));

@@ -557,8 +557,8 @@ BOOST_AUTO_TEST_CASE(throwing_callback_does_not_stop_reading)
     TestTcpServer server;
     Config cfg = tcpConfig(server.port());
     cfg.run_io_thread = false;
+    int calls = 0; // captured by the callback: must outlive the client
     Client client(cfg);
-    int calls = 0;
     client.onTrackUpdate([&](const Track&) {
         if (++calls == 1)
             throw std::runtime_error("callback failure");
@@ -598,9 +598,9 @@ BOOST_AUTO_TEST_CASE(throwing_callback_in_thread_mode_keeps_connection)
 {
     TestTcpServer server;
     Events ev;
+    std::atomic<int> calls{0}; // captured by the callback: must outlive the client
     Client client(tcpConfig(server.port()));
     ev.attach(client);
-    std::atomic<int> calls{0};
     client.onTrackUpdate([&](const Track& t) {
         {
             std::lock_guard<std::mutex> lk(ev.m);
@@ -1157,8 +1157,8 @@ BOOST_AUTO_TEST_CASE(on_error_reports_bind_failure)
     Config cfg = listenConfig();
     cfg.port = tport;
     cfg.reconnect_interval = 100ms;
+    Errors errs; // captured by the callback: must outlive the client
     Client client(cfg);
-    Errors errs;
     errs.attach(client, true);
     client.start();
     BOOST_TEST(client.localPort() == 0);
@@ -1180,8 +1180,8 @@ BOOST_AUTO_TEST_CASE(on_error_reports_bind_failure)
     const uint16_t uport = utaken.local_endpoint().port();
     Config ucfg = udpConfig(uport);
     ucfg.reconnect_interval = 100ms;
-    Client uclient(ucfg);
     Errors uerrs;
+    Client uclient(ucfg);
     uerrs.attach(uclient);
     uclient.start();
     BOOST_REQUIRE(uerrs.waitCount(1));
@@ -1201,10 +1201,10 @@ BOOST_AUTO_TEST_CASE(on_error_reports_connect_failure_once_per_attempt)
     } // closed: connections are refused
     Config cfg = tcpConfig(port);
     cfg.reconnect_interval = 100ms;
-    Client client(cfg);
     Errors errs;
-    errs.attach(client);
     Events ev;
+    Client client(cfg);
+    errs.attach(client);
     ev.attach(client);
     const auto t0 = std::chrono::steady_clock::now();
     client.start();
@@ -1232,10 +1232,10 @@ BOOST_AUTO_TEST_CASE(on_error_reports_swallowed_callback_exception)
     // Thread mode: the exception is discarded, and reported.
     {
         TestTcpServer server;
-        Client client(tcpConfig(server.port()));
         Errors errs;
-        errs.attach(client);
         std::atomic<int> calls{0};
+        Client client(tcpConfig(server.port()));
+        errs.attach(client);
         client.onTrackUpdate([&](const Track&) {
             if (++calls == 1)
                 throw std::runtime_error("boom in onTrackUpdate");
@@ -1264,8 +1264,8 @@ BOOST_AUTO_TEST_CASE(on_error_reports_swallowed_callback_exception)
         TestTcpServer server;
         Config cfg = tcpConfig(server.port());
         cfg.run_io_thread = false;
-        Client client(cfg);
         Errors errs;
+        Client client(cfg);
         errs.attach(client);
         client.onTrackUpdate([](const Track&) { throw std::runtime_error("poll boom"); });
         client.start();

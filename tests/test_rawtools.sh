@@ -9,15 +9,7 @@ rawrec=$1 rawplay=$2 fixtures=$3 readsb=${4:-}
 csv="$fixtures/raw/modes-120s.csv.gz"
 uat="$fixtures/raw/uat-sample.txt.gz"
 stratux="$fixtures/raw/stratux-uat-2015.log.gz"
-tmp=$(mktemp -d)
-bg_pids=()
-cleanup() {
-  [ ${#bg_pids[@]} -gt 0 ] && kill "${bg_pids[@]}" 2>/dev/null
-  wait 2>/dev/null
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-fail() { echo "FAIL: $*"; exit 1; }
+test_init rawtools
 # fixtures/raw/ is fetched by scripts/fixtures/fetch-test-captures.sh (fixtures/README.md):
 # without it the sections that replay those captures, (a)-(c2) and the full
 # stack, are skipped and the rest still runs.

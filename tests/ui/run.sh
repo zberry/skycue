@@ -26,6 +26,7 @@ set -u
 skycued=$1 fixtures=$2 www=$3 pingsim=$4
 shift 4
 here=$(cd "$(dirname "$0")" && pwd)
+. "$here/../lib/test_common.sh"   # free_port only; the teardown below is this script's own
 shots_dir=${SKYCUE_UI_SCREENSHOTS:-"$www/../ui-screenshots"}
 fisb_shots_dir=${SKYCUE_FISB_SCREENSHOTS:-"$www/../fisb-screenshots"}
 
@@ -83,9 +84,6 @@ fail() {
   exit 1
 }
 
-free_port() {
-  python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'
-}
 web_port=$(free_port)
 cue_port=$(free_port)
 # write_conf FILE WEB_PORT CUE_PORT STATS_FILE [EXTRA [EXTRA_CUES_LINES]]: the one

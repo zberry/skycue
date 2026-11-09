@@ -16,13 +16,8 @@ if [ "$#" -ne 4 ]; then
 fi
 readsb=$1 rawplay=$2 csv=$3 out=$4
 here=$(cd "$(dirname "$0")" && pwd)
-work=$(mktemp -d)
-pids=()
-cleanup() {
-    for p in "${pids[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
-    rm -rf "$work"
-}
-trap cleanup EXIT
+. "$here/../lib/test_common.sh"
+test_init gen_raw_golden
 
 # Two free ports: raw input and JSON output.
 read -r p_raw p_json < <(python3 -I - <<'PY'
@@ -35,8 +30,8 @@ PY
 )
 
 "$readsb" --net-only --net-ri-port "$p_raw" --net-json-port "$p_json" \
-    --net-json-port-include-noposition --quiet >"$work/readsb.log" 2>&1 &
-pids+=($!)
+    --net-json-port-include-noposition --quiet >"$tmp/readsb.log" 2>&1 &
+bg_pids+=($!)
 readsb_pid=$!
 # Wait (up to 10 s) for readsb to bind its JSON port.
 wait_port() {
@@ -53,11 +48,11 @@ while time.time() < end:
 sys.exit(1)
 PY
 }
-wait_port "$p_json" || { echo "readsb did not bind its JSON port" >&2; cat "$work/readsb.log" >&2; exit 1; }
-kill -0 "$readsb_pid" || { cat "$work/readsb.log" >&2; exit 1; }
+wait_port "$p_json" || { echo "readsb did not bind its JSON port" >&2; cat "$tmp/readsb.log" >&2; exit 1; }
+kill -0 "$readsb_pid" || { cat "$tmp/readsb.log" >&2; exit 1; }
 
-python3 -I "$here/gen_raw_golden.py" collect "$p_json" "$work/lines.jsonl" &
-pids+=($!)
+python3 -I "$here/gen_raw_golden.py" collect "$p_json" "$tmp/lines.jsonl" &
+bg_pids+=($!)
 collector_pid=$!
 sleep 1
 kill -0 "$collector_pid" || { echo "collector exited early" >&2; exit 1; }
@@ -69,11 +64,11 @@ kill -0 "$collector_pid" || { echo "collector died during playback" >&2; exit 1;
 kill "$readsb_pid"
 wait "$readsb_pid" 2>/dev/null || true
 wait "$collector_pid" 2>/dev/null || true
-pids=()
+bg_pids=()
 
 series=()
 [ -n "${GOLDEN_SERIES_DIR:-}" ] && series=(--dump-series "$GOLDEN_SERIES_DIR")
-python3 -I "$here/gen_raw_golden.py" reduce "$work/lines.jsonl" "$out" ${series[@]+"${series[@]}"}
+python3 -I "$here/gen_raw_golden.py" reduce "$tmp/lines.jsonl" "$out" ${series[@]+"${series[@]}"}
 n=$(python3 -I -c 'import gzip,sys; print(sum(1 for _ in gzip.open(sys.argv[1], "rt")))' "$out")
 if [ "$n" -lt 100 ]; then
     echo "golden has only $n addresses (expected at least 100)" >&2

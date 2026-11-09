@@ -33,6 +33,7 @@
 set -u
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+. "$here/../lib/test_common.sh"   # free_port; the soak keeps its own fail and teardown
 
 usage() {
   sed -n '6,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
@@ -162,12 +163,10 @@ demo_port() {
   case $1 in 8080|30001|30004|30005|30047|30500|30978|30979) return 0 ;; esac
   return 1
 }
-free_port() {  # free_port tcp|udp
+port_not_demo() {  # port_not_demo tcp|udp: the shared free_port, retried while it picks a demo port
   local p n
   for (( n=0; n<20; n++ )); do
-    p=$(python3 -I -c 'import socket, sys
-t = socket.SOCK_DGRAM if sys.argv[1] == "udp" else socket.SOCK_STREAM
-s = socket.socket(type=t); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' "$1") || return 1
+    p=$(free_port "$1") || return 1
     demo_port "$p" || { echo "$p"; return 0; }
   done
   return 1
@@ -211,12 +210,12 @@ EOF
 # web.port = 0 and cues.tcp_port = 0 turn the listeners off, so each gets a free
 # ephemeral port here; the daemon's own log line is still what the clients use.
 for inst in A B; do
-  wp=$(free_port tcp) && cp=$(free_port tcp) || fail "no free port for $inst"
+  wp=$(port_not_demo tcp) && cp=$(port_not_demo tcp) || fail "no free port for $inst"
   mkdir -p "$work/$inst" || fail "work dir for $inst"
   conf "$work/$inst/skycue.toml" "$wp" "$cp"
 done
 
-ps_port=$(free_port udp) || fail "no free UDP port for the pingstation input"
+ps_port=$(port_not_demo udp) || fail "no free UDP port for the pingstation input"
 printf '{"version":1,"inputs":[{"id":"ps-sim","name":"pingsim","type":"pingstation_json","bind":"127.0.0.1","port":%s}]}\n' \
   "$ps_port" > "$work/B/inputs.json"
 

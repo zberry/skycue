@@ -20,32 +20,33 @@ if [ "$#" -ne 4 ]; then
 fi
 dump978=$1 iqgen=$2 sample=$3 out=$4
 here=$(cd "$(dirname "$0")" && pwd)
-work=$(mktemp -d)
+. "$here/../lib/test_common.sh"
+test_init gen_uat_golden
 # A failed run keeps the tools' logs (tails on stderr; files in the
 # current directory only with GEN_UAT_GOLDEN_KEEP_LOGS=1).
-cleanup() {
+show_logs_and_cleanup() {
     status=$?
     if [ "$status" -ne 0 ]; then
         for f in iqgen.log dump978.log; do
-            if [ -s "$work/$f" ]; then
+            if [ -s "$tmp/$f" ]; then
                 echo "--- $f (tail) ---" >&2
-                tail -n 20 "$work/$f" >&2
+                tail -n 20 "$tmp/$f" >&2
                 if [ "${GEN_UAT_GOLDEN_KEEP_LOGS:-}" = 1 ]; then
-                    cp "$work/$f" "./gen_uat_golden.$f" 2>/dev/null || true
+                    cp "$tmp/$f" "./gen_uat_golden.$f" 2>/dev/null || true
                 fi
             fi
         done
     fi
-    rm -rf "$work"
+    cleanup
 }
-trap cleanup EXIT
+trap show_logs_and_cleanup EXIT
 
-gzip -dc "$sample" | grep -E '^([0-9]+,)?-' | sed -E 's/^[0-9]+,//' >"$work/downlinks.txt" || true
-if [ ! -s "$work/downlinks.txt" ]; then
+gzip -dc "$sample" | grep -E '^([0-9]+,)?-' | sed -E 's/^[0-9]+,//' >"$tmp/downlinks.txt" || true
+if [ ! -s "$tmp/downlinks.txt" ]; then
     echo "no downlink lines in $sample" >&2
     exit 1
 fi
-"$iqgen" uat "$work/downlinks.txt" -o "$work/t.cu8" >"$work/iqgen.log"
-"$dump978" --file "$work/t.cu8" --format CU8 --raw-stdout --json-stdout >"$work/out.txt" 2>"$work/dump978.log" || true
-rm -f "$work/t.cu8"
-python3 -I "$here/gen_uat_golden.py" "$work/out.txt" "$out"
+"$iqgen" uat "$tmp/downlinks.txt" -o "$tmp/t.cu8" >"$tmp/iqgen.log"
+"$dump978" --file "$tmp/t.cu8" --format CU8 --raw-stdout --json-stdout >"$tmp/out.txt" 2>"$tmp/dump978.log" || true
+rm -f "$tmp/t.cu8"
+python3 -I "$here/gen_uat_golden.py" "$tmp/out.txt" "$out"

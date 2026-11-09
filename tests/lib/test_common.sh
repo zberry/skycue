@@ -59,16 +59,16 @@ bg() {
 
 # cleanup: stop every pid in bg_pids with SIGTERM, give each up to 3 s (times
 # the slow factor, polled every 0.1 s) to go, SIGKILL what is left, reap, and
-# remove $tmp. A script that needs more on exit defines its own exit trap and
+# remove $tmp. Safe under set -e. A script that needs more on exit defines its own exit trap and
 # calls cleanup from it.
 cleanup() {
   local p i
-  for p in ${bg_pids[@]+"${bg_pids[@]}"}; do kill "$p" 2>/dev/null; done
+  for p in ${bg_pids[@]+"${bg_pids[@]}"}; do kill "$p" 2>/dev/null || true; done
   for p in ${bg_pids[@]+"${bg_pids[@]}"}; do
     for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
-    kill -9 "$p" 2>/dev/null
+    kill -9 "$p" 2>/dev/null || true
   done
-  wait 2>/dev/null
+  wait 2>/dev/null || true
   [ -n "${tmp:-}" ] && rm -rf "$tmp"
   return 0
 }

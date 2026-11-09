@@ -1,6 +1,7 @@
 #include "web_server.hpp"
 
 #include "engine.hpp"
+#include "file_util.hpp"
 #include "log.hpp"
 #include "runtime_config.hpp"
 #include "web_api.hpp"
@@ -53,12 +54,6 @@ constexpr std::size_t kWsMessageLimit = 64 * 1024;        // what a WebSocket cl
 constexpr std::size_t kStaticFileLimit = 8u << 20;        // larger files are not served (500)
 constexpr std::size_t kLingerDrainLimit = 1u << 20;       // bytes read and discarded before closing
 constexpr auto kLingerTime = std::chrono::seconds(2);
-
-bool isDirectory(const std::string& path)
-{
-    struct stat st{};
-    return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
-}
 
 enum class FileRead { ok, missing, too_large, error };
 

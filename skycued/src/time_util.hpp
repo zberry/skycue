@@ -19,6 +19,10 @@ std::string formatIso8601Ms(std::chrono::system_clock::time_point when);
 // Locale-independent; never throws.
 std::optional<std::chrono::system_clock::time_point> parseIso8601Ms(const std::string& text);
 
+// `tp` in UTC through strftime(3) with `strftime_format`, e.g. "%Y%m%dT%H%M%SZ";
+// "" when the result does not fit in 64 bytes.
+std::string formatUtc(std::chrono::system_clock::time_point tp, const char* strftime_format);
+
 // "20261101-123456": UTC, truncated to the second (for file names).
 std::string formatCompactUtc(std::chrono::system_clock::time_point when);
 

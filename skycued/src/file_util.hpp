@@ -5,6 +5,7 @@
 
 #include <sys/types.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 
@@ -56,5 +57,24 @@ private:
     FileStamp known_;
     std::optional<FileStamp> pending_;
 };
+
+enum class ReadStatus { ok, missing, too_large, error };
+
+// The whole regular file at `path` into `out`, which is replaced on ok and
+// untouched otherwise. missing: the path does not exist, a path component is
+// not a directory, the path is a directory (errno EISDIR), or a non-regular
+// file such as a FIFO (errno EINVAL); too_large: the file is over max_bytes,
+// by its size or because it grew while being read; error: any other
+// open/stat/read failure. errno holds the cause on every non-ok return.
+// The open uses O_RDONLY|O_CLOEXEC|O_NONBLOCK and clears O_NONBLOCK once the
+// file is known to be regular, so a FIFO never blocks.
+ReadStatus readRegularFile(const std::string& path, std::size_t max_bytes, std::string& out);
+
+// stat(2) says `path` is a directory.
+bool isDirectory(const std::string& path);
+
+// Renames `path` to path + suffix; on failure stores strerror(errno) in `why`
+// (errno is kept too). Callers keep their own log wording.
+bool setAside(const std::string& path, const std::string& suffix, std::string& why);
 
 }  // namespace skycued

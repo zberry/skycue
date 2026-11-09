@@ -120,6 +120,17 @@ std::string formatCompactUtc(system_clock::time_point when)
     return buf;
 }
 
+std::string formatUtc(system_clock::time_point tp, const char* strftime_format)
+{
+    const std::time_t t = system_clock::to_time_t(tp);
+    std::tm tm{};
+    gmtime_r(&t, &tm);
+    char buf[64];
+    // NOLINTNEXTLINE(clang-diagnostic-format-nonliteral): the caller's format
+    const std::size_t n = std::strftime(buf, sizeof buf, strftime_format, &tm);
+    return std::string(buf, n);  // n == 0 when it did not fit: ""
+}
+
 std::string hexAddress(uint32_t address)
 {
     char buf[8];

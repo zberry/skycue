@@ -2,6 +2,7 @@
 
 #include "config.hpp"
 #include "engine.hpp"
+#include "file_util.hpp"
 #include "hex.hpp"
 #include "json_lite.hpp"
 #include "observation_json.hpp"
@@ -632,12 +633,6 @@ ApiResponse postListRoute(ListKind kind, const std::string& body, const Engine& 
             std::move(*v);
     }
     return apply(rc, delta, [&] { return listsJson(e, rc); });
-}
-
-bool isDirectory(const std::string& path)
-{
-    struct stat st{};
-    return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
 // A small regular file's text; nullopt when it cannot be read, is not a

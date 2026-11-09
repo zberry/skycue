@@ -6,7 +6,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -108,6 +110,80 @@ void SettledFile::accept()
 {
     known_ = FileStamp::of(path_);
     pending_.reset();
+}
+
+ReadStatus readRegularFile(const std::string& path, std::size_t max_bytes, std::string& out)
+{
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) {
+        const int err = errno;
+        return err == ENOENT || err == ENOTDIR || err == EISDIR || err == ENXIO ? ReadStatus::missing
+                                                                                  : ReadStatus::error;
+    }
+    int err = 0;
+    ReadStatus result = ReadStatus::ok;
+    struct stat st{};
+    if (::fstat(fd, &st) != 0) {
+        err = errno;
+        result = ReadStatus::error;
+    } else if (!S_ISREG(st.st_mode)) {
+        err = S_ISDIR(st.st_mode) ? EISDIR : EINVAL;
+        result = ReadStatus::missing;
+    } else if (static_cast<unsigned long long>(st.st_size) > max_bytes) {
+        err = EFBIG;
+        result = ReadStatus::too_large;
+    } else {
+        const int flags = ::fcntl(fd, F_GETFL);
+        if (flags < 0 || ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0) {
+            err = errno;
+            result = ReadStatus::error;
+        }
+    }
+    std::string text;
+    if (result == ReadStatus::ok) {
+        text.reserve(std::min<std::size_t>(static_cast<std::size_t>(st.st_size), std::size_t{1} << 24));
+        char buf[16384];
+        for (;;) {
+            const ssize_t n = ::read(fd, buf, sizeof buf);
+            if (n < 0) {
+                if (errno == EINTR)
+                    continue;
+                err = errno;
+                result = ReadStatus::error;
+                break;
+            }
+            if (n == 0)
+                break;
+            text.append(buf, static_cast<std::size_t>(n));
+            if (text.size() > max_bytes) {  // grew while being read
+                err = EFBIG;
+                result = ReadStatus::too_large;
+                break;
+            }
+        }
+    }
+    ::close(fd);
+    if (result != ReadStatus::ok) {
+        errno = err;
+        return result;
+    }
+    out = std::move(text);
+    return result;
+}
+
+bool isDirectory(const std::string& path)
+{
+    struct stat st{};
+    return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+bool setAside(const std::string& path, const std::string& suffix, std::string& why)
+{
+    const std::string target = path + suffix;
+    if (::rename(path.c_str(), target.c_str()) == 0)
+        return true;
+    why = std::strerror(errno);
+    return false;
 }
 
 }  // namespace skycued

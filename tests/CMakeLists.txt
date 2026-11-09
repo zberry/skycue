@@ -20,6 +20,8 @@ skycue_add_unit_test(geo)
 
 skycue_add_unit_test(stats_store)
 
+skycue_add_unit_test(file_util)
+
 # icao_class: the daemon's copy of the page's class/country rules, on the
 # case fixture app_pure.test.js runs too.
 skycue_add_unit_test(icao_class FIXTURE_DIR)

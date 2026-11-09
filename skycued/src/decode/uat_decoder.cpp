@@ -18,37 +18,20 @@ namespace {
 using std::chrono::seconds;
 using skycue::AddressType;
 using skycue::Source;
-using namespace limits;  // range and emission limits shared with the 1090 decoder
 
 constexpr seconds kFieldFresh{60};     // our choice: observations carry fields <= 60 s old
-constexpr std::size_t kRssiFrames = 8; // our choice: rssi is the mean power over the last 8 frames
-
-void pushRssi(UatKeyState& ks, double dbfs) {
-    ks.rssi_ring[ks.rssi_next] = dbfs;
-    ks.rssi_next = (ks.rssi_next + 1) % kRssiFrames;
-    if (ks.rssi_count < kRssiFrames) ++ks.rssi_count;
-}
-
-std::optional<double> rssiOf(const UatKeyState& ks) {
-    if (ks.rssi_count == 0) return std::nullopt;
-    double sum = 0.0;
-    for (std::size_t i = 0; i < ks.rssi_count; ++i) sum += std::pow(10.0, ks.rssi_ring[i] / 10.0);
-    const double mean = sum / static_cast<double>(ks.rssi_count);
-    if (!(mean > 0.0) || !std::isfinite(mean)) return std::nullopt;
-    return std::round(10.0 * std::log10(mean) * 10.0) / 10.0;
-}
 
 // Sets a timed field; flags a change when it is new, expired or replaced a different value.
 template <typename T>
 void setField(UatKeyState& ks, Timed<T>& f, const T& v, TimePoint now) {
-    if (!f.fresh(now, kFieldFresh) || !(f.value == v)) ks.dirty = true;
+    if (!f.fresh(now, kFieldFresh) || !(f.value == v)) ks.gate.dirty = true;
     f.set(v, now);
 }
 
 // Identity fields live with the key (spec 14 item 5): changed when new or different, never expired.
 template <typename T>
 void setIdentity(UatKeyState& ks, Timed<T>& f, const T& v, TimePoint now) {
-    if (!f.has || !(f.value == v)) ks.dirty = true;
+    if (!f.has || !(f.value == v)) ks.gate.dirty = true;
     f.set(v, now);
 }
 
@@ -112,7 +95,7 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     key.rebroadcast = map->rebroadcast;
     UatKeyState& ks = obtain(key, map->source);
     const auto level = rssi_dbfs ? rssi_dbfs : f.rssi_dbfs;
-    if (level && std::isfinite(*level)) pushRssi(ks, *level);
+    if (level && std::isfinite(*level)) ks.rssi.pushPower(RssiRing::fromDbfs(*level));
 
     const uat::StateVector sv = uat::decodeStateVector(f);
     const bool trackfile = map->type == AddressType::tisb_trackfile;  // TIS-B trackfile targets carry no geometric altitude
@@ -148,7 +131,7 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
         setField(ks, mine, r, now_);
         if (other.has) {  // the source flipped: the other source's rate is stale, not carried for 60 s
             other = Timed<float>{};
-            ks.dirty = true;
+            ks.gate.dirty = true;
         }
     }
     setField(ks, ks.nic, sv.nic, now_);
@@ -168,13 +151,13 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
         const cpr::Position p{*sv.lat, *sv.lon};
         const std::optional<cpr::Position> anchor = cfg_.reference ? cfg_.reference : ks.first_pos;
         bool ok = std::isfinite(p.lat) && std::isfinite(p.lon) && std::fabs(p.lat) <= 90.0 &&
-                  !(anchor && cpr::distanceNm(p, *anchor) > kRangeNm);
+                  withinRange(p, anchor);
         if (!ok) {
             ++counters_.cpr_rejected;  // the fix is dropped; no stored position is touched
             dropped = true;
         } else {
             if (!ks.first_pos) ks.first_pos = p;
-            ks.last_accept_at = now_;
+            ks.gate.last_accept_at = now_;
             accepted = p;  // every accepted in-range fix is new, even a repeat: position_time must advance
         }
     }
@@ -185,16 +168,13 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     else ++counters_.decoded;
 
     if (!handler_) {
-        if (accepted) ks.dirty = false;
+        if (accepted) ks.gate.dirty = false;
         return;
     }
     if (!accepted) {
         // Spec 7.2: without an accepted position in the last 10 s, a change emits, at most once
         // per second; a change held back waits for the next frame (dirty stays set).
-        if (!ks.dirty) return;
-        if (ks.last_accept_at && now_ - *ks.last_accept_at <= kNoPositionFor) return;
-        if (ks.last_change_emit && now_ - *ks.last_change_emit < kChangeInterval) return;
-        ks.last_change_emit = now_;
+        if (!shouldEmitWithoutPosition(ks.gate, now_)) return;
     }
 
     skycued::TrackObservation o;
@@ -228,11 +208,11 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     o.category = ks.category.has ? std::optional(ks.category.value) : std::nullopt;  // identity: lives with the key
     o.nic = ks.nic.fresh(now_, kFieldFresh);
     o.nac_p = ks.nac_p.fresh(now_, kFieldFresh);
-    o.rssi = rssiOf(ks);
+    o.rssi = ks.rssi.meanDb();
     o.raw_line = "-" + coding::toHex(f.bytes, true) + ";";
     o.input_id = input_id_;
     o.rebroadcast = ks.key.rebroadcast;
-    ks.dirty = false;
+    ks.gate.dirty = false;
     ++counters_.observations;
     handler_(o);
 }

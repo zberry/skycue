@@ -7,7 +7,7 @@
 // Counters: each frame counts exactly one of unknown_type, no_position, unmapped
 // (types 7..10) or decoded. A position dropped by the range check counts in both
 // cpr_rejected and no_position; the frame's other fields still merge. rs_errors sums the
-// frames' ";rs=" counts. As in the 1090 decoder a change without a position emits only after
+// frames' ";rs=" counts. The gate in decoder_types.hpp (shared with the 1090 decoder): a change without a position emits only after
 // 10 s without an accepted one and at most once per second (spec 7.2). Callsign,
 // category, squawk and emergency live with the key; all other fields expire at 60 s.
 
@@ -35,8 +35,6 @@ struct UatKeyState {
     std::list<StateKey>::iterator lru;
 
     std::optional<cpr::Position> first_pos;  // anchor of the range check without a reference
-    std::optional<TimePoint> last_accept_at;  // last accepted position
-    std::optional<TimePoint> last_change_emit;  // last observation emitted without a position
 
     Timed<std::string> callsign, category, squawk, emergency;
     Timed<int32_t> alt_baro, alt_geom;
@@ -44,12 +42,9 @@ struct UatKeyState {
     Timed<uint8_t> nic, nac_p;
     Timed<bool> on_ground;
 
-    // Level (dBFS) of the last 8 frames that carried one.
-    std::array<double, 8> rssi_ring{};
-    std::size_t rssi_count = 0;
-    std::size_t rssi_next = 0;
+    RssiRing rssi;  // level (dBFS) of the last frames that carried one, as mean power
 
-    bool dirty = false;  // a tracked field was first seen or changed and is not yet emitted (spec 7.2)
+    EmitGate gate;  // dirty flag and emission times (spec 7.2)
 };
 
 class UatDecoder {

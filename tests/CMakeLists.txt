@@ -275,6 +275,9 @@ skycue_add_unit_test(pingstation FIXTURE_DIR)
 # Input definitions, their validation, the inputs file and the settled-file watcher.
 skycue_add_unit_test(input_def)
 
+# The shared test headers: TempDir, fileExists/fileReadable, forEachLine/loadJsonl.
+skycue_add_unit_test(support_headers LIBS skycued_core ZLIB::ZLIB)
+
 # Output definitions (the hub's destinations) and the raw-message tap.
 skycue_add_unit_test(output_def)
 

@@ -1,7 +1,8 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(Boost 1.66 COMPONENTS system)
+include("${CMAKE_CURRENT_LIST_DIR}/skycueBoostSystem.cmake")
+skycue_require_boost_system(1.66)
 find_dependency(Threads)
 
 include("${CMAKE_CURRENT_LIST_DIR}/skycueTargets.cmake")

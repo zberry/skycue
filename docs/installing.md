@@ -493,6 +493,8 @@ The build packages, on Debian and Raspberry Pi OS:
 sudo apt install build-essential cmake libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl
 ```
 
+With Boost 1.69 or newer the System library is header-only, so `libboost-system-dev` is only needed on older distributions.
+
 on RHEL 8 and 9 (BaseOS and AppStream only):
 
 ```sh

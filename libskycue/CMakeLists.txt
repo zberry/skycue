@@ -15,9 +15,8 @@ option(SKYCUE_INSTALL "Install libskycue" ON)
 # directly gets them too.
 include(GNUInstallDirs)
 
-if(NOT TARGET Boost::system)
-  find_package(Boost 1.66 REQUIRED COMPONENTS system)
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/BoostSystem.cmake")
+skycue_require_boost_system(1.66)
 if(NOT TARGET Threads::Threads)
   find_package(Threads REQUIRED)
 endif()
@@ -89,3 +88,5 @@ install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/skycueConfig.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/skycueConfigVersion.cmake"
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/skycue)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/BoostSystem.cmake"
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/skycue RENAME skycueBoostSystem.cmake)

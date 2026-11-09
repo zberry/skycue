@@ -6,7 +6,7 @@ find_package(ZLIB REQUIRED)
 # skycue-dump: prints the skycue stream one line per frame. For the stream a
 # pure libskycue consumer; skycued_asterix (pure code) decodes capture files.
 add_executable(skycue-dump skycue-dump.cpp)
-target_link_libraries(skycue-dump PRIVATE skycue::skycue skycued_asterix Boost::program_options)
+target_link_libraries(skycue-dump PRIVATE skycue::skycue skycued_asterix skycued_names Boost::program_options)
 
 # skycue-rawrec: records readsb's Beast output and dump978's raw UAT lines.
 add_executable(skycue-rawrec skycue-rawrec.cpp)

@@ -9,11 +9,17 @@ add_library(skycued_asterix STATIC
   src/asterix/cat021_encode.cpp
   src/asterix/cat021_framer.cpp
   src/json_escape.cpp
-  src/time_util.cpp
-  src/track_names.cpp)
+  src/time_util.cpp)
 target_include_directories(skycued_asterix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(skycued_asterix PUBLIC skycue::skycue Boost::boost)
+target_link_libraries(skycued_asterix PUBLIC Boost::boost)
 skycue_set_warnings(skycued_asterix)
+
+# Track display names (a table over libskycue's types). A library of its own so the
+# pure codec above does not depend on libskycue; skycue-dump links it too.
+add_library(skycued_names STATIC src/track_names.cpp)
+target_include_directories(skycued_names PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(skycued_names PUBLIC skycue::skycue)
+skycue_set_warnings(skycued_names)
 
 # --convert-conf fills in the text of the example config: embed it.
 set(_skycue_toml_example "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/skycue.toml.example")
@@ -108,7 +114,7 @@ add_library(skycued_core STATIC
   src/web_stats.cpp
   src/web_server.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
-target_link_libraries(skycued_core PUBLIC skycued_asterix skycue::skycue skycue::net Boost::boost Boost::program_options)
+target_link_libraries(skycued_core PUBLIC skycued_asterix skycued_names skycue::skycue skycue::net Boost::boost Boost::program_options)
 skycue_set_warnings(skycued_core)
 
 add_executable(skycued src/main.cpp)

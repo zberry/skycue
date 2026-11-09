@@ -307,7 +307,7 @@ BOOST_AUTO_TEST_CASE(config_without_daemon_info_500)
     });
     BOOST_TEST(r.status == 500u);
     BOOST_TEST(r.body == "{\"error\":\"no daemon info\"}");
-    req.method = "PUT";
+    req.method = "DELETE";
     const auto put = f.fx->t.call([&] {
         skycued::webapi::ApiContext ctx{*f.fx->engine, *f.rc, f.tmp.path, &f.info};
         return skycued::webapi::handleApi(req, ctx);
@@ -493,4 +493,147 @@ BOOST_AUTO_TEST_CASE(daemon_reports_allow_restart_and_supervisor)
     BOOST_TEST_REQUIRE(daemon.has_value());
     BOOST_TEST(!daemon->getBool("allow_restart").value_or(true));
     BOOST_TEST(daemon->getString("supervisor").value_or("") == "none");
+}
+
+namespace {
+
+std::string slurp(const std::string& path)
+{
+    std::ifstream in(path);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+Reply put(ConfigFx& f, const std::string& body) { return request(f.port, http::verb::put, "/api/config", body); }
+
+std::vector<std::string> names(const JsonObject& o, const char* key)
+{
+    return o.getStringArray(key).value_or(std::vector<std::string>{"<missing>"});
+}
+
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(put_sets_restart_key_and_reports_pending)
+{
+    ConfigFx f;
+    const auto r = put(f, R"({"set":{"fisb.enable":false}})");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    const auto j = parsed(r.body);
+    BOOST_TEST(j.getBool("ok").value_or(false));
+    BOOST_TEST(names(j, "applied") == std::vector<std::string>{"fisb.enable"}, boost::test_tools::per_element());
+    const auto p = j.getObjectArray("pending_restart");
+    BOOST_TEST_REQUIRE((p && p->size() == 1u));
+    BOOST_TEST((*p)[0].getString("key").value_or("") == "fisb.enable");
+    BOOST_TEST((*p)[0].getString("running").value_or("") == "true");
+    BOOST_TEST((*p)[0].getString("configured").value_or("") == "false");
+    BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").find("[fisb]\nenable = false") != std::string::npos);
+    const auto keys = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+    BOOST_TEST(keys.by_key.at("fisb.enable").getString("source").value_or("") == "overrides");
+    BOOST_TEST(!keys.by_key.at("fisb.enable").has("file_value"));
+}
+
+BOOST_AUTO_TEST_CASE(put_live_key_applies_at_once)
+{
+    ConfigFx f;
+    const auto r = put(f, R"({"set":{"filters.max_range_nm":150}})");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    const auto j = parsed(r.body);
+    BOOST_TEST(names(j, "applied") == std::vector<std::string>{"filters.max_range_nm"}, boost::test_tools::per_element());
+    BOOST_TEST(j.getObjectArray("pending_restart")->empty());
+    BOOST_TEST(f.fx->t.call([&] { return f.fx->engine->snapshot().filters.max_range_nm; }) == 150.0);
+}
+
+BOOST_AUTO_TEST_CASE(put_filter_key_clears_overlay_value)
+{
+    ConfigFx f;
+    BOOST_TEST_REQUIRE(request(f.port, http::verb::put, "/api/filters", R"({"max_range_nm":130})").status == 200u);
+    BOOST_TEST(slurp(f.rc->overlayPath()).find("max_range_nm") != std::string::npos);
+    const auto r = put(f, R"({"set":{"filters.max_range_nm":140}})");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    BOOST_TEST(f.fx->t.call([&] { return f.fx->engine->snapshot().filters.max_range_nm; }) == 140.0);
+    BOOST_TEST(slurp(f.rc->overlayPath()).find("max_range_nm") == std::string::npos);
+    const auto keys = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+    BOOST_TEST(keys.by_key.at("filters.max_range_nm").getString("source").value_or("") == "overrides");
+}
+
+BOOST_AUTO_TEST_CASE(put_rejects_wrong_json_types)
+{
+    ConfigFx f;
+    for (const char* body : {R"({"set":{"web.trail_seconds":"300"}})", R"({"set":{"fisb.enable":1}})",
+                             R"({"set":{"web.trail_seconds":1.5}})", R"({"set":{"recording.formats":"csv"}})"}) {
+        const auto r = put(f, body);
+        BOOST_TEST(r.status == 400u, body);
+        BOOST_TEST(parsed(r.body).getString("key").has_value(), r.body);
+    }
+    const auto r = put(f, R"({"set":{"web.trail_seconds":"300"}})");
+    BOOST_TEST(parsed(r.body).getString("key").value_or("") == "web.trail_seconds");
+    BOOST_TEST(parsed(r.body).getString("error").value_or("") == "web.trail_seconds: expected int");
+    BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").empty());
+}
+
+BOOST_AUTO_TEST_CASE(put_bootstrap_403_pinned_409_unknown_400)
+{
+    {
+        ConfigFx f;
+        const auto r = put(f, R"({"set":{"web.bind":"0.0.0.0"}})");
+        BOOST_TEST(r.status == 403u, r.body);
+        BOOST_TEST(parsed(r.body).getString("key").value_or("") == "web.bind");
+        BOOST_TEST(put(f, R"({"set":{"nope.key":1}})").status == 400u);
+        BOOST_TEST(put(f, "[1]").status == 400u);
+    }
+    ConfigFx g(nullptr, {"filters.min_elevation_deg=2"});
+    const auto r = put(g, R"({"set":{"filters.min_elevation_deg":3}})");
+    BOOST_TEST(r.status == 409u, r.body);
+    BOOST_TEST(parsed(r.body).getString("key").value_or("") == "filters.min_elevation_deg");
+    BOOST_TEST(parsed(r.body).getString("source").value_or("") == "set");
+}
+
+BOOST_AUTO_TEST_CASE(put_cross_key_error_names_key)
+{
+    ConfigFx f([](const std::string&) { return ConfigFx::ConfMap{{"cues.max_interval_s", "10"}}; });
+    const auto r = put(f, R"({"set":{"cues.min_interval_s":12}})");
+    BOOST_TEST(r.status == 400u, r.body);
+    const std::string e = parsed(r.body).getString("error").value_or("");
+    BOOST_TEST(e.find("cues.min_interval_s") != std::string::npos, e);
+    BOOST_TEST(e.find("cues.max_interval_s") != std::string::npos, e);
+    BOOST_TEST(e.find("skycue") == std::string::npos, e);
+    BOOST_TEST(parsed(r.body).getString("key").value_or("") == "cues.max_interval_s");
+    BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").empty());
+}
+
+BOOST_AUTO_TEST_CASE(put_clear_is_idempotent)
+{
+    ConfigFx f;
+    auto r = put(f, R"({"clear":["web.trail_seconds"]})");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    BOOST_TEST(parsed(r.body).getStringArray("applied")->empty());
+    BOOST_TEST(put(f, R"({"set":{"web.trail_seconds":300}})").status == 200u);
+    BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").find("trail_seconds = 300") != std::string::npos);
+    r = put(f, R"({"clear":["web.trail_seconds"]})");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").find("trail_seconds") == std::string::npos);
+    BOOST_TEST(parsed(r.body).getObjectArray("pending_restart")->empty());
+}
+
+BOOST_AUTO_TEST_CASE(put_external_key_listed_as_external)
+{
+    ConfigFx f;
+    const auto r = put(f, R"({"set":{"sdr.gain_1090":"49.6"}})");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    const auto j = parsed(r.body);
+    BOOST_TEST(names(j, "external") == std::vector<std::string>{"sdr.gain_1090"}, boost::test_tools::per_element());
+    BOOST_TEST(j.getObjectArray("pending_restart")->empty());
+}
+
+BOOST_AUTO_TEST_CASE(put_unwritable_dir_500_names_state_dir)
+{
+    if (::geteuid() == 0)
+        return;
+    ConfigFx f;
+    ::chmod(f.tmp.path.c_str(), 0500);
+    const auto r = put(f, R"({"set":{"fisb.enable":false}})");
+    ::chmod(f.tmp.path.c_str(), 0700);
+    BOOST_TEST(r.status == 500u, r.body);
+    const std::string e = parsed(r.body).getString("error").value_or("");
+    BOOST_TEST(e.find(f.tmp.path) != std::string::npos, e);
+    BOOST_TEST(e.find("paths.state_dir") != std::string::npos, e);
 }

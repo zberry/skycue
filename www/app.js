@@ -76,6 +76,8 @@
         if (!r.ok) {
           var err = new Error(j.error || ('HTTP ' + r.status));
           err.status = r.status;   // e.g. the Stats detail closes on a 404
+          if (j.key !== undefined) err.key = j.key;           // PUT /api/config: the key at fault
+          if (j.source !== undefined) err.source = j.source;  // ... and what pins it (env, set)
           throw err;
         }
         return j;

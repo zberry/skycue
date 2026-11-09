@@ -685,6 +685,65 @@ void RuntimeConfig::applyUi(const Overlay& delta, const std::string& origin)
         changed();
 }
 
+ConfigApplyResult RuntimeConfig::applyConfig(const std::map<std::string, toml_lite::Value>& set,
+                                             const std::set<std::string>& clear, const std::string& origin)
+{
+    std::set<std::string> touched(clear);
+    for (const auto& kv : set)
+        touched.insert(kv.first);
+    for (const auto& key : touched)
+        keySpec(key);  // std::invalid_argument naming an unknown key
+    for (const auto& key : touched)
+        if (keyClassOf(key) == KeyClass::bootstrap)
+            throw ReadOnlyKeyError(key);
+    for (const auto& key : touched)
+        if (!pinnedBy(key).empty())
+            throw PinnedKeyError(key, pinnedBy(key));
+    for (const auto& key : clear)
+        if (set.count(key))
+            throw std::invalid_argument(key + ": cannot be both set and cleared");
+
+    const Config before = file_conf_;
+    try {
+        writeOverrides(set, clear);
+    } catch (const ConfigError& e) {
+        // "<file>[:<line>]: <message>" -> "<message>" (a key name leads it).
+        const std::string what = e.what();
+        const auto cut = what.find(": ");
+        throw std::invalid_argument(cut == std::string::npos ? what : what.substr(cut + 2));
+    } catch (const std::runtime_error& e) {
+        throw std::runtime_error(std::string(e.what()) + "; the overrides file is " + overrides_watch_.path() +
+                                 ", in paths.state_dir when that is set (set paths.state_dir to a directory"
+                                 " skycued can write)");
+    }
+    reloadConf(kOverridesFileName, true);
+
+    // A filter key set here no longer has a runtime overlay value above it.
+    Overlay next = overlay_;
+    if (touched.count("filters.max_range_nm"))
+        next.max_range_nm.reset();
+    if (touched.count("filters.min_elevation_deg"))
+        next.min_elevation_deg.reset();
+    if (next != overlay_) {
+        writeOverlay(next);
+        overlay_ = std::move(next);
+    }
+
+    ConfigApplyResult result;
+    for (const auto& key : touched) {
+        if (configValueText(before, key) == configValueText(file_conf_, key))
+            continue;
+        result.applied.push_back(key);
+        if (keyClassOf(key) == KeyClass::external)
+            result.external.push_back(key);
+        else if (keyClassOf(key) == KeyClass::restart)
+            result.pending_restart.push_back(key);
+    }
+    if (!applyEffective(origin))
+        changed();
+    return result;
+}
+
 std::string RuntimeConfig::promoteToBaseline()
 {
     std::vector<std::string> problems;
@@ -824,7 +883,7 @@ void RuntimeConfig::poll()
         changed();
 }
 
-void RuntimeConfig::reloadConf(const std::string& edited)
+void RuntimeConfig::reloadConf(const std::string& edited, bool quiet)
 {
     Config c;
     try {
@@ -837,7 +896,7 @@ void RuntimeConfig::reloadConf(const std::string& edited)
     }
     // Against the running values: a key edited back to what is running needs no restart.
     const auto restart = restartKeysChanged(running_, c);
-    if (!restart.empty()) {
+    if (!restart.empty() && !quiet) {
         std::string keys;
         for (const auto& k : restart)
             keys += (keys.empty() ? "" : ", ") + k;
@@ -851,7 +910,7 @@ void RuntimeConfig::reloadConf(const std::string& edited)
          c.min_elevation_deg != file_conf_.min_elevation_deg && overlay_.min_elevation_deg.has_value()},
     };
     for (const auto& o : overridden)
-        if (o.second)
+        if (o.second && !quiet)
             LOG_WARN("runtime: " << o.first << " edited in " << edited << " but overridden by " << kOverlayName
                                  << " (use the UI or \"save as baseline\")");
     // An edit of a filter key that the environment or --set sets changes
@@ -868,7 +927,7 @@ void RuntimeConfig::reloadConf(const std::string& edited)
         if ((src.source != "env" && src.source != "--set") ||
             keyClassOf(src.key) != KeyClass::live)
             continue;
-        if (configValueText(files, src.key) != configValueText(files_only_, src.key))
+        if (!quiet && configValueText(files, src.key) != configValueText(files_only_, src.key))
             LOG_WARN("runtime: " << src.key << " edited in " << edited << " but pinned by "
                                  << (src.source == "env" ? envNameOf(src.key) : std::string("--set")) << " ("
                                  << configValueText(c, src.key) << "); that value stays");
@@ -876,7 +935,7 @@ void RuntimeConfig::reloadConf(const std::string& edited)
     files_only_ = files;
     // An edit of skycue.toml that the overrides file replaces changes nothing
     // either: one line per key, so the edit does not look ignored.
-    if (edited == baseName(conf_path_))
+    if (edited == baseName(conf_path_) && !quiet)
         for (const auto& key : overridesFileKeys()) {
             if (keyClassOf(key) != KeyClass::live)
                 continue;

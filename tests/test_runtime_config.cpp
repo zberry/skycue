@@ -1082,3 +1082,33 @@ BOOST_AUTO_TEST_CASE(overlay_left_next_to_the_config_warns_when_state_dir_is_set
     err2.restore();
     BOOST_TEST(!has(err2.text(), "skycue.runtime.json"), err2.text());
 }
+
+BOOST_AUTO_TEST_CASE(apply_config_orders_its_checks_and_reports_changes)
+{
+    RtFx f(headConf({{"cues.max_interval_s", "10"}}));
+    f.start();
+    using skycued::ConfigApplyResult;
+    using skycued::ReadOnlyKeyError;
+    using V = skycued::toml_lite::Value;
+    f.fx->t.call([&] {
+        BOOST_CHECK_THROW(f.rc->applyConfig({{"nope.key", V(int64_t(1))}}, {}, "ui"), std::invalid_argument);
+        BOOST_CHECK_THROW(f.rc->applyConfig({{"web.bind", V(std::string("0.0.0.0"))}}, {}, "ui"), ReadOnlyKeyError);
+        BOOST_CHECK_THROW(f.rc->applyConfig({{"web.trail_seconds", V(int64_t(300))}}, {"web.trail_seconds"}, "ui"),
+                          std::invalid_argument);
+        try {
+            f.rc->applyConfig({{"cues.min_interval_s", V(int64_t(12))}}, {}, "ui");
+            BOOST_ERROR("no throw");
+        } catch (const std::invalid_argument& e) {
+            const std::string w = e.what();
+            BOOST_TEST(w.find("cues.") == 0u, w);
+            BOOST_TEST(w.find("cues.min_interval_s") != std::string::npos, w);
+            BOOST_TEST(w.find("skycue") == std::string::npos, w);
+        }
+        const ConfigApplyResult r = f.rc->applyConfig({{"fisb.enable", V(false)}, {"filters.max_range_nm", V(int64_t(90))}},
+                                                      {"web.trail_seconds"}, "ui");
+        BOOST_TEST(r.applied.size() == 2u);
+        BOOST_TEST(r.pending_restart == std::vector<std::string>{"fisb.enable"}, boost::test_tools::per_element());
+        BOOST_TEST(r.external.empty());
+    });
+    BOOST_TEST(f.filters().max_range_nm == 90.0);
+}

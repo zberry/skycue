@@ -21,6 +21,7 @@
 #include <cctype>
 #include <chrono>
 #include <map>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -293,6 +294,367 @@ ApiResponse putFiltersRoute(const std::string& body, RuntimeConfig& rc)
         (range ? delta.max_range_nm : delta.min_elevation_deg) = v;
     }
     return apply(rc, delta, [&] { return filtersJson(rc); });
+}
+
+// ---- PUT /api/config ----------------------------------------------------------
+// JsonObject keeps every scalar as text (the string "300" and the number 300
+// read alike), and a config value's JSON type matters, so this body gets its
+// own small reader. The text has already passed JsonObject::parse, so it is
+// valid JSON of bounded size and depth.
+struct JsonScalar {
+    enum Kind { str, num, boolean, other } kind = other;
+    std::string text;  // str: unescaped; num: as written
+    bool flag = false;
+    bool is_array = false;       // a flat array
+    bool array_strings = false;  // ... of strings only
+    std::vector<std::string> items;
+};
+
+int hexDigit(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+class BodyReader {
+public:
+    explicit BodyReader(const std::string& s) : s_(s) {}
+    // {"set": {key: scalar|[strings]}, "clear": [strings]}; false on a shape it does not accept.
+    bool read(std::vector<std::pair<std::string, JsonScalar>>& set, std::vector<std::string>& clear,
+              std::string& problem)
+    {
+        ws();
+        if (!eat('{'))
+            return fail(problem, "the body must be a JSON object");
+        ws();
+        if (eat('}'))
+            return true;
+        for (;;) {
+            std::string name;
+            ws();
+            if (!string(name))
+                return fail(problem, "the body must be a JSON object");
+            ws();
+            if (!eat(':'))
+                return fail(problem, "the body must be a JSON object");
+            ws();
+            if (name == "set") {
+                if (!eat('{'))
+                    return fail(problem, "set must be an object");
+                ws();
+                if (!eat('}')) {
+                    for (;;) {
+                        std::string key;
+                        ws();
+                        if (!string(key))
+                            return fail(problem, "set must be an object");
+                        ws();
+                        if (!eat(':'))
+                            return fail(problem, "set must be an object");
+                        ws();
+                        JsonScalar v;
+                        if (!value(v))
+                            return fail(problem, key + ": unsupported value");
+                        set.emplace_back(std::move(key), std::move(v));
+                        ws();
+                        if (eat(','))
+                            continue;
+                        if (eat('}'))
+                            break;
+                        return fail(problem, "set must be an object");
+                    }
+                }
+            } else if (name == "clear") {
+                JsonScalar v;
+                if (!value(v) || !v.is_array || !v.array_strings)
+                    return fail(problem, "clear must be an array of keys");
+                clear = std::move(v.items);
+            } else {
+                return fail(problem, "unknown key '" + name + "'");
+            }
+            ws();
+            if (eat(','))
+                continue;
+            return eat('}') ? true : fail(problem, "the body must be a JSON object");
+        }
+    }
+
+private:
+    static bool fail(std::string& problem, const std::string& what)
+    {
+        problem = what;
+        return false;
+    }
+    void ws()
+    {
+        while (i_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[i_])))
+            ++i_;
+    }
+    bool eat(char c)
+    {
+        if (i_ < s_.size() && s_[i_] == c) {
+            ++i_;
+            return true;
+        }
+        return false;
+    }
+    static void utf8(std::string& out, unsigned cp)
+    {
+        if (cp < 0x80) {
+            out += static_cast<char>(cp);
+        } else if (cp < 0x800) {
+            out += static_cast<char>(0xC0 | (cp >> 6));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            out += static_cast<char>(0xE0 | (cp >> 12));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+    }
+    bool string(std::string& out)
+    {
+        if (!eat('"'))
+            return false;
+        out.clear();
+        while (i_ < s_.size()) {
+            const char c = s_[i_++];
+            if (c == '"')
+                return true;
+            if (c != '\\') {
+                out += c;
+                continue;
+            }
+            if (i_ >= s_.size())
+                return false;
+            const char e = s_[i_++];
+            switch (e) {
+            case 'b': out += '\b'; break;
+            case 'f': out += '\f'; break;
+            case 'n': out += '\n'; break;
+            case 'r': out += '\r'; break;
+            case 't': out += '\t'; break;
+            case 'u': {
+                if (i_ + 4 > s_.size())
+                    return false;
+                unsigned cp = 0;
+                for (int k = 0; k < 4; ++k) {
+                    const int h = hexDigit(s_[i_++]);
+                    if (h < 0)
+                        return false;
+                    cp = cp * 16 + static_cast<unsigned>(h);
+                }
+                utf8(out, cp);  // a surrogate pair is not a valid config value anyway
+                break;
+            }
+            default: out += e;  // " \\ /
+            }
+        }
+        return false;
+    }
+    bool value(JsonScalar& v)
+    {
+        if (i_ >= s_.size())
+            return false;
+        const char c = s_[i_];
+        if (c == '"') {
+            v.kind = JsonScalar::str;
+            return string(v.text);
+        }
+        if (c == '[') {
+            ++i_;
+            v.is_array = true;
+            v.array_strings = true;
+            ws();
+            if (eat(']'))
+                return true;
+            for (;;) {
+                ws();
+                std::string item;
+                if (s_.compare(i_, 1, "\"") == 0) {
+                    if (!string(item))
+                        return false;
+                    v.items.push_back(std::move(item));
+                } else {
+                    v.array_strings = false;  // skip a non-string element
+                    JsonScalar skipped;
+                    if (!value(skipped))
+                        return false;
+                }
+                ws();
+                if (eat(','))
+                    continue;
+                return eat(']');
+            }
+        }
+        if (s_.compare(i_, 4, "true") == 0 || s_.compare(i_, 5, "false") == 0) {
+            v.kind = JsonScalar::boolean;
+            v.flag = s_[i_] == 't';
+            i_ += v.flag ? 4 : 5;
+            return true;
+        }
+        if (s_.compare(i_, 4, "null") == 0) {
+            i_ += 4;
+            return true;
+        }
+        if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) {
+            const size_t start = i_;
+            while (i_ < s_.size() && (std::isdigit(static_cast<unsigned char>(s_[i_])) || std::strchr("+-.eE", s_[i_])))
+                ++i_;
+            v.kind = JsonScalar::num;
+            v.text = s_.substr(start, i_ - start);
+            return true;
+        }
+        return false;  // an object
+    }
+    const std::string& s_;
+    size_t i_ = 0;
+};
+
+// nullopt when `v` is not of the key's type.
+std::optional<toml_lite::Value> toTomlValue(const KeySpec& spec, const JsonScalar& v)
+{
+    switch (spec.type) {
+    case KeyType::string:
+        if (v.kind == JsonScalar::str && !v.is_array)
+            return toml_lite::Value(v.text);
+        return std::nullopt;
+    case KeyType::boolean:
+        if (v.kind == JsonScalar::boolean)
+            return toml_lite::Value(v.flag);
+        return std::nullopt;
+    case KeyType::strings:
+        if (v.is_array && v.array_strings) {
+            toml_lite::Array items(v.items.begin(), v.items.end());
+            return toml_lite::Value(std::move(items));
+        }
+        return std::nullopt;
+    case KeyType::integer:
+    case KeyType::number: {
+        if (v.kind != JsonScalar::num)
+            return std::nullopt;
+        char* end = nullptr;
+        errno = 0;
+        if (spec.type == KeyType::integer) {
+            if (v.text.find_first_of(".eE") != std::string::npos)
+                return std::nullopt;
+            const long long n = std::strtoll(v.text.c_str(), &end, 10);
+            if (errno != 0 || *end != '\0')
+                return std::nullopt;
+            return toml_lite::Value(static_cast<int64_t>(n));
+        }
+        const double d = std::strtod(v.text.c_str(), &end);
+        if (errno != 0 || *end != '\0' || !std::isfinite(d))
+            return std::nullopt;
+        return toml_lite::Value(d);
+    }
+    }
+    return std::nullopt;
+}
+
+const char* typeWord(KeyType t)
+{
+    switch (t) {
+    case KeyType::integer: return "int";
+    case KeyType::number: return "float";
+    case KeyType::boolean: return "bool";
+    case KeyType::string: return "string";
+    case KeyType::strings: return "array of strings";
+    }
+    return "value";
+}
+
+std::string jsonString(const std::string& s)
+{
+    std::string out;
+    appendJsonString(out, s);
+    return out;
+}
+
+ApiResponse keyError(unsigned status, const std::string& message, const std::string& key)
+{
+    return json(status, JsonWriter().add("error", message).add("key", key).str());
+}
+
+// The key a ConfigError/invalid_argument message starts with ("<key>: ..." or
+// "<key> (10) must ..."), else "".
+std::string leadingKey(const std::string& message)
+{
+    const auto end = message.find_first_of(": ");
+    if (end == std::string::npos)
+        return "";
+    const std::string head = message.substr(0, end);
+    for (const auto& spec : keySpecs())
+        if (head == spec.key)
+            return head;
+    return "";
+}
+
+ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
+{
+    if (!JsonObject::parse(body))
+        return error(400, "the body must be a JSON object");
+    std::vector<std::pair<std::string, JsonScalar>> raw;
+    std::vector<std::string> clear_list;
+    std::string problem;
+    if (!BodyReader(body).read(raw, clear_list, problem))
+        return error(400, problem);
+    std::map<std::string, toml_lite::Value> set;
+    for (const auto& [key, v] : raw) {
+        const KeySpec* spec = nullptr;
+        try {
+            spec = &keySpec(key);
+        } catch (const std::invalid_argument&) {
+            return keyError(400, "unknown key '" + key + "'", key);
+        }
+        auto converted = toTomlValue(*spec, v);
+        if (!converted)
+            return keyError(400, key + ": expected " + typeWord(spec->type), key);
+        if (!set.emplace(key, std::move(*converted)).second)
+            return keyError(400, key + ": set twice", key);
+    }
+    const std::set<std::string> clear(clear_list.begin(), clear_list.end());
+    try {
+        const ConfigApplyResult r = rc.applyConfig(set, clear, "ui");
+        std::vector<std::string> pending;
+        for (const auto& k : r.pending_restart) {
+            // A value put back to the running one waits for nothing.
+            if (configValueText(rc.running(), k) == configValueText(rc.configured(), k))
+                continue;
+            pending.push_back(JsonWriter()
+                                  .add("key", k)
+                                  .add("running", configValueText(rc.running(), k))
+                                  .add("configured", configValueText(rc.configured(), k))
+                                  .str());
+        }
+        std::vector<std::string> applied;
+        for (const auto& k : r.applied)
+            applied.push_back(jsonString(k));
+        std::vector<std::string> external;
+        for (const auto& k : r.external)
+            external.push_back(jsonString(k));
+        return json(200, JsonWriter()
+                             .add("ok", true)
+                             .addRaw("applied", jsonArray(applied))
+                             .addRaw("pending_restart", jsonArray(pending))
+                             .addRaw("external", jsonArray(external))
+                             .str());
+    } catch (const ReadOnlyKeyError& e) {
+        return keyError(403, e.what(), e.key);
+    } catch (const PinnedKeyError& e) {
+        return json(409, JsonWriter().add("error", std::string(e.what())).add("key", e.key).add("source", e.source).str());
+    } catch (const std::invalid_argument& e) {
+        const std::string key = leadingKey(e.what());
+        return key.empty() ? error(400, e.what()) : keyError(400, e.what(), key);
+    } catch (const ConfigError& e) {
+        return error(400, e.what());
+    } catch (const std::exception& e) {
+        return error(500, e.what());
+    }
 }
 
 ApiResponse postListRoute(ListKind kind, const std::string& body, const Engine& e, RuntimeConfig& rc)
@@ -736,8 +1098,13 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
         if (path == "/api/config/schema")
             return get ? json(200, configSchemaJson()) : notAllowed("GET");
         if (path == "/api/config") {
+            if (method == "PUT") {
+                if (auto rejected = rejectUnsafe(request))
+                    return *rejected;
+                return putConfigRoute(body, runtime);
+            }
             if (!get)
-                return notAllowed("GET");
+                return notAllowed("GET, PUT");
             if (!context.daemon)
                 return error(500, "no daemon info");
             LocationFacts loc;

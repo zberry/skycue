@@ -59,6 +59,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -76,6 +77,22 @@ struct PinnedKeyError : std::runtime_error {
     }
     std::string key;
     std::string source;  // "env" or "set"
+};
+
+// A web edit of a bootstrap key (read only: it decides how skycued starts).
+struct ReadOnlyKeyError : std::runtime_error {
+    explicit ReadOnlyKeyError(const std::string& key_)
+        : std::runtime_error(key_ + " is a bootstrap setting and cannot be changed here"), key(key_)
+    {
+    }
+    std::string key;
+};
+
+// What applyConfig changed: the keys whose configured value changed, and of
+// those the external ones (read by another program) and the restart ones.
+struct ConfigApplyResult {
+    std::vector<std::string> applied, external;
+    std::vector<std::string> pending_restart;
 };
 
 // The overlay's content: list deltas are relative to the list files.
@@ -149,6 +166,20 @@ public:
     // applies above a pin).
     void applyUi(const Overlay& delta, const std::string& origin);
 
+    // Writes `set` and `clear` (dotted keys; values already of the key's type)
+    // into skycue.overrides.toml, re-reads the files, drops any runtime overlay
+    // value of a filter key it sets or clears, and applies the live keys with
+    // `origin`. Checked in this order, changing nothing: an unknown key
+    // (std::invalid_argument naming it), a bootstrap key (ReadOnlyKeyError), a
+    // key the environment or --set pins (PinnedKeyError), a key both set and
+    // cleared (std::invalid_argument), a value or combination skycued would
+    // refuse (std::invalid_argument: the ConfigError message without the file
+    // name and line). A
+    // file that cannot be written throws std::runtime_error naming its path
+    // and paths.state_dir (nothing changes then either).
+    ConfigApplyResult applyConfig(const std::map<std::string, toml_lite::Value>& set,
+                                  const std::set<std::string>& clear, const std::string& origin);
+
     // "env" or "set" when that layer sets the (dotted) `key`, else "".
     std::string pinnedBy(const std::string& key) const;
 
@@ -215,7 +246,8 @@ private:
 
     // Watcher reloads: each logs its errors and keeps the previous values.
     // `edited`: the base name of the file whose change this reads (for the log).
-    void reloadConf(const std::string& edited);
+    // `quiet`: log nothing but errors (applyConfig reads the file it wrote).
+    void reloadConf(const std::string& edited, bool quiet = false);
     void reloadOverlay();
     void reloadList(ListKind kind);
     void arm();

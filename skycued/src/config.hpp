@@ -140,6 +140,11 @@ KeyClass keyClassOf(const std::string& key);
 // "live" | "restart" | "external" | "bootstrap"
 const char* keyClassName(KeyClass cls);
 
+// dotted key -> the comment that documents it in the example text: the inline
+// "# ..." of its "key = value" line, else the comment block directly above it
+// (lines joined by a space, the leading "# " stripped).
+std::map<std::string, std::string> exampleComments(const std::string& example_text);
+
 // The SKYCUE_* variables of the process environment that name a key. Pure: a
 // variable whose first segment (SKYCUE_WEB_..., the part before the next
 // underscore) is a config table but which matches no key is a typo; its name

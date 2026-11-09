@@ -19,6 +19,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <thread>
 
 using namespace enginetest;
 using skycued::DaemonInfo;
@@ -127,6 +128,7 @@ struct ConfigFx {
         fx = std::make_unique<EngineFx>(skycued::parseConfigFile(conf, overrides, set_args, env), fakeSource(src), 10s,
                                         rec);
         info.version = "skycued test";
+        info.supervisor = "none";
         info.started = std::chrono::system_clock::now();
         info.config_path = conf;
         info.www_dir = tmp.path + "/www";
@@ -359,4 +361,100 @@ BOOST_AUTO_TEST_CASE(config_daemon_mode_and_locations)
     BOOST_TEST(loc->getInt("operator").value_or(-1) == 2);
     BOOST_TEST(loc->getInt("operator_rejected").value_or(-1) == 1);
     BOOST_TEST(loc->getInt("operator_overflow").value_or(-1) == 0);
+}
+
+BOOST_AUTO_TEST_CASE(schema_lists_every_key_with_type_and_class)
+{
+    ConfigFx f;
+    const auto r = request(f.port, http::verb::get, "/api/config/schema");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    const auto keys = keysOf(parsed(r.body));
+    BOOST_TEST(keys.order == skycued::knownConfigKeys(), boost::test_tools::per_element());
+    const auto& port = keys.by_key.at("web.port");
+    BOOST_TEST(port.getString("type").value_or("") == "int");
+    BOOST_TEST(port.getString("class").value_or("") == "bootstrap");
+    BOOST_TEST(port.getDouble("min").value_or(-1) == 0);
+    BOOST_TEST(port.getDouble("max").value_or(-1) == 65535);
+    const auto& dec = keys.by_key.at("inputs.decoder");
+    BOOST_TEST(dec.getString("type").value_or("") == "enum");
+    BOOST_TEST((dec.getStringArray("values").value_or(std::vector<std::string>{}) ==
+                std::vector<std::string>{"readsb", "skycued"}));
+    const auto& fmt = keys.by_key.at("recording.formats");
+    BOOST_TEST(fmt.getString("type").value_or("") == "string_set");
+    BOOST_TEST((fmt.getStringArray("values").value_or(std::vector<std::string>{}) ==
+                std::vector<std::string>{"jsonl", "csv"}));
+    BOOST_TEST(keys.by_key.at("cues.udp_targets").getString("type").value_or("") == "host_port_list");
+    BOOST_TEST(keys.by_key.at("paths.map_dir").getString("type").value_or("") == "path");
+    BOOST_TEST(keys.by_key.at("filters.max_range_nm").getString("class").value_or("") == "live");
+    BOOST_TEST(keys.by_key.at("sdr.gain_1090").getString("class").value_or("") == "external");
+    BOOST_TEST(!keys.by_key.at("receiver.lat").has("min") == false);
+    for (const auto& [name, entry] : keys.by_key) {
+        BOOST_TEST(!entry.getString("doc").value_or("").empty(), name);
+        BOOST_TEST(entry.has("default"), name);
+    }
+    BOOST_TEST(request(f.port, http::verb::put, "/api/config/schema", "{}").status == 405u);
+}
+
+BOOST_AUTO_TEST_CASE(config_entries_carry_class_editable_file_value_default)
+{
+    {
+        ConfigFx f([](const std::string&) { return ConfigFx::ConfMap{{"web.trail_seconds", "300"}}; });
+        const auto keys = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+        const auto& t = keys.by_key.at("web.trail_seconds");
+        BOOST_TEST(t.getString("class").value_or("") == "restart");
+        BOOST_TEST(t.getBool("editable").value_or(false));
+        BOOST_TEST(t.getString("file_value").value_or("?") == "300");
+        BOOST_TEST(t.getString("default").value_or("?") == "120");
+        BOOST_TEST(!keys.by_key.at("web.bind").getBool("editable").value_or(true));
+        BOOST_TEST(!keys.by_key.at("cues.min_interval_s").has("file_value"));
+    }
+    ConfigFx g(nullptr, {"filters.max_range_nm=88"});
+    const auto keys = keysOf(parsed(request(g.port, http::verb::get, "/api/config").body));
+    const auto& m = keys.by_key.at("filters.max_range_nm");
+    BOOST_TEST(m.getString("source").value_or("") == "set");
+    BOOST_TEST(!m.getBool("editable").value_or(true));
+}
+
+namespace {
+// Waits (up to 5 s) until pending_restart is non-empty (`want`) or empty.
+void waitPending(ConfigFx& f, bool want)
+{
+    for (int i = 0; i < 100; ++i) {
+        const auto p = parsed(request(f.port, http::verb::get, "/api/config").body).getObjectArray("pending_restart");
+        if (p && p->empty() != want)
+            return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(pending_restart_lists_hand_edited_restart_keys)
+{
+    ConfigFx f;
+    f.fx->t.call([&] { f.rc->startWatching(); });
+    BOOST_TEST(parsed(request(f.port, http::verb::get, "/api/config").body).getObjectArray("pending_restart")->empty());
+    std::ofstream(f.conf) << skycue_test::tomlConf({{"receiver.lat", "38.9"},
+                                                    {"receiver.lon", "-77.0"},
+                                                    {"filters.max_range_nm", "120"},
+                                                    {"fisb.enable", "false"}});
+    waitPending(f, true);
+    const auto p = parsed(request(f.port, http::verb::get, "/api/config").body).getObjectArray("pending_restart");
+    BOOST_TEST_REQUIRE(p.has_value());
+    BOOST_TEST_REQUIRE(p->size() == 1u);
+    BOOST_TEST((*p)[0].getString("key").value_or("") == "fisb.enable");
+    BOOST_TEST((*p)[0].getString("running").value_or("") == "true");
+    BOOST_TEST((*p)[0].getString("configured").value_or("") == "false");
+    std::ofstream(f.conf) << skycue_test::tomlConf(
+        {{"receiver.lat", "38.9"}, {"receiver.lon", "-77.0"}, {"filters.max_range_nm", "120"}});
+    waitPending(f, false);
+    BOOST_TEST(parsed(request(f.port, http::verb::get, "/api/config").body).getObjectArray("pending_restart")->empty());
+}
+
+BOOST_AUTO_TEST_CASE(daemon_reports_allow_restart_and_supervisor)
+{
+    ConfigFx f;
+    const auto daemon = parsed(request(f.port, http::verb::get, "/api/config").body).getObject("daemon");
+    BOOST_TEST_REQUIRE(daemon.has_value());
+    BOOST_TEST(!daemon->getBool("allow_restart").value_or(true));
+    BOOST_TEST(daemon->getString("supervisor").value_or("") == "none");
 }

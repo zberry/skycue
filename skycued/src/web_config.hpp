@@ -32,6 +32,7 @@ struct DaemonInfo {
     double replay_speed = 1;
     bool replay_loop = false;
     bool readsb = true, dump978 = true;
+    std::string supervisor;  // "systemd" | "launcher" | "none": what starts skycued again after it exits
 };
 
 // The FIS-B report locations at the time of the request (Engine).
@@ -56,5 +57,11 @@ struct LocationFacts {
 // Call on the RuntimeConfig's thread.
 std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, const LocationFacts& locations,
                        std::chrono::system_clock::time_point now);
+
+// {"keys":[{key, type, class, default, doc, min?, max?, values?}, ...]} in
+// knownConfigKeys() order. `type` is int | float | bool | string | enum |
+// string_set | host_port_list | path; `doc` is the example file's comment for
+// the key. Static for a build.
+std::string configSchemaJson();
 
 }  // namespace skycued

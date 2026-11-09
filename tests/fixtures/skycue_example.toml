@@ -49,14 +49,14 @@ file = ""               # the inputs file; "" means skycue.inputs.json beside th
 decoder = "readsb"
 
 [inputs.readsb]         # the built-in 1090 MHz input
-enable = true
+enable = true           # take aircraft from readsb
 host = "127.0.0.1"      # where readsb runs
 json_port = 30047       # readsb --net-json-port (used when decoder = "readsb")
 beast_port = 30005      # readsb --net-bo-port   (used when decoder = "skycued")
 
 [inputs.dump978]        # the built-in 978 MHz input (USA only; disable elsewhere)
-enable = true
-host = "127.0.0.1"
+enable = true           # take UAT aircraft and FIS-B from dump978-fa
+host = "127.0.0.1"      # where dump978-fa runs
 raw_port = 30978        # dump978-fa --raw-port
 json_port = 30979       # dump978-fa --json-port (not read by skycued; the launcher passes it)
 

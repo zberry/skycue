@@ -1063,3 +1063,15 @@ BOOST_AUTO_TEST_CASE(installed_example_needs_a_position)
         BOOST_TEST(contains(err.what(), "receiver.lon"), err.what());
     }
 }
+
+BOOST_AUTO_TEST_CASE(example_comments_cover_every_key)
+{
+    const auto comments = skycued::exampleComments(readExample());
+    for (const auto& key : skycued::knownConfigKeys()) {
+        const auto it = comments.find(key);
+        BOOST_TEST_REQUIRE((it != comments.end() && !it->second.empty()), key);
+    }
+    BOOST_TEST(comments.at("web.allow_restart") ==
+               "let the web UI restart skycued; only under a supervisor that starts it again");
+    BOOST_TEST(comments.at("paths.state_dir").rfind("state_dir: an absolute directory", 0) == 0);
+}

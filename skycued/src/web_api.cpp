@@ -733,6 +733,8 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return postListRoute(path == "/api/lists/allow" ? ListKind::allow : ListKind::block, body, engine,
                                  runtime);
         }
+        if (path == "/api/config/schema")
+            return get ? json(200, configSchemaJson()) : notAllowed("GET");
         if (path == "/api/config") {
             if (!get)
                 return notAllowed("GET");

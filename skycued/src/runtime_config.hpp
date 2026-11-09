@@ -184,6 +184,13 @@ public:
     // now (overlay included), other keys as at load().
     Config effective() const;
     Overlay overlay() const { return overlay_; }
+    // The restart keys whose value in skycue.toml (and the layers above it)
+    // differs from the running one: edits waiting for a restart.
+    std::vector<std::string> pendingRestartKeys() const { return restartKeysChanged(running_, file_conf_); }
+    // The configuration as loaded at startup (restart keys as running).
+    const Config& running() const { return running_; }
+    // The last good parse of skycue.toml and the layers above it.
+    const Config& configured() const { return file_conf_; }
     std::string overlayPath() const { return overlay_path_; }
     // The overrides file as parsed by load(): in paths.state_dir, else beside
     // skycue.toml.

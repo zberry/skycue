@@ -889,4 +889,58 @@ Config loadConfig(const std::string& path, const std::vector<std::string>& set_a
     }
 }
 
+std::map<std::string, std::string> exampleComments(const std::string& example_text)
+{
+    std::map<std::string, std::string> out;
+    std::string table, block;
+    const auto trim = [](std::string t) {
+        const auto b = t.find_first_not_of(" \t\r");
+        if (b == std::string::npos)
+            return std::string();
+        return t.substr(b, t.find_last_not_of(" \t\r") - b + 1);
+    };
+    std::istringstream in(example_text);
+    for (std::string raw; std::getline(in, raw);) {
+        const std::string line = trim(raw);
+        if (line.empty()) {
+            block.clear();
+        } else if (line[0] == '#') {
+            const std::string text = trim(line.substr(1));
+            if (!text.empty())
+                block += (block.empty() ? "" : " ") + text;
+        } else if (line[0] == '[') {
+            const auto close = line.find(']');
+            table = trim(line.substr(1, close == std::string::npos ? std::string::npos : close - 1));
+            block.clear();
+        } else {
+            const auto eq = line.find('=');
+            if (eq == std::string::npos) {
+                block.clear();
+                continue;
+            }
+            const std::string name = trim(line.substr(0, eq));
+            std::string inline_comment;
+            char quote = 0;
+            for (size_t i = eq + 1; i < line.size(); ++i) {
+                const char c = line[i];
+                if (quote) {
+                    if (c == quote)
+                        quote = 0;
+                } else if (c == '"' || c == '\'') {
+                    quote = c;
+                } else if (c == '#') {
+                    inline_comment = trim(line.substr(i + 1));
+                    break;
+                }
+            }
+            const std::string doc = inline_comment.empty() ? block : inline_comment;
+            if (!doc.empty())
+                out[table.empty() ? name : table + "." + name] = doc;
+            block.clear();
+        }
+    }
+    return out;
+}
+
+
 }  // namespace skycued

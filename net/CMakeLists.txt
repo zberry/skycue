@@ -22,6 +22,11 @@ elseif(NOT TARGET Boost::system)
   find_package(Boost 1.66 QUIET COMPONENTS system)
   if(NOT TARGET Boost::system)
     # Header-only since Boost 1.69; some distributions ship no boost_system package.
+    # Keep this in step with ../cmake/BoostSystem.cmake.
+    if(Boost_VERSION_STRING VERSION_LESS 1.69)
+      message(FATAL_ERROR "skycue: Boost ${Boost_VERSION_STRING} needs the compiled Boost.System library "
+        "(install the boost system development package)")
+    endif()
     add_library(Boost::system INTERFACE IMPORTED)
     if(TARGET Boost::headers)
       target_link_libraries(Boost::system INTERFACE Boost::headers)

@@ -81,14 +81,15 @@ echo "parent project: client_demo built against a copy of skycue/ and ran"
 # of the enclosing build's, so no other skycue install can be picked up.
 # Debian's CMake searches lib/<multiarch> but not lib64 (it is not a Debian
 # library directory), so there the libdir is lib/<multiarch>. The package
-# directory is also passed as skycue_DIR, so no search path has to match.
+# directory is passed as skycue_DIR only when no triplet could be derived.
 libdir=lib64
+pkg_dir_args=()
 if [[ -e /etc/debian_version ]]; then
     # gcc prints the triplet; clang prints nothing, so ask dpkg, and without either use plain lib
-    # (still a Debian library directory; the configure below gets skycue_DIR explicitly).
+    # (still a Debian library directory; the configure below then gets skycue_DIR explicitly).
     multiarch=$("${CXX:-c++}" -print-multiarch 2>/dev/null || true)
     [[ -n $multiarch ]] || multiarch=$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)
-    if [[ -n $multiarch ]]; then libdir=lib/$multiarch; else libdir=lib; fi
+    if [[ -n $multiarch ]]; then libdir=lib/$multiarch; else libdir=lib; pkg_dir_args=("-Dskycue_DIR:PATH=$work/prefix/lib/cmake/skycue"); fi
 fi
 "$cmake_bin" -S "$vendored" -B "$work/lib" -DSKYCUE_BUILD_DAEMON=OFF -DSKYCUE_BUILD_TESTS=OFF \
     -DSKYCUE_BUILD_EXAMPLES=OFF -DCMAKE_INSTALL_LIBDIR=$libdir "${tool_args[@]}" "${prefix_args[@]}"
@@ -101,8 +102,7 @@ test -f "$work/prefix/include/skycue/client.hpp" || { echo "client.hpp not insta
 stray=$(find "$work/prefix" -path "$work/prefix/include" -prune -o -path "$work/prefix/$libdir" -prune -o -type f -print)
 if [[ -n $stray ]]; then echo "libskycue installed files outside include/ and $libdir/: $stray" >&2; exit 1; fi
 "$cmake_bin" -S "$vendored/examples/parent-project" -B "$work/pkg" -DCLIENT_DEMO_FIND_PACKAGE=ON \
-    "-Dskycue_DIR:PATH=$work/prefix/$libdir/cmake/skycue" \
-    "-DCMAKE_PREFIX_PATH=$work/prefix${SKYCUE_SMOKE_PREFIX_PATH:+;$SKYCUE_SMOKE_PREFIX_PATH}" "${tool_args[@]}"
+    "-DCMAKE_PREFIX_PATH=$work/prefix${SKYCUE_SMOKE_PREFIX_PATH:+;$SKYCUE_SMOKE_PREFIX_PATH}" "${pkg_dir_args[@]}" "${tool_args[@]}"
 grep -qx "skycue_DIR:PATH=$work/prefix/$libdir/cmake/skycue" "$work/pkg/CMakeCache.txt" \
     || { echo "find_package did not use the install" >&2; exit 1; }
 "$cmake_bin" --build "$work/pkg" -j "$jobs"

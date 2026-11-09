@@ -11,8 +11,8 @@
 #include "inputs/uat_raw_input.hpp"
 #include "json_lite.hpp"
 #include "raw_formats.hpp"
-#include "test_util.hpp"
 #include "retention.hpp"
+#include "test_util.hpp"
 #include "web_inputs.hpp"
 
 using namespace enginetest;

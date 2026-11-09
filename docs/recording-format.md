@@ -262,6 +262,15 @@ or `ui: block += a1b2c3`, written before the drops and updates the change causes
 | `nac_p` | integer | update, keyframe | navigation accuracy (position) |
 | `alt_geom_source` | string | update, keyframe | `reported` or `estimated`; only with `alt_geom_ft` (JSONL only) |
 | `alt_geom_uncertainty_ft` | integer | update, keyframe | stated error of an estimated `alt_geom_ft`, feet; only when `estimated` (JSONL only) |
+| `heading_mag_deg`, `heading_true_deg` | number | update, keyframe | heading, degrees (JSONL only) |
+| `ias_kt`, `tas_kt` | integer | update, keyframe | indicated and true airspeed, knots (JSONL only) |
+| `mach`, `roll_deg`, `track_rate_dps` | number | update, keyframe | Mach number, roll angle, rate of change of track (JSONL only) |
+| `sel_alt_ft`, `sel_alt_fms_ft` | integer | update, keyframe | selected altitude (MCP/FCU, FMS), feet (JSONL only) |
+| `qnh_mb`, `sel_heading_deg` | number | update, keyframe | selected barometric setting and heading (JSONL only) |
+| `nav_modes` | array of strings | update, keyframe | engaged autopilot modes, as on the received side (JSONL only) |
+| `acas_ra` | object | update, keyframe | ACAS advisory as sent: `active`, `ara`, `rac`, `rat`, `mte` (no `text` or `threat`) (JSONL only) |
+| `emergency` | string | update, keyframe | emergency status name as sent (`none`, `general`, ...) (JSONL only) |
+| `category` | string | update, keyframe | emitter category as sent, e.g. `A3` (JSONL only) |
 | `keyframe` | boolean | update, keyframe | the frame's keyframe flag |
 | `drop_reason` | string | drop | why the track was dropped |
 | `note` | string | filter_change | description of the change |

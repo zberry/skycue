@@ -510,7 +510,11 @@ const char* const kSentKeys[] = {"hex",          "addr_type",   "source",      "
                                  "registration", "nic",         "nac_p",       "keyframe",  "drop_reason",
                                  "note",
                                  // JSONL only, after the columns of the CSV (kSentCsvKeys).
-                                 "alt_geom_source", "alt_geom_uncertainty_ft"};
+                                 "alt_geom_source", "alt_geom_uncertainty_ft",
+                                 // The version-2 cue fields, JSON shapes as in the received stream.
+                                 "heading_mag_deg", "heading_true_deg", "ias_kt", "tas_kt", "mach",
+                                 "roll_deg", "track_rate_dps", "sel_alt_ft", "sel_alt_fms_ft", "qnh_mb",
+                                 "sel_heading_deg", "nav_modes", "acas_ra", "emergency", "category"};
 constexpr std::size_t kSentCsvKeys = 21;  // the CSV columns are the first kSentCsvKeys of kSentKeys
 
 // Sent-stream key by name, so a typo here fails loudly (at first use) rather
@@ -559,6 +563,43 @@ Record trackRecord(const skycue::Track& t)
         r.push_back(intField(sentKey("nic"), *t.nic));
     if (t.nac_p)
         r.push_back(intField(sentKey("nac_p"), *t.nac_p));
+    if (t.heading_mag_deg)
+        r.push_back(floatField(sentKey("heading_mag_deg"), *t.heading_mag_deg));
+    if (t.heading_true_deg)
+        r.push_back(floatField(sentKey("heading_true_deg"), *t.heading_true_deg));
+    if (t.ias_kt)
+        r.push_back(intField(sentKey("ias_kt"), *t.ias_kt));
+    if (t.tas_kt)
+        r.push_back(intField(sentKey("tas_kt"), *t.tas_kt));
+    if (t.mach)
+        r.push_back(floatField(sentKey("mach"), *t.mach));
+    if (t.roll_deg)
+        r.push_back(floatField(sentKey("roll_deg"), *t.roll_deg));
+    if (t.track_rate_dps)
+        r.push_back(floatField(sentKey("track_rate_dps"), *t.track_rate_dps));
+    if (t.sel_alt_ft)
+        r.push_back(intField(sentKey("sel_alt_ft"), *t.sel_alt_ft));
+    if (t.sel_alt_fms_ft)
+        r.push_back(intField(sentKey("sel_alt_fms_ft"), *t.sel_alt_fms_ft));
+    if (t.qnh_mb)
+        r.push_back(floatField(sentKey("qnh_mb"), *t.qnh_mb));
+    if (t.sel_heading_deg)
+        r.push_back(floatField(sentKey("sel_heading_deg"), *t.sel_heading_deg));
+    if (t.nav_modes)
+        r.push_back(rawJsonField(sentKey("nav_modes"), navModesJson(*t.nav_modes)));
+    if (t.acas_ra) {
+        const uint8_t f = t.acas_ra->flags;
+        r.push_back(rawJsonField(sentKey("acas_ra"),
+                                 std::string("{\"active\":") + ((f & 0x40) ? "true" : "false") +
+                                     ",\"ara\":" + std::to_string(t.acas_ra->ara) +
+                                     ",\"rac\":" + std::to_string(f & 0x0F) +
+                                     ",\"rat\":" + ((f & 0x10) ? "true" : "false") +
+                                     ",\"mte\":" + ((f & 0x20) ? "true" : "false") + "}"));
+    }
+    if (t.emergency)
+        r.push_back(textField(sentKey("emergency"), skycue::emergencyName(*t.emergency)));
+    if (t.category)
+        r.push_back(textField(sentKey("category"), *t.category));
     r.push_back(boolField(sentKey("keyframe"), t.keyframe));
     return r;
 }

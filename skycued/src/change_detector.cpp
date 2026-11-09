@@ -2,6 +2,7 @@
 
 #include "geo.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 
@@ -17,6 +18,25 @@ template <class T> bool changed(const std::optional<T>& now, const std::optional
     if (!prev)
         return true;
     return std::fabs(static_cast<double>(*now) - static_cast<double>(*prev)) >= threshold;
+}
+
+// The wire emergency code of the observation's name; nullopt when absent or not in the table.
+std::optional<uint8_t> emergencyOf(const std::optional<std::string>& name)
+{
+    return name ? skycue::emergencyCode(*name) : std::nullopt;
+}
+
+constexpr uint8_t kRaActive = 0x40;
+
+// Whether the advisory the consumer holds differs from the observation's: appearing, ending
+// (active clearing) or a different ARA.
+bool raChanged(const std::optional<AcasRaState>& now, const std::optional<skycue::AcasRaWire>& prev)
+{
+    if (now.has_value() != prev.has_value())
+        return true;
+    if (!now)
+        return false;
+    return now->active != ((prev->flags & kRaActive) != 0) || now->ara != prev->ara;
 }
 
 double angleDiffDeg(double a, double b)
@@ -36,8 +56,8 @@ SendReason shouldSend(const TrackState& s, std::chrono::steady_clock::time_point
         return SendReason::first;
     const skycue::Track& p = *s.last_sent;
 
-    if (l.callsign != p.callsign || l.squawk != p.squawk || l.emergency != s.last_sent_emergency ||
-        l.on_ground.value_or(false) != p.on_ground)
+    if (l.callsign != p.callsign || l.squawk != p.squawk || emergencyOf(l.emergency) != p.emergency ||
+        l.on_ground.value_or(false) != p.on_ground || raChanged(l.acas_ra, p.acas_ra))
         return SendReason::identity;
 
     const double elapsed = std::chrono::duration<double>(now - s.last_sent_at).count();
@@ -85,6 +105,27 @@ skycue::Track toTrack(const TrackState& s, bool keyframe, bool alt_is_geom)
     t.registration = l.registration;
     t.nic = l.nic;
     t.nac_p = l.nac_p;
+    if (l.acas_ra) {
+        const AcasRaState& ra = *l.acas_ra;
+        t.acas_ra = skycue::AcasRaWire{ra.ara, static_cast<uint8_t>((ra.rac & 0x0F) | (ra.rat ? 0x10 : 0) |
+                                                                    (ra.mte ? 0x20 : 0) | (ra.active ? kRaActive : 0))};
+    }
+    t.heading_mag_deg = l.heading_mag_deg;
+    t.heading_true_deg = l.heading_true_deg;
+    t.ias_kt = l.ias_kt;
+    if (l.tas_kt)
+        t.tas_kt = static_cast<uint16_t>(std::clamp<long>(std::lround(*l.tas_kt), 0, 65535));
+    t.mach = l.mach;
+    t.roll_deg = l.roll_deg;
+    t.sel_alt_ft = l.sel_alt_ft;
+    t.sel_alt_fms_ft = l.sel_alt_fms_ft;
+    t.qnh_mb = l.qnh_mb;
+    t.sel_heading_deg = l.sel_heading_deg;
+    t.nav_modes = l.nav_modes;
+    t.track_rate_dps = l.track_rate_dps;
+    t.emergency = emergencyOf(l.emergency);
+    if (l.category && l.category->size() == 2)
+        t.category = l.category;
     return t;
 }
 
@@ -92,7 +133,6 @@ void markSent(TrackState& s, const skycue::Track& sent, std::chrono::steady_cloc
 {
     s.last_sent = sent;
     s.last_sent_at = now;
-    s.last_sent_emergency = s.latest.emergency;
 }
 
 } // namespace skycued

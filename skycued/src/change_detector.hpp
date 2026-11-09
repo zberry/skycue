@@ -19,8 +19,9 @@ enum class SendReason { none, first, moved, altitude, speed, track, identity, ma
 // Rules, first match wins:
 //   1. no position in latest                                  -> none
 //   2. never sent                                             -> first
-//   3. callsign, squawk, emergency or on_ground differs from
-//      what was last sent (regardless of min_interval_s)      -> identity
+//   3. callsign, squawk, emergency, on_ground or the ACAS RA
+//      (appears, ends, or a different ARA) differs from what
+//      was last sent (regardless of min_interval_s)           -> identity
 //   4. less than min_interval_s since last_sent_at            -> none
 //   5. great-circle move from the sent position >= min_move_m -> moved
 //   6. altitude change >= min_alt_change_ft (baro; geom when
@@ -37,8 +38,8 @@ SendReason shouldSend(const TrackState& state, std::chrono::steady_clock::time_p
 // known, else the geometric rate.
 skycue::Track toTrack(const TrackState& state, bool keyframe, bool alt_is_geom);
 
-// Records that `sent` went to the consumer at `now` (sets last_sent,
-// last_sent_at and the emergency status shouldSend compares against).
+// Records that `sent` went to the consumer at `now` (sets last_sent and
+// last_sent_at).
 void markSent(TrackState& state, const skycue::Track& sent, std::chrono::steady_clock::time_point now);
 
 } // namespace skycued

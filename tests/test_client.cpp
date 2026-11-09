@@ -324,6 +324,28 @@ BOOST_AUTO_TEST_CASE(tcp_partial_frame_is_reassembled)
     BOOST_TEST(client.trackCount() == 1u);
 }
 
+BOOST_AUTO_TEST_CASE(tcp_v2_fields_reach_callback)
+{
+    TestTcpServer server;
+    Events ev;
+    Client client(tcpConfig(server.port()));
+    ev.attach(client);
+    client.start();
+    BOOST_REQUIRE(server.waitAccepted());
+    Track t = mkTrack(0x21, true);
+    t.acas_ra = AcasRaWire{0x2000, 0x40};
+    t.category = std::string("A5");
+    t.emergency = static_cast<uint8_t>(1);
+    server.send(encodeTrackUpdate(t));
+    BOOST_REQUIRE(ev.waitFor([&] { return ev.updates.size() == 1; }));
+    std::lock_guard<std::mutex> lock(ev.m);
+    BOOST_REQUIRE(ev.updates[0].acas_ra.has_value());
+    BOOST_TEST(ev.updates[0].acas_ra->ara == 0x2000);
+    BOOST_TEST(int(ev.updates[0].acas_ra->flags) == 0x40);
+    BOOST_TEST((ev.updates[0].category == std::optional<std::string>("A5")));
+    BOOST_TEST(std::string(emergencyName(*ev.updates[0].emergency)) == "general");
+}
+
 BOOST_AUTO_TEST_CASE(tcp_bad_magic_closes_connection)
 {
     TestTcpServer server;

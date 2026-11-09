@@ -87,7 +87,7 @@ BOOST_AUTO_TEST_CASE(header_layout)
     BOOST_TEST(b[1] == 'K');
     BOOST_TEST(b[2] == 'Y');
     BOOST_TEST(b[3] == 'C');
-    BOOST_TEST(b[4] == 1);
+    BOOST_TEST(b[4] == 2);
     BOOST_TEST(b[5] == 4);
     BOOST_TEST(b[6] == 8);
     BOOST_TEST(b[7] == 0);
@@ -118,10 +118,10 @@ BOOST_AUTO_TEST_CASE(track_roundtrip_all_fields)
     checkEqual(in, out);
 }
 
-BOOST_AUTO_TEST_CASE(track_golden_bytes)
+BOOST_AUTO_TEST_CASE(track_golden_bytes_v1_layout)
 {
     // Computed independently from the layout in docs/protocol.md, not from this encoder.
-    const uint8_t expected[] = {
+    const uint8_t v1[] = {
         0x53, 0x4B, 0x59, 0x43, 0x01, 0x02, 0x43, 0x00, 0xC3, 0xB2, 0xA1, 0x00,
         0x00, 0x01, 0x07, 0x00, 0x7B, 0x44, 0x8E, 0x99, 0xA1, 0x01, 0x00, 0x00,
         0x40, 0xAB, 0x2F, 0x17, 0xA8, 0x02, 0x15, 0xD2, 0xFF, 0x03, 0xB8, 0x88,
@@ -130,8 +130,13 @@ BOOST_AUTO_TEST_CASE(track_golden_bytes)
         0x33, 0x04, 0x31, 0x32, 0x30, 0x30, 0x06, 0x4E, 0x31, 0x32, 0x33, 0x34,
         0x35, 0x08, 0x0A,
     };
+    // The version-2 frame is the same bytes with the version byte 2, the payload length 2 longer
+    // and the presence word widened to u32 (two zero bytes after the u16 at offset 24).
+    std::vector<uint8_t> want(std::begin(v1), std::end(v1));
+    want[4] = 2;
+    want[6] = 0x45;
+    want.insert(want.begin() + kHeaderSize + 26, {0x00, 0x00});
     std::vector<uint8_t> got = encodeTrackUpdate(fullTrack());
-    std::vector<uint8_t> want(std::begin(expected), std::end(expected));
     BOOST_TEST(got == want, boost::test_tools::per_element());
 }
 
@@ -161,8 +166,8 @@ BOOST_AUTO_TEST_CASE(track_roundtrip_minimal)
 
     std::vector<uint8_t> b = encodeTrackUpdate(in);
     Frame f = decodeOne(b);
-    BOOST_TEST(f.payload.size() == 4u + 1 + 1 + 1 + 1 + 8 + 4 + 4 + 2);
-    BOOST_TEST(f.payload.size() == 26u);
+    BOOST_TEST(f.payload.size() == 4u + 1 + 1 + 1 + 1 + 8 + 4 + 4 + 4);
+    BOOST_TEST(f.payload.size() == 28u);
 
     Track out = fullTrack(); // decode must clear optionals that are absent
     BOOST_TEST(decodeTrackUpdate(f, out));
@@ -228,14 +233,16 @@ BOOST_AUTO_TEST_CASE(bad_magic)
 BOOST_AUTO_TEST_CASE(bad_version)
 {
     std::vector<uint8_t> b = encodeHeartbeat(Heartbeat{1});
-    b[4] = 2;
+    b[4] = 3;
     Frame f;
     size_t consumed = 99;
+    BOOST_TEST((decodeFrame(b.data(), b.size(), f, consumed) == DecodeStatus::bad_version));
+    b[4] = 0;
     BOOST_TEST((decodeFrame(b.data(), b.size(), f, consumed) == DecodeStatus::bad_version));
     BOOST_TEST(consumed == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(unknown_presence_bit_keeps_known_fields)
+BOOST_AUTO_TEST_CASE(unknown_bit_26_stops_reading)
 {
     Track in;
     in.id = TrackId{0xABCDEF, AddressType::icao};
@@ -249,9 +256,9 @@ BOOST_AUTO_TEST_CASE(unknown_presence_bit_keeps_known_fields)
     in.nic = static_cast<uint8_t>(7);
 
     Frame f = decodeOne(encodeTrackUpdate(in));
-    BOOST_REQUIRE(f.payload.size() == 27u); // 26 fixed + nic
-    // Set presence bit 12 (unknown to this decoder) and append its unknown data after nic.
-    f.payload[25] = static_cast<uint8_t>(f.payload[25] | (1u << (12 - 8)));
+    BOOST_REQUIRE(f.payload.size() == 29u); // 28 fixed + nic
+    // Set presence bit 12 (known since version 2, so use 26) and append its unknown data after nic.
+    f.payload[27] = static_cast<uint8_t>(f.payload[27] | (1u << (26 - 24)));
     f.payload.push_back(0xDE);
     f.payload.push_back(0xAD);
 
@@ -410,4 +417,151 @@ BOOST_AUTO_TEST_CASE(uncertainty_saturates_at_65535)
     Track out;
     BOOST_TEST(decodeTrackUpdate(decodeOne(encodeTrackUpdate(t)), out));
     BOOST_TEST((out.alt_geom_uncertainty_ft == std::optional<uint16_t>(65535)));
+}
+
+namespace {
+
+Track v2Track()
+{
+    Track t = fullTrack();
+    t.acas_ra = AcasRaWire{0x2A5B, 0x4F}; // active, rac 15, rat, mte
+    t.heading_mag_deg = 271.5f;
+    t.heading_true_deg = 270.25f;
+    t.ias_kt = static_cast<uint16_t>(250);
+    t.tas_kt = static_cast<uint16_t>(430);
+    t.mach = 0.78f;
+    t.roll_deg = -12.5f;
+    t.sel_alt_ft = -100;
+    t.sel_alt_fms_ft = 36000;
+    t.qnh_mb = 1013.25f;
+    t.sel_heading_deg = 90.0f;
+    t.nav_modes = static_cast<uint8_t>(0x2B);
+    t.track_rate_dps = -3.0f;
+    t.emergency = static_cast<uint8_t>(6);
+    t.category = std::string("A3");
+    return t;
+}
+
+void checkV2(const Track& a, const Track& b)
+{
+    checkEqual(a, b);
+    BOOST_TEST((a.heading_mag_deg == b.heading_mag_deg));
+    BOOST_TEST((a.heading_true_deg == b.heading_true_deg));
+    BOOST_TEST((a.ias_kt == b.ias_kt));
+    BOOST_TEST((a.tas_kt == b.tas_kt));
+    BOOST_TEST((a.mach == b.mach));
+    BOOST_TEST((a.roll_deg == b.roll_deg));
+    BOOST_TEST((a.sel_alt_ft == b.sel_alt_ft));
+    BOOST_TEST((a.sel_alt_fms_ft == b.sel_alt_fms_ft));
+    BOOST_TEST((a.qnh_mb == b.qnh_mb));
+    BOOST_TEST((a.sel_heading_deg == b.sel_heading_deg));
+    BOOST_TEST((a.nav_modes == b.nav_modes));
+    BOOST_TEST((a.track_rate_dps == b.track_rate_dps));
+    BOOST_TEST((a.emergency == b.emergency));
+    BOOST_TEST((a.category == b.category));
+    BOOST_REQUIRE(a.acas_ra.has_value() == b.acas_ra.has_value());
+    if (a.acas_ra) {
+        BOOST_TEST(a.acas_ra->ara == b.acas_ra->ara);
+        BOOST_TEST(int(a.acas_ra->flags) == int(b.acas_ra->flags));
+    }
+}
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(v2_round_trip_every_new_field)
+{
+    const Track in = v2Track();
+    Track out;
+    BOOST_TEST(decodeTrackUpdate(decodeOne(encodeTrackUpdate(in)), out));
+    checkV2(in, out);
+    // each field on its own, so a wrong field order shows up
+    auto alone = [](auto set) {
+        Track t = fullTrack();
+        set(t);
+        Track o;
+        BOOST_TEST(decodeTrackUpdate(decodeOne(encodeTrackUpdate(t)), o));
+        checkV2(t, o);
+    };
+    alone([](Track& t) { t.acas_ra = AcasRaWire{1, 0}; });
+    alone([](Track& t) { t.heading_mag_deg = 1.5f; });
+    alone([](Track& t) { t.ias_kt = static_cast<uint16_t>(65535); });
+    alone([](Track& t) { t.emergency = static_cast<uint8_t>(0); });
+    alone([](Track& t) { t.category = std::string("C1"); });
+}
+
+BOOST_AUTO_TEST_CASE(v2_presence_is_u32_at_offset_24)
+{
+    Track t = fullTrack();
+    t.category = std::string("A3");   // bit 25
+    t.alt_geom_uncertainty_ft = static_cast<uint16_t>(5); // bit 10
+    const Frame f = decodeOne(encodeTrackUpdate(t));
+    BOOST_TEST(f.version == 2);
+    const uint32_t presence = uint32_t(f.payload[24]) | (uint32_t(f.payload[25]) << 8) |
+                              (uint32_t(f.payload[26]) << 16) | (uint32_t(f.payload[27]) << 24);
+    BOOST_TEST(presence == (0x3FFu | (1u << 10) | (1u << 25)));
+    // category is the last field: length 2, "A3"
+    BOOST_TEST(f.payload[f.payload.size() - 3] == 2);
+    BOOST_TEST(f.payload[f.payload.size() - 2] == 'A');
+    BOOST_TEST(f.payload[f.payload.size() - 1] == '3');
+}
+
+BOOST_AUTO_TEST_CASE(v1_reader_rejects_v2)
+{
+    std::vector<uint8_t> b = encodeTrackUpdate(v2Track());
+    Frame f;
+    size_t consumed = 99;
+    BOOST_TEST((decodeFrame(b.data(), b.size(), f, consumed, 1) == DecodeStatus::bad_version));
+    BOOST_TEST(consumed == 0u);
+    BOOST_TEST((decodeFrame(b.data(), b.size(), f, consumed, 2) == DecodeStatus::ok));
+}
+
+BOOST_AUTO_TEST_CASE(v2_reader_reads_v1)
+{
+    // A frame laid out as version 1 (u16 presence) decodes with the old fields; a version 1
+    // frame never has bits 11+, and what a u32 reading would take as high bits is payload.
+    const uint8_t v1[] = {
+        0x53, 0x4B, 0x59, 0x43, 0x01, 0x02, 0x43, 0x00, 0xC3, 0xB2, 0xA1, 0x00,
+        0x00, 0x01, 0x07, 0x00, 0x7B, 0x44, 0x8E, 0x99, 0xA1, 0x01, 0x00, 0x00,
+        0x40, 0xAB, 0x2F, 0x17, 0xA8, 0x02, 0x15, 0xD2, 0xFF, 0x03, 0xB8, 0x88,
+        0x00, 0x00, 0x50, 0xFB, 0xFF, 0xFF, 0x00, 0xC0, 0xE1, 0x43, 0x00, 0xA0,
+        0x87, 0x43, 0x00, 0x00, 0xC0, 0xC4, 0x06, 0x55, 0x41, 0x4C, 0x31, 0x32,
+        0x33, 0x04, 0x31, 0x32, 0x30, 0x30, 0x06, 0x4E, 0x31, 0x32, 0x33, 0x34,
+        0x35, 0x08, 0x0A,
+    };
+    Frame f;
+    size_t consumed = 0;
+    BOOST_REQUIRE(decodeFrame(v1, sizeof v1, f, consumed) == DecodeStatus::ok);
+    BOOST_TEST(f.version == 1);
+    Track out;
+    BOOST_TEST(decodeTrackUpdate(f, out));
+    checkEqual(fullTrack(), out);
+    BOOST_TEST(!out.acas_ra.has_value());
+    BOOST_TEST(!out.category.has_value());
+
+    // a v1 frame whose u16 presence has bit 11 or above set: unknown to version 1, stop reading
+    std::vector<uint8_t> bad(v1, v1 + sizeof v1);
+    bad[8 + 25] = static_cast<uint8_t>(bad[8 + 25] | 0x08);
+    BOOST_REQUIRE(decodeFrame(bad.data(), bad.size(), f, consumed) == DecodeStatus::ok);
+    BOOST_TEST(decodeTrackUpdate(f, out));
+    BOOST_TEST(!out.acas_ra.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(emergency_names)
+{
+    BOOST_TEST(std::string(emergencyName(0)) == "none");
+    BOOST_TEST(std::string(emergencyName(3)) == "minimum_fuel");
+    BOOST_TEST(std::string(emergencyName(6)) == "downed_aircraft");
+    BOOST_TEST(std::string(emergencyName(7)) == "unknown");
+    BOOST_TEST((emergencyCode("no_comms") == std::optional<uint8_t>(4)));
+    BOOST_TEST(!emergencyCode("bogus").has_value());
+}
+
+BOOST_AUTO_TEST_CASE(v2_full_size_matches_docs)
+{
+    Track t = v2Track();
+    t.callsign = std::string(8, 'C');
+    t.squawk = std::string(4, '7');
+    t.registration = std::string(16, 'R');
+    t.alt_geom_uncertainty_ft = static_cast<uint16_t>(9);
+    BOOST_TEST(decodeOne(encodeTrackUpdate(t)).payload.size() == 131u); // docs/protocol.md
 }

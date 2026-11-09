@@ -248,7 +248,7 @@ On a **TCP** connection (either direction), in order:
    every track skycued is currently forwarding.
 4. Then **deltas**: an update for a track only when skycued's change
    detector fires. With skycued's defaults that is at once for a callsign,
-   squawk, emergency or on-ground change; otherwise at most once per
+   squawk, emergency, on-ground or ACAS advisory change; otherwise at most once per
    `cues.min_interval_s` (1 s) when the aircraft moved or its altitude, speed or
    track changed enough; and at least once per `cues.max_interval_s` (10 s).
 5. Every `cues.keyframe_interval_s` (10 s) a **periodic keyframe**: every
@@ -267,6 +267,16 @@ means the same as any other; the flag tells you only why it was sent. Field
 units and meanings are documented in `skycue/types.hpp`: degrees, feet, knots
 and feet per minute; `position_time` is when the position was measured, on
 the sender's clock (UTC).
+
+Since protocol version 2 a `Track` also carries, each optional: `acas_ra`
+(`AcasRaWire`: `ara`, and `flags` with bits 0-3 RAC, 4 RAT, 5 MTE, 6 active),
+`heading_mag_deg`, `heading_true_deg`, `ias_kt`, `tas_kt`, `mach`, `roll_deg`,
+`track_rate_dps`, `sel_alt_ft`, `sel_alt_fms_ft`, `qnh_mb`, `sel_heading_deg`,
+`nav_modes` (bit 0 autopilot, 1 vnav, 2 althold, 3 approach, 4 lnav, 5 tcas),
+`emergency` (a code) and `category` (e.g. `"A3"`). `emergencyName(code)` in
+`types.hpp` turns the emergency code into `"none"`, `"general"`, `"medical"`,
+`"minimum_fuel"`, `"no_comms"`, `"unlawful_interference"` or
+`"downed_aircraft"` (`"unknown"` for any other code).
 
 The first `onTrackUpdate` for a `TrackId` is how you learn of a new track;
 there is no separate "new" callback.
@@ -315,7 +325,7 @@ then empty. With `tcp` the client redials after `reconnect_interval` (a fixed
 2 s; there is no backoff), forever, and on success you get
 `onConnectionChange(true)` and a fresh keyframe burst. UDP goes back to
 connected on the next well-formed datagram. A stream with a bad magic or
-version (not a skycue v1 sender) is closed the same way and redialled.
+version (not a skycue v1 or v2 sender) is closed the same way and redialled.
 
 (The 0.5 s to 10 s doubling backoff in [protocol.md](protocol.md) is
 skycued's, when it dials a `tcp_listen` consumer.)
@@ -467,10 +477,11 @@ A Hello's keyframe interval (also clamped to at least 10 ms) replaces
 
 ## Compatibility promises
 
-- The library speaks **protocol version 1** only. A sender with another
-  version byte is rejected (`bad_version`) and its connection closed.
-- Within version 1 the sender may append fields to any frame, define the
-  reserved TrackUpdate presence bits (10–15), and add frame types. This
+- The library sends **protocol version 2** and reads versions 1 and 2. A
+  sender with another version byte is rejected (`bad_version`) and its
+  connection closed; a version 1 library does the same to a version 2 sender.
+- Within version 2 the sender may append fields to any frame, define the
+  reserved TrackUpdate presence bits (26–31), and add frame types. This
   library ignores trailing bytes and unknown frame types, and at an unknown
   presence bit keeps the fields already read (all known ones come first).
 - **Enumerations may grow.** `AddressType`, `Source` and `DropReason` values

@@ -130,6 +130,43 @@ BOOST_AUTO_TEST_CASE(identity_bypasses_min_interval)
     }
 }
 
+BOOST_AUTO_TEST_CASE(ra_change_is_immediate)
+{
+    skycued::AcasRaState ra;
+    ra.active = true;
+    ra.ara = 0x2000;
+    {
+        TrackState s = sent();
+        s.latest.acas_ra = ra;
+        BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::identity);
+    }
+    {
+        TrackState s = positioned();
+        s.latest.acas_ra = ra;
+        skycued::markSent(s, skycued::toTrack(s, true, false), kS0);
+        BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::none);
+        s.latest.acas_ra->ara = 0x4000; // a different advisory
+        BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::identity);
+        s = positioned();
+        s.latest.acas_ra = ra;
+        skycued::markSent(s, skycued::toTrack(s, true, false), kS0);
+        s.latest.acas_ra->active = false; // RAT: the advisory ended
+        BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::identity);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(emergency_compared_through_track)
+{
+    TrackState s = sent();
+    BOOST_REQUIRE(s.last_sent->emergency.has_value());
+    BOOST_TEST(int(*s.last_sent->emergency) == 0);
+    s.latest.emergency = "medical";
+    BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::identity);
+    skycued::markSent(s, skycued::toTrack(s, false, false), kS0 + 100ms);
+    BOOST_TEST(int(*s.last_sent->emergency) == 2);
+    BOOST_TEST(shouldSend(s, kS0 + 200ms, kDefaults) == SendReason::none);
+}
+
 BOOST_AUTO_TEST_CASE(on_ground_unset_on_both_sides_is_no_change)
 {
     // An input that never said whether the target is on the ground: it was
@@ -240,8 +277,46 @@ BOOST_AUTO_TEST_CASE(to_track_copies_every_field)
     s.latest.baro_rate_fpm = -640.0f;
     s.latest.geom_rate_fpm = -600.0f;
     s.last_position_time = kWall - 2s;
+    s.latest.heading_mag_deg = 91.0f;
+    s.latest.heading_true_deg = 92.0f;
+    s.latest.ias_kt = 250;
+    s.latest.tas_kt = 400.0f;
+    s.latest.mach = 0.7f;
+    s.latest.roll_deg = -5.0f;
+    s.latest.track_rate_dps = 1.5f;
+    s.latest.sel_alt_ft = 12000;
+    s.latest.sel_alt_fms_ft = 12500;
+    s.latest.qnh_mb = 1009.0f;
+    s.latest.sel_heading_deg = 95.0f;
+    s.latest.nav_modes = skycued::kNavAutopilot | skycued::kNavTcas;
+    s.latest.category = "A3";
+    s.latest.emergency = "downed_aircraft";
+    skycued::AcasRaState ra;
+    ra.active = true;
+    ra.ara = 0x1234;
+    ra.rac = 5;
+    ra.rat = true;
+    ra.mte = true;
+    s.latest.acas_ra = ra;
 
     const skycue::Track t = skycued::toTrack(s, true, true);
+    BOOST_TEST(*t.heading_mag_deg == 91.0f);
+    BOOST_TEST(*t.heading_true_deg == 92.0f);
+    BOOST_TEST(*t.ias_kt == 250);
+    BOOST_TEST(*t.tas_kt == 400);
+    BOOST_TEST(*t.mach == 0.7f);
+    BOOST_TEST(*t.roll_deg == -5.0f);
+    BOOST_TEST(*t.track_rate_dps == 1.5f);
+    BOOST_TEST(*t.sel_alt_ft == 12000);
+    BOOST_TEST(*t.sel_alt_fms_ft == 12500);
+    BOOST_TEST(*t.qnh_mb == 1009.0f);
+    BOOST_TEST(*t.sel_heading_deg == 95.0f);
+    BOOST_TEST(int(*t.nav_modes) == 0x21);
+    BOOST_TEST(*t.category == "A3");
+    BOOST_TEST(int(*t.emergency) == 6);
+    BOOST_REQUIRE(t.acas_ra.has_value());
+    BOOST_TEST(t.acas_ra->ara == 0x1234);
+    BOOST_TEST(int(t.acas_ra->flags) == (5 | 0x10 | 0x20 | 0x40));
     BOOST_TEST(t.id.address == 0xA12345u);
     BOOST_TEST((t.id.type == AddressType::icao));
     BOOST_TEST((t.source == Source::adsb_1090));

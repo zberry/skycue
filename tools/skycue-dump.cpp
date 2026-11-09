@@ -201,6 +201,7 @@ std::string updateLine(bool json, const Track& t)
     const auto i = [](int32_t v) { return num(static_cast<long long>(v)); };
     const auto f = [](float v) { return num(static_cast<double>(v)); };
     const auto u = [](uint8_t v) { return num(static_cast<long long>(v)); };
+    const auto u16 = [](uint16_t v) { return num(static_cast<long long>(v)); };
     const auto txt = [json](const std::string& v) { return json ? jsonString(v) : textWord(v); };
     addOpt(l, "alt_baro_ft", "alt_baro", t.alt_baro_ft, i);
     addOpt(l, "alt_geom_ft", "alt_geom", t.alt_geom_ft, i);
@@ -212,6 +213,46 @@ std::string updateLine(bool json, const Track& t)
     addOpt(l, "registration", "reg", t.registration, txt);
     addOpt(l, "nic", "nic", t.nic, u);
     addOpt(l, "nac_p", "nacp", t.nac_p, u);
+    addOpt(l, "alt_geom_uncertainty_ft", "alt_unc", t.alt_geom_uncertainty_ft, u16);
+    addOpt(l, "heading_mag_deg", "hdg_m", t.heading_mag_deg, f);
+    addOpt(l, "heading_true_deg", "hdg_t", t.heading_true_deg, f);
+    addOpt(l, "ias_kt", "ias", t.ias_kt, u16);
+    addOpt(l, "tas_kt", "tas", t.tas_kt, u16);
+    addOpt(l, "mach", "mach", t.mach, f);
+    addOpt(l, "roll_deg", "roll", t.roll_deg, f);
+    addOpt(l, "track_rate_dps", "trk_rate", t.track_rate_dps, f);
+    addOpt(l, "sel_alt_ft", "sel_alt", t.sel_alt_ft, i);
+    addOpt(l, "sel_alt_fms_ft", "sel_fms", t.sel_alt_fms_ft, i);
+    addOpt(l, "qnh_mb", "qnh", t.qnh_mb, f);
+    addOpt(l, "sel_heading_deg", "sel_hdg", t.sel_heading_deg, f);
+    if (t.nav_modes) {
+        static const char* const names[] = {"autopilot", "vnav", "althold", "approach", "lnav", "tcas"};
+        std::string arr = "[", words;
+        for (unsigned b = 0; b < 6; ++b) {
+            if (!(*t.nav_modes & (1u << b)))
+                continue;
+            arr += std::string(arr.size() > 1 ? "," : "") + "\"" + names[b] + "\"";
+            words += std::string(words.empty() ? "" : "+") + names[b];
+        }
+        l.add("nav_modes", arr + "]", "nav=" + (words.empty() ? std::string("none") : words));
+    }
+    if (t.acas_ra) {
+        const AcasRaWire& ra = *t.acas_ra;
+        const bool act = (ra.flags & 0x40) != 0;
+        l.add("acas_ra",
+              std::string("{\"active\":") + (act ? "true" : "false") + ",\"ara\":" + std::to_string(ra.ara) +
+                  ",\"rac\":" + std::to_string(ra.flags & 0x0F) + ",\"rat\":" + ((ra.flags & 0x10) ? "true" : "false") +
+                  ",\"mte\":" + ((ra.flags & 0x20) ? "true" : "false") + "}",
+              std::string("ra=") + (act ? "active" : "inactive") + ":0x" + [&] {
+                  char buf[8];
+                  std::snprintf(buf, sizeof buf, "%04X", static_cast<unsigned>(ra.ara));
+                  return std::string(buf);
+              }());
+    }
+    addOpt(l, "emergency", "emerg", t.emergency, [json](uint8_t v) {
+        return json ? jsonString(emergencyName(v)) : textWord(emergencyName(v));
+    });
+    addOpt(l, "category", "cat", t.category, txt);
     l.add("on_ground", t.on_ground ? "true" : "false", t.on_ground ? "gnd" : "")
         .add("alt_is_geom", t.alt_is_geom ? "true" : "false", "")
         .add("keyframe", t.keyframe ? "true" : "false", t.keyframe ? "kf" : "");

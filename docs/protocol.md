@@ -35,7 +35,7 @@ Every frame starts with an 8-byte header.
 
 ## TrackUpdate (type 2)
 
-Fixed part, 26 bytes:
+Fixed part, 28 bytes (26 in version 1, where the presence word is a u16):
 
 | Offset | Size | Type | Field            | Notes                                         |
 |-------:|-----:|------|------------------|-----------------------------------------------|
@@ -47,7 +47,7 @@ Fixed part, 26 bytes:
 | 8      | 8    | u64  | position_time_ms | milliseconds since the Unix epoch; decoders clamp values above 4102444800000 (2100-01-01) |
 | 16     | 4    | i32  | lat              | degrees × 10⁷, clamped to ±90                 |
 | 20     | 4    | i32  | lon              | degrees × 10⁷, clamped to ±180                |
-| 24     | 2    | u16  | presence         | bitmask of optional fields that follow        |
+| 24     | 2 (version 1) or 4 (version 2) | u16 / u32 | presence | bitmask of optional fields that follow; the width follows the header version |
 
 `alt_is_geom` means the elevation filter used geometric altitude for this
 track. A non-finite latitude or longitude is sent as 0.
@@ -68,14 +68,40 @@ fields whose presence bit is set are present.
 | 8     | nic               | u8     | 1     |
 | 9     | nac_p             | u8     | 1     |
 | 10    | alt_geom_uncertainty_ft | u16 | 2   |
-| 11–15 | reserved          |        |       |
+| 11    | acas_ra           | u16 ara, u8 flags | 3 |
+| 12    | heading_mag_deg   | f32    | 4     |
+| 13    | heading_true_deg  | f32    | 4     |
+| 14    | ias_kt            | u16    | 2     |
+| 15    | tas_kt            | u16    | 2     |
+| 16    | mach              | f32    | 4     |
+| 17    | roll_deg          | f32    | 4     |
+| 18    | sel_alt_ft        | i32    | 4     |
+| 19    | sel_alt_fms_ft    | i32    | 4     |
+| 20    | qnh_mb            | f32    | 4     |
+| 21    | sel_heading_deg   | f32    | 4     |
+| 22    | nav_modes         | u8     | 1     |
+| 23    | track_rate_dps    | f32    | 4     |
+| 24    | emergency         | u8     | 1     |
+| 25    | category          | string | 1+n, n ≤ 2 (normally 2) |
+| 26–31 | reserved          |        |       |
+
+Bits 11–25 exist from version 2 on. `acas_ra` carries the 14-bit ARA field and a
+flags byte: bits 0–3 RAC, bit 4 RAT, bit 5 MTE, bit 6 active (an advisory that
+has ended keeps its last ARA with the active bit clear); bit 7 is 0. `nav_modes`
+is a bitmask: bit 0 autopilot, 1 vnav, 2 althold, 3 approach, 4 lnav, 5 tcas.
+`emergency` is a code: 0 none, 1 general, 2 medical, 3 minimum_fuel, 4 no_comms,
+5 unlawful_interference, 6 downed_aircraft (a receiver treats other values as
+unknown). `category` is the emitter category, e.g. `A3`. Air-data angles are
+degrees, speeds knots, `qnh_mb` millibars, `track_rate_dps` degrees per second
+(right turn positive), `roll_deg` right wing down positive.
 
 `alt_geom_uncertainty_ft` is present only when `alt_geom_ft` is an estimate
 (see [Geometric altitude](operating.md#geometric-altitude)); a reported
 altitude has no bit 10. The value saturates at 65535.
 
-A TrackUpdate with every field present and maximum-length strings is 81 payload
-bytes (89 with the header).
+A version 2 TrackUpdate with every field present and maximum-length strings is
+131 payload bytes (139 with the header); the fixed part is 28 bytes and the
+optional fields 103. A version 1 frame was 81 payload bytes (89 with the header).
 
 Encoders truncate strings longer than the limits above. Decoders reject a
 string whose length byte exceeds its limit.
@@ -130,6 +156,12 @@ that. See [Liveness](#liveness).
 
 ## Revisions
 
+- **2.0** (2026-11-09): header version 2; presence is a u32 (offset 24, fixed
+  part 28 bytes); bits 11–25: `acas_ra`, air data, intent, `emergency` and
+  `category` on the wire. Version 1 frames still decode (u16 presence, bits
+  0–10). A sender that cannot rely on its receivers upgrading together should
+  run both ends from the same release: a version 1 receiver closes the
+  connection on a version 2 header (`bad_version`).
 - **1.1** (additive; the header version stays 1): presence bit 10,
   `alt_geom_uncertainty_ft`. A receiver of 1.0 reads bits 0–9, stops at bit 10
   as for any unknown bit, and sees an estimated altitude as a plain
@@ -145,10 +177,11 @@ that. See [Liveness](#liveness).
 - **Trailing payload bytes** beyond the fields a receiver knows are ignored.
   Later versions may append fields to any frame type.
 - **Unknown presence bits.** If a TrackUpdate has a presence bit set that the
-  receiver does not know (bits 11–15 in version 1.1, bits 10–15 for a receiver of 1.0), the receiver stops reading
-  optional fields at that bit and keeps the fields it has already read. Because
-  fields are packed in bit order and the reserved bits are above every known
-  bit, all known fields come before any unknown one.
+  receiver does not know (bits 26–31 in version 2, bits 11–31 when the receiver
+  reads a version 1 frame), the receiver stops reading optional fields at that
+  bit and keeps the fields it has already read. Because fields are packed in
+  bit order and the reserved bits are above every known bit, all known fields
+  come before any unknown one.
 - **Truncation.** A payload too short for its fixed part, or for a field its
   presence mask announces, is malformed and the frame is rejected.
 - **Enumerations.** Address type, source and drop reason values not listed

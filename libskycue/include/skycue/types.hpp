@@ -3,7 +3,7 @@
 // skycue track types: what a Client hands to its callbacks. See
 // docs/libskycue.md for the API guide and docs/protocol.md for the wire format.
 //
-// Enumerations: the values below are the ones protocol version 1 defines. The
+// Enumerations: the values below are the ones the protocol defines. The
 // decoder passes the wire byte through unchanged, so a newer sender may deliver
 // a value outside this set (a switch over these enums can fall through every
 // case). Treat any value you do not recognise as `other`.
@@ -77,6 +77,31 @@ inline bool operator<(const TrackId& a, const TrackId& b)
     return static_cast<uint8_t>(a.type) < static_cast<uint8_t>(b.type);
 }
 
+// An ACAS resolution advisory as carried on the wire (protocol version 2).
+struct AcasRaWire {
+    uint16_t ara{};  // active resolution advisories, the 14-bit ARA field
+    uint8_t flags{}; // bits 0-3 RAC, bit 4 RAT, bit 5 MTE, bit 6 active
+};
+
+// Emergency status names by wire code: 0 none, 1 general, 2 medical, 3 minimum_fuel,
+// 4 no_comms, 5 unlawful_interference, 6 downed_aircraft. "unknown" for any other code.
+inline const char* emergencyName(uint8_t code)
+{
+    static const char* const names[] = {"none",    "general",  "medical",
+                                        "minimum_fuel", "no_comms", "unlawful_interference",
+                                        "downed_aircraft"};
+    return code < 7 ? names[code] : "unknown";
+}
+
+// The wire code of an emergency name; nullopt for a name not in the table.
+inline std::optional<uint8_t> emergencyCode(const std::string& name)
+{
+    for (uint8_t c = 0; c < 7; ++c)
+        if (name == emergencyName(c))
+            return c;
+    return std::nullopt;
+}
+
 // The full state of one track, as the sender last knew it. Every update
 // carries every field the sender knows, so a consumer replaces its copy rather
 // than merging: an optional that is nullopt now but was set before means the
@@ -117,6 +142,24 @@ struct Track {
     // Present exactly when alt_geom_ft is an estimate rather than a reported value:
     // its expected error, feet (saturates at 65535). Absent: reported, or no geometric altitude.
     std::optional<uint16_t> alt_geom_uncertainty_ft;
+
+    // Added in protocol version 2. nullopt: not known / not reported.
+    std::optional<AcasRaWire> acas_ra;        // latest ACAS resolution advisory
+    std::optional<float> heading_mag_deg;     // magnetic heading, degrees
+    std::optional<float> heading_true_deg;    // true heading, degrees
+    std::optional<uint16_t> ias_kt;           // indicated airspeed, knots
+    std::optional<uint16_t> tas_kt;           // true airspeed, knots
+    std::optional<float> mach;                // Mach number
+    std::optional<float> roll_deg;            // roll angle, right wing down positive
+    std::optional<int32_t> sel_alt_ft;        // selected altitude (MCP/FCU), feet
+    std::optional<int32_t> sel_alt_fms_ft;    // selected altitude (FMS), feet
+    std::optional<float> qnh_mb;              // selected barometric setting, millibars
+    std::optional<float> sel_heading_deg;     // selected heading, degrees
+    // Autopilot engagement bits: 0 autopilot, 1 vnav, 2 althold, 3 approach, 4 lnav, 5 tcas.
+    std::optional<uint8_t> nav_modes;
+    std::optional<float> track_rate_dps;      // rate of change of track, degrees per second
+    std::optional<uint8_t> emergency;         // emergency status code; see emergencyName()
+    std::optional<std::string> category;      // emitter category, two characters, e.g. "A3"
 };
 
 } // namespace skycue

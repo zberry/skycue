@@ -1,6 +1,6 @@
 #pragma once
 
-// skycue wire protocol, version 1. See docs/protocol.md for the byte layout.
+// skycue wire protocol, version 2. See docs/protocol.md for the byte layout.
 //
 // Most consumers never use this header directly: skycue::Client decodes the
 // stream and hands out Track values. It is public for tools that inspect raw
@@ -16,7 +16,7 @@
 namespace skycue {
 
 constexpr char kMagic[4] = {'S', 'K', 'Y', 'C'}; // first four bytes of every frame
-constexpr uint8_t kVersion = 1;                  // the only protocol version this library speaks
+constexpr uint8_t kVersion = 2;                  // the version this library sends; it also reads version 1
 // The header's type byte. A frame may carry a value not listed here (see Frame).
 enum class FrameType : uint8_t { hello = 1, track_update = 2, track_drop = 3, heartbeat = 4 };
 constexpr size_t kHeaderSize = 8;       // magic, version, type, u16 payload length
@@ -57,11 +57,12 @@ struct Heartbeat {
 struct Frame {
     FrameType type{};             // raw header type byte
     std::vector<uint8_t> payload; // the bytes after the header, undecoded
+    uint8_t version{kVersion};    // the header's version byte (1 or 2); selects the TrackUpdate layout
 };
 
 // Result of decodeFrame. ok: one frame decoded. need_more: the buffer ends
 // inside a header or payload; wait for more bytes. bad_magic, bad_version:
-// not a version-1 skycue frame; a stream cannot be resynchronised after this.
+// not a skycue frame of a supported version; a stream cannot be resynchronised after this.
 enum class DecodeStatus { ok, need_more, bad_magic, bad_version };
 
 // Each encoder returns a complete frame: header followed by payload.
@@ -74,14 +75,17 @@ std::vector<uint8_t> encodeHeartbeat(const Heartbeat& hb);
 // frame and `consumed` is header + payload length. On any other status
 // `consumed` is 0 and `out` is unchanged. need_more means the buffer holds a
 // partial header or a partial payload. The magic and version are checked as
-// soon as the full header is available.
-DecodeStatus decodeFrame(const uint8_t* data, size_t len, Frame& out, size_t& consumed);
+// soon as the full header is available. Versions 1 through max_version are
+// accepted (default kVersion); a reader that only speaks version 1 passes 1.
+DecodeStatus decodeFrame(const uint8_t* data, size_t len, Frame& out, size_t& consumed,
+                         uint8_t max_version = kVersion);
 
 // Payload decoders. Each returns false if the frame type does not match or the
 // payload is truncated or malformed; `out` is then unspecified. Trailing bytes
 // beyond the fields this version knows are ignored.
 bool decodeHello(const Frame& f, Hello& out);
-// Enum bytes are passed through unchanged (may be outside the known set). At a
+// Enum bytes are passed through unchanged (may be outside the known set). Reads the
+// layout of f.version (1: u16 presence, bits 0-10; 2: u32 presence, bits 0-25). At a
 // presence bit this version does not know, stops and keeps the fields read so far.
 bool decodeTrackUpdate(const Frame& f, Track& out);
 bool decodeTrackDrop(const Frame& f, TrackDrop& out); // reason byte passed through unchanged

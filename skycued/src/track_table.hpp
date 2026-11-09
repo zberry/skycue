@@ -32,7 +32,6 @@ struct TrackState {
     std::chrono::system_clock::time_point last_position_time{}; // newest position time (if ever positioned)
     std::chrono::system_clock::time_point last_direct_position_time{}; // newest position of a non-rebroadcast observation
     std::optional<skycue::Track> last_sent;                     // what the consumer last received
-    std::optional<std::string> last_sent_emergency;             // latest.emergency at that send (Track has no field)
     std::chrono::steady_clock::time_point last_sent_at{};
     bool currently_forwarded = false;
 };

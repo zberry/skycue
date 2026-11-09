@@ -23,8 +23,27 @@ enum PresenceBit : unsigned {
     p_nic = 8,
     p_nac_p = 9,
     p_alt_geom_uncertainty = 10,
-    p_known_count = 11,
+    // Version 2 (u32 presence)
+    p_acas_ra = 11,
+    p_heading_mag = 12,
+    p_heading_true = 13,
+    p_ias = 14,
+    p_tas = 15,
+    p_mach = 16,
+    p_roll = 17,
+    p_sel_alt = 18,
+    p_sel_alt_fms = 19,
+    p_qnh = 20,
+    p_sel_heading = 21,
+    p_nav_modes = 22,
+    p_track_rate = 23,
+    p_emergency = 24,
+    p_category = 25,
+    p_known_count = 26,
 };
+
+constexpr unsigned kV1KnownCount = 11; // version 1 knows bits 0-10 only
+constexpr size_t kCategoryLen = 2;
 
 constexpr uint8_t kFlagKeyframe = 0x01;
 constexpr uint8_t kFlagOnGround = 0x02;
@@ -218,10 +237,10 @@ std::vector<uint8_t> encodeTrackUpdate(const Track& t)
     w.i32(scaleDegrees(t.lat_deg, 90.0));
     w.i32(scaleDegrees(t.lon_deg, 180.0));
 
-    uint16_t presence = 0;
+    uint32_t presence = 0;
     auto mark = [&presence](bool set, unsigned bit) {
         if (set)
-            presence = static_cast<uint16_t>(presence | (1u << bit));
+            presence |= 1u << bit;
     };
     mark(t.alt_baro_ft.has_value(), p_alt_baro);
     mark(t.alt_geom_ft.has_value(), p_alt_geom);
@@ -234,7 +253,22 @@ std::vector<uint8_t> encodeTrackUpdate(const Track& t)
     mark(t.nic.has_value(), p_nic);
     mark(t.nac_p.has_value(), p_nac_p);
     mark(t.alt_geom_uncertainty_ft.has_value(), p_alt_geom_uncertainty);
-    w.u16(presence);
+    mark(t.acas_ra.has_value(), p_acas_ra);
+    mark(t.heading_mag_deg.has_value(), p_heading_mag);
+    mark(t.heading_true_deg.has_value(), p_heading_true);
+    mark(t.ias_kt.has_value(), p_ias);
+    mark(t.tas_kt.has_value(), p_tas);
+    mark(t.mach.has_value(), p_mach);
+    mark(t.roll_deg.has_value(), p_roll);
+    mark(t.sel_alt_ft.has_value(), p_sel_alt);
+    mark(t.sel_alt_fms_ft.has_value(), p_sel_alt_fms);
+    mark(t.qnh_mb.has_value(), p_qnh);
+    mark(t.sel_heading_deg.has_value(), p_sel_heading);
+    mark(t.nav_modes.has_value(), p_nav_modes);
+    mark(t.track_rate_dps.has_value(), p_track_rate);
+    mark(t.emergency.has_value(), p_emergency);
+    mark(t.category.has_value(), p_category);
+    w.u32(presence);
 
     if (t.alt_baro_ft)
         w.i32(*t.alt_baro_ft);
@@ -258,6 +292,38 @@ std::vector<uint8_t> encodeTrackUpdate(const Track& t)
         w.u8(*t.nac_p);
     if (t.alt_geom_uncertainty_ft)
         w.u16(*t.alt_geom_uncertainty_ft);
+    if (t.acas_ra) {
+        w.u16(t.acas_ra->ara);
+        w.u8(t.acas_ra->flags);
+    }
+    if (t.heading_mag_deg)
+        w.f32(*t.heading_mag_deg);
+    if (t.heading_true_deg)
+        w.f32(*t.heading_true_deg);
+    if (t.ias_kt)
+        w.u16(*t.ias_kt);
+    if (t.tas_kt)
+        w.u16(*t.tas_kt);
+    if (t.mach)
+        w.f32(*t.mach);
+    if (t.roll_deg)
+        w.f32(*t.roll_deg);
+    if (t.sel_alt_ft)
+        w.i32(*t.sel_alt_ft);
+    if (t.sel_alt_fms_ft)
+        w.i32(*t.sel_alt_fms_ft);
+    if (t.qnh_mb)
+        w.f32(*t.qnh_mb);
+    if (t.sel_heading_deg)
+        w.f32(*t.sel_heading_deg);
+    if (t.nav_modes)
+        w.u8(*t.nav_modes);
+    if (t.track_rate_dps)
+        w.f32(*t.track_rate_dps);
+    if (t.emergency)
+        w.u8(*t.emergency);
+    if (t.category)
+        w.str(*t.category, kCategoryLen);
     return w.finish();
 }
 
@@ -277,7 +343,7 @@ std::vector<uint8_t> encodeHeartbeat(const Heartbeat& hb)
     return w.finish();
 }
 
-DecodeStatus decodeFrame(const uint8_t* data, size_t len, Frame& out, size_t& consumed)
+DecodeStatus decodeFrame(const uint8_t* data, size_t len, Frame& out, size_t& consumed, uint8_t max_version)
 {
     consumed = 0;
     if (data == nullptr || len < kHeaderSize)
@@ -286,13 +352,14 @@ DecodeStatus decodeFrame(const uint8_t* data, size_t len, Frame& out, size_t& co
         if (data[i] != static_cast<uint8_t>(kMagic[i]))
             return DecodeStatus::bad_magic;
     }
-    if (data[4] != kVersion)
+    if (data[4] < 1 || data[4] > max_version)
         return DecodeStatus::bad_version;
     size_t payload_len = static_cast<size_t>(data[6]) | (static_cast<size_t>(data[7]) << 8);
     if (len - kHeaderSize < payload_len)
         return DecodeStatus::need_more;
 
     out.type = static_cast<FrameType>(data[5]);
+    out.version = data[4];
     out.payload.assign(data + kHeaderSize, data + kHeaderSize + payload_len);
     consumed = kHeaderSize + payload_len;
     return DecodeStatus::ok;
@@ -315,10 +382,21 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
     uint8_t type = 0, source = 0, flags = 0, reserved = 0;
     uint64_t ms = 0;
     int32_t lat = 0, lon = 0;
-    uint16_t presence = 0;
-    if (!(r.u32(address) && r.u8(type) && r.u8(source) && r.u8(flags) && r.u8(reserved) && r.u64(ms) &&
-          r.i32(lat) && r.i32(lon) && r.u16(presence)))
+    uint32_t presence = 0;
+    if (f.version < 1 || f.version > kVersion)
         return false;
+    if (!(r.u32(address) && r.u8(type) && r.u8(source) && r.u8(flags) && r.u8(reserved) && r.u64(ms) &&
+          r.i32(lat) && r.i32(lon)))
+        return false;
+    if (f.version == 1) {
+        uint16_t p16 = 0;
+        if (!r.u16(p16))
+            return false;
+        presence = p16;
+    } else if (!r.u32(presence)) {
+        return false;
+    }
+    const unsigned known = f.version == 1 ? kV1KnownCount : static_cast<unsigned>(p_known_count);
 
     Track t;
     t.id = TrackId{address, static_cast<AddressType>(type)};
@@ -339,9 +417,13 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
     // Optional fields appear in bit order. A set bit this version does not know
     // means the rest of the payload has a layout we cannot parse: keep what has
     // been read so far and stop.
-    for (unsigned bit = 0; bit < 16; ++bit) {
+    for (unsigned bit = 0; bit < 32; ++bit) {
         if ((presence & (1u << bit)) == 0)
             continue;
+        if (bit >= known) {
+            out = std::move(t); // unknown bit
+            return true;
+        }
         bool ok = false;
         switch (bit) {
         case p_alt_baro: ok = readOptional(r, t.alt_baro_ft, &Reader::i32); break;
@@ -355,7 +437,28 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
         case p_nic: ok = readOptional(r, t.nic, &Reader::u8); break;
         case p_nac_p: ok = readOptional(r, t.nac_p, &Reader::u8); break;
         case p_alt_geom_uncertainty: ok = readOptional(r, t.alt_geom_uncertainty_ft, &Reader::u16); break;
-        default: out = std::move(t); return true; // unknown bit
+        case p_acas_ra: {
+            AcasRaWire ra;
+            ok = r.u16(ra.ara) && r.u8(ra.flags);
+            if (ok)
+                t.acas_ra = ra;
+            break;
+        }
+        case p_heading_mag: ok = readOptional(r, t.heading_mag_deg, &Reader::f32); break;
+        case p_heading_true: ok = readOptional(r, t.heading_true_deg, &Reader::f32); break;
+        case p_ias: ok = readOptional(r, t.ias_kt, &Reader::u16); break;
+        case p_tas: ok = readOptional(r, t.tas_kt, &Reader::u16); break;
+        case p_mach: ok = readOptional(r, t.mach, &Reader::f32); break;
+        case p_roll: ok = readOptional(r, t.roll_deg, &Reader::f32); break;
+        case p_sel_alt: ok = readOptional(r, t.sel_alt_ft, &Reader::i32); break;
+        case p_sel_alt_fms: ok = readOptional(r, t.sel_alt_fms_ft, &Reader::i32); break;
+        case p_qnh: ok = readOptional(r, t.qnh_mb, &Reader::f32); break;
+        case p_sel_heading: ok = readOptional(r, t.sel_heading_deg, &Reader::f32); break;
+        case p_nav_modes: ok = readOptional(r, t.nav_modes, &Reader::u8); break;
+        case p_track_rate: ok = readOptional(r, t.track_rate_dps, &Reader::f32); break;
+        case p_emergency: ok = readOptional(r, t.emergency, &Reader::u8); break;
+        case p_category: ok = readOptionalStr(r, t.category, kCategoryLen); break;
+        default: out = std::move(t); return true; // not reached: bit < known
         }
         if (!ok)
             return false;

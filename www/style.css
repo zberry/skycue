@@ -499,9 +499,9 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 #inputs-list, #outputs-list { display: flex; flex-direction: column; gap: 8px; }
 #inputs-list.empty::before { content: "No inputs."; color: var(--muted); font-size: 12px; }
 #outputs-list.empty::before { content: "No outputs."; color: var(--muted); font-size: 12px; }
-.input-card, .output-card { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; background: var(--panel-2); font-size: 12px; }
+.res-card { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; background: var(--panel-2); font-size: 12px; }
 .input-head, .output-head { display: flex; align-items: baseline; gap: 6px; }
-.input-head .dot, .output-head .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; align-self: center; background: #6e7681; }
+.res-card .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; align-self: center; background: #6e7681; }
 .dot-green { background: var(--sent) !important; }
 .dot-amber { background: #e3b341 !important; }
 .dot-red { background: var(--blocked) !important; }

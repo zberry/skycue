@@ -2933,9 +2933,6 @@
   var SHOW_MIN_ZOOM = 6;            // "Show" zooms in to this from further out
   var NUMERIC_FIELDS = { port: true, sac: true, sic: true, status_interval_s: true, ttl: true };
   var OUTPUTS_POLL_MS = 1000;       // GET /api/outputs while the Feeds tab is shown (the counters)
-  var DOT_TITLES = { green: 'connected, receiving', amber: 'connected, no data for 30 s',
-    red: 'disconnected, or the status poll failed 3 times', grey: 'disabled' };
-  var ACT_LABELS = { toggle: 'Disable', edit: 'Edit', remove: 'Remove', show: 'Show' };
   var DEVICE_SVG = '<svg width="16" height="16" viewBox="-8 -8 16 16" aria-hidden="true">' +
     '<path d="M0,-7 L7,0 L0,7 L-7,0 Z" fill="currentColor" stroke="#0d1117" stroke-width="1.5"/></svg>';
   var STATION_SVG = '<svg width="16" height="16" viewBox="-8 -8 16 16" aria-hidden="true">' +
@@ -2948,18 +2945,14 @@
     ['recorder_dropped', 'Recorder drops (received / sent)']
   ];
   var rx = {
-    inputs: [],                     // input objects, as GET /api/inputs lists them
     wall: 0,                        // Date.now() when they arrived (for the data ages)
     rates: {},                      // id -> {obs_s, msg_s}
     decoderLines: {},               // id -> the decoder line text (decoding inputs only)
     dataWall: {},                   // id -> Date.now() of the stats item its message count last grew in
     prevLines: null, prevWall: 0,   // the previous stats.inputs
     stats: null,                    // the latest stats object (recorder drops)
-    cards: new Map(),               // id -> card element
     devices: new Map(),             // id -> device marker
     stations: new Map(),            // site_id -> station marker
-    editing: null,                  // the id of the input the form edits; null: it adds one
-    enabledTouched: false,          // the form's Enabled box was changed while editing
     outputs: [],                    // output objects, as GET /api/outputs lists them
     outCards: new Map(),            // id -> output card element
     outEditing: null,               // the id of the output the output form edits; null: it adds one
@@ -2972,31 +2965,31 @@
     if (text !== undefined) e.textContent = text;
     return e;
   }
+  var makePanel = window.skycueResourcePanel.create({
+    $: $, request: request, showMsg: showMsg, eachEl: eachEl, el: el,
+    connected: function () { return connected; }, tabShown: tabShown,
+    confirm: function (text) { return window.confirm(text); }, now: dataNow
+  });
   function inputById(id) {
-    for (var i = 0; i < rx.inputs.length; i++) if (rx.inputs[i].id === id) return rx.inputs[i];
+    var inputs = inputsPanel.items();
+    for (var i = 0; i < inputs.length; i++) if (inputs[i].id === id) return inputs[i];
     return null;
-  }
-  function devicePos(inp) {
-    var ds = inp.state && inp.state.device_status;
-    return ds && typeof ds.lat === 'number' && typeof ds.lon === 'number' ? [ds.lat, ds.lon] : null;
   }
 
   function applyInputs(list) {
-    rx.inputs = Array.isArray(list) ? list : [];
+    var inputs = Array.isArray(list) ? list : [];
     rx.wall = Date.now();
-    if (alertsView) alertsView.inputs(rx.inputs);
+    if (alertsView) alertsView.inputs(inputs);
     // An id that went may come back as a new input: forget its client state.
     var ids = {};
-    rx.inputs.forEach(function (i) { ids[i.id] = true; });
+    inputs.forEach(function (i) { ids[i.id] = true; });
     [rx.dataWall, rx.rates, rx.decoderLines].forEach(function (byId) {
       Object.keys(byId).forEach(function (id) { if (!ids[id]) delete byId[id]; });
     });
     if (rx.prevLines) rx.prevLines = rx.prevLines.filter(function (l) { return ids[l.id]; });
-    var edited = rx.editing !== null && inputById(rx.editing);
-    if (edited && !rx.enabledTouched) formEl('enabled').checked = !!edited.enabled;
+    inputsPanel.apply(inputs);
     updateInputsHeader();
     updateDeviceMarkers();
-    if (tabShown('receiver')) renderInputs();
   }
   // stats.inputs: the rates, and each input's counters and `connected`.
   function applyInputLines(lines, now) {
@@ -3017,23 +3010,24 @@
       if (!inp || !inp.state) return;
       ['connected', 'messages', 'observations', 'uplinks', 'rejected'].forEach(function (k) { inp.state[k] = l[k]; });
     });
-    if (alertsView) alertsView.inputs(rx.inputs);
+    if (alertsView) alertsView.inputs(inputsPanel.items());
     updateInputsHeader();
   }
   function updateInputsHeader() {
-    var n = P.inputsSummary(rx.inputs);
+    var n = P.inputsSummary(inputsPanel.items());
     setStat('stat-inputs', n.connected + '/' + n.enabled, n.enabled > 0 && n.connected === n.enabled ? 'on' : 'off');
   }
-  function refreshInputs() {
-    return request('GET', 'api/inputs').then(function (j) { applyInputs(j.inputs); });
+  // ---- the Inputs panel: resource_panel.js with the input side's parts ----
+  // (the Outputs panel is the same module; tests/js/panel_markup.test.js
+  // runs this region over a fake DOM.) panels:begin
+  var DOT_TITLES = { green: 'connected, receiving', amber: 'connected, no data for 30 s',
+    red: 'disconnected, or the status poll failed 3 times', grey: 'disabled' };
+  function devicePos(inp) {
+    var ds = inp.state && inp.state.device_status;
+    return ds && typeof ds.lat === 'number' && typeof ds.lon === 'number' ? [ds.lat, ds.lon] : null;
   }
-  function pollInputs() {
-    if (connected) P.quietly(refreshInputs()); // the WebSocket watchdog reports a dead skycued
-  }
-
   function makeCard(inp) {
     var card = el('div', 'input-card');
-    card.setAttribute('data-id', inp.id);
     var head = el('div', 'input-head');
     head.appendChild(el('span', 'dot'));
     head.appendChild(el('span', 'input-name'));
@@ -3046,14 +3040,6 @@
     card.appendChild(el('div', 'input-decoder'));
     card.appendChild(el('div', 'input-device'));
     card.appendChild(el('div', 'input-error'));
-    var acts = el('div', 'input-actions');
-    (inp.builtin ? ['toggle'] : ['toggle', 'edit', 'remove', 'show']).forEach(function (a) {
-      var b = el('button', null, ACT_LABELS[a]);
-      b.type = 'button';
-      b.setAttribute('data-act', a);
-      acts.appendChild(b);
-    });
-    card.appendChild(acts);
     return card;
   }
   function setText(card, cls, text) {
@@ -3107,27 +3093,55 @@
     var show = card.querySelector('[data-act=show]');
     if (show) show.hidden = !devicePos(inp);
   }
-  function renderInputs() {
-    var list = $('inputs-list'), now = dataNow(), seen = {};
-    rx.inputs.forEach(function (inp, i) {
-      seen[inp.id] = true;
-      var card = rx.cards.get(inp.id);
-      if (!card) {
-        card = makeCard(inp);
-        rx.cards.set(inp.id, card);
-      }
-      if (list.children[i] !== card) list.insertBefore(card, list.children[i] || null);
-      fillCard(card, inp, now);
-    });
-    rx.cards.forEach(function (card, id) {
-      if (seen[id]) return;
-      card.remove();
-      rx.cards.delete(id);
-    });
-    list.classList.toggle('empty', !rx.inputs.length);
+  // The definition the form holds; a field left empty is not sent, so
+  // skycued's default applies. A transport that is the type's default (any
+  // type but cat021) is left out as well, so a v1 inputs file stays one.
+  function inputDef(formEl) {
+    var def = { type: formEl('type').value };
+    var fields = P.formDefinition($('input-form').elements, inputFields(formEl), NUMERIC_FIELDS);
+    Object.keys(fields).forEach(function (k) { def[k] = fields[k]; });
+    if (def.type !== 'pingstation_cat021' && def.transport === P.inputTransport(def.type)) delete def.transport;
+    if (def.source === 'device') delete def.source;  // the default; leaves a v1 inputs file one
+    return def;
   }
+  function inputFields(formEl) {
+    return P.inputFields(formEl('type').value, formEl('transport').value, formEl('group').value.trim());
+  }
+  // A built-in's card has no Edit: its enable/disable button is all it takes.
+  function fillInputForm(inp, formEl) {
+    formEl('type').value = inp.type;
+    formEl('type').disabled = true;
+    formEl('transport').value = P.inputTransport(inp.type, inp.transport);
+    formEl('group').value = inp.group || '';
+    P.inputFields(inp.type, inp.transport, inp.group).forEach(function (f) {
+      var e = formEl(f), v = f === 'transport' ? formEl('transport').value : inp[f];
+      if (e.type === 'checkbox') e.checked = !!v;
+      else e.value = v === undefined || v === null ? '' : String(v);
+    });
+  }
+  // "Show" pans, keeping the zoom; from a zoom below SHOW_MIN_ZOOM with the
+  // device out of view it zooms in to SHOW_MIN_ZOOM.
+  function showDevice(inp) {
+    var ll = devicePos(inp);
+    if (!ll || !map) return;
+    if (map.getZoom() < SHOW_MIN_ZOOM && !map.getBounds().contains(ll)) map.setView(ll, SHOW_MIN_ZOOM);
+    else map.panTo(ll);
+  }
+  var inputsPanel = makePanel({
+    noun: 'input', listPath: 'api/inputs', formId: 'input-form', titleId: 'input-form-title', msgId: 'inputs-msg',
+    cardClass: 'input-card', makeCard: makeCard, fillCard: fillCard,
+    actions: function (inp) { return inp.builtin ? ['toggle'] : ['toggle', 'edit', 'remove', 'show']; },
+    extraAct: function (act, inp) { if (act === 'show') showDevice(inp); },
+    fieldsFn: inputFields, defFn: inputDef, validateFn: P.validateInputDef, fillForm: fillInputForm,
+    onFormInput: function (name, formEl) {
+      if (name === 'type') formEl('transport').value = P.inputTransport(formEl('type').value);
+    },
+    syncOn: ['type', 'transport', 'group'], alwaysShown: ['type'],
+    onReset: function (formEl) { formEl('type').disabled = false; }
+  });
+  // panels:end
   function renderReceiver() {
-    renderInputs();
+    inputsPanel.render();
     renderOutputs();
     renderStations();
     renderHealth();
@@ -3136,7 +3150,7 @@
   function renderFeedsSummary() {
     var box = $('feeds-summary');
     if (!box) return;
-    var text = P.feedsSummary(rx.inputs, rx.outputs, cues.clients, config.data && config.data.daemon && config.data.daemon.recording_files);
+    var text = P.feedsSummary(inputsPanel.items(), rx.outputs, cues.clients, config.data && config.data.daemon && config.data.daemon.recording_files);
     box.textContent = '';
     text.split(' · ').forEach(function (part, i) {
       if (i) box.appendChild(document.createTextNode(' · '));
@@ -3148,7 +3162,7 @@
   function updateDeviceMarkers() {
     if (!map) return;
     var seen = {};
-    rx.inputs.forEach(function (inp) {
+    inputsPanel.items().forEach(function (inp) {
       var ll = devicePos(inp);
       if (!ll) return;
       seen[inp.id] = true;
@@ -3706,141 +3720,11 @@
     }, fallback);
   }
 
-  // ---- the add / edit form ----
-  function formEl(name) { return $('input-form').elements[name]; }
-  function formFields() {
-    return P.inputFields(formEl('type').value, formEl('transport').value, formEl('group').value.trim());
-  }
-  function syncFormFields() {
-    var shown = formFields();
-    eachEl('#input-form [data-field]', function (l) {
-      var f = l.getAttribute('data-field');
-      l.hidden = f !== 'type' && shown.indexOf(f) < 0;
-    });
-  }
-  // The definition the form holds; a field left empty is not sent, so
-  // skycued's default applies.
-  // A transport that is the type's default (any type but cat021) is left
-  // out as well, so a v1 inputs file stays one.
-  function formDef() {
-    var def = { type: formEl('type').value };
-    formFields().forEach(function (f) {
-      var e = formEl(f);
-      if (e.type === 'checkbox') {
-        def[f] = e.checked;
-        return;
-      }
-      var v = f === 'name' ? e.value : e.value.trim();
-      if (v !== '') def[f] = NUMERIC_FIELDS[f] ? Number(v) : v;
-    });
-    if (def.type !== 'pingstation_cat021' && def.transport === P.inputTransport(def.type)) delete def.transport;
-    if (def.source === 'device') delete def.source;  // the default; leaves a v1 inputs file one
-    return def;
-  }
-  function showFieldErrors(errors) {
-    eachEl('#input-form .field-error', function (e) {
-      var f = e.getAttribute('data-for'), msg = errors[f] || '';
-      e.textContent = msg;
-      var input = formEl(f);
-      input.classList.toggle('invalid', !!msg);
-      if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
-    });
-  }
-  function showFormError(text) { $('input-form').querySelector('.form-error').textContent = text || ''; }
-  function resetForm() {
-    var form = $('input-form');
-    form.reset();
-    rx.editing = null;
-    rx.enabledTouched = false;
-    formEl('id').readOnly = false;
-    formEl('type').disabled = false;
-    $('input-form-title').textContent = 'Add input';
-    form.querySelector('button[type=submit]').textContent = 'Add';
-    form.querySelector('[data-act=cancel]').hidden = true;
-    showFieldErrors({});
-    showFormError('');
-    syncFormFields();
-  }
-  // A built-in's card has no Edit: its enable/disable button is all it takes.
-  function editInput(inp) {
-    resetForm();
-    rx.editing = inp.id;
-    var form = $('input-form');
-    formEl('type').value = inp.type;
-    formEl('type').disabled = true;
-    formEl('transport').value = P.inputTransport(inp.type, inp.transport);
-    formEl('group').value = inp.group || '';
-    P.inputFields(inp.type, inp.transport, inp.group).forEach(function (f) {
-      var e = formEl(f), v = f === 'transport' ? formEl('transport').value : inp[f];
-      if (e.type === 'checkbox') e.checked = !!v;
-      else e.value = v === undefined || v === null ? '' : String(v);
-    });
-    formEl('id').readOnly = true;
-    $('input-form-title').textContent = 'Edit ' + inp.id;
-    form.querySelector('button[type=submit]').textContent = 'Save';
-    form.querySelector('[data-act=cancel]').hidden = false;
-    syncFormFields();
-    form.scrollIntoView({ block: 'nearest' });
-  }
-  function submitInput(ev) {
-    ev.preventDefault();
-    var def = formDef(), id = rx.editing;
-    // Editing: Enabled as the input is now (its card's toggle may have
-    // changed it since Edit), unless the box itself was changed.
-    var current = id !== null && inputById(id);
-    if (current && !rx.enabledTouched) def.enabled = current.enabled;
-    var check = P.validateInputDef(def);
-    showFieldErrors(check.errors);
-    showFormError('');
-    if (!check.ok) return;
-    var submit = $('input-form').querySelector('button[type=submit]');
-    submit.disabled = true;
-    var req = id === null ? request('POST', 'api/inputs', def) :
-      request('PUT', 'api/inputs/' + encodeURIComponent(id), def);
-    req.then(function () {
-      resetForm();
-      return refreshInputs();
-    }).catch(function (err) {
-      showFormError(err.message); // skycued's message, word for word
-    }).then(function () { submit.disabled = false; });
-  }
-  function onFormInput(ev) {
-    var name = ev.target.name;
-    if (name === 'enabled') rx.enabledTouched = true;
-    if (name === 'type') formEl('transport').value = P.inputTransport(formEl('type').value);
-    if (name === 'type' || name === 'transport' || name === 'group') syncFormFields();
-    // Once marked, the marks follow the typing.
-    if ($('input-form').querySelector('.invalid')) showFieldErrors(P.validateInputDef(formDef()).errors);
-  }
-  function onCardClick(ev) {
-    var b = ev.target.closest('button[data-act]');
-    var card = b && b.closest('.input-card');
-    var inp = card && inputById(card.getAttribute('data-id'));
-    if (!inp) return;
-    var act = b.getAttribute('data-act'), path = 'api/inputs/' + encodeURIComponent(inp.id);
-    var outcome = P.act(function (m, e) { showMsg($('inputs-msg'), m, e); }, refreshInputs);
-    if (act === 'toggle') {
-      request('POST', path + (inp.enabled ? '/disable' : '/enable'), {}).then(outcome.done).catch(outcome.failed);
-    } else if (act === 'edit') {
-      editInput(inp);
-    } else if (act === 'remove') {
-      if (!window.confirm('Remove input ' + inp.id + '?')) return;
-      if (rx.editing === inp.id) resetForm();
-      request('DELETE', path).then(outcome.done).catch(outcome.failed);
-    } else if (act === 'show') {
-      // Pans, keeping the zoom; from a zoom below SHOW_MIN_ZOOM with the
-      // device out of view it zooms in to SHOW_MIN_ZOOM.
-      var ll = devicePos(inp);
-      if (!ll || !map) return;
-      if (map.getZoom() < SHOW_MIN_ZOOM && !map.getBounds().contains(ll)) map.setView(ll, SHOW_MIN_ZOOM);
-      else map.panTo(ll);
-    }
-  }
-
   // ---- Outputs (docs/web-api.md, Outputs) ----
   // The list comes with the snapshot and the `outputs` items (a definition
   // changed, an output came up or went down); the counters are read by
   // polling GET /api/outputs every OUTPUTS_POLL_MS while the tab is shown.
+  var ACT_LABELS = { toggle: 'Disable', edit: 'Edit', remove: 'Remove' };
   var OUT_DOT_TITLES = { green: 'up', amber: 'up, with a last error', red: 'not up', grey: 'disabled' };
   function outputById(id) {
     for (var i = 0; i < rx.outputs.length; i++) if (rx.outputs[i].id === id) return rx.outputs[i];
@@ -4198,18 +4082,13 @@
         else openPanel(tab);
       });
     });
-    $('input-form').addEventListener('submit', submitInput);
-    $('input-form').addEventListener('input', onFormInput);
-    $('input-form').addEventListener('change', onFormInput);
-    $('input-form').querySelector('[data-act=cancel]').addEventListener('click', resetForm);
-    $('inputs-list').addEventListener('click', onCardClick);
+    inputsPanel.wire();
     $('output-form').addEventListener('submit', submitOutput);
     $('output-form').addEventListener('input', onOutFormInput);
     $('output-form').addEventListener('change', onOutFormInput);
     $('output-form').querySelector('[data-act=cancel]').addEventListener('click', resetOutForm);
     $('outputs-list').addEventListener('click', onOutputCardClick);
     syncOutFields();
-    syncFormFields();
     $('shape-close').addEventListener('click', hideShape);
     $('wx-filter').addEventListener('input', function () {
       clearTimeout(fisb.wxTimer);
@@ -4315,7 +4194,7 @@
     setInterval(prune, 2000);
     setInterval(watchdog, 1000);
     setInterval(pollFisb, FISB_POLL_MS);
-    setInterval(pollInputs, INPUTS_POLL_MS);
+    setInterval(inputsPanel.poll, INPUTS_POLL_MS);
     setInterval(pollOutputs, OUTPUTS_POLL_MS);
     setInterval(pollCues, CUES_POLL_MS);
     var ticks = 0;

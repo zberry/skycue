@@ -5,6 +5,9 @@ The page skycued serves on `web.port` (see `docs/web-api.md`): `index.html`,
 test), `alerts_pure.js` (the alert rules engine, `window.skycueAlertsPure`,
 node-tested by `tests/js/alerts_pure.test.js`), `alerts_view.js` (the alert
 strip, built from a host object `app.js` passes in, like `stats_view.js`),
+`resource_panel.js` (the Feeds tab's Inputs and Outputs panels: cards, polling and
+the add / edit form, driven by a descriptor per panel that `app.js` passes in;
+node-tested by `tests/js/resource_panel.test.js` and `tests/js/panel_markup.test.js`),
 `app.js` (the page) and `style.css`, with the Stats view's scripts
 ([Stats view](#stats-view)). Plain ES2017, no framework, no build step, and
 no request to any host but skycued itself.
@@ -103,8 +106,8 @@ the strip does, for operators, is in `docs/operating.md` (Alerts).
 
 `index.html` loads the scripts in this order: Leaflet, ECharts,
 `app_pure.js`, `alerts_pure.js`, `stats_pure.js`, `chart_theme.js`,
-`stats_view.js`, `alerts_view.js`, `app.js`: each pure file after
-`app_pure.js`, each view before `app.js`, which creates them.
+`stats_view.js`, `alerts_view.js`, `resource_panel.js`, `app.js`: each pure file after
+`app_pure.js`, each view and the resource panel before `app.js`, which creates them.
 
 ## Map tiles
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The web UI's files as skycued serves them from the staged www directory:
 # /, /app.js, /app_pure.js, the Stats view's stats_pure.js, chart_theme.js
-# and stats_view.js, the alert strip's alerts_pure.js and alerts_view.js, /style.css and (when Leaflet was staged)
+# and stats_view.js, the Feeds tab's resource_panel.js, the alert strip's alerts_pure.js and alerts_view.js, /style.css and (when Leaflet was staged)
 # /vendor/leaflet/leaflet.js and (when ECharts was staged)
 # /vendor/echarts/echarts.min.js with their content types, /api/state with the
 # fixture's 12 tracks, /api/stats/summary with its since, a path escaping
@@ -9,7 +9,7 @@
 # page's scripts free of post-ES2017 syntax; then, when
 # node is installed, `node --check` on the page's scripts and the pure-function
 # tests (tests/js/app_pure.test.js, tests/js/stats_pure.test.js,
-# tests/js/alerts_pure.test.js). Prints
+# tests/js/alerts_pure.test.js, resource_panel.test.js, panel_markup.test.js). Prints
 # SKIP for the parts it cannot run.
 # usage: test_web_ui.sh SKYCUED FIXTURE_DIR WWW_STAGE JS_TEST_DIR
 set -u
@@ -21,7 +21,7 @@ fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }
 }
 for f in "$skycued" "$replay" "$www/index.html" "$www/app.js" "$www/app_pure.js" "$www/style.css" \
-  "$www/stats_pure.js" "$www/chart_theme.js" "$www/stats_view.js" "$www/alerts_pure.js" "$www/alerts_view.js"; do
+  "$www/stats_pure.js" "$www/chart_theme.js" "$www/stats_view.js" "$www/alerts_pure.js" "$www/alerts_view.js" "$www/resource_panel.js"; do
   [ -e "$f" ] || fail "$f missing"
 done
 
@@ -52,12 +52,12 @@ get() {
 get / 200 text/html
 grep -q 'vendor/leaflet/leaflet.js' "$tmp/body" || fail "index.html does not load Leaflet"
 grep -q 'app_pure.js' "$tmp/body" && grep -q 'app.js' "$tmp/body" || fail "index.html does not load the scripts"
-for js in vendor/echarts/echarts.min.js stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js; do
+for js in vendor/echarts/echarts.min.js stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js resource_panel.js; do
   grep -q "src=\"$js\"" "$tmp/body" || fail "index.html does not load $js"
 done
 get /app.js 200 application/javascript
 get /app_pure.js 200 application/javascript
-for js in stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js; do get "/$js" 200 application/javascript; done
+for js in stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js resource_panel.js; do get "/$js" 200 application/javascript; done
 get /style.css 200 text/css
 if [ -e "$www/vendor/leaflet/leaflet.js" ]; then
   get /vendor/leaflet/leaflet.js 200 application/javascript
@@ -103,12 +103,14 @@ for js in "$www"/*.js; do
 done
 
 if command -v node >/dev/null 2>&1; then
-  for js in app_pure.js app.js stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js; do
+  for js in app_pure.js app.js stats_pure.js chart_theme.js stats_view.js alerts_pure.js alerts_view.js resource_panel.js; do
     node --check "$www/$js" || fail "node --check $js"
   done
   node "$jsdir/app_pure.test.js" "$www/app_pure.js" || fail "app_pure.test.js"
   node "$jsdir/stats_pure.test.js" "$www/stats_pure.js" || fail "stats_pure.test.js"
   node "$jsdir/alerts_pure.test.js" "$www/alerts_pure.js" || fail "alerts_pure.test.js"
+  node "$jsdir/resource_panel.test.js" "$www/resource_panel.js" || fail "resource_panel.test.js"
+  node "$jsdir/panel_markup.test.js" "$www" || fail "panel_markup.test.js"
 else
   echo "SKIP: node not installed (syntax check and pure-function tests)"
 fi

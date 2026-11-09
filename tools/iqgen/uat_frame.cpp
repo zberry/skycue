@@ -8,9 +8,8 @@ namespace iqgen {
 
 namespace {
 
-// Frame constants from dump978's uat_protocol.h, and the Reed-Solomon
-// parameters (fcr 120, prim 1) from its fec.cc; dump978 is Copyright (c)
-// 2019 FlightAware LLC, under the BSD-2-Clause licence.
+// Frame constants and Reed-Solomon parameters (fcr 120, prim 1) of the UAT
+// physical layer.
 constexpr unsigned kSyncBits = 36;
 constexpr uint64_t kDownlinkSyncWord = 0xEACDDA4E2ULL;
 constexpr uint64_t kUplinkSyncWord = 0x153225B1DULL;

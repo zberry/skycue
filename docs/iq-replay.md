@@ -76,11 +76,11 @@ readsb reads it as `--iformat UC8` and dump978-fa as `--format CU8`.
 | modulation | phase-continuous binary CPFSK, rectangular frequency pulse, deviation ±312.5 kHz (modulation index 0.6), 1 041 667 bit/s |
 | bit encoding | a 1 bit is +312.5 kHz; every byte is sent MSB first |
 | CU8 mapping | I = 128 + A cos φ, Q = 128 + A sin φ; a positive frequency is φ increasing |
-| sync word | 36 bits, MSB first: downlink `0xEACDDA4E2`, uplink `0x153225B1D` (dump978's `uat_protocol.h`) |
+| sync word | 36 bits, MSB first: downlink `0xEACDDA4E2`, uplink `0x153225B1D` |
 | downlink short | 144 data bits + 96 parity bits, RS(30,18) |
 | downlink long | 272 data bits + 112 parity bits, RS(48,34) |
 | uplink | 432 payload bytes in 6 blocks of RS(92,72), block-interleaved: byte *i* of block *j* is sent at position 6·i + j |
-| Reed–Solomon | GF(2^8) with dump978's `fec.cc` parameters, encoded in `skycue-iqgen` itself (no FEC library) |
+| Reed–Solomon | GF(2^8), field polynomial 0x187, fcr 120, prim 1, encoded in `skycue-iqgen` itself (no FEC library) |
 | timing | `@ts` or stratux nanosecond timestamps; untimed lines are `--spacing-us` apart (default 20000) |
 
 The UAT inputs are post-FEC payloads, which is what dump978 prints, so

@@ -27,11 +27,10 @@ semantic reference.
 
 ## 1. Ground uplink frame (DO-282B), 432 bytes
 
-FA demodulates and Reed-Solomon-corrects the uplink as 6 interleaved RS blocks of 72 data
-bytes. Deinterleaving is `blockdata[i] = raw[i*6 + block]` (FA `fec.cc:112-115`, constants in
-`uat_protocol.h:30-39`: `UPLINK_BLOCK_DATA_BITS=576`, `UPLINK_BLOCKS_PER_FRAME=6`). The hex
-that dump978 prints is the deinterleaved 432-byte payload. The line format is
-`+<864 hex>;rs=N;rssi=X;t=<unix>.<ms>;` (FA `uat_message.cc:30-61`). Older dump978 builds and
+The receiver demodulates and Reed-Solomon-corrects the uplink as 6 interleaved RS blocks of
+72 data bytes (576 data bits per block, 6 blocks per frame). Deinterleaving is
+`blockdata[i] = raw[i*6 + block]`. The hex that dump978 prints is the deinterleaved 432-byte
+payload. The line format is `+<864 hex>;rs=N;rssi=X;t=<unix>.<ms>;`. Older dump978 builds and
 the sample print only `+<hex>;`, with **no `t=`** **[V]**.
 
 ### 1.1 UAT-specific header (bytes 0-7). Bits are MSB-first; "b5.0" = byte 5, bit 0 (LSB).
@@ -548,7 +547,7 @@ Examples decoded from the captures **[V]**:
 | | Uplink header/frames | APDU header | Segmentation | DLAC | 413 | TWGO | Global block | CRL |
 |---|---|---|---|---|---|---|---|---|
 | MUT `uat_decode.c`, `uat2text.c` (61 lines, CLI front end), `extract_nexrad.c` | yes | yes (incl. T-opt 1/3) | **no** | yes | text split RS/ETX | no (hex dump) | 63/64 only, with the empty-block bug §5.4 | no |
-| FA dump978 (C++/Boost) | **no**: demodulation, FEC, raw hex output, downlink ADS-B decode (`uat_message.cc`); `uplink_feedback` is a downlink field | no | no | no | no | no | no | no |
+| FA dump978 (C++/Boost) | **no**: demodulation, FEC, raw hex output, downlink ADS-B decode; `uplink_feedback` is a downlink field | no | no | no | no | no | no | no |
 | STX `uatparse` | yes | yes; `s_f` parsed but marked TODO (:53) | no | yes | yes | `decodeAirmet` exists but is **commented out** (:502-505); z_bot×5 bug | 63/64 (same bug as MUT) | no |
 | FD | yes | yes (DO-358B) | yes | yes | yes, plus parsing | full, plus geometry passes | all 8 products | yes |
 

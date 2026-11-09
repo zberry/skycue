@@ -155,10 +155,10 @@ BOOST_AUTO_TEST_CASE(rs_codes_match_dump978)
 }
 
 // Known answers: the first payload of each kind in raw/uat-sample.txt.gz and
-// the parity dump978's own Reed-Solomon library (configured as in dump978's
-// fec.cc) computes for it, recorded from a one-off cross-check outside the
-// tree. Unlike the syndrome tests, these pin the field polynomial, fcr and
-// prim: a wrong one gives self-consistent codewords with different parity.
+// the parity a reference UAT decoder computes for it, recorded from a one-off
+// cross-check outside the tree. Unlike the syndrome tests, these pin the
+// field polynomial, fcr and prim: a wrong one gives self-consistent codewords
+// with different parity.
 BOOST_AUTO_TEST_CASE(rs_known_answer_parity)
 {
     struct Vector {

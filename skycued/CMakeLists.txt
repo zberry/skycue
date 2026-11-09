@@ -86,6 +86,7 @@ add_library(skycued_core STATIC
   src/raw_formats.cpp
   src/readsb_json_source.cpp
   src/recorder.cpp
+  src/recording_codec.cpp
   src/recording_reader.cpp
   src/registration.cpp
   src/replay_source.cpp

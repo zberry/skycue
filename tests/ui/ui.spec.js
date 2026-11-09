@@ -1060,7 +1060,7 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test('config_tab_edits_stage_apply_and_pending_restart', async ({ page }) => {
+test('config_tab_edits_stage_apply_and_pending_restart', async ({ page }, testInfo) => {
   const errors = watchErrors(page);
   await openPage(page);
   await page.locator('#cfg-toggle').click();
@@ -1082,13 +1082,16 @@ test('config_tab_edits_stage_apply_and_pending_restart', async ({ page }) => {
   await expect(banner).toBeVisible();
   await expect(banner).toContainText('1 setting waits for a restart');
   await expect(page.locator('#config-pending-list')).toContainText('web.trail_seconds');
+  await page.screenshot({ path: testInfo.outputPath(`skycue-config-edit-${testInfo.project.name}.png`), fullPage: true });
   const row = page.locator('#pane-config tr[data-key="web.trail_seconds"]');
   await expect(row.locator('.badge.src')).toHaveText('overrides');
-  await expect(row.locator('.cfg-hint')).toHaveText(/^(file: .*)?$/);
+  await expect(row.locator('.cfg-hint')).toHaveText(/^running 120(; file: .*)?$/);
   await expect(page.locator('#config-restart')).toBeHidden();
-  await expect(page.locator('#config-supervisor')).toContainText('none');
+  await expect(page.locator('#config-restart-note')).toHaveText('restart skycued to apply');
+  await expect(page.locator('#config-supervisor')).toHaveText(/^Supervisor: none/);
   const cfg = (await api('/api/config')).body;
   expect(cfg.keys.find((k) => k.key === 'web.trail_seconds').source).toBe('overrides');
+  expect(cfg.keys.find((k) => k.key === 'web.trail_seconds').value).toBe('300');
   expect(cfg.pending_restart).toEqual([{ key: 'web.trail_seconds', running: '120', configured: '300' }]);
   // Reset: back to skycue.toml, and the restart note goes away.
   await row.locator('.cfg-reset').click();
@@ -1101,7 +1104,8 @@ test('config_tab_edits_stage_apply_and_pending_restart', async ({ page }) => {
   await lat.fill('');   // a number input cannot hold letters; cleared, it parses as not a number
   await lat.dispatchEvent('change');
   await expect(page.locator('#pane-config tr[data-key="receiver.lat"] .cfg-err')).toHaveText(/expected/);
-  await expect(page.locator('#config-bar')).toBeHidden();
+  await expect(page.locator('#config-bar-text')).toHaveText('fix 1 error first');
+  await expect(page.locator('#config-apply')).toBeDisabled();
   expect(errors).toEqual([]);
 });
 

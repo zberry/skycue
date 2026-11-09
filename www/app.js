@@ -3372,8 +3372,8 @@
       ul.appendChild(el('li', null, p.key + ' (running ' + p.running + ', configured ' + p.configured + ')'));
     });
     $('config-restart').hidden = !d.allow_restart;
-    $('config-supervisor').textContent = d.allow_restart ? 'Supervisor: ' + (d.supervisor || 'none') :
-      'restart skycued to apply' + (d.supervisor ? ' (Supervisor: ' + d.supervisor + ')' : ' (Supervisor: none)');
+    $('config-restart-note').textContent = d.allow_restart ? '' : 'restart skycued to apply';
+    $('config-supervisor').textContent = 'Supervisor: ' + (d.supervisor || 'none');
   }
 
   // The control's raw input, as P.configParse takes it.
@@ -3428,21 +3428,43 @@
     $('config-bar-text').textContent = s.text;
     $('config-bar-keys').textContent = s.keys.join(', ');
     $('config-apply').disabled = bad;
+    if (bad) {
+      var n = Object.keys(config.rows).filter(function (k) { return config.rows[k].bad; }).length;
+      bar.hidden = false;
+      $('config-bar-text').textContent = 'fix ' + n + (n === 1 ? ' error' : ' errors') + ' first';
+    }
   }
   // Show the staged state of one row: its class, hint and error text.
   function paintConfigRow(key) {
     var r = config.rows[key], staged = key in config.staged;
     r.tr.classList.toggle('changed', staged);
-    r.hint.textContent = staged ? (config.staged[key] === null ? 'will reset to skycue.toml' : 'was ' + r.row.value) :
-      P.configRowHint(r.row);
+    var parts = [];
+    if (staged) parts.push(config.staged[key] === null ? 'will reset to skycue.toml' : 'was ' + r.row.value);
+    else {
+      if (r.running !== undefined) parts.push('running ' + r.running);
+      if (P.configRowHint(r.row)) parts.push(P.configRowHint(r.row));
+    }
+    r.hint.textContent = parts.join('; ');
     r.err.textContent = r.error || '';
     r.err.hidden = !r.error;
     r.bad = !!r.error;
+  }
+  // Whether a parsed value is the one the row already shows (its text).
+  function sameConfigValue(row, v) {
+    var t = row.spec.type, cur = String(row.value);
+    if (t === 'int' || t === 'float') return Number(cur) === v;
+    if (t === 'bool') return String(v) === cur;
+    if (t === 'string_set') return configWords(cur).sort().join(' ') === v.slice().sort().join(' ');
+    if (t === 'host_port_list') return configWords(cur).join(' ') === v.join(' ');
+    return cur === v;
   }
   function stageConfig(key, raw) {
     var r = config.rows[key], res = P.configParse(r.row.spec, raw);
     if (res.error) {
       r.error = res.error;
+      delete config.staged[key];
+    } else if (sameConfigValue(r.row, res.value)) {
+      r.error = '';
       delete config.staged[key];
     } else {
       r.error = '';
@@ -3456,6 +3478,8 @@
     var box = $('config-groups');
     box.textContent = '';
     config.rows = {};
+    var runningOf = {};
+    (keys || []).forEach(function (k) { if (k.running !== undefined) runningOf[k.key] = k.running; });
     P.configTables(keys, schema).forEach(function (g) {
       box.appendChild(el('h2', null, '[' + g.table + ']'));
       var table = el('table', 'cfg-table'), body = el('tbody');
@@ -3506,7 +3530,7 @@
         td.appendChild(err);
         tr.appendChild(td);
         body.appendChild(tr);
-        config.rows[r.key] = { row: r, tr: tr, hint: hint, err: err, error: '', bad: false };
+        config.rows[r.key] = { row: r, tr: tr, hint: hint, err: err, error: '', bad: false, running: runningOf[r.key] };
         paintConfigRow(r.key);
       });
       table.appendChild(body);
@@ -3580,11 +3604,16 @@
     $('config-restart').disabled = true;
     request('POST', 'api/restart').then(function () {
       showMsg(msg, 'restarting…');
-      var t0 = Date.now(), timer = setInterval(function () {
+      var t0 = Date.now(), done = false, timer = setInterval(function () {
         request('GET', 'api/config').then(function (c) {
-          if (c.daemon && c.daemon.started !== before) { clearInterval(timer); $('config-restart').disabled = false; showConfig(); }
+          if (done || !c.daemon || c.daemon.started === before) return;
+          done = true;
+          clearInterval(timer);
+          $('config-restart').disabled = false;
+          showConfig();
         }, function () { /* down while restarting */ });
-        if (Date.now() - t0 > 30000) {
+        if (!done && Date.now() - t0 > 30000) {
+          done = true;
           clearInterval(timer);
           $('config-restart').disabled = false;
           showMsg(msg, 'skycued has not come back; check the service', true);

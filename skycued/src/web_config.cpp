@@ -165,7 +165,8 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
                                    (key == "filters.min_elevation_deg" && overlay.min_elevation_deg.has_value()));
         const auto flag = info.cli_overrides.find(key);
         const auto pinned = layer.find(key);
-        std::string value, source;
+        const KeyClass cls = keyClassOf(key);
+        std::string value, source, running;
         if (from_overlay) {
             value = configValueText(effective, key);
             source = "runtime";
@@ -180,8 +181,15 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
             source = effective.override_keys.count(key) ? "overrides"
                      : effective.file_keys.count(key)   ? "conf"
                                                         : "default";
+            // The panel edits the files: a key that waits for a restart shows
+            // what the files say now, and what runs when that differs.
+            if (cls != KeyClass::live) {
+                value = configValueText(runtime.configured(), key);
+                const std::string run = configValueText(runtime.running(), key);
+                if (run != value)
+                    running = run;
+            }
         }
-        const KeyClass cls = keyClassOf(key);
         const bool editable = cls != KeyClass::bootstrap && source != "env" && source != "set";
         JsonWriter entry;
         entry.add("key", key)
@@ -190,6 +198,8 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
             .add("restart", std::find(restart.begin(), restart.end(), key) != restart.end())
             .add("class", keyClassName(cls))
             .add("editable", editable);
+        if (!running.empty())
+            entry.add("running", running);
         const auto file = runtime.configured().file_values.find(key);
         if (file != runtime.configured().file_values.end())
             entry.add("file_value", file->second);

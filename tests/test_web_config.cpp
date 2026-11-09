@@ -449,6 +449,11 @@ BOOST_AUTO_TEST_CASE(file_value_follows_hand_edits)
     };
     write({{"web.trail_seconds", "400"}, {"cues.min_interval_s", "2"}});
     BOOST_TEST(waitFor("web.trail_seconds", "400").value_or("?") == "400");
+    {   // a restart key shows what the files say, and what runs when that differs
+        const auto keys = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+        BOOST_TEST(keys.by_key.at("web.trail_seconds").getString("value").value_or("?") == "400");
+        BOOST_TEST(keys.by_key.at("web.trail_seconds").getString("running").value_or("?") == "300");
+    }
     BOOST_TEST(waitFor("cues.min_interval_s", "2").value_or("?") == "2");
     write({{"web.trail_seconds", "400"}});
     BOOST_TEST(!waitFor("cues.min_interval_s", std::nullopt).has_value());
@@ -627,6 +632,23 @@ BOOST_AUTO_TEST_CASE(put_clear_is_idempotent)
     BOOST_TEST_REQUIRE(r.status == 200u, r.body);
     BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").find("trail_seconds") == std::string::npos);
     BOOST_TEST(parsed(r.body).getObjectArray("pending_restart")->empty());
+}
+
+BOOST_AUTO_TEST_CASE(put_restart_key_shows_configured_and_running)
+{
+    ConfigFx f;
+    BOOST_TEST(put(f, R"({"set":{"web.trail_seconds":300}})").status == 200u);
+    const auto keys = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+    const auto& t = keys.by_key.at("web.trail_seconds");
+    BOOST_TEST(t.getString("value").value_or("?") == "300");
+    BOOST_TEST(t.getString("running").value_or("?") == "120");
+    BOOST_TEST(t.getString("source").value_or("?") == "overrides");
+    BOOST_TEST(!keys.by_key.at("cues.min_interval_s").getString("running").has_value());
+    // a live key keeps the effective value and has no running field
+    BOOST_TEST(put(f, R"({"set":{"filters.max_range_nm":90}})").status == 200u);
+    const auto k2 = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+    BOOST_TEST(k2.by_key.at("filters.max_range_nm").getString("value").value_or("?") == "90");
+    BOOST_TEST(!k2.by_key.at("filters.max_range_nm").getString("running").has_value());
 }
 
 BOOST_AUTO_TEST_CASE(put_external_key_listed_as_external)

@@ -1,11 +1,11 @@
 # skycue hardening
 
-How the sanitizer, fuzz, static-analysis and soak runs are made, and what
-they found and fixed. None of the instrumentation here is in the default
-configure or any release; the shipped binaries are built exactly as before.
-Run output (logs, summaries, soak CSVs) is not kept in the repository; each
-part below is the procedure, plus the fixes it led to with their regression
-tests.
+How to run the sanitizer, fuzz, static-analysis and soak checks. None of the
+instrumentation here is in the default configure or any release; the shipped
+binaries are built exactly as before. Run output (logs, summaries, soak CSVs)
+is not kept in the repository. What the fuzz harnesses found and fixed is in
+[hardening-results.md](hardening-results.md); dated results of other runs are
+in the [changelog](../CHANGELOG.md#development-history).
 
 ## Skip rules and suppression formats
 
@@ -368,7 +368,8 @@ in the same change:
    `scripts/dev/run-fuzz.sh <name>` (600 s) with `findings=0`.
 5. Each finding: a regression test in the parser's own test file, named
    `fuzz_<name>_<what>`, red before the fix; the fix; then the 600 s run
-   again on the kept corpus. Record the fix and its test here.
+   again on the kept corpus. Record the fix and its test in
+   [hardening-results.md](hardening-results.md).
 
 ### Harnesses and the fixes they led to
 

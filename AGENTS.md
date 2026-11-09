@@ -5,6 +5,7 @@ dump978-fa output (and its own decoders), shows a live map, and forwards chosen 
 C++17, Boost, CMake; web page in plain JavaScript. Everything is built from source, offline.
 
 ## Layout
+Read `ARCHITECTURE.md` first for the data flow and the glossary.
 - `libskycue/`: client library (`skycue::skycue`), wire protocol, ECEF helpers.
 - `skycued/`: the daemon: inputs, decoders, track table, engine/filters, hub, web server, recorder.
 - `net/`: `skycue::net` socket library (dialer, listener, framer, fanout) with its own tests.
@@ -31,7 +32,7 @@ C++17, Boost, CMake; web page in plain JavaScript. Everything is built from sour
   `SKYCUE_DUMP978` (dump978-fa) name executables for `decode_differential` and `decode_differential_uat`;
   `SKYCUE_TEST_READSB` (CMake cache variable) does the same for `rawtools`. Unset: the committed
   goldens stand and the live run is skipped. Never put a path to them in a file.
-- Sanitizers, fuzzing, static analysis, soak: `docs/hardening.md`. Test fixtures: `tests/fixtures/README.md`.
+- Sanitizers, fuzzing, static analysis, soak: `docs/hardening.md` (what the fuzz harnesses found: `docs/hardening-results.md`). Test fixtures: `tests/fixtures/README.md`.
 
 ## Dependencies (fixed set)
 - Allowed: Boost, the vendored Leaflet and ECharts tarballs, the C++17 standard library, system libraries (zlib).

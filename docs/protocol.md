@@ -1,4 +1,4 @@
-# skycue wire protocol (version 1)
+# skycue wire protocol (versions 1 and 2)
 
 skycued sends track data to clients as a stream of frames. The codec lives in
 `libskycue` (`skycue/protocol.hpp`).

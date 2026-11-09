@@ -1,9 +1,9 @@
 // minimal_consumer: the smallest useful libskycue program. Prints one line per
 // connection change, track update and track drop until SIGINT or SIGTERM.
 //
-//   minimal_consumer tcp HOST:PORT     connect to skycued (its CUE_TCP_PORT)
-//   minimal_consumer listen BIND:PORT  let skycued connect (its CUE_TCP_CONNECT)
-//   minimal_consumer udp BIND:PORT     receive datagrams (its CUE_UDP_TARGETS)
+//   minimal_consumer tcp HOST:PORT     connect to skycued (its cues.tcp_port)
+//   minimal_consumer listen BIND:PORT  let skycued connect (its cues.tcp_connect)
+//   minimal_consumer udp BIND:PORT     receive datagrams (its cues.udp_targets)
 #include <skycue/client.hpp>
 
 #include <chrono>

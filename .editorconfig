@@ -13,6 +13,9 @@ trim_trailing_whitespace = false
 [*.{cpp,hpp,h,inc,in}]
 indent_size = 4
 
+[*.py]
+indent_size = 4
+
 [*.{js,json,cmake,sh,yml,yaml}]
 indent_size = 2
 

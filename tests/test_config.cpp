@@ -553,6 +553,15 @@ BOOST_AUTO_TEST_CASE(spec_ranges_match_the_parser)
     BOOST_CHECK_THROW(parseWith("recording.formats", "[\"json\"]"), ConfigError);
     BOOST_CHECK_NO_THROW(parseWith("recording.formats", "[\"csv\"]"));
     BOOST_CHECK_NO_THROW(parseWith("recording.formats", "[\"jsonl\", \"csv\"]"));
+    // cues.max_interval_s has a floor of 1 of its own, beside max >= min
+    try {
+        parseConfigText(std::string(kLatLon) + "[cues]\nmin_interval_s = 0.2\nmax_interval_s = 0.5\n", "t.toml");
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& e) {
+        BOOST_TEST(contains(e.what(), "cues.max_interval_s"), e.what());
+    }
+    BOOST_CHECK_NO_THROW(
+        parseConfigText(std::string(kLatLon) + "[cues]\nmin_interval_s = 0.2\nmax_interval_s = 1\n", "t.toml"));
     // filters.max_range_nm: lo is 0 but the value must be above it
     BOOST_CHECK_THROW(parseWith("filters.max_range_nm", "0"), ConfigError);
     BOOST_CHECK_NO_THROW(parseWith("filters.max_range_nm", "0.5"));

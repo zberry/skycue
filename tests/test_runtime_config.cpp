@@ -758,6 +758,9 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     const auto changed = skycued::restartKeysChanged(a, b);
     BOOST_TEST((std::set<std::string>(changed.begin(), changed.end()) == restart_set));
     BOOST_TEST(changed.size() == restart.size());
+    // every restart key has a differs entry: nothing in restart_set is missing from `changed`
+    for (const auto& k : restart)
+        BOOST_TEST(std::count(changed.begin(), changed.end(), k) == 1, k + " has no differs entry");
 
     // The live four alone need no restart.
     skycued::Config c = a;

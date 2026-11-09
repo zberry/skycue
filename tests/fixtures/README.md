@@ -358,9 +358,10 @@ PIREP texts in two `#` header lines plus one report per line, used by
 - Origin: the OpenSky Network sample bucket, `https://s3.opensky-network.org/data-samples/incident-data/`,
   five tarballs (the pin lines in the fetch script give each file name and SHA-256).
   Each tarball is one aircraft's extract of OpenSky's Trino tables; the fetch script
-  unpacks the position, velocity and identification tables and the README.txt into
-  `opensky/<name>/` (the other tables, rollcall/allcall/ACAS, operational status and
-  state vectors, stay in the cache).
+  unpacks the position, velocity, identification, ACAS and rollcall-replies tables and the
+  README.txt into `opensky/<name>/` (the other tables, allcall, operational status and
+  state vectors, stay in the cache). Column names are lower case in three tarballs and
+  camelCase in `n722bd` and `xauci`; the tests lower-case the header.
 - Licence: CC BY 4.0, stated in each tarball's README ("Cite Schaefer et al. (2014),
   'Bringing up OpenSky'"). Attribution: OpenSky Network, https://opensky-network.org.
   The data is real flights, including two diversions and a fatal accident; do not republish
@@ -379,13 +380,22 @@ PIREP texts in two `#` header lines plus one report per line, used by
 - Columns used: `rawmsg` (the frame, hex), `mintime` (receive time, epoch seconds, ms
   resolution), `icao24`; position: `lat`, `lon`, `alt` (metres), `baroalt`, `surface`;
   velocity: `velocity` (m/s), `heading`; identification: `identity` (callsign, space
-  padded). Surface frames are present in `n722bd` (about 470) and `os82` (about 510). No
+  padded); ACAS (`*_acas_data4.csv`): `islongformat`, `sensitivitylevel`,
+  `replyinformation`, `altitude` (metres), `activeresolutionadvisories` (ARA, 14-bit
+  integer), `resolutionadvisorycomplement` (RAC, 4 bits), `hasterminated`,
+  `hasmultiplethreats`, `nopassbelow`, `nopassabove`, `noturnleft`, `noturnright`;
+  rollcall (`*_rollcall_replies_data4.csv`): `altitude` (metres, DF4/20), `identity` (Mode A
+  code, DF5/21). Surface frames are present in `n722bd` (about 470) and `os82` (about 510). No
   DF18 (TIS-B/ADS-R): each file is one aircraft.
 - What it exercises: the whole airborne path of the decoder (position, altitude, velocity,
   identification) against another decoder's output for the same frames, in `decode_opensky`
-  (`tests/test_decode_opensky.cpp`). Skipped when absent.
-- Not unpacked: the other tables (rollcall DF4/5/20/21, allcall DF11, ACAS, operational
-  status, state vectors); they stay in the cache tarballs.
+  (`tests/test_decode_opensky.cpp`); the ACAS RA fields, DF0/16 altitude and the rollcall
+  altitude and identity, in `decode_acas_opensky` (`tests/test_decode_acas_opensky.cpp`).
+  Skipped when absent. OpenSky slices the MV field of every long DF16 as an RA whatever its
+  first byte; only 1 of the 2,259 long DF16 frames here has the RA marker 0x30, so the test
+  checks the field layout with that byte set to 0x30 in a copy of the frame.
+- Not unpacked: the other tables (allcall DF11, operational status, state vectors); they
+  stay in the cache tarballs.
 
 ## iq/porto-awec2026/ (only with SKYCUE_FETCH_IQ=1)
 

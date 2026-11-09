@@ -48,6 +48,7 @@
 
 #include "coding/bits.hpp"
 #include "decode/modes_decoder.hpp"
+#include "opensky_csv.hpp"
 #include "test_slow.hpp"
 
 using skycued::TrackObservation;
@@ -67,24 +68,6 @@ bool endsWith(const std::string& s, const std::string& suf)
     return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
 }
 
-// A CSV line to fields; a double-quoted field may hold commas.
-std::vector<std::string> splitCsv(const std::string& line)
-{
-    std::vector<std::string> out;
-    std::string cur;
-    bool q = false;
-    for (char c : line) {
-        if (c == '"') q = !q;
-        else if (c == ',' && !q) {
-            out.push_back(cur);
-            cur.clear();
-        } else if (c != '\r')
-            cur.push_back(c);
-    }
-    out.push_back(cur);
-    return out;
-}
-
 struct Row {
     double t = 0;
     int table = 0;  // 0 position, 1 velocity, 2 identification
@@ -98,9 +81,9 @@ std::vector<Row> readTable(const fs::path& p, int table)
     std::ifstream in(p);
     std::string line;
     if (!std::getline(in, line)) return rows;
-    const auto head = splitCsv(line);
+    const auto head = opensky::splitCsv(line);
     while (std::getline(in, line)) {
-        const auto c = splitCsv(line);
+        const auto c = opensky::splitCsv(line);
         if (c.size() != head.size()) continue;
         Row r;
         r.table = table;

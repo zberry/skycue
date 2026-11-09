@@ -697,6 +697,16 @@ skycue_set_warnings(test_decode_opensky)
 add_test(NAME decode_opensky COMMAND test_decode_opensky)
 set_tests_properties(decode_opensky PROPERTIES TIMEOUT 120)
 
+# ACAS resolution advisories and rollcall altitude / identity against the same OpenSky
+# tables (fixtures/opensky/*_acas_data4.csv, *_rollcall_replies_data4.csv; skips when absent).
+add_executable(test_decode_acas_opensky test_decode_acas_opensky.cpp)
+target_link_libraries(test_decode_acas_opensky PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_acas_opensky PRIVATE BOOST_TEST_DYN_LINK
+  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+skycue_set_warnings(test_decode_acas_opensky)
+add_test(NAME decode_acas_opensky COMMAND test_decode_acas_opensky)
+set_tests_properties(decode_acas_opensky PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
 # AltitudeFit: rolling GNSS-minus-baro fit over all aircraft.
 add_executable(test_altitude_fit test_altitude_fit.cpp)
 target_link_libraries(test_altitude_fit PRIVATE skycued_core Boost::unit_test_framework)

@@ -260,7 +260,11 @@ while read -r kind name sha url; do
   src=$cache/$name
   if [ "$rel" != "${rel#opensky/}" ] || [ "$rel" != "${rel#iq/}" ]; then
     # An unpacked directory: stamped with the archive's SHA-256, redone when it differs.
-    if [ "$(cat "$dest/.sha256" 2>/dev/null)" = "$sha" ]; then
+    # The OpenSky stamp also names the table set, so a checkout unpacked before the ACAS and
+    # rollcall tables were added is unpacked again.
+    stamp=$sha
+    case $rel in opensky/*) stamp="$sha tables=position,velocity,identification,acas,rollcall" ;; esac
+    if [ "$(cat "$dest/.sha256" 2>/dev/null)" = "$stamp" ]; then
       echo "sha256 ok: $dest"
       continue
     fi
@@ -268,9 +272,9 @@ while read -r kind name sha url; do
     mkdir -p "$dest.part"
     case $rel in
       opensky/*)
-        # Only the tables test_decode_opensky reads, plus the README that states the licence.
+        # Only the tables the OpenSky decode tests read, plus the README that states the licence.
         tar -xzf "$src" -C "$dest.part" --strip-components=1 --wildcards \
-          '*/README.txt' '*_position_data4.csv' '*_velocity_data4.csv' '*_identification_data4.csv' ||
+          '*/README.txt' '*_position_data4.csv' '*_velocity_data4.csv' '*_identification_data4.csv' '*_acas_data4.csv' '*_rollcall_replies_data4.csv' ||
           die "unpacking $src failed"
         ;;
       iq/*)
@@ -285,7 +289,7 @@ for n in z.namelist():
 PY
         ;;
     esac
-    printf '%s\n' "$sha" >"$dest.part/.sha256"
+    printf '%s\n' "$stamp" >"$dest.part/.sha256"
     mv "$dest.part" "$dest"
     echo "sha256 ok: $dest (unpacked)"
     continue

@@ -5,7 +5,7 @@
 - `test_*.cpp`: Boost.Test unit tests. The ctest name is the file name without
   `test_`, and related tests share a prefix: `decode_`, `fisb_`, `hub`, `web_`;
   the `net_` tests live in `net/tests`.
-- `test_*.sh`: shell tests, many of which start `skycued`. They share
+- `test_*.sh`: shell tests, many of which start `skycued`. Most share
   `lib/test_common.sh`.
 - `scripts/`: tests of the scripts and packaging, each registered as
   `script_<name>`.
@@ -55,12 +55,12 @@ A skip is ctest's "Skipped" (exit status 77). It is not a pass.
 | `decode_differential_uat` | python3 or curl is missing, or every sample is absent; its fresh-run half also needs `SKYCUE_DUMP978` |
 | `decode_uat_golden`, `decode_uat_synthetic` | a committed golden file is missing (they do not need fetched captures) |
 | `ui_playwright` | node or `npm ci` in `tests/ui` (Playwright 1.61.1, Chromium) is missing, or the web libraries are not staged |
-| `fuzz_smoke`, `static_analysis`, `soak_short` | `SKYCUE_FUZZ`, `SKYCUE_STATIC_TESTS` or `SKYCUE_SOAK_TESTS` is off (clang for the first, clang-tidy for the second) |
+| `fuzz_smoke`, `static_analysis`, `soak_short` | `SKYCUE_FUZZ`, `SKYCUE_STATIC_TESTS` or `SKYCUE_SOAK_TESTS` is off (clang for the first, clang-tidy for the second); `soak_short` also skips without the fetched FIS-B recording, node 22 or newer, or curl |
 | `script_*` | the tool that script needs (python3, curl, a git checkout) is missing |
 
 Two tests do not skip as a whole: `rawtools` and `iqgen_cli` print `SKIP` for the sections
 that read the fetched captures, run the rest and report a pass. `web_ui` runs
 its node checks only when node is installed and passes without them.
 
-Run at least one CI job with the fixtures fetched and the external decoders set;
-otherwise the differential tests never run.
+Any CI setup should include one job with the fetched fixtures and the external decoders set,
+or the differential tests never run.

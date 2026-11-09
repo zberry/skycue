@@ -19,11 +19,12 @@ Source: <https://github.com/zberry/skycue>. Packages and the source tarball:
 ```sh
 cmake -S . -B build && cmake --build build -j"$(nproc)"
 ctest --test-dir build
-build/skycued/skycued --config packaging/skycue.toml.example --set receiver.lat=<lat> --set receiver.lon=<lon> --www-dir www
+cp packaging/skycue.toml.example skycue.toml
+build/skycued/skycued --config ./skycue.toml --set receiver.lat=<lat> --set receiver.lon=<lon> --www-dir www
 ```
 
 A git clone runs `scripts/dev/fetch-web-libs.sh` first; a release tarball already has the
-web libraries. The example config puts the receiver at 0.0/0.0, which skycued refuses, hence the
+web libraries. The copied config puts the receiver at 0.0/0.0, which skycued refuses, hence the
 two `--set` options. Then open <http://127.0.0.1:8080/>. Details, and a config of
 your own: [Run it from the build tree](docs/installing.md#run-it-from-the-build-tree).
 
@@ -107,7 +108,7 @@ METAR, TAF, PIREP, winds aloft and NOTAMs, keeps the current picture with its
 expiry rules, and draws it on the map. It is for situational awareness only
 and is not flight-critical ([docs/fisb.md](docs/fisb.md)).
 
-**Flow.** The first card of the Stats tab, **Flow**, is a live diagram of the
+**Flow.** The first Traffic card of the Stats view, **Flow**, is a live diagram of the
 pipeline: how many messages per second each input delivers, how many are
 rejected, and how the track updates split by decision on their way to the cue
 connections ([docs/operating.md](docs/operating.md#stats-view)).
@@ -143,7 +144,7 @@ and `skycued --check-inputs` tells you whether skycue can reach the decoders.
 ## Requirements
 
 - Linux: Debian 12 or 13 or Raspberry Pi OS (amd64, arm64), RHEL 8 or 9 and rebuilds (x86_64).
-- To build: CMake 3.25 or newer, a C++17 compiler, Boost, zlib and python3 (standard library only; the build runs it for the ICAO tables check and many tests use it). Some tests also use curl. The release tarball carries the web libraries, so nothing is downloaded; a git clone fetches them once with `scripts/dev/fetch-web-libs.sh`.
+- To build: CMake 3.25 or newer, a C++17 compiler, Boost, zlib and python3 (standard library only) for the tests: the ICAO tables check and the script tests; the daemon itself does not need it. Some tests also use curl. The release tarball carries the web libraries, so nothing is downloaded; a git clone fetches them once with `scripts/dev/fetch-web-libs.sh`.
 - To bake the offline map: network access once (about 310 MB of Natural Earth data) and GDAL, or podman or docker (see [docs/installing.md](docs/installing.md#5-bake-the-map)).
 - A web browser. No internet access is needed at runtime.
 - readsb (and dump978-fa for UAT), or a pingStation 3, as the source of aircraft.
@@ -182,7 +183,7 @@ For contributors:
 |---|---|
 | `libskycue/` | the cue-client library (`skycue::skycue`) |
 | `skycued/` | the daemon: decoders, track table, web server |
-| `net/` | `skycue::net`, the socket library the daemon uses (dialer, listener, framer, fan-out), with its own tests; `libskycue` does not use it and stays standalone (see [docs/libskycue.md](docs/libskycue.md)) |
+| `net/` | `skycue::net`, the socket library the daemon uses (dialer, listener, framer, fan-out), with its own tests; `libskycue` does not use it: it links only Boost.System and Threads and is kept independent of the daemon's `net/` library |
 | `tools/` | the command-line tools (`skycue-dump`, `-rawrec`, `-rawplay`, `-pingsim`, `-stats`, `-fisb`; `iqgen/` for `skycue-iqgen`) |
 | `www/` | the web page (Leaflet and ECharts are added from `sources/` at build time) |
 | `cmake/` | CMake modules |

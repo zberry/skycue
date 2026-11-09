@@ -662,9 +662,10 @@ else()
 endif()
 
 # Script tests: every tests/scripts/test_*.sh runs as ctest "script_<name>" (exit
-# 77 is a skip). The eight today:
-#   script_test_make_locations   script_test_make_maps   script_test_make_tiles
-#   script_test_package_metadata script_test_package_scripts (package_postinst runs test_package_postinst.sh itself)
+# 77 is a skip). The twelve today:
+#   script_test_capture_seeds    script_test_docs_libskycue_example   script_test_fetch_test_captures
+#   script_test_fetch_web_libs   script_test_make_locations   script_test_make_maps   script_test_make_tiles
+#   script_test_net_standalone   script_test_package_metadata   script_test_package_scripts
 #   script_test_skycue_web_tarballs   script_test_source_tarball
 file(GLOB _script_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_*.sh")
 list(FILTER _script_tests EXCLUDE REGEX "/test_package_postinst\\.sh$")  # registered above (takes arguments)

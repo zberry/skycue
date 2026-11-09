@@ -497,3 +497,27 @@ BOOST_AUTO_TEST_CASE(readsb_tisb_type_sets_rebroadcast)
     BOOST_REQUIRE(direct);
     BOOST_TEST(!direct->rebroadcast);
 }
+
+BOOST_AUTO_TEST_CASE(json_string_array_escapes_and_has_no_spaces)
+{
+    using namespace skycued;
+    BOOST_CHECK_EQUAL(jsonStringArray({}), "[]");
+    BOOST_CHECK_EQUAL(jsonStringArray({"a", "b\"c", "d\\e", "\n"}), R"(["a","b\"c","d\\e","\n"])");
+    BOOST_CHECK_EQUAL(jsonString("x\ty"), R"("x\ty")");
+}
+
+BOOST_AUTO_TEST_CASE(json_writer_add_opt_and_finite)
+{
+    using namespace skycued;
+    BOOST_CHECK_EQUAL(JsonWriter().addOpt("a", std::optional<int32_t>(5)).addOpt("b", std::optional<int32_t>()).str(),
+                      R"({"a":5})");
+    BOOST_CHECK_EQUAL(JsonWriter().addOpt("f", std::optional<float>(1.5f)).str(), R"({"f":1.5})");
+    BOOST_CHECK_EQUAL(JsonWriter().addOpt("f", std::optional<float>(NAN)).str(), "{}");
+    BOOST_CHECK_EQUAL(JsonWriter().addOpt("f", std::optional<float>(INFINITY)).str(), "{}");
+    BOOST_CHECK_EQUAL(JsonWriter().addOpt("s", std::optional<std::string>("x")).str(), R"({"s":"x"})");
+    BOOST_CHECK_EQUAL(JsonWriter().addOpt("s", std::optional<std::string>()).str(), "{}");
+    BOOST_CHECK_EQUAL(JsonWriter().addFinite("d", NAN).str(), "{}");
+    BOOST_CHECK_EQUAL(JsonWriter().addFinite("d", 2.0).str(), R"({"d":2})");
+    BOOST_CHECK_EQUAL(JsonWriter().addOptionalText("t", "").str(), R"({"t":null})");
+    BOOST_CHECK_EQUAL(JsonWriter().addOptionalText("t", "a b").str(), R"({"t":"a b"})");
+}

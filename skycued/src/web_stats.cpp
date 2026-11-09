@@ -145,14 +145,6 @@ private:
     std::string s_;
 };
 
-std::string strings(const std::vector<std::string>& v)
-{
-    Arr a;
-    for (const auto& s : v)
-        a.str(s);
-    return a.done();
-}
-
 std::string countsObject(const std::map<std::string, uint64_t>& m)
 {
     JsonWriter w;
@@ -528,7 +520,7 @@ std::string rowJson(const AircraftStats& a)
         w.add("min_rssi", *a.min_rssi);
     if (a.max_rssi)
         w.add("max_rssi", *a.max_rssi);
-    w.addRaw("callsigns", strings(a.callsigns)).addRaw("squawks", strings(a.squawks)).addRaw("inputs", strings(a.inputs));
+    w.addRaw("callsigns", jsonStringArray(a.callsigns)).addRaw("squawks", jsonStringArray(a.squawks)).addRaw("inputs", jsonStringArray(a.inputs));
     if (a.registration)
         w.add("registration", *a.registration);
     if (a.category)

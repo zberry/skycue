@@ -48,12 +48,6 @@ JsonWriter start(const char* type)
     return w;
 }
 
-void addFinite(JsonWriter& w, const char* key, double v)
-{
-    if (std::isfinite(v))
-        w.add(key, v);
-}
-
 void putStats(JsonWriter& w, const EngineStats& s)
 {
     auto n = [](uint64_t v) { return static_cast<int64_t>(v); };
@@ -151,39 +145,11 @@ void putFilters(JsonWriter& w, const RuntimeConfig& rc)
         .add("overlay_active", !rc.overlay().empty());
 }
 
-std::string stringArray(const std::vector<std::string>& values)
-{
-    std::vector<std::string> quoted;
-    quoted.reserve(values.size());
-    for (const auto& v : values) {
-        std::string s;
-        appendJsonString(s, v);
-        quoted.push_back(std::move(s));
-    }
-    return jsonArray(quoted);
-}
-
 void putLists(JsonWriter& w, const Engine& e, const RuntimeConfig& rc)
 {
-    w.addRaw("allow", stringArray(e.allowList().entries()))
-        .addRaw("block", stringArray(e.blockList().entries()))
+    w.addRaw("allow", jsonStringArray(e.allowList().entries()))
+        .addRaw("block", jsonStringArray(e.blockList().entries()))
         .add("overlay_active", !rc.overlay().empty());
-}
-
-template <class T> void addOpt(JsonWriter& w, const char* key, const std::optional<T>& v)
-{
-    if (v)
-        w.add(key, static_cast<int64_t>(*v));
-}
-void addOpt(JsonWriter& w, const char* key, const std::optional<float>& v)
-{
-    if (v && std::isfinite(*v))
-        w.add(key, static_cast<double>(*v));
-}
-void addOpt(JsonWriter& w, const char* key, const std::optional<std::string>& v)
-{
-    if (v)
-        w.add(key, *v);
 }
 
 // One decimal, no locale: 12.34 -> 12.3, 5 -> 5.0.
@@ -200,30 +166,30 @@ void putGeom(JsonWriter& w, const GeomResult& g)
     if (g.source == GeomSource::reported || g.source == GeomSource::estimated) {
         w.add("alt_geom_source", g.source == GeomSource::reported ? "reported" : "estimated");
         if (g.source == GeomSource::estimated)
-            addOpt(w, "alt_geom_uncertainty_ft", g.uncertainty_ft);
+            w.addOpt("alt_geom_uncertainty_ft", g.uncertainty_ft);
         if (g.age_s && std::isfinite(*g.age_s))
             w.addRaw("alt_geom_age_s", oneDecimal(*g.age_s));
-        addOpt(w, "geom_minus_baro_ft", g.geom_minus_baro_ft);
+        w.addOpt("geom_minus_baro_ft", g.geom_minus_baro_ft);
     }
 }
 
 void putCommB(JsonWriter& w, const CommBFields& c)
 {
-    addOpt(w, "heading_mag_deg", c.heading_mag_deg);
-    addOpt(w, "heading_true_deg", c.heading_true_deg);
-    addOpt(w, "ias_kt", c.ias_kt);
-    addOpt(w, "tas_kt", c.tas_kt);
-    addOpt(w, "mach", c.mach);
-    addOpt(w, "roll_deg", c.roll_deg);
-    addOpt(w, "track_rate_dps", c.track_rate_dps);
-    addOpt(w, "sel_alt_ft", c.sel_alt_ft);
-    addOpt(w, "sel_alt_fms_ft", c.sel_alt_fms_ft);
-    addOpt(w, "qnh_mb", c.qnh_mb);
-    addOpt(w, "sel_heading_deg", c.sel_heading_deg);
+    w.addOpt("heading_mag_deg", c.heading_mag_deg);
+    w.addOpt("heading_true_deg", c.heading_true_deg);
+    w.addOpt("ias_kt", c.ias_kt);
+    w.addOpt("tas_kt", c.tas_kt);
+    w.addOpt("mach", c.mach);
+    w.addOpt("roll_deg", c.roll_deg);
+    w.addOpt("track_rate_dps", c.track_rate_dps);
+    w.addOpt("sel_alt_ft", c.sel_alt_ft);
+    w.addOpt("sel_alt_fms_ft", c.sel_alt_fms_ft);
+    w.addOpt("qnh_mb", c.qnh_mb);
+    w.addOpt("sel_heading_deg", c.sel_heading_deg);
     if (c.nav_modes)
         w.addRaw("nav_modes", navModesJson(*c.nav_modes));
-    addOpt(w, "acas_sl", c.acas_sl);
-    addOpt(w, "acas_ri", c.acas_ri);
+    w.addOpt("acas_sl", c.acas_sl);
+    w.addOpt("acas_ri", c.acas_ri);
     if (c.acas_ra)
         w.addRaw("acas_ra", acasRaJson(*c.acas_ra));
 }
@@ -238,27 +204,27 @@ void putTrack(JsonWriter& w, const TrackSnapshot& ts)
         w.addExact("lat", t.lat_deg).addExact("lon", t.lon_deg);
         w.add("position_time", formatIso8601Ms(t.position_time));
     }
-    addOpt(w, "alt_baro_ft", t.alt_baro_ft);
-    addOpt(w, "alt_geom_ft", t.alt_geom_ft);
+    w.addOpt("alt_baro_ft", t.alt_baro_ft);
+    w.addOpt("alt_geom_ft", t.alt_geom_ft);
     putGeom(w, ts.geom);
-    addOpt(w, "gs_kt", t.ground_speed_kt);
-    addOpt(w, "track_deg", t.track_deg);
-    addOpt(w, "vr_fpm", t.vertical_rate_fpm);
-    addOpt(w, "callsign", t.callsign);
-    addOpt(w, "squawk", t.squawk);
-    addOpt(w, "registration", t.registration);
-    addOpt(w, "nic", t.nic);
-    addOpt(w, "nac_p", t.nac_p);
+    w.addOpt("gs_kt", t.ground_speed_kt);
+    w.addOpt("track_deg", t.track_deg);
+    w.addOpt("vr_fpm", t.vertical_rate_fpm);
+    w.addOpt("callsign", t.callsign);
+    w.addOpt("squawk", t.squawk);
+    w.addOpt("registration", t.registration);
+    w.addOpt("nic", t.nic);
+    w.addOpt("nac_p", t.nac_p);
     w.add("on_ground", t.on_ground).add("alt_is_geom", t.alt_is_geom);
-    addFinite(w, "range_nm", ts.range_nm);
-    addFinite(w, "elevation_deg", ts.elevation_deg);
+    w.addFinite("range_nm", ts.range_nm);
+    w.addFinite("elevation_deg", ts.elevation_deg);
     w.add("decision", decisionName(ts.decision))
         .add("forwarded", ts.forwarded)
         .add("first_seen", formatIso8601Ms(ts.first_seen))
         .add("last_seen", formatIso8601Ms(ts.last_seen));
-    addOpt(w, "emergency", ts.emergency);
-    addOpt(w, "category", ts.category);
-    addFinite(w, "rssi", ts.rssi);
+    w.addOpt("emergency", ts.emergency);
+    w.addOpt("category", ts.category);
+    w.addFinite("rssi", ts.rssi);
     putCommB(w, ts.commb);
     if (!ts.input.empty())
         w.add("input", ts.input);
@@ -572,13 +538,6 @@ const char* typeWord(KeyType t)
     case KeyType::strings: return "array of strings";
     }
     return "value";
-}
-
-std::string jsonString(const std::string& s)
-{
-    std::string out;
-    appendJsonString(out, s);
-    return out;
 }
 
 ApiResponse keyError(unsigned status, const std::string& message, const std::string& key)

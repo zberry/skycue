@@ -98,12 +98,30 @@ public:
     // `json` is an already-serialised JSON value (another JsonWriter's str(),
     // a jsonArray(), "null", ...), inserted verbatim: no checks, no escaping.
     JsonWriter& addRaw(const char* key, const std::string& json);
+    // Optional and finite-only members: the key is left out when there is no value.
+    // Integers are written as int64_t; a float only when finite; a double via addFinite.
+    JsonWriter& addFinite(const char* key, double value);
+    template <class T> JsonWriter& addOpt(const char* key, const std::optional<T>& v)
+    {
+        if (v)
+            add(key, static_cast<int64_t>(*v));
+        return *this;
+    }
+    JsonWriter& addOpt(const char* key, const std::optional<float>& v);
+    JsonWriter& addOpt(const char* key, const std::optional<std::string>& v);
+    // An empty text is written as null, anything else as an escaped string.
+    JsonWriter& addOptionalText(const char* key, const std::string& value);
     std::string str() const;  // "{...}"
 
 private:
     void key(const char* k);
     std::string body_;
 };
+
+// `s` as a quoted, escaped JSON string.
+std::string jsonString(const std::string& s);
+// ["a","b"] from plain strings, escaped, without spaces; "[]" when empty.
+std::string jsonStringArray(const std::vector<std::string>& values);
 
 // "[a,b,...]" from already-serialised JSON values, inserted verbatim.
 std::string jsonArray(const std::vector<std::string>& values);

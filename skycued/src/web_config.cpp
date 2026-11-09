@@ -24,17 +24,6 @@ std::string baseName(const std::string& path)
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
-std::string stringArray(const std::vector<std::string>& values)
-{
-    std::vector<std::string> quoted;
-    for (const auto& v : values) {
-        std::string s;
-        appendJsonString(s, v);
-        quoted.push_back(std::move(s));
-    }
-    return jsonArray(quoted);
-}
-
 // The built-in default of `key`; "" for a key with none (receiver.lat/lon).
 std::string defaultText(const std::string& key)
 {
@@ -95,7 +84,7 @@ std::string configSchemaJson()
         if (has_max)
             entry.add("max", spec.hi);
         if (!spec.values.empty())
-            entry.addRaw("values", stringArray(spec.values));
+            entry.addRaw("values", jsonStringArray(spec.values));
         if (relativeOnlyKey(spec.key))
             entry.add("relative_only", true);
         keys.push_back(entry.str());

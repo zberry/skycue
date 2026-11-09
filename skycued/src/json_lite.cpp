@@ -199,6 +199,50 @@ JsonWriter& JsonWriter::add(const char* k, const std::string& value)
     return *this;
 }
 
+JsonWriter& JsonWriter::addFinite(const char* k, double value)
+{
+    if (std::isfinite(value))
+        add(k, value);
+    return *this;
+}
+
+JsonWriter& JsonWriter::addOpt(const char* k, const std::optional<float>& v)
+{
+    if (v && std::isfinite(*v))
+        add(k, static_cast<double>(*v));
+    return *this;
+}
+
+JsonWriter& JsonWriter::addOpt(const char* k, const std::optional<std::string>& v)
+{
+    if (v)
+        add(k, *v);
+    return *this;
+}
+
+JsonWriter& JsonWriter::addOptionalText(const char* k, const std::string& value)
+{
+    if (value.empty())
+        return addRaw(k, "null");
+    return add(k, value);
+}
+
+std::string jsonString(const std::string& s)
+{
+    std::string out;
+    appendJsonString(out, s);
+    return out;
+}
+
+std::string jsonStringArray(const std::vector<std::string>& values)
+{
+    std::vector<std::string> quoted;
+    quoted.reserve(values.size());
+    for (const auto& v : values)
+        quoted.push_back(jsonString(v));
+    return jsonArray(quoted);
+}
+
 JsonWriter& JsonWriter::add(const char* k, double value)
 {
     key(k);

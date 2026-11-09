@@ -495,10 +495,24 @@
         <span id="config-copy-status" class="msg" role="status"></span>
       </div>
       <textarea id="config-copy-text" readonly hidden aria-label="Configuration as text"></textarea>
+      <div id="config-restart-banner" hidden>
+        <b id="config-pending-text"></b>
+        <ul id="config-pending-list"></ul>
+        <div class="cfg-restart-row">
+          <button type="button" id="config-restart">Restart skycued</button>
+          <span id="config-supervisor"></span>
+        </div>
+      </div>
       <p id="config-msg" class="msg" role="status"></p>
       <h2>Daemon</h2>
       <table id="config-daemon" class="kv"><tbody></tbody></table>
       <div id="config-groups"></div>
+      <div id="config-bar" hidden>
+        <b id="config-bar-text"></b>
+        <button type="button" id="config-apply">Apply</button>
+        <button type="button" id="config-discard">Discard</button>
+        <span id="config-bar-keys"></span>
+      </div>
     </section>
   </aside>
 </main>

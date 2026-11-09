@@ -3326,12 +3326,14 @@
   }
 
   // ---- Config tab ----------------------------------------------------------------
-  // docs/operating.md, Config tab. Read only: GET /api/config each time the
-  // tab is shown and on Refresh; one table per CONFIG_GROUPS group with each
-  // key's value, source and restart badge. "Copy as text" puts configText()
-  // on the clipboard, or, where the clipboard refuses, in a selected
-  // textarea to copy by hand. Server strings go in through textContent.
-  var config = { data: null, seq: 0 };
+  // docs/operating.md, Config tab. GET /api/config/schema once per page, then
+  // GET /api/config each time the tab is shown and on Refresh: one table per
+  // TOML table (P.configTables), one typed control per key. An edit is staged
+  // (config.staged: dotted key -> JSON value, null to clear the override) and
+  // the sticky bar's Apply sends it as one PUT /api/config. A key the launcher
+  // owns, the bootstrap keys and keys --set or the environment pin have a
+  // disabled control. Server strings go in through textContent.
+  var config = { data: null, schema: null, seq: 0, staged: {}, rows: {}, restarting: false };
 
   function renderConfigDaemon(d) {
     var body = $('config-daemon').tBodies[0], started = Date.parse(d.started);
@@ -3342,6 +3344,7 @@
       ['Inputs file', d.inputs_path],
       ['Overlay file', d.overlay_path + (d.overlay_active ? ' (unsaved changes)' : '')],
       ['Overrides file', d.overrides_path],
+      ['Supervisor', d.supervisor],
       ['www directory', d.www_dir],
       ['Recording to', d.record_dir || 'not recording'],
       ['Recording files', (d.recording_files || []).join(', ') || 'none'],
@@ -3357,47 +3360,245 @@
       body.appendChild(tr);
     });
   }
-  function renderConfigGroups(keys) {
+
+  // The banner for settings that wait for a restart.
+  function renderPendingRestart(list, d) {
+    var banner = $('config-restart-banner');
+    banner.hidden = !list || list.length === 0;
+    $('config-pending-text').textContent = P.pendingRestartText(list);
+    var ul = $('config-pending-list');
+    ul.textContent = '';
+    (list || []).forEach(function (p) {
+      ul.appendChild(el('li', null, p.key + ' (running ' + p.running + ', configured ' + p.configured + ')'));
+    });
+    $('config-restart').hidden = !d.allow_restart;
+    $('config-supervisor').textContent = d.allow_restart ? 'Supervisor: ' + (d.supervisor || 'none') :
+      'restart skycued to apply' + (d.supervisor ? ' (Supervisor: ' + d.supervisor + ')' : ' (Supervisor: none)');
+  }
+
+  // The control's raw input, as P.configParse takes it.
+  function configRaw(spec, ctl) {
+    var kind = P.configControl(spec).kind;
+    if (kind === 'checkbox') return ctl.checked;
+    if (kind === 'checkset') {
+      var out = [];
+      Array.prototype.forEach.call(ctl.querySelectorAll('input'), function (b) { if (b.checked) out.push(b.value); });
+      return out;
+    }
+    return ctl.value;
+  }
+  function configWords(text) { return String(text).split(/\s+/).filter(function (w) { return w !== ''; }); }
+
+  // The control of one row, set to the API's value text.
+  function makeConfigControl(row, id) {
+    var spec = row.spec, c = P.configControl(spec), ctl, words = configWords(row.value);
+    if (c.kind === 'checkbox') {
+      ctl = el('input'); ctl.type = 'checkbox'; ctl.checked = row.value === 'true';
+    } else if (c.kind === 'select') {
+      ctl = el('select');
+      (c.values || []).forEach(function (v) { var o = el('option', null, v); o.value = v; ctl.appendChild(o); });
+      ctl.value = row.value;
+    } else if (c.kind === 'checkset') {
+      ctl = el('span', 'cfg-checks');
+      (c.values || []).forEach(function (v) {
+        var lab = el('label', 'check'), b = el('input');
+        b.type = 'checkbox'; b.value = v; b.checked = words.indexOf(v) >= 0;
+        lab.appendChild(b);
+        lab.appendChild(document.createTextNode(' ' + v));
+        ctl.appendChild(lab);
+      });
+    } else if (c.kind === 'lines') {
+      ctl = el('textarea'); ctl.rows = 2; ctl.value = words.join('\n');
+    } else if (c.kind === 'number') {
+      ctl = el('input'); ctl.type = 'number'; ctl.step = String(c.step);
+      if (typeof c.min === 'number') ctl.min = String(c.min);
+      if (typeof c.max === 'number') ctl.max = String(c.max);
+      ctl.value = row.value;
+    } else {
+      ctl = el('input'); ctl.type = 'text'; ctl.value = row.value;
+    }
+    ctl.id = id;
+    return ctl;
+  }
+
+  function updateConfigBar() {
+    var s = P.configStage(config.staged, config.schema), bar = $('config-bar');
+    var bad = Object.keys(config.rows).some(function (k) { return config.rows[k].bad; });
+    bar.hidden = s.keys.length === 0;
+    $('config-bar-text').textContent = s.text;
+    $('config-bar-keys').textContent = s.keys.join(', ');
+    $('config-apply').disabled = bad;
+  }
+  // Show the staged state of one row: its class, hint and error text.
+  function paintConfigRow(key) {
+    var r = config.rows[key], staged = key in config.staged;
+    r.tr.classList.toggle('changed', staged);
+    r.hint.textContent = staged ? (config.staged[key] === null ? 'will reset to skycue.toml' : 'was ' + r.row.value) :
+      P.configRowHint(r.row);
+    r.err.textContent = r.error || '';
+    r.err.hidden = !r.error;
+    r.bad = !!r.error;
+  }
+  function stageConfig(key, raw) {
+    var r = config.rows[key], res = P.configParse(r.row.spec, raw);
+    if (res.error) {
+      r.error = res.error;
+      delete config.staged[key];
+    } else {
+      r.error = '';
+      config.staged[key] = res.value;
+    }
+    paintConfigRow(key);
+    updateConfigBar();
+  }
+
+  function renderConfigGroups(keys, schema) {
     var box = $('config-groups');
     box.textContent = '';
-    P.groupConfig(keys).forEach(function (g) {
-      box.appendChild(el('h2', null, g.group));
+    config.rows = {};
+    P.configTables(keys, schema).forEach(function (g) {
+      box.appendChild(el('h2', null, '[' + g.table + ']'));
       var table = el('table', 'cfg-table'), body = el('tbody');
-      table.setAttribute('data-group', g.group);
+      table.setAttribute('data-table', g.table);
       g.rows.forEach(function (r) {
-        var tr = el('tr'), restart = el('td', 'cfg-restart');
+        var tr = el('tr'), th = el('th', null, r.bare), td = el('td', 'cfg-ctl');
         tr.setAttribute('data-key', r.key);
-        tr.appendChild(el('th', null, r.key));
-        tr.appendChild(el('td', 'cfg-value', String(r.value)));
-        tr.appendChild(el('td', 'cfg-source', P.configSourceLabel(r.source)));
-        if (r.restart) restart.appendChild(el('span', 'badge', 'restart'));
-        tr.appendChild(restart);
+        th.title = r.key;
+        tr.appendChild(th);
+        var meta = el('div', 'cfg-meta'), hint = el('span', 'cfg-hint'), err = el('div', 'cfg-err');
+        var off = r.spec ? P.configDisabledTitle(r) : 'edit skycue.toml and restart';
+        var locked = !r.spec || r.cls === 'bootstrap' || off !== '';
+        if (r.spec) {
+          var ctl = makeConfigControl(r, 'cfg-' + r.key.replace(/\./g, '-'));
+          if (locked) {
+            ctl.title = off || 'edit skycue.toml and restart';
+            if (ctl.tagName === 'SPAN') Array.prototype.forEach.call(ctl.querySelectorAll('input'), function (b) { b.disabled = true; });
+            else ctl.disabled = true;
+          } else {
+            ctl.addEventListener('change', function () { stageConfig(r.key, configRaw(r.spec, ctl)); });
+          }
+          td.appendChild(ctl);
+        } else {
+          td.appendChild(el('span', 'cfg-plain', String(r.value)));
+        }
+        if (locked || r.cls === 'bootstrap') {
+          var pin = el('span', 'badge pin', r.cls === 'bootstrap' ? 'bootstrap' : 'pinned');
+          pin.title = off || 'edit skycue.toml and restart';
+          meta.appendChild(pin);
+        } else {
+          meta.appendChild(el('span', 'badge ' + r.cls, r.cls === 'external' ? 'launcher' : r.cls));
+        }
+        meta.appendChild(el('span', 'badge src', P.configSourceLabel(r.source)));
+        meta.appendChild(hint);
+        if (r.source === 'overrides' && !locked) {
+          var reset = el('button', 'cfg-reset', '↺');
+          reset.type = 'button';
+          reset.title = 'Reset to skycue.toml';
+          reset.addEventListener('click', function () {
+            config.staged[r.key] = null;
+            config.rows[r.key].error = '';
+            paintConfigRow(r.key);
+            updateConfigBar();
+          });
+          meta.appendChild(reset);
+        }
+        td.appendChild(meta);
+        td.appendChild(err);
+        tr.appendChild(td);
         body.appendChild(tr);
+        config.rows[r.key] = { row: r, tr: tr, hint: hint, err: err, error: '', bad: false };
+        paintConfigRow(r.key);
       });
       table.appendChild(body);
       box.appendChild(table);
     });
+    updateConfigBar();
   }
-  // A response that an answer to a later request overtook is not shown.
+
+  function renderConfig(c, pending) {
+    config.data = c;
+    renderConfigDaemon(c.daemon || {});
+    renderConfigGroups(c.keys || [], config.schema);
+    renderPendingRestart(pending || c.pending_restart || [], c.daemon || {});
+    showFilterPins(c.keys || []);
+    $('config-copy').disabled = false;
+  }
+
+  // A response that an answer to a later request overtook is not shown. A
+  // fresh load drops the staged edits.
   function showConfig() {
     var seq = ++config.seq;
     // A fresh load: the last copy's status and fallback text no longer apply.
     showMsg($('config-copy-status'), '');
     $('config-copy-text').hidden = true;
     $('config-copy-text').value = '';
-    request('GET', 'api/config').then(function (c) {
+    var schema = config.schema ? Promise.resolve(config.schema) :
+      request('GET', 'api/config/schema').then(function (s) { config.schema = s.keys || []; return config.schema; });
+    return schema.then(function () { return request('GET', 'api/config'); }).then(function (c) {
       if (seq !== config.seq) return;
-      config.data = c;
+      config.staged = {};
       showMsg($('config-msg'), '');
-      renderConfigDaemon(c.daemon || {});
-      renderConfigGroups(c.keys || []);
-      showFilterPins(c.keys || []);
-      $('config-copy').disabled = false;
+      renderConfig(c);
     }).catch(function (e) {
       if (seq === config.seq) showMsg($('config-msg'), 'Could not load the configuration: ' + e.message, true);
     });
   }
-  function configText() { return config.data ? P.configText(config.data) : ''; }
+
+  function applyConfig() {
+    var s = P.configStage(config.staged, config.schema);
+    if (s.keys.length === 0) return;
+    $('config-apply').disabled = true;
+    showMsg($('config-msg'), '');
+    request('PUT', 'api/config', s.body).then(function (res) {
+      var seq = ++config.seq;
+      config.staged = {};
+      return request('GET', 'api/config').then(function (c) {
+        if (seq !== config.seq) return;
+        renderConfig(c, res.pending_restart);
+        var ext = res.external && res.external.length ? ' (' + res.external.length + ' for the launcher)' : '';
+        showMsg($('config-msg'), 'Applied' + ext);
+      });
+    }).catch(function (e) {
+      if (e.status === 400 && e.key !== undefined && config.rows[e.key]) {
+        config.rows[e.key].error = e.message;
+        paintConfigRow(e.key);
+        updateConfigBar();
+        return;
+      }
+      showMsg($('config-msg'), e.message + (e.source ? ' (set by ' + e.source + ')' : ''), true);
+      updateConfigBar();
+    });
+  }
+  function discardConfig() {
+    config.staged = {};
+    Object.keys(config.rows).forEach(function (k) { config.rows[k].error = ''; });
+    renderConfigGroups(config.data.keys || [], config.schema);
+  }
+
+  function restartDaemon() {
+    var before = config.data && config.data.daemon ? config.data.daemon.started : null, msg = $('config-msg');
+    $('config-restart').disabled = true;
+    request('POST', 'api/restart').then(function () {
+      showMsg(msg, 'restarting…');
+      var t0 = Date.now(), timer = setInterval(function () {
+        request('GET', 'api/config').then(function (c) {
+          if (c.daemon && c.daemon.started !== before) { clearInterval(timer); $('config-restart').disabled = false; showConfig(); }
+        }, function () { /* down while restarting */ });
+        if (Date.now() - t0 > 30000) {
+          clearInterval(timer);
+          $('config-restart').disabled = false;
+          showMsg(msg, 'skycued has not come back; check the service', true);
+        }
+      }, 1000);
+    }, function (e) {
+      $('config-restart').disabled = false;
+      showMsg(msg, e.message, true);
+    });
+  }
+
+  function configText() {
+    return config.data ? P.configText(Object.assign({}, config.data, { schema: config.schema || [] })) : '';
+  }
   function copyConfig() {
     var text = configText(), status = $('config-copy-status'), area = $('config-copy-text');
     var fallback = function () {
@@ -3895,6 +4096,9 @@
     $('details-close').addEventListener('click', closePanel);
     $('config-refresh').addEventListener('click', showConfig);
     $('config-copy').addEventListener('click', copyConfig);
+    $('config-apply').addEventListener('click', applyConfig);
+    $('config-discard').addEventListener('click', discardConfig);
+    $('config-restart').addEventListener('click', restartDaemon);
     eachEl('#details [role=tab]', function (b) {
       b.addEventListener('click', function () { setTab(b.id.replace(/^tab-/, '')); });
     });

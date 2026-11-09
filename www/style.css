@@ -559,13 +559,32 @@ label.check.cues-drops-only { margin: 0 0 4px; font-size: 12px; color: var(--mut
   color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; resize: vertical; }
 #config-copy-text[hidden] { display: none; }
 table.cfg-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 6px; }
-table.cfg-table th { text-align: left; font-weight: normal; padding: 2px 6px 2px 0; vertical-align: top;
+table.cfg-table th { width: 40%; text-align: left; font-weight: normal; padding: 3px 6px 3px 0; vertical-align: top;
   font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); word-break: break-all; border-top: 1px solid var(--line); }
-table.cfg-table td { padding: 2px 6px 2px 0; border-top: 1px solid var(--line); vertical-align: top; }
-table.cfg-table td.cfg-value { word-break: break-all; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
-table.cfg-table td.cfg-source { color: var(--muted); white-space: nowrap; }
-table.cfg-table td.cfg-restart { padding-right: 0; white-space: nowrap; text-align: right; }
+table.cfg-table td { padding: 3px 0; border-top: 1px solid var(--line); vertical-align: top; }
+.cfg-ctl input[type=number], .cfg-ctl input[type=text], .cfg-ctl select, .cfg-ctl textarea { width: 100%; box-sizing: border-box; }
+.cfg-ctl textarea { font: 11px ui-monospace, Menlo, Consolas, monospace; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; }
+.cfg-checks label { display: block; }
+.cfg-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.cfg-hint { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.cfg-reset { padding: 0 6px; font-size: 11px; }
+.cfg-err { font-size: 11px; color: var(--blocked); }
+.cfg-err[hidden] { display: none; }
+tr.changed th { color: var(--accent); }
+tr.changed th::before { content: "\25CF "; }
 .badge { display: inline-block; padding: 0 5px; border: 1px solid var(--line); border-radius: 8px; font-size: 10px; color: var(--muted); }
+.badge.live { border-color: var(--sent); color: var(--sent); }
+.badge.restart { border-color: var(--elev); color: var(--elev); }
+.badge.external { border-color: var(--unknown); color: var(--unknown); }
+.badge.pin { border-style: dashed; border-color: var(--line); }
+#config-restart-banner { border: 1px solid var(--elev); border-radius: 4px; padding: 6px 8px; margin-bottom: 8px; font-size: 12px; }
+#config-restart-banner[hidden], #config-bar[hidden] { display: none; }
+#config-restart-banner ul { margin: 4px 0; padding-left: 18px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
+.cfg-restart-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#config-supervisor { color: var(--muted); }
+#config-bar { position: sticky; bottom: calc(-1 * var(--gutter)); display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 8px calc(-1 * var(--gutter)) 0; padding: 8px var(--gutter); background: var(--panel); border-top: 1px solid var(--line); font-size: 12px; }
+#config-bar-keys { flex-basis: 100%; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 
 /* Five tabs on one row needs about 340 px of side panel at the 13 px tab
    font; below 1280 px the panel narrows and the tabs may wrap.

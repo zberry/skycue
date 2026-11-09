@@ -51,6 +51,8 @@ struct Velocity {
 std::optional<Velocity> decodeVelocity(const Frame& f);  // TC19 ST1-4 (ST3/4: heading/airspeed, no gs/track)
 
 // TC29 target state and status, subtype 1 (version 2). Subtype 0 -> nullopt.
+// The mode flags are meaningful only when modes_valid is set; consumers must
+// gate autopilot/vnav/althold/approach/tcas/lnav on it.
 struct TargetState {
     std::optional<int32_t> sel_alt_ft, sel_alt_fms_ft;  // by the altitude type bit
     std::optional<float> qnh_mb, sel_heading_deg;

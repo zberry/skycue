@@ -142,7 +142,9 @@ std::optional<Bds60> decodeBds60(uint64_t mb, std::optional<int32_t> alt_ft)
         return std::nullopt;
     if (alt_ft && b.ias_kt && b.mach) {
         // Loose cross-check: Mach from IAS at ISA (661.5 kt = speed of sound at
-        // sea level, delta = pressure ratio), within 20 %.
+        // sea level, delta = pressure ratio), within 20 %. This treats IAS as
+        // equivalent airspeed (no compressibility correction), which overestimates
+        // Mach by about 10 % near Mach 0.8; that stays inside the tolerance.
         const double delta = std::pow(1.0 - 6.8756e-6 * *alt_ft, 5.2559);
         if (delta > 0.0) {
             const double est = *b.ias_kt / (661.5 * std::sqrt(delta));
@@ -180,7 +182,9 @@ CommbResult inferCommb(uint64_t mb, const CommbContext& ctx)
     // Tie-break by the track's known state. Per candidate: contradicted when
     // an available comparison fails, supported when one holds. Contradicted
     // candidates drop out; if one remains it wins, else exactly one supported
-    // candidate wins, else ambiguous. For 4,0 the only check is the selected
+    // candidate wins, else ambiguous: a candidate the context confirms beats
+    // candidates the context cannot judge; two confirmed or none confirmed ->
+    // ambiguous. For 4,0 the only check is the selected
     // altitude range (0..50000 ft), which can contradict but never support.
     bool keep40 = b40.has_value(), keep50 = b50.has_value(), keep60 = b60.has_value();
     bool sup50 = false, sup60 = false;

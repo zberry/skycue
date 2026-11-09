@@ -109,7 +109,7 @@ BOOST_AUTO_TEST_CASE(bds40_status_zero_requires_zero_value)
     Mb n = bds40Mb();
     n.at(48, 1, 0);  // mode status off with VNAV/ALTHOLD set
     BOOST_CHECK(!decodeBds40(n.v).has_value());
-    Mb none;  // no status bit at all but a value
+    Mb none;  // all zero: every field's status is 0 and so is its value, but at least one status must be set
     BOOST_CHECK(!decodeBds40(none.v).has_value());
 }
 
@@ -273,6 +273,98 @@ BOOST_AUTO_TEST_CASE(infer_tie_break_by_ground_speed_and_baro_rate)
     both.track_deg = 100.0f;
     both.baro_rate_fpm = 2000;
     BOOST_CHECK(inferCommb(m.v, both).kind == CommbKind::ambiguous);
+}
+
+BOOST_AUTO_TEST_CASE(bds40_mode_target_source_status)
+{
+    Mb m = bds40Mb();
+    m.at(55, 2, 1);  // target altitude source set while its status (bit 54) is 0
+    BOOST_CHECK(!decodeBds40(m.v).has_value());
+    m.at(54, 1, 1);
+    BOOST_CHECK(decodeBds40(m.v).has_value());
+    Mb n = bds40Mb();
+    n.at(56, 1, 1);
+    BOOST_CHECK(!decodeBds40(n.v).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(bds50_each_status_zero_requires_zero_value)
+{
+    // status bit, first value bit, width
+    const unsigned f[][3] = {{1, 2, 10}, {24, 25, 10}, {35, 36, 10}, {46, 47, 10}};
+    for (const auto& x : f) {
+        Mb m = bds50Mb();
+        BOOST_REQUIRE(decodeBds50(m.v).has_value());
+        m.at(x[0], 1, 0);
+        BOOST_CHECK_MESSAGE(!decodeBds50(m.v).has_value(), "5,0 status bit " << x[0]);
+        m.at(x[1], x[2], 0);  // value cleared too: accepted
+        BOOST_CHECK_MESSAGE(decodeBds50(m.v).has_value(), "5,0 cleared field at " << x[0]);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(bds60_each_status_zero_requires_zero_value)
+{
+    const unsigned f[][3] = {{1, 2, 11}, {24, 25, 10}, {35, 36, 10}, {46, 47, 10}};
+    for (const auto& x : f) {
+        Mb m = bds60Mb();
+        BOOST_REQUIRE(decodeBds60(m.v, std::nullopt).has_value());
+        m.at(x[0], 1, 0);
+        BOOST_CHECK_MESSAGE(!decodeBds60(m.v, std::nullopt).has_value(), "6,0 status bit " << x[0]);
+        m.at(x[1], x[2], 0);
+        BOOST_CHECK_MESSAGE(decodeBds60(m.v, std::nullopt).has_value(), "6,0 cleared field at " << x[0]);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(bds60_inertial_rate_limit)
+{
+    Mb m;
+    m.at(46, 1, 1).sat(47, 10, 187);  // 5984 ft/min
+    BOOST_CHECK(decodeBds60(m.v, std::nullopt).has_value());
+    m.sat(47, 10, 188);  // 6016
+    BOOST_CHECK(!decodeBds60(m.v, std::nullopt).has_value());
+    m.sat(47, 10, -188);
+    BOOST_CHECK(!decodeBds60(m.v, std::nullopt).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(infer_bds40_dropped_when_selected_altitude_out_of_range)
+{
+    // Passes 4,0 (MCP 51232 ft, FMS 0) and 5,0 (roll -39.4, track 90), not 6,0.
+    Mb m;
+    m.at(1, 1, 1).at(2, 12, 3202).at(14, 1, 1);
+    BOOST_REQUIRE(decodeBds40(m.v).has_value());
+    BOOST_REQUIRE(*decodeBds40(m.v)->sel_alt_mcp_ft > 50000);
+    BOOST_REQUIRE(decodeBds50(m.v).has_value());
+    BOOST_REQUIRE(!decodeBds60(m.v, std::nullopt).has_value());
+    const auto r = inferCommb(m.v, CommbContext{});
+    BOOST_CHECK(r.kind == CommbKind::bds50);
+    BOOST_CHECK(r.b50.has_value() && !r.b40.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(infer_bds40_survives_as_only_candidate)
+{
+    const Mb m = bds40Mb();
+    BOOST_REQUIRE(decodeBds40(m.v).has_value());
+    BOOST_REQUIRE(!decodeBds50(m.v).has_value());
+    BOOST_REQUIRE(!decodeBds60(m.v, std::nullopt).has_value());
+    CommbContext ctx;  // context that would contradict a 5,0 or 6,0 changes nothing
+    ctx.track_deg = 10.0f;
+    ctx.gs_kt = 100.0f;
+    ctx.baro_rate_fpm = 3000;
+    const auto r = inferCommb(m.v, ctx);
+    BOOST_CHECK(r.kind == CommbKind::bds40);
+    BOOST_CHECK(r.b40.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(infer_passes_altitude_to_bds60)
+{
+    Mb m = bds60Mb();
+    m.at(25, 10, 75);  // Mach 0.30 with IAS 280
+    BOOST_REQUIRE(decodeBds60(m.v, std::nullopt).has_value());
+    BOOST_CHECK(!decodeBds60(m.v, 35000).has_value());
+    CommbContext ctx;
+    ctx.alt_ft = 35000;
+    const auto r = inferCommb(m.v, ctx);
+    BOOST_CHECK(r.kind != CommbKind::bds60);
+    BOOST_CHECK(!r.b60.has_value());
 }
 
 BOOST_AUTO_TEST_CASE(infer_empty)

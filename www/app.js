@@ -2952,11 +2952,7 @@
     prevLines: null, prevWall: 0,   // the previous stats.inputs
     stats: null,                    // the latest stats object (recorder drops)
     devices: new Map(),             // id -> device marker
-    stations: new Map(),            // site_id -> station marker
-    outputs: [],                    // output objects, as GET /api/outputs lists them
-    outCards: new Map(),            // id -> output card element
-    outEditing: null,               // the id of the output the output form edits; null: it adds one
-    outEnabledTouched: false
+    stations: new Map()             // site_id -> station marker
   };
 
   function el(tag, cls, text) {
@@ -3139,10 +3135,62 @@
     syncOn: ['type', 'transport', 'group'], alwaysShown: ['type'],
     onReset: function (formEl) { formEl('type').disabled = false; }
   });
+  // ---- the Outputs panel: the same module, over P.outputFields ----
+  var OUT_DOT_TITLES = { green: 'up', amber: 'up, with a last error', red: 'not up', grey: 'disabled' };
+  function makeOutputCard(out) {
+    var card = el('div', 'output-card');
+    var head = el('div', 'output-head');
+    head.appendChild(el('span', 'dot'));
+    head.appendChild(el('span', 'output-name'));
+    head.appendChild(el('span', 'output-kind'));
+    card.appendChild(head);
+    card.appendChild(el('div', 'output-endpoint'));
+    var line = el('div', 'output-stats');
+    ['output-peers', 'output-bytes', 'output-dropped'].forEach(function (c) { line.appendChild(el('span', c)); });
+    card.appendChild(line);
+    card.appendChild(el('div', 'output-error'));
+    return card;
+  }
+  function fillOutputCard(card, out) {
+    var st = out.state || {}, color = P.outputDot(out);
+    var dot = card.querySelector('.dot');
+    dot.className = 'dot dot-' + color;
+    dot.title = OUT_DOT_TITLES[color];
+    setText(card, 'output-name', out.name || out.id);
+    setText(card, 'output-kind', (out.name ? out.id + ' · ' : '') + out.kind);
+    setText(card, 'output-endpoint', P.outputEndpoint(out));
+    setText(card, 'output-peers', 'peers ' + (st.peers || 0));
+    setText(card, 'output-bytes', 'bytes ' + (st.bytes || 0));
+    setText(card, 'output-dropped', 'dropped ' + (st.dropped || 0));
+    setText(card, 'output-error', st.last_error ? 'last error: ' + st.last_error : '').hidden = !st.last_error;
+  }
+  function outputFields(formEl) {
+    return P.outputFields(formEl('kind').value, formEl('transport').value, formEl('group').value.trim());
+  }
+  function fillOutputForm(out, formEl) {
+    formEl('kind').value = out.kind;
+    formEl('transport').value = out.transport;
+    formEl('group').value = out.group || '';
+    P.outputFields(out.kind, out.transport, out.group).forEach(function (f) {
+      var e = formEl(f), v = out[f];
+      if (e.type === 'checkbox') e.checked = !!v;
+      else e.value = v === undefined || v === null ? '' : String(v);
+    });
+  }
+  var outputsPanel = makePanel({
+    noun: 'output', listPath: 'api/outputs', formId: 'output-form', titleId: 'output-form-title', msgId: 'outputs-msg',
+    cardClass: 'output-card', makeCard: makeOutputCard, fillCard: fillOutputCard,
+    actions: function (out) { return out.builtin ? ['toggle'] : ['toggle', 'edit', 'remove']; },
+    fieldsFn: outputFields,
+    defFn: function (formEl) { return P.formDefinition($('output-form').elements, outputFields(formEl), NUMERIC_FIELDS); },
+    validateFn: P.validateOutputDef, fillForm: fillOutputForm,
+    syncOn: ['kind', 'transport', 'group'], alwaysShown: [],
+    pollNeedsTab: true
+  });
   // panels:end
   function renderReceiver() {
     inputsPanel.render();
-    renderOutputs();
+    outputsPanel.render();
     renderStations();
     renderHealth();
     renderFeedsSummary();
@@ -3150,7 +3198,7 @@
   function renderFeedsSummary() {
     var box = $('feeds-summary');
     if (!box) return;
-    var text = P.feedsSummary(inputsPanel.items(), rx.outputs, cues.clients, config.data && config.data.daemon && config.data.daemon.recording_files);
+    var text = P.feedsSummary(inputsPanel.items(), outputsPanel.items(), cues.clients, config.data && config.data.daemon && config.data.daemon.recording_files);
     box.textContent = '';
     text.split(' · ').forEach(function (part, i) {
       if (i) box.appendChild(document.createTextNode(' · '));
@@ -3724,191 +3772,10 @@
   // The list comes with the snapshot and the `outputs` items (a definition
   // changed, an output came up or went down); the counters are read by
   // polling GET /api/outputs every OUTPUTS_POLL_MS while the tab is shown.
-  var ACT_LABELS = { toggle: 'Disable', edit: 'Edit', remove: 'Remove' };
-  var OUT_DOT_TITLES = { green: 'up', amber: 'up, with a last error', red: 'not up', grey: 'disabled' };
-  function outputById(id) {
-    for (var i = 0; i < rx.outputs.length; i++) if (rx.outputs[i].id === id) return rx.outputs[i];
-    return null;
-  }
-  function applyOutputs(list) {
-    rx.outputs = Array.isArray(list) ? list : [];
-    var edited = rx.outEditing !== null && outputById(rx.outEditing);
-    if (edited && !rx.outEnabledTouched) outEl('enabled').checked = !!edited.enabled;
-    if (tabShown('receiver')) renderOutputs();
-  }
-  function refreshOutputs() {
-    return request('GET', 'api/outputs').then(function (j) { applyOutputs(j.outputs); });
-  }
-  function pollOutputs() {
-    // A skycued without outputs answers 404: the section stays empty.
-    if (connected && tabShown('receiver')) P.quietly(refreshOutputs()); // the watchdog reports a dead skycued
-  }
-  function makeOutputCard(out) {
-    var card = el('div', 'output-card');
-    card.setAttribute('data-id', out.id);
-    var head = el('div', 'output-head');
-    head.appendChild(el('span', 'dot'));
-    head.appendChild(el('span', 'output-name'));
-    head.appendChild(el('span', 'output-kind'));
-    card.appendChild(head);
-    card.appendChild(el('div', 'output-endpoint'));
-    var line = el('div', 'output-stats');
-    ['output-peers', 'output-bytes', 'output-dropped'].forEach(function (c) { line.appendChild(el('span', c)); });
-    card.appendChild(line);
-    card.appendChild(el('div', 'output-error'));
-    var acts = el('div', 'output-actions');
-    (out.builtin ? ['toggle'] : ['toggle', 'edit', 'remove']).forEach(function (a) {
-      var b = el('button', null, ACT_LABELS[a]);
-      b.type = 'button';
-      b.setAttribute('data-act', a);
-      acts.appendChild(b);
-    });
-    card.appendChild(acts);
-    return card;
-  }
-  function fillOutputCard(card, out) {
-    var st = out.state || {}, color = P.outputDot(out);
-    var dot = card.querySelector('.dot');
-    dot.className = 'dot dot-' + color;
-    dot.title = OUT_DOT_TITLES[color];
-    setText(card, 'output-name', out.name || out.id);
-    setText(card, 'output-kind', (out.name ? out.id + ' · ' : '') + out.kind);
-    setText(card, 'output-endpoint', P.outputEndpoint(out));
-    setText(card, 'output-peers', 'peers ' + (st.peers || 0));
-    setText(card, 'output-bytes', 'bytes ' + (st.bytes || 0));
-    setText(card, 'output-dropped', 'dropped ' + (st.dropped || 0));
-    setText(card, 'output-error', st.last_error ? 'last error: ' + st.last_error : '').hidden = !st.last_error;
-    card.querySelector('[data-act=toggle]').textContent = out.enabled ? 'Disable' : 'Enable';
-  }
-  function renderOutputs() {
-    var list = $('outputs-list'), seen = {};
-    rx.outputs.forEach(function (out, i) {
-      seen[out.id] = true;
-      var card = rx.outCards.get(out.id);
-      if (!card) {
-        card = makeOutputCard(out);
-        rx.outCards.set(out.id, card);
-      }
-      if (list.children[i] !== card) list.insertBefore(card, list.children[i] || null);
-      fillOutputCard(card, out);
-    });
-    rx.outCards.forEach(function (card, id) {
-      if (seen[id]) return;
-      card.remove();
-      rx.outCards.delete(id);
-    });
-    list.classList.toggle('empty', !rx.outputs.length);
-  }
-
-  // the output form: the input form's way, over P.outputFields
-  function outEl(name) { return $('output-form').elements[name]; }
-  function outFields() {
-    return P.outputFields(outEl('kind').value, outEl('transport').value, outEl('group').value.trim());
-  }
-  function syncOutFields() {
-    var shown = outFields();
-    eachEl('#output-form [data-field]', function (l) {
-      l.hidden = shown.indexOf(l.getAttribute('data-field')) < 0;
-    });
-  }
-  function outDef() {
-    var def = {};
-    outFields().forEach(function (f) {
-      var e = outEl(f);
-      if (e.type === 'checkbox') {
-        def[f] = e.checked;
-        return;
-      }
-      var v = f === 'name' ? e.value : e.value.trim();
-      if (v !== '') def[f] = NUMERIC_FIELDS[f] ? Number(v) : v;
-    });
-    return def;
-  }
-  function showOutErrors(errors) {
-    eachEl('#output-form .field-error', function (e) {
-      var f = e.getAttribute('data-for'), msg = errors[f] || '';
-      e.textContent = msg;
-      var input = outEl(f);
-      input.classList.toggle('invalid', !!msg);
-      if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
-    });
-  }
-  function showOutFormError(text) { $('output-form').querySelector('.form-error').textContent = text || ''; }
-  function resetOutForm() {
-    var form = $('output-form');
-    form.reset();
-    rx.outEditing = null;
-    rx.outEnabledTouched = false;
-    outEl('id').readOnly = false;
-    $('output-form-title').textContent = 'Add output';
-    form.querySelector('button[type=submit]').textContent = 'Add';
-    form.querySelector('[data-act=cancel]').hidden = true;
-    showOutErrors({});
-    showOutFormError('');
-    syncOutFields();
-  }
-  function editOutput(out) {
-    resetOutForm();
-    rx.outEditing = out.id;
-    var form = $('output-form');
-    outEl('kind').value = out.kind;
-    outEl('transport').value = out.transport;
-    outEl('group').value = out.group || '';
-    P.outputFields(out.kind, out.transport, out.group).forEach(function (f) {
-      var e = outEl(f), v = out[f];
-      if (e.type === 'checkbox') e.checked = !!v;
-      else e.value = v === undefined || v === null ? '' : String(v);
-    });
-    outEl('id').readOnly = true;
-    $('output-form-title').textContent = 'Edit ' + out.id;
-    form.querySelector('button[type=submit]').textContent = 'Save';
-    form.querySelector('[data-act=cancel]').hidden = false;
-    syncOutFields();
-    form.scrollIntoView({ block: 'nearest' });
-  }
-  function submitOutput(ev) {
-    ev.preventDefault();
-    var def = outDef(), id = rx.outEditing;
-    var current = id !== null && outputById(id);
-    if (current && !rx.outEnabledTouched) def.enabled = current.enabled;
-    var check = P.validateOutputDef(def);
-    showOutErrors(check.errors);
-    showOutFormError('');
-    if (!check.ok) return;
-    var submit = $('output-form').querySelector('button[type=submit]');
-    submit.disabled = true;
-    var req = id === null ? request('POST', 'api/outputs', def) :
-      request('PUT', 'api/outputs/' + encodeURIComponent(id), def);
-    req.then(function () {
-      resetOutForm();
-      return refreshOutputs();
-    }).catch(function (err) {
-      showOutFormError(err.message); // skycued's message, word for word
-    }).then(function () { submit.disabled = false; });
-  }
-  function onOutFormInput(ev) {
-    var name = ev.target.name;
-    if (name === 'enabled') rx.outEnabledTouched = true;
-    if (name === 'kind' || name === 'transport' || name === 'group') syncOutFields();
-    if ($('output-form').querySelector('.invalid')) showOutErrors(P.validateOutputDef(outDef()).errors);
-  }
-  function onOutputCardClick(ev) {
-    var b = ev.target.closest('button[data-act]');
-    var card = b && b.closest('.output-card');
-    var out = card && outputById(card.getAttribute('data-id'));
-    if (!out) return;
-    var act = b.getAttribute('data-act'), path = 'api/outputs/' + encodeURIComponent(out.id);
-    var outcome = P.act(function (m, e) { showMsg($('outputs-msg'), m, e); }, refreshOutputs);
-    if (act === 'toggle') {
-      request('POST', path + (out.enabled ? '/disable' : '/enable'), {}).then(outcome.done).catch(outcome.failed);
-    } else if (act === 'edit') {
-      editOutput(out);
-    } else if (act === 'remove') {
-      if (!window.confirm('Remove output ' + out.id + '?')) return;
-      if (rx.outEditing === out.id) resetOutForm();
-      request('DELETE', path).then(outcome.done).catch(outcome.failed);
-    }
-  }
+  // The panel is resource_panel.js, like the Inputs; a skycued without
+  // outputs answers its poll 404 and the section stays empty.
+  function applyOutputs(list) { outputsPanel.apply(list); }
+  function pollOutputs() { outputsPanel.poll(); }
 
   // ---- WebSocket -----------------------------------------------------------------
   function setConnected(on) {
@@ -4083,12 +3950,7 @@
       });
     });
     inputsPanel.wire();
-    $('output-form').addEventListener('submit', submitOutput);
-    $('output-form').addEventListener('input', onOutFormInput);
-    $('output-form').addEventListener('change', onOutFormInput);
-    $('output-form').querySelector('[data-act=cancel]').addEventListener('click', resetOutForm);
-    $('outputs-list').addEventListener('click', onOutputCardClick);
-    syncOutFields();
+    outputsPanel.wire();
     $('shape-close').addEventListener('click', hideShape);
     $('wx-filter').addEventListener('input', function () {
       clearTimeout(fisb.wxTimer);

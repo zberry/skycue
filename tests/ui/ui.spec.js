@@ -5058,7 +5058,7 @@ test('stats_coverage_fleet_signal_rows_are_full', async ({ page }) => {
 // ---- Stats: the whole view, chart disposal, the ledger across a restart -------
 // The chart cards a view on `summary` draws: Weather only once UAT was
 // seen (the aircraft detail card, made empty, draws once a row is opened).
-const allCards = (summary) => TRAFFIC_CARDS.concat(COVERAGE_CARDS, FLEET_CARDS, SIGNAL_CARDS,
+const allCards = (summary) => ['traffic-flow'].concat(TRAFFIC_CARDS, COVERAGE_CARDS, FLEET_CARDS, SIGNAL_CARDS,
   summary.uat_seen ? ['weather-uat'] : []).sort();
 const drawnCards = async (page) => (await statsState(page)).cards.filter((c) => c.canvas).map((c) => c.id).sort();
 

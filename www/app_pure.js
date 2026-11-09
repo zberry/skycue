@@ -1010,8 +1010,13 @@
     var frames = n(state.frames), rate = null;
     if (prev && prev.decoding === true && dtS > 0 && frames >= n(prev.frames)) rate = (frames - n(prev.frames)) / dtS;
     var pct = frames > 0 ? n(state.crc_fail) / frames * 100 : null;
-    return 'frames/s ' + formatNum(rate, 1) + ' · CRC fail ' + formatNum(pct, 1, '%') + ' · fixed ' + n(state.crc_fixed) +
+    var line = 'frames/s ' + formatNum(rate, 1) + ' · CRC fail ' + formatNum(pct, 1, '%') + ' · fixed ' + n(state.crc_fixed) +
       ' · pending ' + n(state.cpr_pending) + ' · rejected ' + n(state.cpr_rejected) + ' · unknown ' + n(state.unknown_type);
+    // Comm-B registers and ACAS resolution advisories, once any was decoded.
+    if (n(state.commb_bds40) + n(state.commb_bds50) + n(state.commb_bds60) + n(state.acas_ra) > 0)
+      line += ' · Comm-B 4,0 ' + n(state.commb_bds40) + ' · 5,0 ' + n(state.commb_bds50) + ' · 6,0 ' + n(state.commb_bds60) +
+        ' · RA ' + n(state.acas_ra);
+    return line;
   }
 
   // A device status is stale when it arrived more than 3 status intervals

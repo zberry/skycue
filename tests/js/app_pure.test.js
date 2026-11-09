@@ -834,6 +834,13 @@ test('decoderLine_formats_rates_and_percent', () => {
     'frames/s — · CRC fail — · fixed 0 · pending 0 · rejected 0 · unknown 0');
 });
 
+test('decoderLine_appends_commb_and_ra_counts_when_non_zero', () => {
+  const cur = { decoding: true, frames: 10, crc_fail: 0, commb_bds40: 2, commb_bds50: 3, commb_bds60: 4, acas_ra: 1 };
+  assert.ok(P.decoderLine(cur, null, 1).endsWith(' · unknown 0 · Comm-B 4,0 2 · 5,0 3 · 6,0 4 · RA 1'));
+  assert.ok(P.decoderLine({ decoding: true, frames: 1, acas_ra: 1 }, null, 1).endsWith('Comm-B 4,0 0 · 5,0 0 · 6,0 0 · RA 1'));
+  assert.ok(P.decoderLine({ decoding: true, frames: 1, commb_ambiguous: 5 }, null, 1).indexOf('Comm-B') < 0);
+});
+
 test('decoderLine_absent_without_decoding', () => {
   assert.strictEqual(P.decoderLine({ frames: 5 }, null, 1), null);
   assert.strictEqual(P.decoderLine({ decoding: false, frames: 5 }, { frames: 1 }, 1), null);

@@ -74,7 +74,16 @@ void putCounters(JsonWriter& w, const InputCounters& c)
         .add("mlat_skipped", num(c.mlat_skipped))
         .add("modeac_skipped", num(c.modeac_skipped))
         .add("other_skipped", num(c.other_skipped))
-        .add("rs_errors", num(c.rs_errors));
+        .add("rs_errors", num(c.rs_errors))
+        .add("commb_bds40", num(c.commb_bds40))
+        .add("commb_bds50", num(c.commb_bds50))
+        .add("commb_bds60", num(c.commb_bds60))
+        .add("commb_ambiguous", num(c.commb_ambiguous))
+        .add("commb_other", num(c.commb_other))
+        .add("commb_empty", num(c.commb_empty))
+        .add("commb_unknown", num(c.commb_unknown))
+        .add("acas_ra", num(c.acas_ra))
+        .add("acas_ra_tc28", num(c.acas_ra_tc28));
 }
 
 std::string deviceStatusJson(const DeviceStatus& d)

@@ -13,6 +13,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "decode/acas.hpp"
+#include "decode/commb.hpp"
 #include "decode/cpr.hpp"
 #include "decode/frame.hpp"
 #include "decode/key_state.hpp"
@@ -29,6 +31,9 @@ struct DecoderConfig {
 struct DecodeCounters {
     uint64_t frames = 0, crc_fail = 0, crc_fixed = 0, ap_unconfirmed = 0, no_position = 0, cpr_pending = 0,
              cpr_rejected = 0, decoded = 0, unmapped = 0, unknown_type = 0, evicted = 0, observations = 0;
+    // Comm-B register inference (DF20/21) and ACAS RAs (spec section 14 item 8).
+    uint64_t commb_bds40 = 0, commb_bds50 = 0, commb_bds60 = 0, commb_ambiguous = 0, commb_other = 0,
+             commb_empty = 0, commb_unknown = 0, acas_ra = 0, acas_ra_tc28 = 0;
     uint64_t rs_errors = 0;  // UAT only: Reed-Solomon symbol errors corrected, summed over the frames (the "rs=" values)
 };
 
@@ -50,6 +55,8 @@ private:
     void evictIdle();
     void onEs(const Frame& f, const StateKey& key, skycue::Source src, Clock::time_point arrival,
               std::optional<uint8_t> signal);
+    void applyAcasRa(KeyState& ks, const AcasRa& ra);
+    void applyCommb(KeyState& ks, const Frame& f);
     void onAp(const Frame& f, Clock::time_point arrival, std::optional<uint8_t> signal);
     void onDf11(const Frame& f, uint32_t residual, std::optional<uint8_t> signal);
     bool positionStep(KeyState& ks, const CprFields& c, cpr::Position& out);

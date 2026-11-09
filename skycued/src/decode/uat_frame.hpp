@@ -84,6 +84,7 @@ struct StateVector {
     uint8_t nic = 0;
     enum class Ag : uint8_t { airborne_subsonic, airborne_supersonic, ground, reserved };
     Ag ag = Ag::airborne_subsonic;
+    std::optional<float> heading_mag_deg, heading_true_deg;  // ground, track type 2 / 3 (same 9 bits as the track)
     std::optional<float> gs_kt, track_deg;  // airborne from N/S, E/W (x4 when supersonic); ground only when the track type says track
     std::optional<int32_t> vrate_fpm;       // 64 fpm steps, sign and source bit
     std::optional<bool> vrate_geometric;

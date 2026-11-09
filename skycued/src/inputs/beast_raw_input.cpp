@@ -64,6 +64,15 @@ InputState BeastRawInput::state() const
         c.unmapped = d.unmapped;
         c.unknown_type = d.unknown_type;
         c.evicted = d.evicted;
+        c.commb_bds40 = d.commb_bds40;
+        c.commb_bds50 = d.commb_bds50;
+        c.commb_bds60 = d.commb_bds60;
+        c.commb_ambiguous = d.commb_ambiguous;
+        c.commb_other = d.commb_other;
+        c.commb_empty = d.commb_empty;
+        c.commb_unknown = d.commb_unknown;
+        c.acas_ra = d.acas_ra;
+        c.acas_ra_tc28 = d.acas_ra_tc28;
         c.decoder_observations = d.observations;
         c.mlat_skipped = source_counters_.mlat_skipped;
         c.modeac_skipped = source_counters_.modeac_skipped;

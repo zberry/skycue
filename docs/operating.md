@@ -386,11 +386,29 @@ every such input produces observations. What changes:
   `inputs.dump978.raw_port` to it, so the built-in `dump978` input reads the replay. See [Raw capture and replay](#raw-capture-and-replay).
 
 The default keeps readsb's own decoding and its JSON. The decoder follows the
-public Mode S layouts and was compared with readsb on the same capture;
-Comm-B vertical rates (BDS 6,0) are not decoded yet, so the barometric
-vertical rate of a few aircraft can differ from readsb's in interrogated
-airspace (the comparison accepts 95 % agreement on that one value, and measured
-about 97 % on the 120 s capture).
+public Mode S layouts and was compared with readsb on the same capture.
+
+**Comm-B and ACAS.** The Comm-B field of DF 20 and 21 replies does not say
+which register it holds, so skycued decodes it as BDS 4,0 (selected altitude,
+pressure setting, VNAV, altitude hold, approach), 5,0 (roll, true track, ground
+speed, track angle rate, true airspeed) and 6,0 (magnetic heading, indicated
+airspeed, Mach, barometric and inertial vertical rate) and accepts a register
+only when exactly one passes its range and reserved-bit checks; when two pass,
+the aircraft's own track, ground speed and barometric rate (from ADS-B) decide,
+and when that does not settle it the reply is counted `commb_ambiguous` and
+nothing is set. Replies that are empty, another register (identification, data
+link capability) or none of the three count in `commb_empty`, `commb_other` and
+`commb_unknown`; the accepted ones in `commb_bds40`, `commb_bds50` and
+`commb_bds60`. Like altitude and squawk, a Comm-B reply is used only for an
+address confirmed in the last 60 s. The values are kept for 60 s with the other
+dynamic fields. ACAS resolution advisories come from DF 16 (`acas_ra`) and from
+the ADS-B status message (`acas_ra_tc28`); the advisory is reported as active
+for 30 s after its last message, a message that ends it reports "clear of
+conflict" for 30 s, and then the field is dropped. The ADS-B target-state
+message (selected altitude, pressure setting, selected heading, autopilot and
+other modes) and the heading/airspeed form of the ADS-B velocity message are
+decoded as well. The Feeds tab line adds `Comm-B 4,0 · 5,0 · 6,0 · RA` counts
+once any is non-zero.
 
 ### UAT (978 MHz) in skycued
 

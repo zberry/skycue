@@ -620,3 +620,25 @@ BOOST_AUTO_TEST_CASE(fuzz_random_18_34_bytes_never_throws)
         BOOST_REQUIRE_NO_THROW(uat::parseDownlinkLine(line));
     }
 }
+
+BOOST_AUTO_TEST_CASE(uat_heading_codes_map_to_heading_fields)
+{
+    for (unsigned t : {0u, 1u, 2u, 3u}) {
+        Rig r;
+        auto s = airborne();
+        s.ag = 2;
+        s.ns_kt.reset();
+        s.ew_kt.reset();
+        s.ground_speed_kt = 12;
+        s.track_type = t;
+        s.track_deg = 90.0;
+        r.feed(s);
+        BOOST_REQUIRE_EQUAL(r.out.size(), 1u);
+        const auto& o = r.last();
+        BOOST_CHECK_EQUAL(o.track_deg.has_value(), t == 1);
+        BOOST_CHECK_EQUAL(o.heading_mag_deg.has_value(), t == 2);
+        BOOST_CHECK_EQUAL(o.heading_true_deg.has_value(), t == 3);
+        if (t == 2) BOOST_CHECK_CLOSE(*o.heading_mag_deg, 90.0f, 1.0);
+        if (t == 3) BOOST_CHECK_CLOSE(*o.heading_true_deg, 90.0f, 1.0);
+    }
+}

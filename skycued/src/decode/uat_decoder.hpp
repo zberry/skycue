@@ -40,7 +40,7 @@ struct UatKeyState {
 
     Timed<std::string> callsign, category, squawk, emergency;
     Timed<int32_t> alt_baro, alt_geom;
-    Timed<float> gs, track, baro_rate, geom_rate;
+    Timed<float> gs, track, baro_rate, geom_rate, heading_mag, heading_true;
     Timed<uint8_t> nic, nac_p;
     Timed<bool> on_ground;
 

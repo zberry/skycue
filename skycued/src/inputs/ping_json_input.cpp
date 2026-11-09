@@ -75,6 +75,15 @@ InputState PingJsonInput::state() const
         c.unmapped = m.unmapped + u.unmapped;
         c.unknown_type = m.unknown_type + u.unknown_type;
         c.evicted = m.evicted + u.evicted;
+        c.commb_bds40 = m.commb_bds40;
+        c.commb_bds50 = m.commb_bds50;
+        c.commb_bds60 = m.commb_bds60;
+        c.commb_ambiguous = m.commb_ambiguous;
+        c.commb_other = m.commb_other;
+        c.commb_empty = m.commb_empty;
+        c.commb_unknown = m.commb_unknown;
+        c.acas_ra = m.acas_ra;
+        c.acas_ra_tc28 = m.acas_ra_tc28;
         c.rs_errors = m.rs_errors + u.rs_errors;
         c.decoder_observations = m.observations + u.observations;
     }

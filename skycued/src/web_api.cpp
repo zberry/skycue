@@ -95,7 +95,11 @@ void putStats(JsonWriter& w, const EngineStats& s)
                 .add("crc_fixed", n(in.decoder.crc_fixed))
                 .add("cpr_pending", n(in.decoder.cpr_pending))
                 .add("cpr_rejected", n(in.decoder.cpr_rejected))
-                .add("unknown_type", n(in.decoder.unknown_type));
+                .add("unknown_type", n(in.decoder.unknown_type))
+                .add("commb_bds40", n(in.decoder.commb_bds40))
+                .add("commb_bds50", n(in.decoder.commb_bds50))
+                .add("commb_bds60", n(in.decoder.commb_bds60))
+                .add("acas_ra", n(in.decoder.acas_ra));
         inputs.push_back(line.str());
     }
     w.addRaw("inputs", jsonArray(inputs));

@@ -105,6 +105,9 @@ struct KeyState {
     Timed<int32_t> sel_alt, sel_alt_fms;
     Timed<uint8_t> nav_modes, acas_sl, acas_ri;
     Timed<AcasRaState> acas_ra;
+    // Track, ground speed and the two vertical rates are set by ADS-B velocity messages and by
+    // Comm-B; the flag says the stored value came from Comm-B, which never replaces a fresh ADS-B one.
+    bool track_commb = false, gs_commb = false, baro_rate_commb = false, geom_rate_commb = false;
 
     // TC31 (kept for the key's life, applied to later position messages).
     struct Tc31 {

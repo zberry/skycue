@@ -139,6 +139,8 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     if (geom) setField(ks, ks.alt_geom, *geom, now_);
     if (sv.gs_kt) setField(ks, ks.gs, *sv.gs_kt, now_);
     if (sv.track_deg) setField(ks, ks.track, *sv.track_deg, now_);
+    if (sv.heading_mag_deg) ks.heading_mag.set(*sv.heading_mag_deg, now_);
+    if (sv.heading_true_deg) ks.heading_true.set(*sv.heading_true_deg, now_);
     if (sv.vrate_fpm) {
         const float r = static_cast<float>(*sv.vrate_fpm);
         Timed<float>& mine = sv.vrate_geometric.value_or(false) ? ks.geom_rate : ks.baro_rate;
@@ -216,6 +218,8 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
     }
     o.gs_kt = ks.gs.fresh(now_, kFieldFresh);
     o.track_deg = ks.track.fresh(now_, kFieldFresh);
+    o.heading_mag_deg = ks.heading_mag.fresh(now_, kFieldFresh);
+    o.heading_true_deg = ks.heading_true.fresh(now_, kFieldFresh);
     o.baro_rate_fpm = ks.baro_rate.fresh(now_, kFieldFresh);
     o.geom_rate_fpm = ks.geom_rate.fresh(now_, kFieldFresh);
     o.callsign = ks.callsign.has ? std::optional(ks.callsign.value) : std::nullopt;  // identity: lives with the key

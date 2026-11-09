@@ -699,7 +699,9 @@ BOOST_AUTO_TEST_CASE(counters_in_state_json)
     BOOST_REQUIRE(skycued::JsonObject::parse(text));
     for (const char* name : {"frames", "crc_fail", "crc_fixed", "ap_unconfirmed", "no_position", "cpr_pending",
                              "cpr_rejected", "decoded", "unmapped", "unknown_type", "evicted", "decoder_observations",
-                             "mlat_skipped", "modeac_skipped", "other_skipped"})
+                             "mlat_skipped", "modeac_skipped", "other_skipped", "commb_bds40", "commb_bds50",
+                             "commb_bds60", "commb_ambiguous", "commb_other", "commb_empty", "commb_unknown",
+                             "acas_ra", "acas_ra_tc28"})
         BOOST_TEST(text.find(std::string("\"") + name + "\":") != std::string::npos, name);
 }
 

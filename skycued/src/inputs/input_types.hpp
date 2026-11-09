@@ -36,6 +36,9 @@ struct InputCounters {
     uint64_t frames = 0, crc_fail = 0, crc_fixed = 0, ap_unconfirmed = 0, no_position = 0, cpr_pending = 0,
              cpr_rejected = 0, decoded = 0, unmapped = 0, unknown_type = 0, evicted = 0, decoder_observations = 0,
              mlat_skipped = 0, modeac_skipped = 0, other_skipped = 0;
+    // Comm-B register inference and ACAS RAs of the 1090 decoder (DecodeCounters).
+    uint64_t commb_bds40 = 0, commb_bds50 = 0, commb_bds60 = 0, commb_ambiguous = 0, commb_other = 0,
+             commb_empty = 0, commb_unknown = 0, acas_ra = 0, acas_ra_tc28 = 0;
     uint64_t rs_errors = 0;  // UAT: Reed-Solomon symbol errors corrected, summed
     // pingStation `source: decode`: datagrams without rawData, and byte-equal rawData skipped within 1 s.
     uint64_t no_raw = 0, raw_duplicates = 0;
@@ -75,6 +78,15 @@ struct InputCounters {
         modeac_skipped += o.modeac_skipped;
         other_skipped += o.other_skipped;
         rs_errors += o.rs_errors;
+        commb_bds40 += o.commb_bds40;
+        commb_bds50 += o.commb_bds50;
+        commb_bds60 += o.commb_bds60;
+        commb_ambiguous += o.commb_ambiguous;
+        commb_other += o.commb_other;
+        commb_empty += o.commb_empty;
+        commb_unknown += o.commb_unknown;
+        acas_ra += o.acas_ra;
+        acas_ra_tc28 += o.acas_ra_tc28;
         return *this;
     }
 };

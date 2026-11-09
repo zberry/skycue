@@ -20,6 +20,7 @@ using skycue::Source;
 using namespace limits;
 
 constexpr seconds kFieldFresh{60};      // our choice: observations carry fields <= 60 s old
+constexpr seconds kAcasRaFresh{30};     // spec 14 item 8: an RA message keeps the field for 30 s
 constexpr seconds kConfirmFresh{60};    // our choice: an address stays confirmed for 60 s
 constexpr seconds kAirbornePair{10};    // our choice: airborne even/odd pair window
 constexpr seconds kSurfacePair{30};     // our choice: surface pair window
@@ -207,6 +208,90 @@ void ModesDecoder::onDf11(const Frame& f, uint32_t residual, std::optional<uint8
     ++counters_.decoded;  // no observation from a DF11 (design 5.2)
 }
 
+// The three mode bits BDS 4,0 can state; autopilot, LNAV and TCAS (TC29 only) are kept.
+constexpr uint8_t kBds40ModeMask = kNavVnav | kNavAltHold | kNavApproach;
+
+void ModesDecoder::applyAcasRa(KeyState& ks, const AcasRa& ra) {
+    AcasRaState st;
+    st.active = !ra.rat;
+    st.ara = ra.ara;
+    st.rac = ra.rac;
+    st.rat = ra.rat;
+    st.mte = ra.mte;
+    st.tti = ra.tti;
+    st.threat_address = ra.threat_address;
+    st.threat_alt_ft = ra.threat_alt_ft;
+    st.threat_range_nm = ra.threat_range_nm;
+    st.threat_bearing_deg = ra.threat_bearing_deg;
+    st.text = ra.rat ? "clear of conflict" : acasRaText(ra);
+    st.at = now_;
+    // A change of advisory, or the return of one after the field expired, is sent at once (like emergency).
+    const auto prev = ks.acas_ra.fresh(now_, kAcasRaFresh);
+    if (!prev || prev->active != st.active || prev->ara != st.ara || prev->rac != st.rac ||
+        prev->mte != st.mte)
+        ks.dirty = true;
+    ks.acas_ra.set(st, now_);
+}
+
+void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
+    // A field an ADS-B message set in the last 60 s keeps that value (ADS-B outranks Comm-B).
+    const auto setCommb = [this](Timed<float>& f, bool& from_commb, float v) {
+        if (f.fresh(now_, kFieldFresh) && !from_commb) return;
+        f.set(v, now_);
+        from_commb = true;
+    };
+    CommbContext ctx;
+    ctx.track_deg = ks.track.fresh(now_, kFieldFresh);
+    ctx.gs_kt = ks.gs.fresh(now_, kFieldFresh);
+    ctx.baro_rate_fpm = ks.baro_rate.has && now_ - ks.baro_rate.at <= kFieldFresh
+                            ? std::optional<int32_t>(static_cast<int32_t>(std::lround(ks.baro_rate.value)))
+                            : std::nullopt;
+    ctx.alt_ft = ks.alt_baro.fresh(now_, kFieldFresh);
+    const CommbResult r = inferCommb(f.field56(32), ctx);
+    switch (r.kind) {
+    case CommbKind::bds40:
+        ++counters_.commb_bds40;
+        if (r.b40) {
+            if (r.b40->sel_alt_mcp_ft) ks.sel_alt.set(*r.b40->sel_alt_mcp_ft, now_);
+            if (r.b40->sel_alt_fms_ft) ks.sel_alt_fms.set(*r.b40->sel_alt_fms_ft, now_);
+            if (r.b40->qnh_mb) ks.qnh.set(*r.b40->qnh_mb, now_);
+            if (r.b40->modes_valid) {
+                uint8_t m = ks.nav_modes.fresh(now_, kFieldFresh).value_or(0) & ~kBds40ModeMask;
+                if (r.b40->vnav) m |= kNavVnav;
+                if (r.b40->althold) m |= kNavAltHold;
+                if (r.b40->approach) m |= kNavApproach;
+                ks.nav_modes.set(m, now_);
+            }
+        }
+        break;
+    case CommbKind::bds50:
+        ++counters_.commb_bds50;
+        if (r.b50) {
+            if (r.b50->roll_deg) ks.roll.set(*r.b50->roll_deg, now_);
+            if (r.b50->track_deg) setCommb(ks.track, ks.track_commb, *r.b50->track_deg);  // the ground track, as TC19 sets it
+            if (r.b50->gs_kt) setCommb(ks.gs, ks.gs_commb, *r.b50->gs_kt);
+            if (r.b50->track_rate_dps) ks.track_rate.set(*r.b50->track_rate_dps, now_);
+            if (r.b50->tas_kt) ks.tas.set(*r.b50->tas_kt, now_);
+        }
+        break;
+    case CommbKind::bds60:
+        ++counters_.commb_bds60;
+        if (r.b60) {
+            if (r.b60->heading_mag_deg) ks.heading_mag.set(*r.b60->heading_mag_deg, now_);
+            if (r.b60->ias_kt) ks.ias.set(*r.b60->ias_kt, now_);
+            if (r.b60->mach) ks.mach.set(*r.b60->mach, now_);
+            if (r.b60->baro_rate_fpm) setCommb(ks.baro_rate, ks.baro_rate_commb, static_cast<float>(*r.b60->baro_rate_fpm));
+            if (r.b60->inertial_rate_fpm)
+                setCommb(ks.geom_rate, ks.geom_rate_commb, static_cast<float>(*r.b60->inertial_rate_fpm));
+        }
+        break;
+    case CommbKind::ambiguous: ++counters_.commb_ambiguous; break;
+    case CommbKind::other: ++counters_.commb_other; break;
+    case CommbKind::empty: ++counters_.commb_empty; break;
+    case CommbKind::unknown: ++counters_.commb_unknown; break;
+    }
+}
+
 void ModesDecoder::onAp(const Frame& f, Clock::time_point arrival, std::optional<uint8_t> signal) {
     const uint32_t residual = coding::modesCrcResidual(f.bytes);  // the AP field: the address
     StateKey key;
@@ -235,7 +320,17 @@ void ModesDecoder::onAp(const Frame& f, Clock::time_point arrival, std::optional
         break;
     }
     }
+    if (f.df == 20 || f.df == 21) applyCommb(*ks, f);
     if (f.df == 0 || f.df == 16) {
+        const AcasCommon c = decodeAcasCommon(f);
+        ks->acas_sl.set(c.sl, now_);
+        ks->acas_ri.set(c.ri, now_);
+        if (f.df == 16) {
+            if (const auto ra = decodeAcasRaMv(f)) {
+                applyAcasRa(*ks, *ra);
+                ++counters_.acas_ra;
+            }
+        }
         if (verticalStatusGround(f)) setGround(*ks, true);
     } else {
         const int fs = flightStatus(f);
@@ -276,10 +371,14 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
         if (surface) {
             const SurfaceMovement mv = decodeSurfaceMovement(f);
             if (mv.gs_kt) {
+                ks.gs_commb = false;
                 ks.gs.set(mv.gs_kt.value_or(0.0f), now_);
                 ks.last_gs_kt = mv.gs_kt.value_or(0.0f);
             }
-            if (mv.track_deg) ks.track.set(*mv.track_deg, now_);
+            if (mv.track_deg) {
+                ks.track_commb = false;
+                ks.track.set(*mv.track_deg, now_);
+            }
             setGround(ks, true);
         } else {
             // TC 9-18: barometric AC12 (Q bit). TC 20-22: GNSS height in metres, no Q bit.
@@ -299,14 +398,26 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
     } else if (tc == 19) {
         if (const auto v = decodeVelocity(f)) {
             if (v->gs_kt) {
+                ks.gs_commb = false;
                 ks.gs.set(v->gs_kt.value_or(0.0f), now_);
                 ks.last_gs_kt = v->gs_kt.value_or(0.0f);
             }
-            if (v->track_deg) ks.track.set(*v->track_deg, now_);
+            if (v->track_deg) {
+                ks.track_commb = false;
+                ks.track.set(*v->track_deg, now_);
+            }
+            if (v->heading_mag_deg) ks.heading_mag.set(*v->heading_mag_deg, now_);
+            if (v->ias_kt) ks.ias.set(*v->ias_kt, now_);
+            if (v->tas_kt) ks.tas.set(static_cast<float>(*v->tas_kt), now_);
             if (v->rate_fpm) {
                 const float r = static_cast<float>(*v->rate_fpm);
-                if (v->rate_is_geom) ks.geom_rate.set(r, now_);
-                else ks.baro_rate.set(r, now_);
+                if (v->rate_is_geom) {
+                    ks.geom_rate_commb = false;
+                    ks.geom_rate.set(r, now_);
+                } else {
+                    ks.baro_rate_commb = false;
+                    ks.baro_rate.set(r, now_);
+                }
             }
             if (v->gnss_baro_diff_ft) ks.gnss_diff.set(*v->gnss_baro_diff_ft, now_);
             // GNSS minus baro difference (design 5.4): only from a fresh baro altitude
@@ -326,6 +437,10 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
             if (em) setField(ks, ks.emergency, *em, now_, true);
             if (sq) setField(ks, ks.squawk, *sq, now_, true);
             ++counters_.decoded;
+        } else if (const auto ra = decodeAcasRaTc28(f)) {
+            applyAcasRa(ks, *ra);
+            ++counters_.acas_ra_tc28;
+            ++counters_.decoded;
         } else {
             ++counters_.unmapped;  // ST 2 and others: decoded, no field
         }
@@ -338,7 +453,26 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
             ++counters_.unmapped;
         }
     } else if (tc == 29) {
-        ++counters_.unmapped;
+        if (const auto t = decodeTargetState(f)) {
+            if (t->sel_alt_ft) ks.sel_alt.set(*t->sel_alt_ft, now_);
+            if (t->sel_alt_fms_ft) ks.sel_alt_fms.set(*t->sel_alt_fms_ft, now_);
+            if (t->qnh_mb) ks.qnh.set(*t->qnh_mb, now_);
+            if (t->sel_heading_deg) ks.sel_heading.set(*t->sel_heading_deg, now_);
+            // NACp stays TC31-only: taking the TC29 value drops nac_p agreement with readsb below its floor.
+            if (t->modes_valid) {  // the flags mean nothing while the status bit is 0
+                uint8_t m = 0;
+                if (t->autopilot) m |= kNavAutopilot;
+                if (t->vnav) m |= kNavVnav;
+                if (t->althold) m |= kNavAltHold;
+                if (t->approach) m |= kNavApproach;
+                if (t->lnav) m |= kNavLnav;
+                if (t->tcas) m |= kNavTcas;
+                ks.nav_modes.set(m, now_);
+            }
+            ++counters_.decoded;
+        } else {
+            ++counters_.unmapped;
+        }
     } else {  // 23-27, 30
         ++counters_.unknown_type;
     }
@@ -502,6 +636,21 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
     if (o.geom_minus_baro_ft) o.geom_minus_baro_time = ks.gnss_diff.at;
     o.gs_kt = ks.gs.fresh(now_, kFieldFresh);
     o.track_deg = ks.track.fresh(now_, kFieldFresh);
+    o.heading_mag_deg = ks.heading_mag.fresh(now_, kFieldFresh);
+    o.heading_true_deg = ks.heading_true.fresh(now_, kFieldFresh);
+    o.ias_kt = ks.ias.fresh(now_, kFieldFresh);
+    o.tas_kt = ks.tas.fresh(now_, kFieldFresh);
+    o.mach = ks.mach.fresh(now_, kFieldFresh);
+    o.roll_deg = ks.roll.fresh(now_, kFieldFresh);
+    o.track_rate_dps = ks.track_rate.fresh(now_, kFieldFresh);
+    o.sel_alt_ft = ks.sel_alt.fresh(now_, kFieldFresh);
+    o.sel_alt_fms_ft = ks.sel_alt_fms.fresh(now_, kFieldFresh);
+    o.qnh_mb = ks.qnh.fresh(now_, kFieldFresh);
+    o.sel_heading_deg = ks.sel_heading.fresh(now_, kFieldFresh);
+    o.nav_modes = ks.nav_modes.fresh(now_, kFieldFresh);
+    o.acas_ra = ks.acas_ra.fresh(now_, kAcasRaFresh);
+    o.acas_sl = ks.acas_sl.fresh(now_, kFieldFresh);
+    o.acas_ri = ks.acas_ri.fresh(now_, kFieldFresh);
     o.baro_rate_fpm = ks.baro_rate.fresh(now_, kFieldFresh);
     o.geom_rate_fpm = ks.geom_rate.fresh(now_, kFieldFresh);
     o.callsign = ks.callsign.has ? std::optional(ks.callsign.value) : std::nullopt;  // identity: lives with the key

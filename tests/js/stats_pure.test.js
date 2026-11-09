@@ -895,9 +895,9 @@ function flowWinClients(k, mult) {
 test('flowGraph drawing height is capped for few nodes', () => {
   const z = flowGraphOf(null, flowZero());
   assert.strictEqual(z.height, 360);
-  assert.strictEqual(z.top, 8); assert.strictEqual(z.bottom, z.top);   // five decisions: drawH 344
+  assert.strictEqual(z.top, 20); assert.strictEqual(z.bottom, z.top);   // five decisions: drawH 344
   const g12 = flowGraphOf(null, flowWinClients(12, 1));
-  assert.strictEqual(g12.height, 504); assert.strictEqual(g12.top, 8);
+  assert.strictEqual(g12.height, 504); assert.strictEqual(g12.top, 20);
 });
 
 test('flowGraph height depends on the node set only', () => {
@@ -926,6 +926,7 @@ test('flowGraph raw output tags every input of the kind, else the decoder', () =
 
 test('flowGraph caption names the span when short', () => {
   assert.ok(/^messages per second, last 60 s/.test(flowGraphOf(null, flowWin(14)).caption));
+  assert.ok(/ · after the scheduler every output receives every cue, so those bands are copies · ⏺ marks a recorder; hover for the file/.test(flowGraphOf().caption));
   assert.ok(/last 0 s/.test(S.flowGraph(null, flowSnap(0), { width: 1000, theme: FLOW_THEME }).caption));
   assert.ok(/^messages per second, last 5 s/.test(flowGraphOf(null, flowWin(2)).caption));
 });

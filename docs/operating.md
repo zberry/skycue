@@ -1413,6 +1413,19 @@ The toolbar along the top:
   are not touched. Another reset within 5 s of the last one is refused
   ("Reset failed: the statistics were reset less than 5 s ago").
 
+The first Traffic card, **Flow**, is a live diagram of the pipeline: one band
+per input flows into the decoder, then to rejected messages and track
+updates, which split by decision (sent to cues, out of range, below
+elevation, blocked, no position); the sent band goes through the cue
+scheduler to one node per cue connection. Band widths are messages per
+second over the last minute, and the cue connections show the copies after
+the scheduler (one per connection). A thin band carries nothing. A ⏺ marks a
+node a recording file is written from (hover for the file, its size and
+write rate) and ↗ one a raw output serves. Click an input or a cue
+connection to open its card in the [Receiver tab](#receiver-tab). It
+refreshes every 5 s while **live** is on and the page is visible, and its
+**CSV** button saves the rates.
+
 Below it, the sections:
 
 - **Tiles**: aircraft (and how many were new), observations (and

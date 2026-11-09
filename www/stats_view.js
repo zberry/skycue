@@ -31,6 +31,7 @@
   var P = window.skycuePure;
   var CSV_MIME = 'text/csv;charset=utf-8';
   var LIVE_MS = 10000;          // live refresh period while the view is shown
+  var FLOW_MS = 5000;           // the Flow card's own refresh period
   var DISPOSE_MS = 60000;       // charts are disposed once hidden this long
   var SLOW_EVERY = 6;           // hours, coverage and rssi: on open and every 6th refresh
   var RANGE_KEY = 'skycue.stats.range';
@@ -232,6 +233,7 @@
     function schedule() {
       clearTimeout(st.liveTimer);
       st.liveTimer = null;
+      flowSchedule(true);
       if (!st.open || !liveOn()) return;
       st.liveTimer = setTimeout(function () {
         st.liveTimer = null;
@@ -263,6 +265,7 @@
       if (!st.open) return;
       if (liveOn()) refreshNow().then(schedule);
       else schedule();
+      flowSchedule(false);
     });
     $('stats-reset').addEventListener('click', function () {
       if (!window.confirm(RESET_QUESTION)) return;
@@ -285,10 +288,12 @@
       st.disposeTimer = null;
       st.slowDue = true;
       refreshNow().then(schedule);
+      flowSchedule(false);
     }
     function close() {
       if (!st.open) return;
       st.open = false;
+      flowStop();
       clearTimeout(st.liveTimer);
       st.liveTimer = null;
       clearTimeout(st.disposeTimer);
@@ -465,8 +470,99 @@
       });
     }
 
+
+    // ---- Flow (Sankey of the pipeline, its own 5 s timer) ------------------------
+    var flow = { win: S.flowWindow(), timer: null, failed: false, busy: false, lastHeight: 0, graph: null, rates: null };
+    function flowStop() { clearTimeout(flow.timer); flow.timer = null; }
+    // (Re)arms the flow timer; now: tick at once (the view just opened or live went on).
+    function flowSchedule(afterRefresh) {
+      if (flow.timer !== null) { if (afterRefresh) return; flowStop(); }
+      if (!st.open || !liveOn()) return;
+      flow.timer = setTimeout(flowTick, afterRefresh ? FLOW_MS : 0);
+    }
+    function flowTick() {
+      flow.timer = null;
+      if (!st.open || !liveOn()) return;
+      if (document.hidden) { flow.timer = setTimeout(flowTick, FLOW_MS); return; }
+      Promise.all(['api/stats', 'api/inputs', 'api/cues/clients', 'api/config', 'api/outputs'].map(get)).then(function (r) {
+        var cfg = r[3] || {};
+        S.flowPush(flow.win, { t: host.dataNow(), stats: r[0], inputs: (r[1] && r[1].inputs) || [], clients: r[2],
+          files: (cfg.daemon && cfg.daemon.recording_files) || [], outputs: (r[4] && r[4].outputs) || [] });
+        flow.failed = false;
+      }, function () { flow.failed = true; }).then(function () {
+        if (st.open) flowDraw();
+      }).then(function () {
+        if (st.open && liveOn()) flow.timer = setTimeout(flowTick, FLOW_MS);
+      });
+    }
+    function flowDraw() {
+      var card = cards['traffic-flow'];
+      if (!card) return;
+      var rates = S.flowRates(flow.win);
+      flow.rates = rates;
+      var chart = card.chart();
+      if (!rates || !chart) { if (flow.failed) card.setCaption('waiting for data · last fetch failed'); return; }
+      var win = flow.win.samples;
+      var el = card.el.querySelector('.card-chart');
+      var g = S.flowGraph(rates, win[win.length - 1], { width: el.clientWidth || 1000, theme: theme, now: host.dataNow() });
+      flow.graph = g;
+      card.setCaption(g.caption + (flow.failed ? ' · last fetch failed' : ''));
+      var hover = {};
+      g.tags.forEach(function (t) { hover[t.node] = t.hover; });
+      var tagText = {};
+      g.tags.forEach(function (t) { tagText[t.node] = t.text; });
+      var muted = tk.muted || '#8b949e', text = tk.text || '#c9d1d9';
+      var data = g.nodes.map(function (n) {
+        var lines = n.label.split('\n');
+        var tag = tagText[n.name];
+        if (tag && n.tall) lines.push(tag);
+        else if (tag) lines[0] += ' ' + tag;
+        var first = '{n|' + lines[0] + '}';
+        var rest = lines.slice(1).map(function (l) { return '{s|' + l + '}'; });
+        return { name: n.name, depth: n.depth, itemStyle: { color: n.color, borderColor: n.color },
+          label: { formatter: [first].concat(rest).join('\n'),
+            rich: { n: { color: n.idle ? muted : text, fontSize: 12 } } } };
+      });
+      if (g.height !== flow.lastHeight) {
+        el.style.height = g.height + 'px';
+        flow.lastHeight = g.height;
+        chart.resize();
+      }
+      chart.setOption({ series: [{ id: 'flow', type: 'sankey', left: 8, right: 230, top: 8, bottom: 8,
+        nodeAlign: 'left', nodeWidth: 10, nodeGap: 30, draggable: false, layoutIterations: 0,
+        emphasis: { focus: 'adjacency' }, lineStyle: { curveness: 0.5, opacity: 0.45 },
+        label: { position: 'right', color: text, rich: { s: { color: muted, fontSize: 11, fontFamily: 'monospace' } } },
+        data: data,
+        links: g.links.map(function (l) { return { source: l.source, target: l.target, value: l.value,
+          lineStyle: { color: l.color } }; }) }],
+        tooltip: { trigger: 'item', confine: true, formatter: function (p) {
+          var esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+          if (p.dataType === 'edge') {
+            var lab = {}; g.nodes.forEach(function (n) { lab[n.name] = n.label.split('\n')[0]; });
+            var v = p.data.value;
+            return esc(lab[p.data.source] || p.data.source) + ' &rarr; ' + esc(lab[p.data.target] || p.data.target) +
+              '<br>' + (v > 0.05 ? v.toFixed(1) : '0') + '/s';
+          }
+          var nd = g.nodes.filter(function (n) { return n.name === p.name; })[0];
+          var h = esc(nd ? nd.label : p.name).replace(/\n/g, '<br>');
+          if (hover[p.name]) h += '<br>' + esc(hover[p.name]).replace(/\n/g, '<br>');
+          return h;
+        } } }, { notMerge: false });
+      if (!chart.__flowClick) {
+        chart.__flowClick = true;
+        chart.on('click', function (p) {
+          if (p.dataType !== 'node' || !flow.graph) return;
+          var nd = flow.graph.nodes.filter(function (n) { return n.name === p.name; })[0];
+          if (nd && (nd.depth === 0 || nd.depth === 5) && host.openFeeds) host.openFeeds(nd.name);
+        });
+      }
+    }
+
     registerSection(function (d) {
       var grid = sectionEl('traffic');
+      var flowCard = addCard(grid, 'traffic-flow', 'Flow');
+      flowCard.addAction('CSV', function () { if (flow.rates) downloadCsv('flow', S.flowCsvRows(flow.rates)); });
+      flowDraw();
       var inputs = addCard(grid, 'traffic-inputs', 'Observations by input');
       inputs.addAction('CSV', function () {
         if (data.series) downloadCsv('observations-by-input', S.seriesCsvRows(data.series));

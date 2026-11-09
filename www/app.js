@@ -3959,7 +3959,13 @@
         request: request, select: select, hasTrack: function (key) { return tracks.has(key); },
         setViewFilter: function (partial) { setViewFilters(partial); }, showMain: showMain,
         thousands: P.thousands, formatNum: P.formatNum, storeGet: storeGet, storeSet: storeSet, dataNow: dataNow,
-        download: downloadText
+        download: downloadText,
+        openFeeds: function (id) {
+          openPanel('receiver');
+          showMain('map');
+          var el = document.querySelector('#pane-receiver [data-id="' + String(id).replace(/["\\]/g, '') + '"]');
+          if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+        }
       });
     } else $('stats-toggle').hidden = true;
     $('stats-toggle').addEventListener('click', function () { showMain(mainView === 'stats' ? 'map' : 'stats'); });

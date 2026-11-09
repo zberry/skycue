@@ -449,7 +449,6 @@ BOOST_AUTO_TEST_CASE(emitted_observation_common_fields_pin)
     r.feed(b, 61.0);
     BOOST_REQUIRE_EQUAL(r.out.size(), 2u);
     BOOST_CHECK(r.last().gs_kt.has_value());  // fed again by this frame
-    r.feed(airborne(), 62.0);
     auto m = airborne();
     m.type = 0;
     m.alt_ft = 5200;

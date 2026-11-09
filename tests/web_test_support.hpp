@@ -72,14 +72,20 @@ inline Reply exchange(boost::asio::ip::tcp::socket& s, boost::beast::http::verb 
     return r;
 }
 
-// One request on a fresh connection, with a 10 s read timeout.
+// The read timeout of the one-shot requests below, scaled by SKYCUE_TEST_SLOW.
+inline int httpRecvSeconds()
+{
+    return static_cast<int>(slow(std::chrono::seconds(10)).count() / 1000);
+}
+
+// One request on a fresh connection, with a 10 s read timeout (times the slow factor).
 inline Reply request(uint16_t port, boost::beast::http::verb verb, const std::string& target,
                      const std::string& body = "")
 {
     boost::asio::io_context io;
     boost::asio::ip::tcp::socket s(io);
     s.connect(boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), port));
-    setRecvTimeout(s, 10);
+    setRecvTimeout(s, httpRecvSeconds());
     return exchange(s, verb, target, body);
 }
 
@@ -99,7 +105,7 @@ inline Reply requestWith(uint16_t port, boost::beast::http::verb verb, const std
     boost::asio::io_context io;
     boost::asio::ip::tcp::socket s(io);
     s.connect(boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), port));
-    setRecvTimeout(s, 10);
+    setRecvTimeout(s, httpRecvSeconds());
     http::request<http::string_body> req{verb, target, 11};
     bool host = false;
     for (const auto& h : headers) {

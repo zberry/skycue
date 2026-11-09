@@ -83,3 +83,20 @@ BOOST_AUTO_TEST_CASE(lookup_returns_null_for_unlisted_values)
     BOOST_TEST(std::string(lookupAddressTypeName(AddressType::icao)) == "icao");
     BOOST_TEST(std::string(lookupDropReasonName(DropReason::stale)) == "stale");
 }
+
+// The tables list every enumerator: the values run 0..last without a gap, each has a name, and
+// the value after the last has none. A new enumerator without a table row fails here once last
+// moves with it.
+BOOST_AUTO_TEST_CASE(tables_cover_every_enumerator)
+{
+    const auto cover = [](auto lookupName, int last) {
+        for (int v = 0; v <= last; ++v)
+            BOOST_TEST(lookupName(v) != nullptr, "value " << v);
+        BOOST_TEST(lookupName(last + 1) == nullptr);
+    };
+    cover([](int v) { return lookupAddressTypeName(static_cast<AddressType>(v)); },
+          static_cast<int>(AddressType::other));
+    cover([](int v) { return lookupSourceName(static_cast<Source>(v)); }, static_cast<int>(Source::other));
+    cover([](int v) { return lookupDropReasonName(static_cast<DropReason>(v)); },
+          static_cast<int>(DropReason::stale));
+}

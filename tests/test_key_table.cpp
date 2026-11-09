@@ -99,3 +99,18 @@ BOOST_AUTO_TEST_CASE(find_does_not_touch_lru) {
     BOOST_CHECK(t.find(key(1)) == nullptr);
     BOOST_CHECK(t.find(key(2)) != nullptr);
 }
+
+BOOST_AUTO_TEST_CASE(pointer_to_a_surviving_key_stays_valid_across_an_eviction) {
+    uint64_t evicted = 0;
+    KeyTable<S> t(2, seconds(300), evicted);
+    t.obtain(key(1), kSrc, t0);
+    S* p = &t.obtain(key(2), kSrc, t0);
+    p->tag = 9;
+    t.obtain(key(3), kSrc, t0);  // full: key 1, the oldest, goes
+    BOOST_CHECK_EQUAL(evicted, 1u);
+    BOOST_CHECK(t.find(key(1)) == nullptr);
+    BOOST_CHECK(t.find(key(2)) == p);
+    BOOST_CHECK_EQUAL(p->tag, 9);
+    BOOST_CHECK(&t.obtain(key(2), kSrc, t0) == p);
+    BOOST_CHECK_EQUAL(t.size(), 2u);
+}

@@ -52,6 +52,7 @@ test_init() {
 
 # bg CMD [ARG...]: run CMD in the background and remember its pid in bg_pids
 # (cleanup stops it). $! is set as for a plain `CMD &`.
+# This function shadows the bash job-control builtin bg on purpose.
 bg() {
   "$@" &
   bg_pids+=($!)
@@ -59,8 +60,8 @@ bg() {
 
 # cleanup: stop every pid in bg_pids with SIGTERM, give each up to 3 s (times
 # the slow factor, polled every 0.1 s) to go, SIGKILL what is left, reap, and
-# remove $tmp. Safe under set -e. A script that needs more on exit defines its own exit trap and
-# calls cleanup from it.
+# remove $tmp. Safe under set -e. A script that needs more on exit defines its
+# own exit trap and calls cleanup from it.
 cleanup() {
   local p i
   for p in ${bg_pids[@]+"${bg_pids[@]}"}; do kill "$p" 2>/dev/null || true; done

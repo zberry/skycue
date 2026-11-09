@@ -64,5 +64,8 @@ Two tests do not skip as a whole: `rawtools` and `iqgen_cli` print `SKIP` for th
 that read the fetched captures, run the rest and report a pass. `web_ui` runs
 its node checks only when node is installed and passes without them.
 
+Unit tests that need a fetched fixture for only some cases, such as `beast_raw` and `uat_raw_decode`, skip those
+cases (Boost.Test reports them as skipped) and run the rest.
+
 Any CI setup should include one job with the fetched fixtures and the external decoders set,
 or the differential tests never run. The workflow in `.github/workflows/ci.yml` runs `ctest -LE 'needs-fixtures|needs-node|slow'` and has no such job.

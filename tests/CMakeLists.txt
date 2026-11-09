@@ -1,77 +1,28 @@
-add_executable(test_smoke test_smoke.cpp)
-target_link_libraries(test_smoke PRIVATE Boost::unit_test_framework)
-target_compile_definitions(test_smoke PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_smoke)
-add_test(NAME smoke COMMAND test_smoke)
+skycue_add_unit_test(smoke LIBS)
 
-add_executable(test_protocol test_protocol.cpp)
-target_link_libraries(test_protocol PRIVATE skycue::skycue Boost::unit_test_framework)
-target_compile_definitions(test_protocol PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
-skycue_set_warnings(test_protocol)
-add_test(NAME protocol COMMAND test_protocol)
+skycue_add_unit_test(protocol LIBS skycue::skycue DEFS SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
 
-add_executable(test_client test_client.cpp)
-target_link_libraries(test_client PRIVATE skycue::skycue Boost::unit_test_framework)
-target_compile_definitions(test_client PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_client)
-target_include_directories(test_client PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME client COMMAND test_client)
-set_tests_properties(client PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(client LIBS skycue::skycue NET_SUPPORT TIMEOUT 60)
 
 get_filename_component(_skycue_example_conf
   "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/skycue.toml.example" ABSOLUTE)
-add_executable(test_config test_config.cpp)
-target_link_libraries(test_config PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_config PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}"
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_config)
-add_test(NAME config COMMAND test_config)
+skycue_add_unit_test(config DEFS SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}" FIXTURE_DIR)
 
 get_filename_component(_skycue_docs_dir "${CMAKE_CURRENT_SOURCE_DIR}/../docs" ABSOLUTE)
-add_executable(test_config_keys test_config_keys.cpp)
-target_link_libraries(test_config_keys PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_config_keys PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}"
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
-  SKYCUE_DOCS_DIR="${_skycue_docs_dir}")
-skycue_set_warnings(test_config_keys)
-add_test(NAME config_keys COMMAND test_config_keys)
+skycue_add_unit_test(config_keys DEFS SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}"
+  SKYCUE_DOCS_DIR="${_skycue_docs_dir}" FIXTURE_DIR)
 
-add_executable(test_conf_convert test_conf_convert.cpp)
-target_link_libraries(test_conf_convert PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_conf_convert PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_conf_convert)
-add_test(NAME conf_convert COMMAND test_conf_convert)
+skycue_add_unit_test(conf_convert)
 
-add_executable(test_readsb_json test_readsb_json.cpp)
-target_link_libraries(test_readsb_json PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_readsb_json PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_readsb_json)
-add_test(NAME readsb_json COMMAND test_readsb_json)
+skycue_add_unit_test(readsb_json FIXTURE_DIR)
 
-add_executable(test_geo test_geo.cpp)
-target_link_libraries(test_geo PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_geo PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_geo)
-add_test(NAME geo COMMAND test_geo)
+skycue_add_unit_test(geo)
 
-add_executable(test_stats_store test_stats_store.cpp)
-target_link_libraries(test_stats_store PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_stats_store PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_stats_store)
-add_test(NAME stats_store COMMAND test_stats_store)
+skycue_add_unit_test(stats_store)
 
 # icao_class: the daemon's copy of the page's class/country rules, on the
 # case fixture app_pure.test.js runs too.
-add_executable(test_icao_class test_icao_class.cpp)
-target_link_libraries(test_icao_class PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_icao_class PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_icao_class)
-add_test(NAME icao_class COMMAND test_icao_class)
+skycue_add_unit_test(icao_class FIXTURE_DIR)
 
 # icao_tables_current: skycued/src/icao_tables.inc is what
 # scripts/fixtures/gen-icao-tables.py writes from www/app_pure.js. Skipped when the
@@ -103,52 +54,19 @@ else()
   set_tests_properties(icao_tables_current icao_tables_generator PROPERTIES TIMEOUT 60)
 endif()
 
-add_executable(test_registration test_registration.cpp)
-target_link_libraries(test_registration PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_registration PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_registration)
-add_test(NAME registration COMMAND test_registration)
+skycue_add_unit_test(registration)
 
-add_executable(test_track_table test_track_table.cpp)
-target_link_libraries(test_track_table PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_track_table PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_track_table)
-add_test(NAME track_table COMMAND test_track_table)
+skycue_add_unit_test(track_table)
 
-add_executable(test_change_detector test_change_detector.cpp)
-target_link_libraries(test_change_detector PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_change_detector PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_change_detector)
-add_test(NAME change_detector COMMAND test_change_detector)
+skycue_add_unit_test(change_detector)
 
-add_executable(test_filters test_filters.cpp)
-target_link_libraries(test_filters PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_filters PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_filters)
-add_test(NAME filters COMMAND test_filters)
+skycue_add_unit_test(filters)
 
-add_executable(test_forwarder test_forwarder.cpp)
-target_link_libraries(test_forwarder PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_forwarder PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_forwarder)
-target_include_directories(test_forwarder PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME forwarder COMMAND test_forwarder)
-set_tests_properties(forwarder PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(forwarder NET_SUPPORT TIMEOUT 60)
 
-add_executable(test_recorder test_recorder.cpp)
-target_link_libraries(test_recorder PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_recorder PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
-  SKYCUE_DOCS_DIR="${_skycue_docs_dir}")
-skycue_set_warnings(test_recorder)
-add_test(NAME recorder COMMAND test_recorder)
+skycue_add_unit_test(recorder DEFS SKYCUE_DOCS_DIR="${_skycue_docs_dir}" FIXTURE_DIR TIMEOUT 60)
 
-add_executable(test_retention test_retention.cpp)
-target_link_libraries(test_retention PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_retention PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_retention)
-add_test(NAME retention COMMAND test_retention)
-set_tests_properties(recorder PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(retention)
 
 # Builds a tiny consumer against libskycue through add_subdirectory(),
 # through find_package() on an install of it, and linked into a shared
@@ -223,11 +141,7 @@ else()
     ENVIRONMENT "CMAKE=${CMAKE_COMMAND};CTEST=${CMAKE_CTEST_COMMAND};CXX=${CMAKE_CXX_COMPILER};SKYCUE_SMOKE_BOOST_DIR=${_smoke_boost_dir};SKYCUE_SMOKE_PREFIX_PATH=${_smoke_prefix_path}")
 endif()
 
-add_executable(test_raw_formats test_raw_formats.cpp)
-target_link_libraries(test_raw_formats PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_raw_formats PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_raw_formats)
-add_test(NAME raw_formats COMMAND test_raw_formats)
+skycue_add_unit_test(raw_formats)
 
 # skycue-rawrec / skycue-rawplay on the real-data fixtures; the last part
 # feeds a real readsb when SKYCUE_TEST_READSB names one.
@@ -247,33 +161,13 @@ add_test(NAME hub
     $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(hub PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
-add_executable(test_engine test_engine.cpp)
-target_link_libraries(test_engine PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_engine PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_engine)
-target_include_directories(test_engine PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME engine COMMAND test_engine)
-set_tests_properties(engine PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(engine LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT TIMEOUT 120)
 
-add_executable(test_stats_engine test_stats_engine.cpp)
-target_link_libraries(test_stats_engine PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_stats_engine PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_stats_engine)
-target_include_directories(test_stats_engine PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME stats_engine COMMAND test_stats_engine)
-set_tests_properties(stats_engine PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(stats_engine LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT
+  TIMEOUT 120)
 
 foreach(_t engine_api recording_independence runtime_config web_config check_inputs)
-  add_executable(test_${_t} test_${_t}.cpp)
-  target_link_libraries(test_${_t} PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-  target_compile_definitions(test_${_t} PRIVATE BOOST_TEST_DYN_LINK
-    SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-  skycue_set_warnings(test_${_t})
-  target_include_directories(test_${_t} PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-  add_test(NAME ${_t} COMMAND test_${_t})
-  set_tests_properties(${_t} PROPERTIES TIMEOUT 60)
+  skycue_add_unit_test(${_t} LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT TIMEOUT 60)
 endforeach()
 
 # test_check_inputs runs skycued --check-inputs for the inputs.decoder lines.
@@ -294,11 +188,7 @@ add_test(NAME pingsim
     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(pingsim PROPERTIES TIMEOUT 120)
 
-add_executable(test_stats test_stats.cpp)
-target_link_libraries(test_stats PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_stats PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_stats)
-add_test(NAME stats COMMAND test_stats)
+skycue_add_unit_test(stats)
 
 # skycue-stats on the readsb JSON fixture and on recordings of a skycued replaying it.
 add_test(NAME stats_cli
@@ -312,6 +202,7 @@ add_test(NAME fisb_cli
     $<TARGET_FILE:skycue-fisb> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(fisb_cli PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
+# Hand-written: SKYCUED_EXE needs a generator expression and a target dependency.
 add_executable(test_web_server test_web_server.cpp)
 target_link_libraries(test_web_server PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
 target_compile_definitions(test_web_server PRIVATE BOOST_TEST_DYN_LINK
@@ -326,31 +217,15 @@ set_tests_properties(web_server PROPERTIES TIMEOUT 120)
 
 # /api/outputs, the cue clients' output field and the WebSocket outputs item
 # over an Engine with a Hub and the cue Forwarder.
-add_executable(test_web_outputs test_web_outputs.cpp)
-target_link_libraries(test_web_outputs PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_web_outputs PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_web_outputs)
-target_include_directories(test_web_outputs PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME web_outputs COMMAND test_web_outputs)
-set_tests_properties(web_outputs PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(web_outputs LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT
+  TIMEOUT 120)
 
 # The shared reply helpers and the exception-to-status ladders of the /api/* files.
-add_executable(test_web_reply test_web_reply.cpp)
-target_link_libraries(test_web_reply PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_web_reply PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_web_reply)
-add_test(NAME web_reply COMMAND test_web_reply)
+skycue_add_unit_test(web_reply LIBS skycued_core Threads::Threads)
 
 # The FIS-B routes and WebSocket items over a replay of the uplink fixture.
-add_executable(test_fisb_web test_fisb_web.cpp)
-target_link_libraries(test_fisb_web PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_fisb_web PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_fisb_web)
-target_include_directories(test_fisb_web PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME fisb_web COMMAND test_fisb_web)
-set_tests_properties(fisb_web PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(fisb_web LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT
+  TIMEOUT 120)
 
 # The web UI as skycued serves it from the staged www directory, plus the
 # page's pure helpers under node when node is installed.
@@ -374,221 +249,96 @@ endif()
 # FIS-B uplink frame, APDU header and DLAC parsers on hand-built vectors and
 # the two uplink fixtures (zlib only for reading the .gz sample).
 find_package(ZLIB REQUIRED)
-add_executable(test_fisb_frame test_fisb_frame.cpp)
-target_link_libraries(test_fisb_frame PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
-target_compile_definitions(test_fisb_frame PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_fisb_frame)
-add_test(NAME fisb_frame COMMAND test_fisb_frame)
+skycue_add_unit_test(fisb_frame LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR)
 
 # FIS-B segment reassembly, TWGO records and product-413 text, on hand-built
 # vectors and both uplink fixtures.
-add_executable(test_fisb_twgo test_fisb_twgo.cpp)
-target_link_libraries(test_fisb_twgo PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
-target_compile_definitions(test_fisb_twgo PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_fisb_twgo)
-add_test(NAME fisb_twgo COMMAND test_fisb_twgo)
+skycue_add_unit_test(fisb_twgo LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR)
 
 # FIS-B global-block rasters (63/64 NEXRAD, 70/71/84/90/91/103) on hand-built
 # vectors and both uplink fixtures.
-add_executable(test_fisb_blocks test_fisb_blocks.cpp)
-target_link_libraries(test_fisb_blocks PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
-target_compile_definitions(test_fisb_blocks PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_fisb_blocks)
-add_test(NAME fisb_blocks COMMAND test_fisb_blocks)
+skycue_add_unit_test(fisb_blocks LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR)
 
 # FisbStore on a fake clock (design §10).
-add_executable(test_fisb_store test_fisb_store.cpp)
-target_link_libraries(test_fisb_store PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_fisb_store PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_fisb_store)
-add_test(NAME fisb_store COMMAND test_fisb_store)
+skycue_add_unit_test(fisb_store)
 
 # LocationIndex: learned report positions, persistence, operator CSV (design §3.2).
-add_executable(test_location_index test_location_index.cpp)
-target_link_libraries(test_location_index PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_location_index PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_location_index)
-add_test(NAME location_index COMMAND test_location_index)
+skycue_add_unit_test(location_index)
 
 # FisbDecoder end to end, Engine/Recorder/replay integration.
-add_executable(test_fisb_decoder test_fisb_decoder.cpp)
-target_link_libraries(test_fisb_decoder PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB
-  Threads::Threads)
-target_compile_definitions(test_fisb_decoder PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_fisb_decoder)
-target_include_directories(test_fisb_decoder PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME fisb_decoder COMMAND test_fisb_decoder)
-set_tests_properties(fisb_decoder PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(fisb_decoder LIBS skycued_core ZLIB::ZLIB Threads::Threads FIXTURE_DIR
+  NET_SUPPORT TIMEOUT 120)
 
 # Mode S CRC, UAT Reed-Solomon and framing for the IQ generators, on
 # hand-built vectors and the raw UAT fixture.
-add_executable(test_iqgen test_iqgen.cpp)
-target_link_libraries(test_iqgen PRIVATE skycue_iqgen_core Boost::unit_test_framework)
-target_compile_definitions(test_iqgen PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_iqgen)
-add_test(NAME iqgen COMMAND test_iqgen)
+skycue_add_unit_test(iqgen LIBS skycue_iqgen_core FIXTURE_DIR)
 add_test(NAME iqgen_cli
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_iqgen_cli.sh
     $<TARGET_FILE:skycue-iqgen> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(iqgen_cli PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
 # ASTERIX CAT021 decoder, test encoder and TCP stream framer (pure).
-add_executable(test_cat021 test_cat021.cpp)
-target_link_libraries(test_cat021 PRIVATE skycued_asterix Boost::unit_test_framework)
-target_compile_definitions(test_cat021 PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_cat021)
-add_test(NAME cat021 COMMAND test_cat021)
+skycue_add_unit_test(cat021 LIBS skycued_asterix)
 
 # pingStation 3 adapters, pure part: device time, JSON parser, CAT021 mapping.
-add_executable(test_pingstation test_pingstation.cpp)
-target_link_libraries(test_pingstation PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_pingstation PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_pingstation)
-add_test(NAME pingstation COMMAND test_pingstation)
+skycue_add_unit_test(pingstation FIXTURE_DIR)
 
 # Input definitions, their validation, the inputs file and the settled-file watcher.
-add_executable(test_input_def test_input_def.cpp)
-target_link_libraries(test_input_def PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_input_def PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_input_def)
-add_test(NAME input_def COMMAND test_input_def)
+skycue_add_unit_test(input_def)
 
 # Output definitions (the hub's destinations) and the raw-message tap.
-add_executable(test_output_def test_output_def.cpp)
-target_link_libraries(test_output_def PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_output_def PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_output_def)
-add_test(NAME output_def COMMAND test_output_def)
+skycue_add_unit_test(output_def)
 
-add_executable(test_raw_tap test_raw_tap.cpp)
-target_link_libraries(test_raw_tap PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_raw_tap PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_raw_tap)
-add_test(NAME raw_tap COMMAND test_raw_tap)
+skycue_add_unit_test(raw_tap)
 
 # The hub core: per-kind buses and output lifecycle.
-add_executable(test_hub_core test_hub_core.cpp)
-target_link_libraries(test_hub_core PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_hub_core PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_hub_core)
-target_include_directories(test_hub_core PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME hub_core COMMAND test_hub_core)
-set_tests_properties(hub_core PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(hub_core LIBS skycued_core Threads::Threads NET_SUPPORT TIMEOUT 60)
 
 # pingStation transports: UDP listener, TCP connect client, TCP listener.
-add_executable(test_transports test_transports.cpp)
-target_link_libraries(test_transports PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_transports PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_transports)
-target_include_directories(test_transports PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME transports COMMAND test_transports)
-set_tests_properties(transports PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(transports LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT
+  TIMEOUT 60)
 
 # Mode S CRC, bit helpers and single-bit syndrome correction.
-add_executable(test_coding test_coding.cpp)
-target_link_libraries(test_coding PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_coding PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_coding)
-add_test(NAME coding COMMAND test_coding)
+skycue_add_unit_test(coding)
 
 # Comm-B BDS 4,0/5,0/6,0 inference, ACAS RA decoding (frame level, pure).
-add_executable(test_decode_commb test_decode_commb.cpp)
-target_link_libraries(test_decode_commb PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_commb PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_decode_commb)
-add_test(NAME decode_commb COMMAND test_decode_commb)
+skycue_add_unit_test(decode_commb)
 
 # Mode S frame fields and altitude/squawk code tables.
-add_executable(test_decode_fields test_decode_fields.cpp)
-target_link_libraries(test_decode_fields PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_fields PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_decode_fields)
-add_test(NAME decode_fields COMMAND test_decode_fields)
+skycue_add_unit_test(decode_fields)
 
 # CPR position math: global, surface and local decoding with NL.
-add_executable(test_decode_cpr test_decode_cpr.cpp)
-target_link_libraries(test_decode_cpr PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_cpr PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_decode_cpr)
-add_test(NAME decode_cpr COMMAND test_decode_cpr)
+skycue_add_unit_test(decode_cpr FIXTURE_DIR)
 
 # The 1090 decoder: address confirmation, CPR pairing, observation production.
-add_executable(test_decode_modes test_decode_modes.cpp)
-target_link_libraries(test_decode_modes PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_modes PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_decode_modes)
-add_test(NAME decode_modes COMMAND test_decode_modes)
+skycue_add_unit_test(decode_modes)
 
 # Damaged input: random bytes, bit flips, key table limits, wrong frame lengths.
-add_executable(test_decode_robustness test_decode_robustness.cpp)
-target_link_libraries(test_decode_robustness PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_robustness PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_decode_robustness)
-add_test(NAME decode_robustness COMMAND test_decode_robustness)
-set_tests_properties(decode_robustness PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(decode_robustness TIMEOUT 120)
 
 # Inputs and the InputManager: pingStation inputs over real sockets, the
 # inputs file, hand edits and the lifecycle.
-add_executable(test_inputs test_inputs.cpp)
-target_link_libraries(test_inputs PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_inputs PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_inputs)
-target_include_directories(test_inputs PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME inputs COMMAND test_inputs)
-set_tests_properties(inputs PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(inputs LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT TIMEOUT 120)
 
 # Every input's raw messages on the tap; readsb and pingStation JSON on any transport; uat_raw.
-add_executable(test_raw_inputs test_raw_inputs.cpp)
-target_link_libraries(test_raw_inputs PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_raw_inputs PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_raw_inputs)
-target_include_directories(test_raw_inputs PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME raw_inputs COMMAND test_raw_inputs)
-set_tests_properties(raw_inputs PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(raw_inputs LIBS skycued_core Threads::Threads NET_SUPPORT TIMEOUT 120)
 
 # The pingStation status poll over HTTP against an in-test server.
-add_executable(test_status_poller test_status_poller.cpp)
-target_link_libraries(test_status_poller PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_status_poller PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_status_poller)
-target_include_directories(test_status_poller PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME status_poller COMMAND test_status_poller)
-set_tests_properties(status_poller PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(status_poller LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT
+  TIMEOUT 60)
 
 # pingStation raw capture (capture: true) and the RECORD_RAW frames of JSON
 # mode, in the formats skycue-rawplay replays.
-add_executable(test_capture test_capture.cpp)
-target_link_libraries(test_capture PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_capture PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_capture)
-target_include_directories(test_capture PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME capture COMMAND test_capture)
-set_tests_properties(capture PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(capture LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT TIMEOUT 60)
 
 # The beast_raw input (Beast and AVR over any transport), its re-encode and the
 # raw captures of beast_raw and uat_raw.
-add_executable(test_beast_raw test_beast_raw.cpp)
-target_link_libraries(test_beast_raw PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_beast_raw PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_beast_raw)
-target_include_directories(test_beast_raw PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME beast_raw COMMAND test_beast_raw)
-set_tests_properties(beast_raw PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(beast_raw LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT
+  TIMEOUT 60)
 
 # The sanitizer canary (scripts/dev/run-sanitizers.sh --canary); never built by
 # default.
+# Hand-written: EXCLUDE_FROM_ALL, no ctest entry.
 add_executable(sanitizer_canary EXCLUDE_FROM_ALL sanitizer/canary.cpp)
 target_link_libraries(sanitizer_canary PRIVATE Threads::Threads)
 
@@ -685,68 +435,32 @@ if(TEST script_test_net_standalone)
 endif()
 
 # Beast and AVR frames as decoder input.
-add_executable(test_decode_frame_source test_decode_frame_source.cpp)
-target_link_libraries(test_decode_frame_source PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_frame_source PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_decode_frame_source)
-add_test(NAME decode_frame_source COMMAND test_decode_frame_source)
+skycue_add_unit_test(decode_frame_source)
 
 # The 1090 decoder against readsb on the 120 s capture: positions, altitude,
 # speed, rates and identity from fixtures/raw/modes-120s.golden.jsonl.gz
 # (skips when the fetched capture or the golden is absent).
 find_package(ZLIB REQUIRED)
-add_executable(test_decode_golden test_decode_golden.cpp)
-target_link_libraries(test_decode_golden PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
-target_compile_definitions(test_decode_golden PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_decode_golden)
-add_test(NAME decode_golden COMMAND test_decode_golden)
-set_tests_properties(decode_golden PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(decode_golden LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR TIMEOUT 120)
 
 # The 1090 decoder against OpenSky's decoded fields for the same frames
 # (fixtures/opensky/*, fetched and unpacked by fetch-test-captures.sh; skips
 # when absent).
-add_executable(test_decode_opensky test_decode_opensky.cpp)
-target_link_libraries(test_decode_opensky PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_opensky PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_decode_opensky)
-add_test(NAME decode_opensky COMMAND test_decode_opensky)
-set_tests_properties(decode_opensky PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(decode_opensky FIXTURE_DIR TIMEOUT 120)
 
 # ACAS resolution advisories and rollcall altitude / identity against the same OpenSky
 # tables (fixtures/opensky/*_acas_data4.csv, *_rollcall_replies_data4.csv; skips when absent).
-add_executable(test_decode_acas_opensky test_decode_acas_opensky.cpp)
-target_link_libraries(test_decode_acas_opensky PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_acas_opensky PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_decode_acas_opensky)
-add_test(NAME decode_acas_opensky COMMAND test_decode_acas_opensky)
-set_tests_properties(decode_acas_opensky PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+skycue_add_unit_test(decode_acas_opensky FIXTURE_DIR TIMEOUT 120 SKIPPABLE)
 
 # AltitudeFit: rolling GNSS-minus-baro fit over all aircraft.
-add_executable(test_altitude_fit test_altitude_fit.cpp)
-target_link_libraries(test_altitude_fit PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_altitude_fit PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_altitude_fit)
-add_test(NAME altitude_fit COMMAND test_altitude_fit)
+skycue_add_unit_test(altitude_fit)
 
 # Per-track geometric altitude policy: reported or estimated.
-add_executable(test_geom_altitude test_geom_altitude.cpp)
-target_link_libraries(test_geom_altitude PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_geom_altitude PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_geom_altitude)
-add_test(NAME geom_altitude COMMAND test_geom_altitude)
+skycue_add_unit_test(geom_altitude)
 
 # Geometric altitude evaluation on the data: leave-one-aircraft-out fit on the
 # 120 s capture and own-difference hold on the OpenSky fixtures (skips when absent).
-add_executable(test_geom_eval test_geom_eval.cpp)
-target_link_libraries(test_geom_eval PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
-target_compile_definitions(test_geom_eval PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_geom_eval)
-add_test(NAME geom_eval COMMAND test_geom_eval)
-set_tests_properties(geom_eval PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+skycue_add_unit_test(geom_eval LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR TIMEOUT 120 SKIPPABLE)
 
 # skycued's own decoder against readsb, live: the 120 s capture replayed at speed 1
 # through a beast_raw input under inputs.decoder = "skycued", compared with the committed
@@ -757,30 +471,17 @@ add_test(NAME decode_differential
 set_tests_properties(decode_differential PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 
 # UAT (978 MHz) frame layout, line parser and pure field decoders.
-add_executable(test_decode_uat_frame test_decode_uat_frame.cpp)
-target_link_libraries(test_decode_uat_frame PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_uat_frame PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_decode_uat_frame)
-add_test(NAME decode_uat_frame COMMAND test_decode_uat_frame)
+skycue_add_unit_test(decode_uat_frame)
 
 # UatDecoder: observations, range check, geometric altitude.
-add_executable(test_decode_uat test_decode_uat.cpp)
-target_link_libraries(test_decode_uat PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_decode_uat PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_decode_uat)
-add_test(NAME decode_uat COMMAND test_decode_uat)
+skycue_add_unit_test(decode_uat)
 
 # The UAT frame decoders against dump978-fa, field by field, on the sample's 439
 # downlinks (fixtures/raw/uat-sample.golden.jsonl.gz) and the two Stratux captures' 3760
 # and 303 (uat-stratux.golden.jsonl.gz, uat-stratux-b.golden.jsonl.gz); skips when a
 # golden is absent.
-add_executable(test_decode_uat_golden test_decode_uat_golden.cpp)
-target_link_libraries(test_decode_uat_golden PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
-target_compile_definitions(test_decode_uat_golden PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_decode_uat_golden)
-add_test(NAME decode_uat_golden COMMAND test_decode_uat_golden)
-set_tests_properties(decode_uat_golden PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+skycue_add_unit_test(decode_uat_golden LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR TIMEOUT 120
+  SKIPPABLE)
 
 # Synthetic UAT coverage matrix (about 110 frames built with encodeUat): uat_synth prints the
 # frames and the values built into them (fixtures/gen_uat_synthetic.sh runs it, then dump978-fa);
@@ -788,35 +489,18 @@ set_tests_properties(decode_uat_golden PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 7
 # golden is absent.
 add_executable(uat_synth uat_synth.cpp)
 skycue_set_warnings(uat_synth)
-add_executable(test_decode_uat_synthetic test_decode_uat_synthetic.cpp)
-target_link_libraries(test_decode_uat_synthetic PRIVATE skycued_core Boost::unit_test_framework ZLIB::ZLIB)
-target_compile_definitions(test_decode_uat_synthetic PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_decode_uat_synthetic)
-add_test(NAME decode_uat_synthetic COMMAND test_decode_uat_synthetic)
-set_tests_properties(decode_uat_synthetic PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+skycue_add_unit_test(decode_uat_synthetic LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR TIMEOUT 120
+  SKIPPABLE)
 
 # pingStation `source: decode`: rawData frames of both bands through the decoders, the 1 s duplicate
 # rule, the reference from the status position, and device mode unchanged.
-add_executable(test_ping_decode test_ping_decode.cpp)
-target_link_libraries(test_ping_decode PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
-target_compile_definitions(test_ping_decode PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_ping_decode)
-target_include_directories(test_ping_decode PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME ping_decode COMMAND test_ping_decode)
-set_tests_properties(ping_decode PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(ping_decode LIBS skycued_core Threads::Threads FIXTURE_DIR NET_SUPPORT
+  TIMEOUT 120)
 
 # UatRawInput with the 978 decoder on (inputs.decoder = "skycued"): the dump978 sample and the
 # Stratux log through a real input, the counters and the double-feed warning.
-add_executable(test_uat_raw_decode test_uat_raw_decode.cpp)
-target_link_libraries(test_uat_raw_decode PRIVATE skycued_core Boost::unit_test_framework Threads::Threads ZLIB::ZLIB)
-target_compile_definitions(test_uat_raw_decode PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-skycue_set_warnings(test_uat_raw_decode)
-target_include_directories(test_uat_raw_decode PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
-add_test(NAME uat_raw_decode COMMAND test_uat_raw_decode)
-set_tests_properties(uat_raw_decode PROPERTIES TIMEOUT 120)
+skycue_add_unit_test(uat_raw_decode LIBS skycued_core Threads::Threads ZLIB::ZLIB FIXTURE_DIR
+  NET_SUPPORT TIMEOUT 120)
 
 # skycued's own UAT decoder against dump978-fa, live: the 439-downlink sample replayed at speed 1
 # (about 2 minutes), then the Stratux captures, through a uat_raw input under inputs.decoder = "skycued", compared per address with
@@ -827,20 +511,9 @@ add_test(NAME decode_differential_uat
     $<TARGET_FILE:skycue-iqgen>)
 set_tests_properties(decode_differential_uat PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 
-add_executable(test_toml_lite test_toml_lite.cpp)
-target_link_libraries(test_toml_lite PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_toml_lite PRIVATE BOOST_TEST_DYN_LINK
-  SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}")
-skycue_set_warnings(test_toml_lite)
-add_test(NAME toml_lite COMMAND test_toml_lite)
-set_tests_properties(toml_lite PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(toml_lite DEFS SKYCUE_EXAMPLE_CONF="${_skycue_example_conf}" TIMEOUT 60)
 
-add_executable(test_log test_log.cpp)
-target_link_libraries(test_log PRIVATE skycued_core Boost::unit_test_framework)
-target_compile_definitions(test_log PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_log)
-add_test(NAME log COMMAND test_log)
-set_tests_properties(log PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(log TIMEOUT 60)
 
 # skycued's configuration command line: --dump-env, --set, --convert-conf, the legacy flags.
 add_test(NAME config_cli
@@ -849,12 +522,7 @@ add_test(NAME config_cli
     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skycue_example_old.conf ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
 set_tests_properties(config_cli PROPERTIES TIMEOUT 60)
 
-add_executable(test_ecef test_ecef.cpp)
-target_link_libraries(test_ecef PRIVATE skycue::skycue Boost::unit_test_framework)
-target_compile_definitions(test_ecef PRIVATE BOOST_TEST_DYN_LINK)
-skycue_set_warnings(test_ecef)
-add_test(NAME ecef COMMAND test_ecef)
-set_tests_properties(ecef PROPERTIES TIMEOUT 60)
+skycue_add_unit_test(ecef LIBS skycue::skycue TIMEOUT 60)
 
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

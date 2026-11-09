@@ -299,7 +299,8 @@ Origins, endpoints and callsigns are set with `textContent`.
 
 ## Config tab
 
-The Config tab (`showConfig`) is read only and fetches `GET /api/config`
+The Config tab (`showConfig`) edits through `PUT /api/config` (staged, then
+Applied; see docs/operating.md) and fetches `GET /api/config`
 each time it is shown and on `#config-refresh`. `#config-daemon` lists the
 daemon facts (the run mode through `daemonModeText`, the learned and
 operator locations through `daemonLocationsText`); `groupConfig` sorts the keys into one `table[data-group]`

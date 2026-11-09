@@ -129,50 +129,56 @@ that escapes `skycued`, `skycue-rawrec` or `skycue-pingsim` ends it with
 exit status 1 and one line, `fatal: <what>` at ERROR in skycued's log or
 `skycue-rawrec: <what>` / `skycue-pingsim: <what>` on stderr.
 
-Keys are written below as `table.key`. Every key except the four `filters`
-keys is read once at startup: a change needs a restart (the filters apply at
-once, see [Config tab](#config-tab)).
+Keys are written below as `table.key`. Each key has a class, shown in the
+tables as `live`, `restart`, `launcher` or `bootstrap` and as a badge in the
+[Config tab](#config-tab): `live` keys (the four `filters` keys) apply at
+once; `restart` keys are read once at startup, so a change needs a restart;
+`launcher` keys (the `[sdr]` table) are read by the launcher that starts
+readsb and dump978-fa, so a change takes effect when it next starts them;
+`bootstrap` keys are needed before the overrides file can be read, so they are
+set in `skycue.toml` (or by `--set`, the environment or a flag) and the page
+cannot change them.
 
 **`[receiver]`**
 
-| Key | Meaning |
-|-----|---------|
-| `receiver.lat`, `receiver.lon` | receiver position in decimal degrees (required: skycued refuses to start while both are missing or both 0.0; `skycue-stats` does not need them) |
-| `receiver.alt_m`, `receiver.antenna_height_m` | ground altitude above mean sea level and antenna height above the ground, in metres; their sum sets the elevation angles |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `receiver.lat`, `receiver.lon` | restart | receiver position in decimal degrees (required: skycued refuses to start while both are missing or both 0.0; `skycue-stats` does not need them) |
+| `receiver.alt_m`, `receiver.antenna_height_m` | restart | ground altitude above mean sea level and antenna height above the ground, in metres; their sum sets the elevation angles |
 
 **`[inputs]`, `[inputs.readsb]`, `[inputs.dump978]`**
 
-| Key | Meaning |
-|-----|---------|
-| `inputs.file` | the inputs file; empty (default): `skycue.inputs.json` beside the config, or in `paths.state_dir` when that is set |
-| `inputs.decoder` | `"readsb"` (default) or `"skycued"`: who decodes the 1090 and 978 MHz frames of the built-in inputs, see [Decoding in skycued](#decoding-in-skycued); a change needs a restart |
-| `inputs.readsb.enable` | `false`: there is no readsb on this machine, skycued does not connect to one (as `--no-readsb`, which applies last); default `true` |
-| `inputs.readsb.host` | host of readsb (default `"127.0.0.1"`, not empty) (`--readsb-host` overrides it) |
-| `inputs.readsb.json_port` | readsb's JSON port, `--net-json-port` (default 30047); read when `inputs.decoder = "readsb"` |
-| `inputs.readsb.beast_port` | readsb's Beast port, `--net-bo-port`, 1 to 65535 (default 30005); read only under `inputs.decoder = "skycued"`; a change needs a restart |
-| `inputs.dump978.enable` | `false`: there is no 978 MHz decoder, skycued neither connects to one nor expects UAT input (as `--no-uat`, which applies last); default `true` |
-| `inputs.dump978.host` | host of dump978-fa (default `"127.0.0.1"`, not empty) (`--dump978-host` overrides it) |
-| `inputs.dump978.raw_port` | dump978-fa's raw port, `--raw-port` (default 30978); where skycued reads UAT lines |
-| `inputs.dump978.json_port` | dump978-fa's JSON port, `--json-port` (default 30979); skycued does not read it, the launcher passes it to dump978-fa |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `inputs.file` | restart | the inputs file; empty (default): `skycue.inputs.json` beside the config, or in `paths.state_dir` when that is set |
+| `inputs.decoder` | restart | `"readsb"` (default) or `"skycued"`: who decodes the 1090 and 978 MHz frames of the built-in inputs, see [Decoding in skycued](#decoding-in-skycued); a change needs a restart |
+| `inputs.readsb.enable` | restart | `false`: there is no readsb on this machine, skycued does not connect to one (as `--no-readsb`, which applies last); default `true` |
+| `inputs.readsb.host` | restart | host of readsb (default `"127.0.0.1"`, not empty) (`--readsb-host` overrides it) |
+| `inputs.readsb.json_port` | restart | readsb's JSON port, `--net-json-port` (default 30047); read when `inputs.decoder = "readsb"` |
+| `inputs.readsb.beast_port` | restart | readsb's Beast port, `--net-bo-port`, 1 to 65535 (default 30005); read only under `inputs.decoder = "skycued"`; a change needs a restart |
+| `inputs.dump978.enable` | restart | `false`: there is no 978 MHz decoder, skycued neither connects to one nor expects UAT input (as `--no-uat`, which applies last); default `true` |
+| `inputs.dump978.host` | restart | host of dump978-fa (default `"127.0.0.1"`, not empty) (`--dump978-host` overrides it) |
+| `inputs.dump978.raw_port` | restart | dump978-fa's raw port, `--raw-port` (default 30978); where skycued reads UAT lines |
+| `inputs.dump978.json_port` | restart | dump978-fa's JSON port, `--json-port` (default 30979); skycued does not read it, the launcher passes it to dump978-fa |
 
 **`[sdr]`**: read by the launcher that starts readsb and dump978-fa, not by
 skycued, which only checks the values.
 
-| Key | Meaning |
-|-----|---------|
-| `sdr.serial_1090`, `sdr.serial_978` | serial numbers as `rtl_test` prints them; empty: the only dongle, or let the program choose; the two must differ when both are set |
-| `sdr.gain_1090`, `sdr.gain_978` | dB as a decimal in a string (`"49.6"`), or `"auto"`; the 1090 gain also takes `"auto-verbose"` (default `"auto"`) |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `sdr.serial_1090`, `sdr.serial_978` | launcher | serial numbers as `rtl_test` prints them; empty: the only dongle, or let the program choose; the two must differ when both are set |
+| `sdr.gain_1090`, `sdr.gain_978` | launcher | dB as a decimal in a string (`"49.6"`), or `"auto"`; the 1090 gain also takes `"auto-verbose"` (default `"auto"`) |
 
 **`[cues]`**
 
-| Key | Meaning |
-|-----|---------|
-| `cues.tcp_port` | cue clients connect here; `0`: no listener |
-| `cues.tcp_connect` | `["host:port", ...]` of clients that listen; skycued dials them |
-| `cues.udp_targets` | `["host:port", ...]` to send UDP cues to |
-| `cues.min_interval_s`, `cues.max_interval_s` | per-aircraft cue rate: at most one per min (at least 0.1), at least one per max (not below min) |
-| `cues.track_timeout_s` | silence before a track is dropped (at least 1) |
-| `cues.keyframe_interval_s` | full-state keyframes on the stream (at least 1) |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `cues.tcp_port` | restart | cue clients connect here; `0`: no listener |
+| `cues.tcp_connect` | restart | `["host:port", ...]` of clients that listen; skycued dials them |
+| `cues.udp_targets` | restart | `["host:port", ...]` to send UDP cues to |
+| `cues.min_interval_s`, `cues.max_interval_s` | restart | per-aircraft cue rate: at most one per min (at least 0.1), at least one per max (not below min) |
+| `cues.track_timeout_s` | restart | silence before a track is dropped (at least 1) |
+| `cues.keyframe_interval_s` | restart | full-state keyframes on the stream (at least 1) |
 
 The three forwarding modes (`cues.tcp_port`, `cues.tcp_connect`,
 `cues.udp_targets`) can be used together; with all three off skycued runs but
@@ -180,47 +186,48 @@ warns that it forwards to nobody.
 
 **`[filters]`**
 
-| Key | Meaning |
-|-----|---------|
-| `filters.max_range_nm`, `filters.min_elevation_deg` | aircraft farther or lower are not sent |
-| `filters.allow_list_file`, `filters.block_list_file` | curated lists, read at startup ([Curated lists](#curated-lists)); a relative path is taken from `paths.state_dir` |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `filters.max_range_nm`, `filters.min_elevation_deg` | live | aircraft farther or lower are not sent |
+| `filters.allow_list_file`, `filters.block_list_file` | live | curated lists, read at startup ([Curated lists](#curated-lists)); a relative path is taken from `paths.state_dir` |
 
 **`[web]`**
 
-| Key | Meaning |
-|-----|---------|
-| `web.port`, `web.bind` | the web UI ([The web UI](#the-web-ui)); `web.port = 0`: off; `web.bind = "0.0.0.0"` listens on every interface |
-| `web.trail_seconds` | trail length on the web map, 0 to 3600 |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `web.port`, `web.bind` | bootstrap | the web UI ([The web UI](#the-web-ui)); `web.port = 0`: off; `web.bind = "0.0.0.0"` listens on every interface |
+| `web.trail_seconds` | restart | trail length on the web map, 0 to 3600 |
+| `web.allow_restart` | bootstrap | `true`: the Config tab's **Restart** button (`POST /api/restart`) may stop skycued with exit status 75 so that its supervisor starts it again; default `false`, and the packaged `/etc/skycue/skycue.toml` sets `true` (the systemd unit restarts on 75). Anyone who can reach the web port can then restart the daemon; see [Security](web-api.md#security) |
 
 **`[recording]`**
 
-| Key | Meaning |
-|-----|---------|
-| `recording.dir`, `recording.formats` | where and how to record (`["jsonl", "csv"]`, at least one while `dir` is set; see [Recordings](#recordings)) |
-| `recording.raw` | write the pingStation JSON `rawData` frames to `recording.dir` (the decoders' raw streams are recorded by `skycue-rawrec`) |
-| `recording.max_gb` | disk budget for the recordings (pass it to `skycue-rawrec --max-gb` too); `0`: unlimited |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `recording.dir`, `recording.formats` | restart | where and how to record (`["jsonl", "csv"]`, at least one while `dir` is set; see [Recordings](#recordings)) |
+| `recording.raw` | restart | write the pingStation JSON `rawData` frames to `recording.dir` (the decoders' raw streams are recorded by `skycue-rawrec`) |
+| `recording.max_gb` | restart | disk budget for the recordings (pass it to `skycue-rawrec --max-gb` too); `0`: unlimited |
 
 **`[fisb]`**
 
-| Key | Meaning |
-|-----|---------|
-| `fisb.enable`, `fisb.experimental` | decode FIS-B weather from the 978 MHz uplinks (default `true`); also decode the unverified layouts (default `false`). See [FIS-B weather](#fis-b-weather) |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `fisb.enable`, `fisb.experimental` | restart | decode FIS-B weather from the 978 MHz uplinks (default `true`); also decode the unverified layouts (default `false`). See [FIS-B weather](#fis-b-weather) |
 
 **`[paths]`**
 
-| Key | Meaning |
-|-----|---------|
-| `paths.state_dir` | absolute directory for skycued's files; a relative `inputs.file`, `paths.locations_file`, `stats.file`, `filters.allow_list_file` or `filters.block_list_file` is taken from it, and it holds the runtime overlay `skycue.runtime.json` and the `skycue.overrides.toml` that save as baseline writes (see [web-api.md](web-api.md#save-as-baseline)); empty (default): the places next to the config (next to `skycue.toml`; the list files from the working directory) |
-| `paths.map_dir` | absolute directory the web map's `tiles/` and `overlays/` are served from, and nowhere else; empty (default): the web directory's |
-| `paths.locations_file` | optional CSV `id,lat,lon` of report locations, merged under the learned ones; a relative path is taken from `skycue.toml`'s directory, or from `paths.state_dir` when it is set; read at startup (a change needs a restart). See [Report locations](#report-locations-fisb-locationsjson) |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `paths.state_dir` | bootstrap | absolute directory for skycued's files; a relative `inputs.file`, `paths.locations_file`, `stats.file`, `filters.allow_list_file` or `filters.block_list_file` is taken from it, and it holds the runtime overlay `skycue.runtime.json` and the `skycue.overrides.toml` that the Config tab and save as baseline write, which holds every key saved from the page (see [web-api.md](web-api.md#save-as-baseline)); empty (default): the places next to the config (next to `skycue.toml`; the list files from the working directory) |
+| `paths.map_dir` | restart | absolute directory the web map's `tiles/` and `overlays/` are served from, and nowhere else; empty (default): the web directory's |
+| `paths.locations_file` | restart | optional CSV `id,lat,lon` of report locations, merged under the learned ones; a relative path is taken from `skycue.toml`'s directory, or from `paths.state_dir` when it is set; read at startup (a change needs a restart). See [Report locations](#report-locations-fisb-locationsjson) |
 
 **`[stats]`**
 
-| Key | Meaning |
-|-----|---------|
-| `stats.file` | where the statistics history is kept (default `"skycue.stats.json"` in `paths.state_dir`, or next to `skycue.toml` when that is empty); a relative path is taken from `skycue.toml`'s directory, or from `paths.state_dir` when it is set; `""`: kept in memory only; a file that cannot be read back is renamed `<file>.bad`; read at startup (a change needs a restart). See [Statistics file](#statistics-file) |
-| `stats.aircraft_max` | aircraft kept in the statistics ledger, a whole number 100..100000 (default 20000); past it the 5 % heard longest ago are forgotten; a change needs a restart |
-| `stats.save_s` | seconds between saves of `stats.file` while it changed, a whole number 10..86400 (default 300); also saved at a clean shutdown and at once on a reset; a change needs a restart |
+| Key | Class | Meaning |
+|-----|-------|---------|
+| `stats.file` | restart | where the statistics history is kept (default `"skycue.stats.json"` in `paths.state_dir`, or next to `skycue.toml` when that is empty); a relative path is taken from `skycue.toml`'s directory, or from `paths.state_dir` when it is set; `""`: kept in memory only; a file that cannot be read back is renamed `<file>.bad`; read at startup (a change needs a restart). See [Statistics file](#statistics-file) |
+| `stats.aircraft_max` | restart | aircraft kept in the statistics ledger, a whole number 100..100000 (default 20000); past it the 5 % heard longest ago are forgotten; a change needs a restart |
+| `stats.save_s` | restart | seconds between saves of `stats.file` while it changed, a whole number 10..86400 (default 300); also saved at a clean shutdown and at once on a reset; a change needs a restart |
 
 ### Overriding a key for one run
 
@@ -242,7 +249,10 @@ segment is not a table are not skycued's and are ignored silently.
 key, all layers and flags applied, as shell assignments
 (`SKYCUE_INPUTS_READSB_HOST='127.0.0.1'`; an array is its entries separated by
 spaces). It is what the scripts read: `eval "$(skycued --config "$CONF"
---dump-env)"`. Do not export the variables: skycued reads `SKYCUE_*` from its
+--dump-env)"`, so they see the settings saved from the Config tab too
+(`skycue.overrides.toml` is read like the other layers). `skycue-stats` and the
+launcher read the same file the same way, which is how a saved `[sdr]` value
+reaches readsb and dump978-fa the next time they start. Do not export the variables: skycued reads `SKYCUE_*` from its
 environment, so exporting them would pin every key to itself. On an error
 nothing is printed on stdout and the exit status is 2.
 
@@ -275,12 +285,12 @@ them by hand ([installing.md](installing.md#from-source)):
 | recordings | `recording.dir` | `recording.dir` (commented out; `/var/lib/skycue/recordings` is ready for it) |
 | log | standard error of the terminal it runs in | the journal (`journalctl -u skycued`) |
 
-`skycue.overrides.toml` is in the same TOML grammar and holds only
-the keys the page may save (`filters.max_range_nm`, `filters.min_elevation_deg`,
-`filters.allow_list_file`, `filters.block_list_file`); skycued reads it after
-`skycue.toml`, so its values win. skycued owns the file: it writes it whole,
-with a header line saying so, so comments you add are lost the next time the
-page saves. Hand edits are picked up while skycued runs. The packaged
+`skycue.overrides.toml` is in the same TOML grammar and holds the keys saved
+from the page: any key except the bootstrap keys (`paths.state_dir`,
+`web.port`, `web.bind`, `web.allow_restart`), which are an error there. skycued
+reads it after `skycue.toml`, so its values win. skycued owns the file: it
+writes it whole, with a header line saying so, so comments you add are lost the
+next time the page saves. Hand edits are picked up while skycued runs. The packaged
 `skycue.toml` is a file the package manager owns, so the daemon, which runs as
 the `skycue` user with only `/var/lib/skycue` writable, never writes it. To
 make a saved value part of `skycue.toml` again, copy it there and delete the
@@ -1683,20 +1693,8 @@ clients are refreshed every 5 s while the tab is open.
 ### Config tab
 
 The side panel's fifth tab (**Config** in the header opens and closes it).
-Shows the configuration skycued is running with (`GET /api/config`, see
-docs/web-api.md); nothing on it can be changed. Each `skycue.toml` key, by its
-dotted name, has its running value and its **source**: `conf` (set in
-`skycue.toml`), `default` (not set there, so the built-in default applies),
-`overrides` (set in `skycue.overrides.toml`, which save as baseline writes,
-and whose values replace `skycue.toml`'s), `env` (a `SKYCUE_*` environment
-variable), `--set` (a `--set key=value` argument), `flag` (a command-line
-option such as `--web-port`) or `runtime` (a range or elevation filter
-changed in the UI and not yet saved as baseline). A key set by `env` or
-`--set` is pinned: the page shows it read-only, and a filter key that is
-pinned cannot be changed from the page. Keys marked restart take effect only
-when skycued restarts; the four filter keys (`filters.max_range_nm`,
-`filters.min_elevation_deg`, `filters.allow_list_file`,
-`filters.block_list_file`) apply at once. Above the keys are the
+Shows the configuration skycued is set up with (`GET /api/config`, see
+docs/web-api.md) and edits it. Above the keys are the
 daemon's version, uptime, the config, inputs, overrides and overlay files (and
 whether the overlay holds unsaved changes), the www and recording
 directories with the files being recorded, the log level, how it runs
@@ -1708,10 +1706,66 @@ and the report locations it holds: **Learned locations** (how many and the
 **Operator locations** (how many were read from the resolved
 `paths.locations_file`, with any rejected lines and ids over the cap).
 
-The keys are grouped as Receiver site, Decoders, Cue outputs, Recording,
-Filters, Web, Statistics, FIS-B and Paths (a key skycued has that none of
-these names is under Other). The tab asks skycued again each time it is opened
-and on **Refresh**. **Copy as text** puts the whole configuration on the
+The keys are grouped as the `skycue.toml` tables, each under its table name
+(`receiver`, `inputs`, `inputs.readsb`, `sdr`, `cues`, `filters`, `web` and so
+on), and each row shows the bare key; hover it for the full dotted name and the
+help text. A key skycued has that no table names is under Other. The tab asks
+skycued again each time it is opened and on **Refresh**.
+
+**Editing.** Each row has a control for its type: a number box (with the
+allowed range), a check box, a text box, a drop-down for a key with a fixed set
+of values (`inputs.decoder`), check boxes for a set (`recording.formats`), and
+a list of `host:port` entries (`cues.tcp_connect`, `cues.udp_targets`). An edit
+is staged, not sent: the row is marked, and a bar at the bottom of the tab
+shows how many edits are staged with **Apply** and **Discard**. Apply saves
+them together (`PUT /api/config`); if any is refused (a number out of range,
+`cues.max_interval_s` below `cues.min_interval_s`) nothing is saved and the
+message names the key. Where a key has a value in a file, its **↺** button
+clears the saved value, so the key goes back to `skycue.toml`'s value or the
+default; a `file: …` hint shows what the files give when the row shows
+something else.
+
+**Badges.** `live` (a filter key: applies the moment it is saved), `restart`
+(read when skycued starts), `launcher` (an `[sdr]` key: skycued does not read
+it; the launcher passes it to readsb and dump978-fa when it next starts them,
+so restart that, not skycued) and `pinned` (pinned by the environment, `--set` or
+a flag: the row is read-only, because a file edit would change nothing).
+**Bootstrap** keys (`paths.state_dir`, `web.port`, `web.bind`,
+`web.allow_restart`) are shown read-only: skycued needs them before it can read
+the overrides file, so change them in `skycue.toml` and restart. The source
+badge says where the value comes from: `conf` (set in `skycue.toml`), `default`
+(not set there, so the built-in default applies), `overrides` (set in
+`skycue.overrides.toml`, which the page writes, and whose values replace
+`skycue.toml`'s), `env` (a `SKYCUE_*` environment variable), `--set` (a `--set
+key=value` argument), `flag` (a command-line option such as `--web-port`) or
+`runtime` (a range or elevation filter changed in the Filters tab and not yet
+saved as baseline).
+
+**What a row shows.** A `live` key shows the value in effect. Any other key
+shows the value *configured*: what the files and layers say now. When skycued
+runs with something else (you saved a change and have not restarted) the row
+adds `running <value>`, and the banner at the top of the tab lists every such
+key as `key (running X, configured Y)`. The banner has a **Restart** button
+when `web.allow_restart` is on (the packages set it), which stops skycued
+cleanly with exit status 75; the tab waits for it to come back and reloads.
+Without it the banner says "restart skycued to apply" and you restart it
+yourself (`sudo systemctl restart skycued`, or stop and start `skycue-start.sh`).
+Below the banner a `Supervisor:` line names what will start skycued again:
+`systemd`, `launcher` (`skycue-start.sh`) or `none`; with `none`, a restart from
+the page ends skycued and it stays stopped until you start it. Do not turn
+`web.allow_restart` on for a skycued started by hand.
+
+**Where saves go.** Into `skycue.overrides.toml`, never `skycue.toml`. Under the
+packages that is `/var/lib/skycue/skycue.overrides.toml` (`paths.state_dir`),
+which the daemon can write; `/etc/skycue/skycue.toml` stays as installed and
+the package manager can upgrade it. By hand, it is beside `skycue.toml`, or in
+`paths.state_dir` when that is set; if the directory is not writable the save
+fails and the message names the path and says to set `paths.state_dir`. To make
+a saved value part of `skycue.toml`, copy it there and delete it from the
+overrides file (or press **↺**). A saved `[sdr]` key is also what `skycue-start.sh`
+and `--dump-env` read on their next start.
+
+**Copy as text** puts the whole configuration on the
 clipboard in `skycue.toml` form: a `# <group>` line before each group, a
 `[table]` line where the table changes, and before each `key = value` line a
 comment naming its source (and `, restart`), e.g. `# filters.max_range_nm:

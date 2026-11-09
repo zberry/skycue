@@ -14,6 +14,14 @@ There is no authentication; see [Security](#security).
 - **No authentication.** Anyone who can reach the port can read the
   tracks and change the filters, the lists and the inputs. The UI is meant for a trusted
   network only.
+- The same goes for the configuration: the Config tab (`PUT /api/config`) can
+  change every key of `skycue.toml` except the bootstrap keys
+  (`paths.state_dir`, `web.port`, `web.bind`, `web.allow_restart`), and,
+  when `web.allow_restart` is on, `POST /api/restart` stops skycued so that
+  its supervisor starts it again. It is the same trust model: whoever may
+  change the filters may change the receiver position, the outputs and the
+  inputs, and may restart the daemon. `web.allow_restart` is off by default and
+  cannot be turned on from the page.
 - `web.bind` defaults to `127.0.0.1`: only programs on the same machine
   can connect. Set it to another address (or `0.0.0.0` for every
   interface) only when every host that can reach the port may change the
@@ -115,7 +123,10 @@ There is no authentication; see [Security](#security).
 | POST | `/api/stats/reset` | `{}` | `{"ok": true}`; empties the statistics |
 | GET | `/api/filters/history` | | `{"changes": [change...]}`: the last 100 filter changes, oldest first |
 | GET | `/api/cues/clients` | | `{"tcp": [client...], "udp": [target...]}`: the cue stream's TCP connections and UDP targets now |
-| GET | `/api/config` | | `{"daemon": {...}, "keys": [key...]}`: the configuration running and where each value came from |
+| GET | `/api/config` | | `{"daemon": {...}, "keys": [key...], "pending_restart": [...]}`: the configuration, where each value came from and what waits for a restart |
+| GET | `/api/config/schema` | | `{"keys": [spec...]}`: every key's type, class, default, help text and limits |
+| PUT | `/api/config` | `{"set": {key: value...}, "clear": [key...]}` | `{"ok": true, "applied": [...], "pending_restart": [...], "external": [...]}`; saves to `skycue.overrides.toml` |
+| POST | `/api/restart` | `{}` | 202 `{"ok": true, "exit_status": 75}`, then skycued shuts down cleanly; 403 unless `web.allow_restart` |
 | GET | `/ws` | (WebSocket upgrade) | see [WebSocket](#websocket-ws); without an upgrade, 400 |
 | GET, HEAD | `/`, `/<file>` | | a static file (see [Static files](#static-files)) |
 
@@ -183,8 +194,8 @@ it belongs to: `cue-tcp`, `cue-connect-N` or `cue-udp-N` for the built-in
 ones, else the id of an output you added ([Outputs](#outputs)). Clients
 should ignore fields they do not know. Other methods: 405 with `Allow: GET`.
 
-`GET /api/config` shows the configuration skycued runs with and facts
-about the daemon. It is read only: nothing in it can be changed here.
+`GET /api/config` shows the configuration skycued is set up with and facts
+about the daemon. To change it, see [`PUT /api/config`](#put-apiconfig).
 
 ```json
 {"daemon": {"version": "skycued 0.1.0", "started": "2026-11-02T14:03:06.912Z", "uptime_s": 3725,
@@ -199,13 +210,20 @@ about the daemon. It is read only: nothing in it can be changed here.
                           "operator_path": "/etc/skycue/locations.csv", "operator": 61234,
                           "operator_rejected": 0, "operator_overflow": 0}},
  "keys": [
-  {"key": "receiver.lat", "value": "38.9", "source": "conf", "restart": true},
-  {"key": "filters.max_range_nm", "value": "20", "source": "runtime", "restart": false},
-  {"key": "cues.min_interval_s", "value": "1", "source": "default", "restart": true},
-  {"key": "web.trail_seconds", "value": "300", "source": "env", "restart": true},
-  {"key": "stats.save_s", "value": "60", "source": "set", "restart": true},
-  {"key": "web.port", "value": "8081", "source": "flag", "restart": true}
- ]}
+  {"key": "receiver.lat", "value": "38.9", "source": "conf", "restart": true,
+   "class": "restart", "editable": true, "default": "0", "file_value": "38.9"},
+  {"key": "filters.max_range_nm", "value": "20", "source": "runtime", "restart": false,
+   "class": "live", "editable": true, "default": "250", "file_value": "100"},
+  {"key": "cues.min_interval_s", "value": "1", "source": "default", "restart": true,
+   "class": "restart", "editable": true, "default": "1"},
+  {"key": "web.trail_seconds", "value": "300", "source": "env", "restart": true,
+   "class": "restart", "editable": false, "default": "120"},
+  {"key": "stats.save_s", "value": "120", "running": "60", "source": "overrides", "restart": true,
+   "class": "restart", "editable": true, "default": "300", "file_value": "120"},
+  {"key": "web.port", "value": "8081", "source": "flag", "restart": true,
+   "class": "bootstrap", "editable": false, "default": "8080"}
+ ],
+ "pending_restart": [{"key": "stats.save_s", "running": "60", "configured": "120"}]}
 ```
 
 `daemon`: `started` is the wall-clock time skycued started and `uptime_s`
@@ -249,7 +267,92 @@ runtime overlay), `flag` (a command-line option: `--cue-tcp-port`,
 `restart` is true for every key that takes effect only when skycued
 restarts: all but `filters.max_range_nm`, `filters.min_elevation_deg`,
 `filters.allow_list_file` and `filters.block_list_file`, which apply at
-once. Other methods: 405 with `Allow: GET`.
+once.
+
+Each key also has `class`, one of `live` (the four filter keys, which apply
+at once), `restart` (read when skycued starts), `external` (the four `[sdr]`
+keys, which skycued does not read: the launcher that starts readsb and
+dump978-fa does, on its next start) or `bootstrap` (`paths.state_dir`,
+`web.port`, `web.bind`, `web.allow_restart`: skycued needs them before it can
+read the overrides file, so they are set in `skycue.toml`, by `--set`, the
+environment or a flag, and nowhere else); `editable`, whether `PUT
+/api/config` may change it (false for a bootstrap key and for a key pinned by
+the environment, `--set` or a flag); `default`, the built-in default, spelled
+like `value`; and `file_value`, what the files alone give, when they set it
+(`skycue.toml` with `skycue.overrides.toml` over it, before the environment,
+`--set`, flags and the runtime overlay).
+
+For a `live` key `value` is the effective value, as above. For every other
+key `value` is the value *configured*: what the files and layers say now,
+which after a save or a hand edit is not necessarily what skycued runs with.
+When skycued runs with something else, `running` is that value. The top-level
+`pending_restart` lists those keys as `{"key", "running", "configured"}`
+(empty when nothing waits); a restart makes them equal. `external` keys never
+appear in it, as skycued runs with nothing for them.
+
+`daemon` also has `allow_restart` (the value of `web.allow_restart`) and
+`supervisor`: `"systemd"` when skycued was started by a systemd unit
+(`INVOCATION_ID` is set), `"launcher"` when by `skycue-start.sh`
+(`SKYCUE_LAUNCHER` is set), else `"none"`. With `"none"`, a restart ends
+skycued and nothing starts it again. Other methods: 405 with `Allow: GET`.
+
+### `GET /api/config/schema`
+
+`{"keys": [...]}`, one object per key in the order of `GET /api/config`:
+`key`, `type` (`int`, `float`, `bool`, `string`, `enum`, `string_set`,
+`host_port_list` or `path`), `class` (as above), `default`, `doc` (one line of
+help), and where they apply `min` and `max` (numbers) and `values` (the
+allowed strings of an `enum` or the allowed entries of a `string_set`). It
+does not change while skycued runs; the page asks once. Other methods: 405
+with `Allow: GET`.
+
+### `PUT /api/config`
+
+Body `{"set": {"<key>": <value>, ...}, "clear": ["<key>", ...]}`; either may
+be left out. A value is typed JSON as the schema says: a number for `int` and
+`float`, `true`/`false` for `bool`, a string for `string`, `enum` and `path`,
+an array of strings for `string_set` and `host_port_list`. The changes are
+checked together with the same rules as `skycue.toml` (types, ranges, the
+cross-key checks such as `cues.max_interval_s` not below `cues.min_interval_s`),
+and then written to `skycue.overrides.toml` ([Save as
+baseline](#save-as-baseline)): `set` puts a key there, `clear` removes it, so
+the key falls back to `skycue.toml`'s value or the default. A request that
+changes nothing does not touch the file. Everything is applied or nothing is.
+
+- **200** `{"ok": true, "applied": [key...], "pending_restart": [...],
+  "external": [key...]}`: `applied` the `live` keys now in effect;
+  `pending_restart` as in `GET /api/config`, after the save; `external` the
+  `[sdr]` keys saved, which the launcher reads when it next starts readsb and
+  dump978-fa. A `PUT` of a filter key also removes that key's value from the
+  runtime overlay, so the saved value is the running one and the overlay does
+  not hide it.
+- **400** `{"error": "...", "key": "..."}`: not a JSON object, an unknown
+  key or a field other than `set` and `clear`, a value of the wrong type
+  (`"cues.tcp_port: expected int"`), out of range, or failing a cross-key
+  check. The message is the one `skycue.toml` would give, without the file
+  name; `key` is there when one key is at fault.
+- **403** `{"error": "...", "key": "..."}`: a bootstrap key.
+- **409** `{"error": "...", "key": "...", "source": "..."}`: the key is
+  pinned by `env`, `set` or `flag`; the file would not change what skycued
+  uses.
+- **500**: the overrides file could not be written. The message names the path
+  and says to set `paths.state_dir`, as a [save as baseline](#save-as-baseline)
+  does.
+
+Other methods: 405 with `Allow: GET, PUT`.
+
+### `POST /api/restart`
+
+Body `{}`. When `web.allow_restart` is `false` (the default) the answer is
+**403** `{"error": "restart not allowed (web.allow_restart)"}` and nothing
+happens. Otherwise **202** `{"ok": true, "exit_status": 75}`, and skycued shuts
+down cleanly (the same orderly stop as `SIGTERM`: it saves its state first) and
+exits with status 75. A supervisor that starts it again on that status makes
+this a restart: the packaged systemd unit has `SuccessExitStatus=75` and
+`RestartForceExitStatus=75`, and `skycue-start.sh` restarts its children
+whatever they exit with and logs status 75 as "restart requested from the web
+UI". Run by hand, with no supervisor, skycued simply ends. The page shows the
+supervisor in `daemon.supervisor`. Other methods: 405 with `Allow: POST`.
 
 `GET /api/tiles-available` reads the map directory (`paths.map_dir` when it is
 set, else the www directory; `www/` below): when `www/tiles/meta.json` exists (written by
@@ -736,9 +839,9 @@ overlay stays in effect.
 
 - `filters.max_range_nm` / `filters.min_elevation_deg` are written to
   `skycue.overrides.toml`, a file skycued owns: it is written whole each
-  time (the filter keys it already holds stay, the saved ones replace them),
-  after a header line `# written by skycued <ISO-8601 UTC time>; only filter
-  keys; edits are picked up live`. It sits in `paths.state_dir` when that is
+  time (the keys it already holds stay, the saved ones replace them),
+  after a header line `# written by skycued <ISO-8601 UTC time>; settings saved
+  from the web UI; filter keys apply live, the rest on restart`. It sits in `paths.state_dir` when that is
   set, else beside `skycue.toml`. `skycue.toml` itself is never written: it
   may belong to root and skycued need not be able to write it. When the
   directory is not writable (the packages' `/etc/skycue` is root's, for a
@@ -755,13 +858,15 @@ overlay stays in effect.
   the overlay and the result says so. The same goes for a file that cannot be
   written.
 
-`skycue.overrides.toml` has the `skycue.toml` grammar and may assign only
-`filters.max_range_nm`, `filters.min_elevation_deg`, `filters.allow_list_file`
-and `filters.block_list_file`; skycued reads it right after `skycue.toml`,
-and its values replace `skycue.toml`'s. Any other key in it is an error naming
-the file and line, as is a line that does not parse; at startup that stops
-skycued, as an error in `skycue.toml` does, and a save refuses to overwrite
-a file that does not parse. A relative `filters.allow_list_file` /
+`skycue.overrides.toml` has the `skycue.toml` grammar and may assign any key
+except the bootstrap keys (`paths.state_dir`, `web.port`, `web.bind`,
+`web.allow_restart`): the Config tab's `PUT /api/config` writes it too, so it
+holds whatever was saved from the page. skycued reads it right after
+`skycue.toml`, and its values replace `skycue.toml`'s. A bootstrap key in it is
+an error naming the file and line, as is a line that does not parse; at
+startup that stops skycued, as an error in `skycue.toml` does, on a reload it
+is logged at ERROR and the previous configuration stays, and a save refuses to
+overwrite a file that does not parse. A relative `filters.allow_list_file` /
 `filters.block_list_file` set there is taken from `paths.state_dir` too. You
 may edit it by hand, or delete it to go back to `skycue.toml`'s values. An
 edit of `skycue.toml` to a key that `skycue.overrides.toml` sets changes
@@ -785,7 +890,7 @@ edit that keeps the size and lands in the same second as the previous one
 can go unnoticed (save it again, or let the editor replace the file). A
 `skycue.toml` or `skycue.overrides.toml` edit that
 does not parse is logged once at ERROR and the previous configuration stays
-in effect. Only the filter keys (`filters.max_range_nm`,
+in effect. A bootstrap key in `skycue.overrides.toml` is such an error. Only the filter keys (`filters.max_range_nm`,
 `filters.min_elevation_deg`, `filters.allow_list_file`,
 `filters.block_list_file`) take effect at once; a change to any
 other key that now differs from the value skycued is running with is
@@ -801,7 +906,9 @@ changes nothing that skycued runs with, and is logged at WARN:
 skycue.runtime.json (use the UI or "save as baseline")`. To make the edit
 take effect, clear the overlay's value (the ↺ button in the UI, or
 `PUT /api/filters` with `null`), or save the running values as the
-baseline first and edit afterwards.
+baseline first and edit afterwards. A save of a
+filter key from the Config tab (`PUT /api/config`) removes that key's value
+from the overlay itself, so the saved value is the one that runs.
 
 ## FIS-B
 

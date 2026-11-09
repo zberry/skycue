@@ -34,9 +34,9 @@ double secs(TimePoint a, TimePoint b) { return std::chrono::duration<double>(a -
 
 // Sets a timed field; flags a change when it replaced a different value.
 template <typename T>
-void setField(KeyState& ks, Timed<T>& f, const T& v, TimePoint now, bool track) {
+void setField(KeyState& ks, Timed<T>& f, const T& v, TimePoint now, bool track, Origin origin = Origin::adsb) {
     if (track && f.has && !(f.value == v)) ks.gate.dirty = true;
-    f.set(v, now);
+    f.set(v, now, origin);
 }
 
 }  // namespace
@@ -179,10 +179,9 @@ void ModesDecoder::applyAcasRa(KeyState& ks, const AcasRa& ra) {
 
 void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
     // A field an ADS-B message set in the last 60 s keeps that value (ADS-B outranks Comm-B).
-    const auto setCommb = [this](Timed<float>& field, bool& from_commb, float v) {
-        if (field.fresh(now_, kFieldFresh) && !from_commb) return;
-        field.set(v, now_);
-        from_commb = true;
+    const auto setCommb = [this](Timed<float>& field, float v) {
+        if (field.shieldedFromCommb(now_, kFieldFresh)) return;
+        field.set(v, now_, Origin::commb);
     };
     CommbContext ctx;
     ctx.track_deg = ks.track.fresh(now_, kFieldFresh);
@@ -199,20 +198,19 @@ void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
             // Intent fields mark the key dirty when the value changes (like identity). A TC29
             // value under 60 s old outranks BDS 4,0; a later TC29
             // replaces a 4,0 value at once.
-            const auto setIntent = [&](auto& field, bool& from_commb, const auto& v) {
-                if (field.fresh(now_, kFieldFresh) && !from_commb) return;
-                setField(ks, field, v, now_, true);
-                from_commb = true;
+            const auto setIntent = [&](auto& field, const auto& v) {
+                if (field.shieldedFromCommb(now_, kFieldFresh)) return;
+                setField(ks, field, v, now_, true, Origin::commb);
             };
-            if (r.b40->sel_alt_mcp_ft) setIntent(ks.sel_alt, ks.sel_alt_commb, *r.b40->sel_alt_mcp_ft);
-            if (r.b40->sel_alt_fms_ft) setIntent(ks.sel_alt_fms, ks.sel_alt_fms_commb, *r.b40->sel_alt_fms_ft);
-            if (r.b40->qnh_mb) setIntent(ks.qnh, ks.qnh_commb, *r.b40->qnh_mb);
+            if (r.b40->sel_alt_mcp_ft) setIntent(ks.sel_alt, *r.b40->sel_alt_mcp_ft);
+            if (r.b40->sel_alt_fms_ft) setIntent(ks.sel_alt_fms, *r.b40->sel_alt_fms_ft);
+            if (r.b40->qnh_mb) setIntent(ks.qnh, *r.b40->qnh_mb);
             if (r.b40->modes_valid) {  // replaces the whole set, no merging (as readsb)
                 uint8_t m = 0;
                 if (r.b40->vnav) m |= kNavVnav;
                 if (r.b40->althold) m |= kNavAltHold;
                 if (r.b40->approach) m |= kNavApproach;
-                setIntent(ks.nav_modes, ks.nav_modes_commb, m);
+                setIntent(ks.nav_modes, m);
             }
         }
         break;
@@ -220,8 +218,8 @@ void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
         ++counters_.commb_bds50;
         if (r.b50) {
             if (r.b50->roll_deg) ks.roll.set(*r.b50->roll_deg, now_);
-            if (r.b50->track_deg) setCommb(ks.track, ks.track_commb, *r.b50->track_deg);  // the ground track, as TC19 sets it
-            if (r.b50->gs_kt) setCommb(ks.gs, ks.gs_commb, *r.b50->gs_kt);
+            if (r.b50->track_deg) setCommb(ks.track, *r.b50->track_deg);  // the ground track, as TC19 sets it
+            if (r.b50->gs_kt) setCommb(ks.gs, *r.b50->gs_kt);
             if (r.b50->track_rate_dps) ks.track_rate.set(*r.b50->track_rate_dps, now_);
             if (r.b50->tas_kt) ks.tas.set(*r.b50->tas_kt, now_);
         }
@@ -232,9 +230,9 @@ void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
             if (r.b60->heading_mag_deg) ks.heading_mag.set(*r.b60->heading_mag_deg, now_);
             if (r.b60->ias_kt) ks.ias.set(*r.b60->ias_kt, now_);
             if (r.b60->mach) ks.mach.set(*r.b60->mach, now_);
-            if (r.b60->baro_rate_fpm) setCommb(ks.baro_rate, ks.baro_rate_commb, static_cast<float>(*r.b60->baro_rate_fpm));
+            if (r.b60->baro_rate_fpm) setCommb(ks.baro_rate, static_cast<float>(*r.b60->baro_rate_fpm));
             if (r.b60->inertial_rate_fpm)
-                setCommb(ks.geom_rate, ks.geom_rate_commb, static_cast<float>(*r.b60->inertial_rate_fpm));
+                setCommb(ks.geom_rate, static_cast<float>(*r.b60->inertial_rate_fpm));
         }
         break;
     case CommbKind::ambiguous: ++counters_.commb_ambiguous; break;
@@ -323,12 +321,10 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
         if (surface) {
             const SurfaceMovement mv = decodeSurfaceMovement(f);
             if (mv.gs_kt) {
-                ks.gs_commb = false;
                 ks.gs.set(mv.gs_kt.value_or(0.0f), now_);
                 ks.last_gs_kt = mv.gs_kt.value_or(0.0f);
             }
             if (mv.track_deg) {
-                ks.track_commb = false;
                 ks.track.set(*mv.track_deg, now_);
             }
             setGround(ks, true);
@@ -350,12 +346,10 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
     } else if (tc == 19) {
         if (const auto v = decodeVelocity(f)) {
             if (v->gs_kt) {
-                ks.gs_commb = false;
                 ks.gs.set(v->gs_kt.value_or(0.0f), now_);
                 ks.last_gs_kt = v->gs_kt.value_or(0.0f);
             }
             if (v->track_deg) {
-                ks.track_commb = false;
                 ks.track.set(*v->track_deg, now_);
             }
             if (v->heading_mag_deg) ks.heading_mag.set(*v->heading_mag_deg, now_);
@@ -364,10 +358,8 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
             if (v->rate_fpm) {
                 const float r = static_cast<float>(*v->rate_fpm);
                 if (v->rate_is_geom) {
-                    ks.geom_rate_commb = false;
                     ks.geom_rate.set(r, now_);
                 } else {
-                    ks.baro_rate_commb = false;
                     ks.baro_rate.set(r, now_);
                 }
             }
@@ -406,9 +398,9 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
         }
     } else if (tc == 29) {
         if (const auto t = decodeTargetState(f)) {
-            if (t->sel_alt_ft) { setField(ks, ks.sel_alt, *t->sel_alt_ft, now_, true); ks.sel_alt_commb = false; }
-            if (t->sel_alt_fms_ft) { setField(ks, ks.sel_alt_fms, *t->sel_alt_fms_ft, now_, true); ks.sel_alt_fms_commb = false; }
-            if (t->qnh_mb) { setField(ks, ks.qnh, *t->qnh_mb, now_, true); ks.qnh_commb = false; }
+            if (t->sel_alt_ft) setField(ks, ks.sel_alt, *t->sel_alt_ft, now_, true);
+            if (t->sel_alt_fms_ft) setField(ks, ks.sel_alt_fms, *t->sel_alt_fms_ft, now_, true);
+            if (t->qnh_mb) setField(ks, ks.qnh, *t->qnh_mb, now_, true);
             if (t->sel_heading_deg) setField(ks, ks.sel_heading, *t->sel_heading_deg, now_, true);
             // NACp stays TC31-only: taking the TC29 value drops nac_p agreement with readsb below its floor.
             if (t->modes_valid) {  // the flags mean nothing while the status bit is 0
@@ -420,7 +412,6 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
                 if (t->lnav) m |= kNavLnav;
                 if (t->tcas) m |= kNavTcas;
                 setField(ks, ks.nav_modes, m, now_, true);
-                ks.nav_modes_commb = false;
             }
             ++counters_.decoded;
         } else {

@@ -36,21 +36,31 @@ struct StateKeyHash {
     }
 };
 
+// Where a stored value came from. ADS-B outranks Comm-B for the fields both set.
+enum class Origin : uint8_t { adsb, commb };
+
 // A value and the (max-so-far) time it was learned.
 template <typename T>
 struct Timed {
     T value{};
     TimePoint at{};
     bool has = false;
-    void set(const T& v, TimePoint t) {
+    Origin origin = Origin::adsb;
+    // Sets the origin too, so every ADS-B set ends Comm-B ownership of the value.
+    void set(const T& v, TimePoint t, Origin o = Origin::adsb) {
         value = v;
         at = t;
         has = true;
+        origin = o;
     }
     // The value when it is no older than max_age at now.
     std::optional<T> fresh(TimePoint now, std::chrono::seconds max_age) const {
         if (has && now - at <= max_age) return value;
         return std::nullopt;
+    }
+    // True while an ADS-B value no older than max_age is held: Comm-B must not replace it.
+    bool shieldedFromCommb(TimePoint now, std::chrono::seconds max_age) const {
+        return fresh(now, max_age).has_value() && origin == Origin::adsb;
     }
 };
 
@@ -126,11 +136,6 @@ struct KeyState : KeyBase, CommonFields {
     Timed<int32_t> sel_alt, sel_alt_fms;
     Timed<uint8_t> nav_modes, acas_sl, acas_ri;
     Timed<AcasRaState> acas_ra;
-    // Track, ground speed and the two vertical rates are set by ADS-B velocity messages and by
-    // Comm-B; the flag says the stored value came from Comm-B, which never replaces a fresh ADS-B one.
-    bool track_commb = false, gs_commb = false, baro_rate_commb = false, geom_rate_commb = false;
-    // Intent fields whose current value came from BDS 4,0 (a TC29 value under 60 s old outranks it).
-    bool sel_alt_commb = false, sel_alt_fms_commb = false, qnh_commb = false, nav_modes_commb = false;
 
     // TC31 (kept for the key's life, applied to later position messages).
     struct Tc31 {

@@ -6,6 +6,7 @@
 #include "json_lite.hpp"
 #include "time_util.hpp"
 #include "web_api.hpp"
+#include "web_reply.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -66,16 +67,6 @@ std::string param(const std::map<std::string, std::string>& params, const char* 
     const auto it = params.find(key);
     return it == params.end() ? std::string() : it->second;
 }
-
-ApiResponse reply(unsigned status, std::string body)
-{
-    ApiResponse r;
-    r.status = status;
-    r.body = std::move(body);
-    return r;
-}
-
-ApiResponse fail(unsigned status, const std::string& message) { return reply(status, errorJson(message)); }
 
 // ---- status ----
 
@@ -714,9 +705,7 @@ ApiResponse handleFisbApi(const ApiRequest& request, const Engine& engine)
     else
         return fail(404, "no such API path: " + path);
     if (request.method != "GET") {
-        ApiResponse r = fail(405, "method not allowed");
-        r.allow = "GET";
-        return r;
+        return notAllowed("GET");
     }
     const auto params = queryParams(request.query);
     switch (route) {

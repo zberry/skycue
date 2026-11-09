@@ -3,6 +3,7 @@
 #include "engine.hpp"
 #include "json_lite.hpp"
 #include "time_util.hpp"
+#include "web_reply.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,23 +23,6 @@ const char kPrefix[] = "/api/inputs/";
 constexpr std::size_t kPrefixLen = sizeof kPrefix - 1;
 
 int64_t num(uint64_t v) { return static_cast<int64_t>(v); }
-
-ApiResponse reply(unsigned status, std::string body)
-{
-    ApiResponse r;
-    r.status = status;
-    r.body = std::move(body);
-    return r;
-}
-
-ApiResponse fail(unsigned status, const std::string& message) { return reply(status, errorJson(message)); }
-
-ApiResponse notAllowed(const char* allow)
-{
-    ApiResponse r = fail(405, "method not allowed");
-    r.allow = allow;
-    return r;
-}
 
 void putCounters(JsonWriter& w, const InputCounters& c)
 {
@@ -290,19 +274,7 @@ bool isInputsPath(const std::string& path)
 
 ApiResponse handleInputsApi(const ApiRequest& request, Engine& engine)
 {
-    try {
-        return route(request, engine.inputs());
-    } catch (const InputDefError& e) {
-        return fail(400, e.what());
-    } catch (const InputForbidden& e) {
-        return fail(403, e.what());
-    } catch (const InputNotFound& e) {
-        return fail(404, e.what());
-    } catch (const InputConflict& e) {
-        return fail(409, e.what());
-    } catch (const std::exception& e) {
-        return fail(500, e.what());
-    }
+    return runGuarded([&] { return route(request, engine.inputs()); });
 }
 
 }  // namespace webapi

@@ -11,6 +11,7 @@
 #include "web_fisb.hpp"
 #include "web_inputs.hpp"
 #include "web_outputs.hpp"
+#include "web_reply.hpp"
 #include "web_stats.hpp"
 
 #include <dirent.h>
@@ -263,48 +264,25 @@ void putTrack(JsonWriter& w, const TrackSnapshot& ts)
         w.add("input", ts.input);
 }
 
-ApiResponse json(unsigned status, std::string body)
-{
-    ApiResponse r;
-    r.status = status;
-    r.body = std::move(body);
-    return r;
-}
-
-ApiResponse error(unsigned status, const std::string& message) { return json(status, errorJson(message)); }
-
-ApiResponse notAllowed(const char* allow)
-{
-    ApiResponse r = error(405, "method not allowed");
-    r.allow = allow;
-    return r;
-}
-
 // Applies `delta` from the UI; the reply is `ok()` or the error.
 template <class Ok> ApiResponse apply(RuntimeConfig& rc, const Overlay& delta, Ok ok)
 {
     try {
         rc.applyUi(delta, "ui");
-    } catch (const PinnedKeyError& e) {
-        return json(409, JsonWriter().add("error", std::string(e.what())).add("key", e.key).add("source", e.source).str());
-    } catch (const std::invalid_argument& e) {
-        return error(400, e.what());
-    } catch (const ConfigError& e) {
-        return error(400, e.what());
     } catch (const std::exception& e) {
-        return error(500, e.what());
+        return failureResponse(e, ErrorFamily::config);
     }
-    return json(200, ok());
+    return reply(200, ok());
 }
 
 ApiResponse putFiltersRoute(const std::string& body, RuntimeConfig& rc)
 {
     const auto obj = JsonObject::parse(body);
     if (!obj)
-        return error(400, "the body must be a JSON object");
+        return fail(400, "the body must be a JSON object");
     for (const auto& k : obj->keys())
         if (k != "max_range_nm" && k != "min_elevation_deg")
-            return error(400, "unknown key '" + k + "'");
+            return fail(400, "unknown key '" + k + "'");
     Overlay delta;
     for (const char* k : {"max_range_nm", "min_elevation_deg"}) {
         if (!obj->has(k))
@@ -318,7 +296,7 @@ ApiResponse putFiltersRoute(const std::string& body, RuntimeConfig& rc)
         }
         const auto v = obj->getDouble(k);
         if (!v)
-            return error(400, std::string(k) + " must be a number or null");
+            return fail(400, std::string(k) + " must be a number or null");
         (range ? delta.max_range_nm : delta.min_elevation_deg) = v;
     }
     return apply(rc, delta, [&] { return filtersJson(rc); });
@@ -605,7 +583,7 @@ std::string jsonString(const std::string& s)
 
 ApiResponse keyError(unsigned status, const std::string& message, const std::string& key)
 {
-    return json(status, JsonWriter().add("error", message).add("key", key).str());
+    return reply(status, JsonWriter().add("error", message).add("key", key).str());
 }
 
 // The key a ConfigError/invalid_argument message starts with ("<key>: ..." or
@@ -625,12 +603,12 @@ std::string leadingKey(const std::string& message)
 ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
 {
     if (!JsonObject::parse(body))
-        return error(400, "the body must be a JSON object");
+        return fail(400, "the body must be a JSON object");
     std::vector<std::pair<std::string, JsonScalar>> raw;
     std::vector<std::string> clear_list;
     std::string problem;
     if (!BodyReader(body).read(raw, clear_list, problem))
-        return error(400, problem);
+        return fail(400, problem);
     // The key's own checks first, as the spec orders them: unknown (400),
     // bootstrap (403), pinned (409); only then the value types.
     std::vector<std::string> touched(clear_list);
@@ -647,7 +625,7 @@ ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
         const std::string pin = rc.pinnedBy(key);
         if (!pin.empty()) {
             const PinnedKeyError e(key, pin);
-            return json(409, JsonWriter().add("error", std::string(e.what())).add("key", key).add("source", pin).str());
+            return pinnedResponse(e);
         }
     }
     std::map<std::string, toml_lite::Value> set;
@@ -668,7 +646,7 @@ ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
         std::vector<std::string> external;
         for (const auto& k : r.external)
             external.push_back(jsonString(k));
-        return json(200, JsonWriter()
+        return reply(200, JsonWriter()
                              .add("ok", true)
                              .addRaw("applied", jsonArray(applied))
                              .addRaw("pending_restart", pendingRestartJson(rc))
@@ -676,15 +654,11 @@ ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
                              .str());
     } catch (const ReadOnlyKeyError& e) {
         return keyError(403, e.what(), e.key);
-    } catch (const PinnedKeyError& e) {
-        return json(409, JsonWriter().add("error", std::string(e.what())).add("key", e.key).add("source", e.source).str());
     } catch (const std::invalid_argument& e) {
         const std::string key = leadingKey(e.what());
-        return key.empty() ? error(400, e.what()) : keyError(400, e.what(), key);
-    } catch (const ConfigError& e) {
-        return error(400, e.what());
+        return key.empty() ? fail(400, e.what()) : keyError(400, e.what(), key);
     } catch (const std::exception& e) {
-        return error(500, e.what());
+        return failureResponse(e, ErrorFamily::config);
     }
 }
 
@@ -692,10 +666,10 @@ ApiResponse postListRoute(ListKind kind, const std::string& body, const Engine& 
 {
     const auto obj = JsonObject::parse(body);
     if (!obj)
-        return error(400, "the body must be a JSON object");
+        return fail(400, "the body must be a JSON object");
     for (const auto& k : obj->keys())
         if (k != "add" && k != "remove")
-            return error(400, "unknown key '" + k + "'");
+            return fail(400, "unknown key '" + k + "'");
     Overlay delta;
     const bool allow = kind == ListKind::allow;
     for (const char* k : {"add", "remove"}) {
@@ -703,7 +677,7 @@ ApiResponse postListRoute(ListKind kind, const std::string& body, const Engine& 
             continue;
         auto v = obj->getStringArray(k);
         if (!v)
-            return error(400, std::string(k) + " must be an array of entries");
+            return fail(400, std::string(k) + " must be an array of entries");
         const bool add = std::strcmp(k, "add") == 0;
         (add ? (allow ? delta.allow_add : delta.block_add) : (allow ? delta.allow_remove : delta.block_remove)) =
             std::move(*v);
@@ -838,11 +812,11 @@ std::optional<ApiResponse> rejectUnsafe(const ApiRequest& req)
     if (req.method != "DELETE") {
         const std::string type = lower(header(req, "content-type"));
         if (type.compare(0, 16, "application/json") != 0)
-            return error(415, "content-type must be application/json");
+            return fail(415, "content-type must be application/json");
     }
     const auto origin = req.headers.find("origin");
     if (origin != req.headers.end() && !sameOrigin(origin->second, header(req, "host")))
-        return error(403, "cross-origin request rejected");
+        return fail(403, "cross-origin request rejected");
     return std::nullopt;
 }
 
@@ -1082,12 +1056,12 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
     try {
         const bool get = method == "GET";
         if (path == "/api/state")
-            return get ? json(200, stateJson(engine, runtime)) : notAllowed("GET");
+            return get ? reply(200, stateJson(engine, runtime)) : notAllowed("GET");
         if (path == "/api/stats")
-            return get ? json(200, statsJson(engine.stats())) : notAllowed("GET");
+            return get ? reply(200, statsJson(engine.stats())) : notAllowed("GET");
         if (path == "/api/filters") {
             if (get)
-                return json(200, filtersJson(runtime));
+                return reply(200, filtersJson(runtime));
             if (method != "PUT")
                 return notAllowed("GET, PUT");
             if (auto rejected = rejectUnsafe(request))
@@ -1095,7 +1069,7 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return putFiltersRoute(body, runtime);
         }
         if (path == "/api/filters/history")
-            return get ? json(200, filterHistoryJson(engine)) : notAllowed("GET");
+            return get ? reply(200, filterHistoryJson(engine)) : notAllowed("GET");
         if (path == "/api/filters/save-baseline") {
             if (method != "POST")
                 return notAllowed("POST");
@@ -1111,13 +1085,13 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
                         items.push_back(JsonWriter().add("key", key).add("source", source).str());
                     w.addRaw("skipped", jsonArray(items));
                 }
-                return json(200, w.str());
+                return reply(200, w.str());
             } catch (const std::exception& e) {
-                return error(500, e.what());
+                return fail(500, e.what());
             }
         }
         if (path == "/api/lists")
-            return get ? json(200, listsJson(engine, runtime)) : notAllowed("GET");
+            return get ? reply(200, listsJson(engine, runtime)) : notAllowed("GET");
         if (path == "/api/lists/allow" || path == "/api/lists/block") {
             if (method != "POST")
                 return notAllowed("POST");
@@ -1132,14 +1106,14 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             if (auto rejected = rejectUnsafe(request))
                 return *rejected;
             if (!runtime.effective().web_allow_restart)
-                return error(403, "restart not allowed (web.allow_restart)");
+                return fail(403, "restart not allowed (web.allow_restart)");
             if (!context.on_restart || !*context.on_restart)
-                return error(500, "restart is not wired up");
+                return fail(500, "restart is not wired up");
             (*context.on_restart)();
-            return json(202, "{\"ok\":true,\"exit_status\":75}");
+            return reply(202, "{\"ok\":true,\"exit_status\":75}");
         }
         if (path == "/api/config/schema")
-            return get ? json(200, configSchemaJson()) : notAllowed("GET");
+            return get ? reply(200, configSchemaJson()) : notAllowed("GET");
         if (path == "/api/config") {
             if (method == "PUT") {
                 if (auto rejected = rejectUnsafe(request))
@@ -1149,7 +1123,7 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             if (!get)
                 return notAllowed("GET, PUT");
             if (!context.daemon)
-                return error(500, "no daemon info");
+                return fail(500, "no daemon info");
             LocationFacts loc;
             loc.learned_path = engine.learnedLocationsPath();
             loc.operator_path = engine.operatorLocationsPath();
@@ -1157,10 +1131,10 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             loc.operator_rows = engine.locationIndex().operatorCount();
             loc.operator_rejected = engine.locationIndex().operatorRejected();
             loc.operator_overflow = engine.locationIndex().operatorOverflow();
-            return json(200, configJson(*context.daemon, runtime, loc, std::chrono::system_clock::now()));
+            return reply(200, configJson(*context.daemon, runtime, loc, std::chrono::system_clock::now()));
         }
         if (path == "/api/cues/clients")
-            return get ? json(200, cueClientsJson(engine.forwarder())) : notAllowed("GET");
+            return get ? reply(200, cueClientsJson(engine.forwarder())) : notAllowed("GET");
         if (isInputsPath(path))
             return handleInputsApi(request, engine);
         if (isOutputsPath(path))
@@ -1170,10 +1144,10 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
         if (isStatsPath(path))
             return handleStatsApi(request, engine, context.stats);
         if (path == "/api/tiles-available")
-            return get ? json(200, tilesAvailableJson(map_dir)) : notAllowed("GET");
-        return error(404, "no such API path: " + path);
+            return get ? reply(200, tilesAvailableJson(map_dir)) : notAllowed("GET");
+        return fail(404, "no such API path: " + path);
     } catch (const std::exception& e) {
-        return error(500, e.what());
+        return fail(500, e.what());
     }
 }
 

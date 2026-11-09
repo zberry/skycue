@@ -326,6 +326,13 @@ target_include_directories(test_web_outputs PRIVATE ${PROJECT_SOURCE_DIR}/net/te
 add_test(NAME web_outputs COMMAND test_web_outputs)
 set_tests_properties(web_outputs PROPERTIES TIMEOUT 120)
 
+# The shared reply helpers and the exception-to-status ladders of the /api/* files.
+add_executable(test_web_reply test_web_reply.cpp)
+target_link_libraries(test_web_reply PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)
+target_compile_definitions(test_web_reply PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_web_reply)
+add_test(NAME web_reply COMMAND test_web_reply)
+
 # The FIS-B routes and WebSocket items over a replay of the uplink fixture.
 add_executable(test_fisb_web test_fisb_web.cpp)
 target_link_libraries(test_fisb_web PRIVATE skycued_core Boost::unit_test_framework Threads::Threads)

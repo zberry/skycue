@@ -8,6 +8,7 @@
 #include "stats_store.hpp"
 #include "time_util.hpp"
 #include "web_api.hpp"
+#include "web_reply.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -38,23 +39,6 @@ constexpr std::size_t kCountriesMax = 20;  // by_country entries before "other"
 constexpr int64_t kPageDefault = 100, kPageMax = 1000;
 const AddressType kAddrTypes[] = {AddressType::icao, AddressType::non_icao, AddressType::tisb_trackfile,
                                   AddressType::other};
-
-ApiResponse reply(unsigned status, std::string body)
-{
-    ApiResponse r;
-    r.status = status;
-    r.body = std::move(body);
-    return r;
-}
-
-ApiResponse fail(unsigned status, const std::string& message) { return reply(status, errorJson(message)); }
-
-ApiResponse notAllowed(const char* allow)
-{
-    ApiResponse r = fail(405, "method not allowed");
-    r.allow = allow;
-    return r;
-}
 
 int64_t floorDiv(int64_t a, int64_t b)
 {

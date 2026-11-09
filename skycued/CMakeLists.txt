@@ -102,6 +102,7 @@ add_library(skycued_core STATIC
   src/web_fisb.cpp
   src/web_inputs.cpp
   src/web_outputs.cpp
+  src/web_reply.cpp
   src/web_stats.cpp
   src/web_server.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)

@@ -521,7 +521,6 @@
         var tag = tagText[n.name];
         if (tag && n.tall) lines.push(tag);
         else if (tag) lines[0] += ' ' + tag;
-        
         var rich = function (t) { return String(t).replace(/[{}|]/g, ' '); };
         var first = '{n|' + rich(lines[0]) + '}';
         var rest = lines.slice(1).map(function (l) { return '{s|' + rich(l) + '}'; });
@@ -534,7 +533,8 @@
         flow.lastHeight = g.height;
         chart.resize();
       }
-      chart.setOption({ series: [{ id: 'flow', type: 'sankey', left: 8, right: 230, top: 8, bottom: 8,
+      chart.__flowTall = g.nodes.filter(function (n) { return n.tall; }).map(function (n) { return n.name; });
+      chart.setOption({ animation: false, series: [{ id: 'flow', type: 'sankey', animation: false, left: 8, right: 230, top: g.top, bottom: g.bottom,
         nodeAlign: 'left', nodeWidth: 10, nodeGap: 30, draggable: false, layoutIterations: 0,
         emphasis: { focus: 'adjacency' }, lineStyle: { curveness: 0.5, opacity: 0.45 },
         label: { position: 'right', color: text, rich: { s: { color: muted, fontSize: 11, fontFamily: 'monospace' } } },

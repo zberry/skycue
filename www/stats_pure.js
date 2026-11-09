@@ -800,17 +800,20 @@
       n.band = Math.max(inV[n.name] || 0, outV[n.name] || 0, FLOW_THIN);
       (cols[n.depth] = cols[n.depth] || []).push(n);
     });
+    var nMax = 0;
+    Object.keys(cols).forEach(function (k) { nMax = Math.max(nMax, cols[k].length); });
+    var height = Math.max(FLOW_MIN_H, nMax * 42);
+    // The drawing height is capped so a few nodes keep readable bands.
+    var drawH = Math.min(height - 16, 110 * nMax);
+    var top = Math.round((height - drawH) / 2);
     var scale = Infinity;
     Object.keys(cols).forEach(function (k) {
       var sum = 0; cols[k].forEach(function (n) { sum += n.band; });
-      scale = Math.min(scale, Math.max(0, FLOW_MIN_H - cols[k].length * FLOW_GAP) / sum);
+      scale = Math.min(scale, Math.max(0, drawH - cols[k].length * FLOW_GAP) / sum);
     });
-    var nMax = 0;
     Object.keys(cols).forEach(function (k) {
       cols[k].forEach(function (n) { n.bandPx = Math.max(1, n.band * scale); });
-      nMax = Math.max(nMax, cols[k].length);
     });
-    var height = Math.max(FLOW_MIN_H, nMax * 42);
 
     // Labels: name, then the rate (or "no data <age>"), a third line on a tall node.
     nodes.forEach(function (n) {
@@ -875,7 +878,7 @@
     var caption = 'messages per second, last ' + (!rt.span_s ? 0 : rt.span_s < 55 ? span : 60) + ' s · a thin band carries nothing';
     return {
       nodes: nodes.map(function (n) { return { name: n.name, label: n.label, color: n.color, depth: n.depth, bandPx: n.bandPx, tall: n.tall, idle: n.idle }; }),
-      links: links, tags: tags, height: height, caption: caption
+      links: links, tags: tags, height: height, top: top, bottom: top, caption: caption
     };
   }
 

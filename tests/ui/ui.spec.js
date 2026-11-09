@@ -4261,13 +4261,31 @@ test('flow_card_first_in_traffic_full_width_and_draws', async ({ page }, testInf
   await expect(card.locator('.card-chart canvas').first()).toBeAttached({ timeout: 15000 });
   await expect(card.locator('.card-caption')).toHaveText(/messages per second/, { timeout: 15000 });
   expect(cb.height).toBeGreaterThanOrEqual(360);
-  await card.screenshot({ path: testInfo.outputPath(`flow-card-${testInfo.project.name}.png`) });
+  await expect.poll(async () => ((await cardOption(page, 'traffic-flow')).series[0].data || []).length,
+    { timeout: 15000 }).toBeGreaterThanOrEqual(10);
+  await page.waitForTimeout(300);
+  // the right half of the chart is not blank
+  const painted = await page.evaluate(() => {
+    const cv = document.querySelector('[data-card="traffic-flow"] .card-chart canvas');
+    const w = cv.width, h = cv.height, x = Math.floor(w * 0.7);
+    const d = cv.getContext('2d').getImageData(x, 0, 20, h).data;
+    const bg = [d[0], d[1], d[2], d[3]];
+    for (let i = 4; i < d.length; i += 4) {
+      if (d[i] !== bg[0] || d[i + 1] !== bg[1] || d[i + 2] !== bg[2] || d[i + 3] !== bg[3]) return true;
+    }
+    return false;
+  });
+  expect(painted).toBe(true);
+  const tall = await page.evaluate(() => {
+    const inst = window.echarts.getInstanceByDom(document.querySelector('[data-card="traffic-flow"] .card-chart'));
+    return inst.__flowTall || [];
+  });
   const data = (await cardOption(page, 'traffic-flow')).series[0].data;
-  expect(data.length).toBeGreaterThan(2);
   for (const n of data) {
     const lines = String(n.label.formatter).split('\n').length;
-    expect(lines, n.name).toBeLessThanOrEqual(3);
+    expect(lines, n.name).toBeLessThanOrEqual(tall.includes(n.name) ? 3 : 2);
   }
+  await card.screenshot({ path: testInfo.outputPath(`flow-card-${testInfo.project.name}.png`) });
 });
 
 test('stats_traffic_inputs_stacked_by_input_with_zoom', async ({ page }, testInfo) => {

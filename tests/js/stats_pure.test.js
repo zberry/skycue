@@ -892,6 +892,14 @@ function flowWinClients(k, mult) {
   return w;
 }
 
+test('flowGraph drawing height is capped for few nodes', () => {
+  const z = flowGraphOf(null, flowZero());
+  assert.strictEqual(z.height, 360);
+  assert.strictEqual(z.top, 8); assert.strictEqual(z.bottom, z.top);   // five decisions: drawH 344
+  const g12 = flowGraphOf(null, flowWinClients(12, 1));
+  assert.strictEqual(g12.height, 504); assert.strictEqual(g12.top, 8);
+});
+
 test('flowGraph height depends on the node set only', () => {
   assert.strictEqual(flowGraphOf().height, 360);
   assert.strictEqual(flowGraphOf(null, flowWinClients(8, 1)).height, 360);

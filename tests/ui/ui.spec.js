@@ -414,7 +414,7 @@ test('screenshots', async ({ page }, testInfo) => {
   await expect(page.locator('#cues-filters li').first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath(`skycue-cues-${testInfo.project.name}.png`), fullPage: true });
   await page.locator('#tab-config').click();
-  await expect(page.locator('#pane-config tr[data-key="receiver.lat"] .cfg-value')).toHaveText('38.9');
+  await expect(page.locator('#cfg-receiver-lat')).toHaveValue('38.9');
   await page.screenshot({ path: testInfo.outputPath(`skycue-config-${testInfo.project.name}.png`), fullPage: true });
 });
 
@@ -1026,13 +1026,14 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   await page.locator('#wx-toggle').click();
   await page.locator('#tab-config').click();
   const row = (k) => page.locator(`#pane-config tr[data-key="${k}"]`);
-  await expect(row('receiver.lat').locator('.cfg-value')).toHaveText('38.9');
-  await expect(row('receiver.lat').locator('.cfg-source')).toHaveText('conf');
-  await expect(row('web.port').locator('.cfg-value')).toHaveText(port);
-  await expect(row('web.port').locator('.cfg-restart')).toContainText('restart');
-  await expect(row('cues.min_interval_s').locator('.cfg-source')).toHaveText('default');
-  await expect(row('filters.max_range_nm').locator('.cfg-restart')).not.toContainText('restart');
-  await expect(page.locator('#pane-config table[data-group="Paths"] tr[data-key="paths.locations_file"]')).toHaveCount(1);
+  await expect(page.locator('#cfg-receiver-lat')).toHaveValue('38.9');
+  await expect(row('receiver.lat').locator('.badge.src')).toHaveText('conf');
+  await expect(page.locator('#cfg-web-port')).toHaveValue(port);
+  await expect(row('web.port').locator('.badge.pin')).toHaveText('bootstrap');
+  await expect(row('web.trail_seconds').locator('.badge.restart')).toHaveText('restart');
+  await expect(row('cues.min_interval_s').locator('.badge.src')).toHaveText('default');
+  await expect(row('filters.max_range_nm').locator('.badge.live')).toHaveText('live');
+  await expect(page.locator('#pane-config table[data-table="paths"] tr[data-key="paths.locations_file"]')).toHaveCount(1);
   await expect(page.locator('#config-daemon')).toContainText('skycued');
   // run.sh's skycued replays the readsb fixture in real time, looped.
   await expect(page.locator('#config-daemon tr', { hasText: 'Runs' })).toContainText(/replay of \S*readsb-sample\.jsonl \(speed 1, looped\)/);
@@ -1055,8 +1056,63 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   await expect(page.locator('#config-copy-status')).toHaveText('');
   await expect(page.locator('#config-copy-status')).not.toHaveClass(/\berror\b/);
   await expect(page.locator('#config-copy-text')).toBeHidden();
-  await expect(row('receiver.lat').locator('.cfg-value')).toHaveText('38.9');
+  await expect(page.locator('#cfg-receiver-lat')).toHaveValue('38.9');
   expect(errors).toEqual([]);
+});
+
+test('config_tab_edits_stage_apply_and_pending_restart', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openPage(page);
+  await page.locator('#cfg-toggle').click();
+  await expect(page.locator('#config-groups table').first()).toBeVisible();
+  await expect(page.locator('#config-groups h2').first()).toHaveText('[receiver]');
+  const th = page.locator('#pane-config tr[data-key="web.trail_seconds"] th');
+  await expect(th).toHaveText('trail_seconds');
+  await expect(th).toHaveAttribute('title', 'web.trail_seconds');
+  await expect(page.locator('#config-bar')).toBeHidden();
+  await expect(page.locator('#config-restart-banner')).toBeHidden();
+  const ctl = page.locator('#cfg-web-trail_seconds');
+  await ctl.fill('300');
+  await ctl.dispatchEvent('change');
+  await expect(page.locator('#config-bar')).toBeVisible();
+  await expect(page.locator('#config-bar-text')).toHaveText('1 change');
+  await page.locator('#config-apply').click();
+  await expect(page.locator('#config-bar')).toBeHidden();
+  const banner = page.locator('#config-restart-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('1 setting waits for a restart');
+  await expect(page.locator('#config-pending-list')).toContainText('web.trail_seconds');
+  const row = page.locator('#pane-config tr[data-key="web.trail_seconds"]');
+  await expect(row.locator('.badge.src')).toHaveText('overrides');
+  await expect(row.locator('.cfg-hint')).toHaveText(/^(file: .*)?$/);
+  await expect(page.locator('#config-restart')).toBeHidden();
+  await expect(page.locator('#config-supervisor')).toContainText('none');
+  const cfg = (await api('/api/config')).body;
+  expect(cfg.keys.find((k) => k.key === 'web.trail_seconds').source).toBe('overrides');
+  expect(cfg.pending_restart).toEqual([{ key: 'web.trail_seconds', running: '120', configured: '300' }]);
+  // Reset: back to skycue.toml, and the restart note goes away.
+  await row.locator('.cfg-reset').click();
+  await expect(page.locator('#config-bar-text')).toHaveText('1 change');
+  await page.locator('#config-apply').click();
+  await expect(banner).toBeHidden();
+  expect((await api('/api/config')).body.pending_restart).toEqual([]);
+  // A value of the wrong type is shown under its row and is not staged.
+  const lat = page.locator('#cfg-receiver-lat');
+  await lat.fill('');   // a number input cannot hold letters; cleared, it parses as not a number
+  await lat.dispatchEvent('change');
+  await expect(page.locator('#pane-config tr[data-key="receiver.lat"] .cfg-err')).toHaveText(/expected/);
+  await expect(page.locator('#config-bar')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('config_tab_bootstrap_and_pinned_rows_disabled', async ({ page }) => {
+  // run.sh's skycued has no --set, so only the bootstrap half applies here.
+  await openPage(page);
+  await page.locator('#cfg-toggle').click();
+  await expect(page.locator('#config-groups table').first()).toBeVisible();
+  const bind = page.locator('#cfg-web-bind');
+  await expect(bind).toBeDisabled();
+  await expect(bind).toHaveAttribute('title', 'edit skycue.toml and restart');
 });
 
 // ---- FIS-B ---------------------------------------------------------------------

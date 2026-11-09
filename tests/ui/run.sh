@@ -98,7 +98,7 @@ lat = 38.9
 lon = -77.0
 [cues]
 tcp_port = $3
-$6
+${6:-}
 [web]
 port = $2
 trail_seconds = 120
@@ -107,7 +107,7 @@ max_range_nm = 150
 min_elevation_deg = 0
 [stats]
 file = "$4"
-$5
+${5:-}
 EOC
 }
 write_conf "$tmp/skycue.toml" "$web_port" "$cue_port" ""

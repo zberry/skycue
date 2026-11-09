@@ -1,3 +1,7 @@
+// The Recorder class: files, rotation, retention and failure streaks. The
+// recording format itself (keys, field builders, JSONL/CSV encoding) is in
+// recording_codec.cpp.
+
 #include "recorder.hpp"
 #include "recording_codec.hpp"
 
@@ -5,21 +9,16 @@
 #include "fisb/fisb_store.hpp"
 
 #include "log.hpp"
-#include "observation_json.hpp"
 #include "retention.hpp"
-#include "rotating_file.hpp"
 #include "time_util.hpp"
 #include "track_names.hpp"
 
 #include <sys/stat.h>
 
-#include <algorithm>
 #include <atomic>
 #include <cerrno>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <limits>
 #include <set>
 #include <stdexcept>
 #include <utility>

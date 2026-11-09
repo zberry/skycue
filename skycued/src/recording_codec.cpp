@@ -1,27 +1,17 @@
+// The recording format as code: the key tables, the field builders, JSONL and
+// CSV encoding, and reading records back. The Recorder class (files, rotation,
+// retention, failure streaks) is in recorder.cpp.
+
 #include "recording_codec.hpp"
 
-#include "recorder.hpp"
-
-#include "fisb/fisb_json.hpp"
-#include "fisb/fisb_store.hpp"
-
-#include "log.hpp"
 #include "observation_json.hpp"
-#include "retention.hpp"
-#include "rotating_file.hpp"
 #include "time_util.hpp"
 #include "track_names.hpp"
 
-#include <sys/stat.h>
-
-#include <algorithm>
-#include <atomic>
-#include <cerrno>
 #include <cmath>
-#include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <limits>
-#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -36,11 +26,7 @@ using skycue::Source;
 
 }  // namespace
 
-namespace {
-
 // ---- Field builders ----
-
-}  // namespace
 
 Field textField(const char* key, std::string value)
 {

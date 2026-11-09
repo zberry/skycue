@@ -4,7 +4,6 @@
 #include "retention.hpp"
 #include "temp_dir.hpp"
 
-#include <ftw.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>

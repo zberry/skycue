@@ -6,7 +6,6 @@
 #include "temp_dir.hpp"
 
 #include <dirent.h>
-#include <ftw.h>
 #include <unistd.h>
 
 #include <algorithm>

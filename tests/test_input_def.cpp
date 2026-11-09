@@ -8,7 +8,6 @@
 #include "json_lite.hpp"
 #include "temp_dir.hpp"
 
-#include <ftw.h>
 #include <stdio.h>
 #include <unistd.h>
 

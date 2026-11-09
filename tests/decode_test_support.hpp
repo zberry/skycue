@@ -284,6 +284,7 @@ inline Me typeOnly(int tc) {
 }
 
 // A decoder with its observations collected into obs; a test derives from it and adds its own feed().
+// Destroying obs before dec is safe: a decoder emits nothing on destruction.
 template <class Dec>
 struct DecoderRig {
     explicit DecoderRig(skycued::decode::DecoderConfig cfg = {}, std::string input_id = "in1")

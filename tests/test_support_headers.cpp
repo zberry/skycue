@@ -49,6 +49,23 @@ BOOST_AUTO_TEST_CASE(temp_dir_lives_for_its_scope)
     BOOST_TEST(!fileExists(kept));
 }
 
+BOOST_AUTO_TEST_CASE(temp_dir_removes_nested_trees)
+{
+    std::string kept;
+    {
+        TempDir t;
+        kept = t.path;
+        BOOST_REQUIRE(::mkdir((kept + "/a").c_str(), 0755) == 0);
+        BOOST_REQUIRE(::mkdir((kept + "/a/b").c_str(), 0755) == 0);
+        std::ofstream(kept + "/a/b/f") << "x";
+        BOOST_TEST(fileExists(kept + "/a/b/f"));
+    }
+    BOOST_TEST(!fileExists(kept + "/a/b/f"));
+    BOOST_TEST(!fileExists(kept + "/a/b"));
+    BOOST_TEST(!fileExists(kept + "/a"));
+    BOOST_TEST(!fileExists(kept));
+}
+
 BOOST_AUTO_TEST_CASE(temp_dir_name_has_the_tag)
 {
     TempDir t("x");

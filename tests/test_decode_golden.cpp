@@ -39,7 +39,6 @@ namespace {
 
 const std::string kFixtures = SKYCUE_FIXTURE_DIR;
 
-
 struct Snap {  // one position observation of ours with the fields it carried
     double lat = 0, lon = 0;
     std::optional<int32_t> alt;

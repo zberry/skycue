@@ -35,7 +35,6 @@ const std::string kGolden = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-sample.g
 const std::string kStratux = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux.golden.jsonl.gz";
 const std::string kStratuxB = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux-b.golden.jsonl.gz";  // the 2015 "problem" log
 
-
 // A decoder variant: the faithful one, or one with a deliberate fault.
 struct Variant {
     int alt_delta_ft = 0;

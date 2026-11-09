@@ -40,7 +40,6 @@ namespace {
 const std::string kGolden = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-synthetic.golden.jsonl.gz";
 const std::string kExpect = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-synthetic.expect.jsonl.gz";
 
-
 struct RequireGoldens {
     RequireGoldens()
     {

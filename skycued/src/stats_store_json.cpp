@@ -8,6 +8,7 @@
 #include "log.hpp"
 #include "recorder.hpp"
 #include "time_util.hpp"
+#include "track_names.hpp"
 
 #include <sys/stat.h>
 
@@ -81,7 +82,7 @@ bool alignedTo(int64_t t_s, int64_t len)
 
 std::string trackKey(const TrackId& id)
 {
-    return hexAddress(id.address) + "|" + recording::addressTypeName(id.type);
+    return hexAddress(id.address) + "|" + addressTypeName(id.type);
 }
 
 std::optional<TrackId> parseTrackKey(const std::string& s)
@@ -94,7 +95,7 @@ std::optional<TrackId> parseTrackKey(const std::string& s)
         return std::nullopt;
     const std::string type = s.substr(bar + 1);
     for (AddressType t : {AddressType::icao, AddressType::non_icao, AddressType::tisb_trackfile, AddressType::other})
-        if (type == recording::addressTypeName(t))
+        if (type == addressTypeName(t))
             return TrackId{*addr, t};
     return std::nullopt;
 }
@@ -102,7 +103,7 @@ std::optional<TrackId> parseTrackKey(const std::string& s)
 std::optional<Source> parseSourceName(const std::string& s)
 {
     for (Source v : {Source::adsb_1090, Source::uat_978, Source::tisb, Source::adsr, Source::mlat, Source::other})
-        if (s == recording::sourceName(v))
+        if (s == sourceName(v))
             return v;
     return std::nullopt;
 }
@@ -516,7 +517,7 @@ std::string StatsStore::toJson() const
         inputs.str(joinList(a->inputs));
         registration.str(a->registration.value_or(std::string()));
         category.str(a->category.value_or(std::string()));
-        source.str(recording::sourceName(a->source));
+        source.str(sourceName(a->source));
     }
     JsonWriter ac;
     ac.addRaw("key", key.done());

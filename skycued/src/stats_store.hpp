@@ -51,7 +51,7 @@
 // with the id and time of that maximum and its observation count. Identity
 // fields (callsign, squawk, registration, category, emergency) come from
 // state.latest. Categorical counts: category ([A-D][0-7], else "none"),
-// source and addr_type (recording::sourceName/addressTypeName), input,
+// source and addr_type (sourceName/addressTypeName), input,
 // decision (decisionName), squawk_emergency ("7500", "7600", "7700").
 // An observation with source uat_978 sets uatSeen().
 //

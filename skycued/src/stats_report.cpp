@@ -4,6 +4,7 @@
 #include "json_lite.hpp"
 #include "recorder.hpp"
 #include "time_util.hpp"
+#include "track_names.hpp"
 #include "fisb/fisb_decoder.hpp"
 #include "fisb/fisb_json.hpp"
 #include "fisb/fisb_store.hpp"
@@ -320,8 +321,8 @@ StatsReport computeStats(const std::vector<RecordingRecord>& input, const StatsO
         const TrackObservation& o = r.obs;
         ++ac.observations;
         ++(o.on_ground.value_or(false) ? ac.on_ground : ac.airborne);
-        const char* src = recording::sourceName(o.source);
-        const char* typ = recording::addressTypeName(o.id.type);
+        const char* src = sourceName(o.source);
+        const char* typ = addressTypeName(o.id.type);
         ++ac.by_source[src].obs;
         source_ac[src].insert(o.id);
         ++ac.by_addr_type[typ].obs;
@@ -469,7 +470,7 @@ StatsReport computeStats(const std::vector<RecordingRecord>& input, const StatsO
                     best = s.first;
                     best_n = s.second;
                 }
-            row.source = recording::sourceName(best);
+            row.source = sourceName(best);
             row.callsign = a.callsign;
             row.registration = a.registration;
             row.category = a.category;
@@ -488,7 +489,7 @@ StatsReport computeStats(const std::vector<RecordingRecord>& input, const StatsO
     // ---- sent stream ----
     auto& st = rep.sent;
     for (DropReason d : kDropReasons)
-        st.drops[recording::dropReasonName(d)] = 0;
+        st.drops[dropReasonName(d)] = 0;
     std::map<TrackId, uint64_t> per_ac;
     for (const RecordingRecord* rp : recs) {
         const RecordingRecord& r = *rp;
@@ -853,7 +854,7 @@ std::string formatStatsTextBody(const StatsReport& rep)
                    "max nm", "mean gs");
         for (const auto& r : rep.top)
             out += fmt("  %-8s %-14s %-10s %-4s %-8s %-8s %7llu  %-20s  %-20s %7s %7s %7s %7s\n",
-                       trackIdText(r.id).c_str(), recording::addressTypeName(r.id.type), r.source.c_str(),
+                       trackIdText(r.id).c_str(), addressTypeName(r.id.type), r.source.c_str(),
                        orDash(r.category).c_str(), orDash(r.callsign).c_str(), orDash(r.registration).c_str(),
                        ull(r.obs), timeShort(r.first).c_str(), timeShort(r.last).c_str(),
                        orDash(r.min_alt_ft).c_str(), orDash(r.max_alt_ft).c_str(), orDash1(r.max_range_nm).c_str(),
@@ -874,7 +875,7 @@ std::string formatStatsTextBody(const StatsReport& rep)
     out += fmt("Updates with the keyframe flag: %llu\n", ull(st.keyframe_flagged));
     out += "Drops by reason:\n";
     for (DropReason d : kDropReasons) {
-        const char* name = recording::dropReasonName(d);
+        const char* name = dropReasonName(d);
         out += fmt("  %-12s %8llu\n", name, ull(st.drops.at(name)));
     }
     out += fmt("Filter changes: %llu\n", ull(st.filter_changes.size()));
@@ -886,7 +887,7 @@ std::string formatStatsTextBody(const StatsReport& rep)
     } else {
         out += fmt("  %-8s %-14s %8s\n", "hex", "addr_type", "updates");
         for (const auto& u : st.updates_per_aircraft)
-            out += fmt("  %-8s %-14s %8llu\n", trackIdText(u.first).c_str(), recording::addressTypeName(u.first.type),
+            out += fmt("  %-8s %-14s %8llu\n", trackIdText(u.first).c_str(), addressTypeName(u.first.type),
                        ull(u.second));
     }
     if (!st.compared) {
@@ -916,7 +917,7 @@ int64_t i64(uint64_t v) { return static_cast<int64_t>(v); }
 void addId(JsonWriter& w, const TrackId& id)
 {
     w.add("hex", trackIdText(id));
-    w.add("addr_type", recording::addressTypeName(id.type));
+    w.add("addr_type", addressTypeName(id.type));
 }
 
 std::string binsJson(const std::vector<StatsReport::Bin>& bins)
@@ -1155,7 +1156,7 @@ std::string formatStatsJson(const StatsReport& rep)
         w.add("keyframe_flagged", i64(st.keyframe_flagged));
         JsonWriter drops;
         for (DropReason d : kDropReasons) {
-            const char* name = recording::dropReasonName(d);
+            const char* name = dropReasonName(d);
             drops.add(name, i64(st.drops.at(name)));
         }
         w.addRaw("drops", drops.str());

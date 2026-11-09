@@ -5,6 +5,7 @@
 #include "log.hpp"
 #include "recorder.hpp"
 #include "time_util.hpp"
+#include "track_names.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -368,8 +369,8 @@ void StatsStore::observe(const TrackObservation& obs, const TrackState& state, c
     // Categorical counts.
     ++counts_[std::size_t(StatsCount::category)]
              [id_fields.category && validCategory(*id_fields.category) ? *id_fields.category : std::string("none")];
-    ++counts_[std::size_t(StatsCount::source)][recording::sourceName(obs.source)];
-    ++counts_[std::size_t(StatsCount::addr_type)][recording::addressTypeName(obs.id.type)];
+    ++counts_[std::size_t(StatsCount::source)][sourceName(obs.source)];
+    ++counts_[std::size_t(StatsCount::addr_type)][addressTypeName(obs.id.type)];
     countInput(counts_[std::size_t(StatsCount::input)], input);
     ++counts_[std::size_t(StatsCount::decision)][decisionName(result.decision)];
     if (emergencySquawk(id_fields.squawk))

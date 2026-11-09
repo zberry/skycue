@@ -175,16 +175,6 @@ std::optional<TrackObservation> observationFromRecord(const JsonObject& record);
 // has the wrong form or range. `out.file` is 0.
 bool sentRecordFromRecord(const JsonObject& record, RecordingRecord& out);
 
-// The enum texts both formats use ("adsb_1090", "non_icao", "source_lost", ...).
-const char* addressTypeName(skycue::AddressType type);
-const char* sourceName(skycue::Source source);
-const char* dropReasonName(skycue::DropReason reason);
-
-// The inverse of the three above; nullopt for text that names no enumerator.
-std::optional<skycue::AddressType> parseAddressType(const std::string& text);
-std::optional<skycue::Source> parseSource(const std::string& text);
-std::optional<skycue::DropReason> parseDropReason(const std::string& text);
-
 }  // namespace recording
 
 }  // namespace skycued

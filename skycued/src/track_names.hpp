@@ -10,6 +10,12 @@
 
 namespace skycued {
 
+// nullptr for a value that is not one of the enumerators.
+const char* lookupAddressTypeName(skycue::AddressType type);
+const char* lookupSourceName(skycue::Source source);
+const char* lookupDropReasonName(skycue::DropReason reason);
+
+// The lookup, else "other" ("timeout" for a drop reason): what the recorder writes.
 const char* addressTypeName(skycue::AddressType type);
 const char* sourceName(skycue::Source source);
 const char* dropReasonName(skycue::DropReason reason);

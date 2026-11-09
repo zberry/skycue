@@ -18,6 +18,7 @@
 #include "asterix/cat021.hpp"
 #include "json_escape.hpp"
 #include "time_util.hpp"
+#include "track_names.hpp"
 
 #include <boost/program_options.hpp>
 
@@ -94,39 +95,10 @@ std::string num(double v, const char* fmt = "%g")
 }
 std::string num(long long v) { return std::to_string(v); }
 
-const char* name(AddressType t)
-{
-    switch (t) {
-    case AddressType::icao: return "icao";
-    case AddressType::non_icao: return "non_icao";
-    case AddressType::tisb_trackfile: return "tisb_trackfile";
-    case AddressType::other: return "other";
-    }
-    return "unknown";
-}
-const char* name(Source s)
-{
-    switch (s) {
-    case Source::adsb_1090: return "adsb_1090";
-    case Source::uat_978: return "uat_978";
-    case Source::tisb: return "tisb";
-    case Source::adsr: return "adsr";
-    case Source::mlat: return "mlat";
-    case Source::other: return "other";
-    }
-    return "unknown";
-}
-const char* name(DropReason r)
-{
-    switch (r) {
-    case DropReason::timeout: return "timeout";
-    case DropReason::filtered: return "filtered";
-    case DropReason::source_lost: return "source_lost";
-    case DropReason::shutdown: return "shutdown";
-    case DropReason::stale: return "stale";
-    }
-    return "unknown";
-}
+const char* orUnknown(const char* name) { return name ? name : "unknown"; }
+const char* name(AddressType t) { return orUnknown(skycued::lookupAddressTypeName(t)); }
+const char* name(Source s) { return orUnknown(skycued::lookupSourceName(s)); }
+const char* name(DropReason r) { return orUnknown(skycued::lookupDropReasonName(r)); }
 
 const char* frameTypeName(FrameType t)
 {

@@ -35,15 +35,6 @@ using skycue::Source;
 
 }  // namespace
 
-// ---- enum names (forwards to track_names) ----
-
-const char* addressTypeName(AddressType t) { return skycued::addressTypeName(t); }
-const char* sourceName(Source s) { return skycued::sourceName(s); }
-const char* dropReasonName(DropReason r) { return skycued::dropReasonName(r); }
-std::optional<AddressType> parseAddressType(const std::string& s) { return skycued::parseAddressType(s); }
-std::optional<Source> parseSource(const std::string& s) { return skycued::parseSource(s); }
-std::optional<DropReason> parseDropReason(const std::string& s) { return skycued::parseDropReason(s); }
-
 namespace {
 
 // ---- Field builders ----
@@ -1046,8 +1037,8 @@ void Recorder::writeDrop(skycue::TrackId id, skycue::DropReason reason)
 {
     write(withHead(now8601(), "event", "drop",
                    {recording::textField(recording::sentKey("hex"), hexAddress(id.address)),
-                    recording::textField(recording::sentKey("addr_type"), recording::addressTypeName(id.type)),
-                    recording::textField(recording::sentKey("drop_reason"), recording::dropReasonName(reason))}));
+                    recording::textField(recording::sentKey("addr_type"), addressTypeName(id.type)),
+                    recording::textField(recording::sentKey("drop_reason"), dropReasonName(reason))}));
 }
 
 void Recorder::writeFilterChange(const std::string& description)

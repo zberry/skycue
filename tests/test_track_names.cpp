@@ -1,7 +1,7 @@
 #define BOOST_TEST_MODULE skycued_track_names
 #include <boost/test/unit_test.hpp>
 
-#include "recorder.hpp"
+#include "track_names.hpp"
 
 #include <skycue/types.hpp>
 
@@ -10,7 +10,7 @@
 // The enum texts are part of the recording file format and the stats files:
 // these tests pin them.
 
-using namespace skycued::recording;
+using namespace skycued;
 using skycue::AddressType;
 using skycue::DropReason;
 using skycue::Source;
@@ -72,4 +72,14 @@ BOOST_AUTO_TEST_CASE(out_of_range_values_use_the_recorder_fallbacks)
     BOOST_TEST(std::string(addressTypeName(static_cast<AddressType>(200))) == "other");
     BOOST_TEST(std::string(sourceName(static_cast<Source>(200))) == "other");
     BOOST_TEST(std::string(dropReasonName(static_cast<DropReason>(200))) == "timeout");
+}
+
+BOOST_AUTO_TEST_CASE(lookup_returns_null_for_unlisted_values)
+{
+    BOOST_TEST(lookupAddressTypeName(static_cast<AddressType>(200)) == nullptr);
+    BOOST_TEST(lookupSourceName(static_cast<Source>(200)) == nullptr);
+    BOOST_TEST(lookupDropReasonName(static_cast<DropReason>(200)) == nullptr);
+    BOOST_TEST(std::string(lookupSourceName(Source::mlat)) == "mlat");
+    BOOST_TEST(std::string(lookupAddressTypeName(AddressType::icao)) == "icao");
+    BOOST_TEST(std::string(lookupDropReasonName(DropReason::stale)) == "stale");
 }

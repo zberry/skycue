@@ -7,6 +7,7 @@
 #include "recorder.hpp"
 #include "stats_store.hpp"
 #include "time_util.hpp"
+#include "track_names.hpp"
 #include "web_api.hpp"
 #include "web_reply.hpp"
 
@@ -28,8 +29,6 @@ namespace webapi {
 
 namespace {
 
-using recording::addressTypeName;
-using recording::sourceName;
 using skycue::AddressType;
 using skycue::TrackId;
 using SysTime = std::chrono::system_clock::time_point;

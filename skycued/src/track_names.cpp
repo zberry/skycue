@@ -1,70 +1,89 @@
 #include "track_names.hpp"
 
+#include <cstddef>
+
 namespace skycued {
+
+namespace {
 
 using skycue::AddressType;
 using skycue::DropReason;
 using skycue::Source;
 
-const char* addressTypeName(AddressType t)
+template <typename E>
+struct NameEntry {
+    E value;
+    const char* name;
+};
+
+constexpr NameEntry<AddressType> addressTypeTable[] = {
+    {AddressType::icao, "icao"},
+    {AddressType::non_icao, "non_icao"},
+    {AddressType::tisb_trackfile, "tisb_trackfile"},
+    {AddressType::other, "other"},
+};
+
+constexpr NameEntry<Source> sourceTable[] = {
+    {Source::adsb_1090, "adsb_1090"},
+    {Source::uat_978, "uat_978"},
+    {Source::tisb, "tisb"},
+    {Source::adsr, "adsr"},
+    {Source::mlat, "mlat"},
+    {Source::other, "other"},
+};
+
+constexpr NameEntry<DropReason> dropReasonTable[] = {
+    {DropReason::timeout, "timeout"},
+    {DropReason::filtered, "filtered"},
+    {DropReason::source_lost, "source_lost"},
+    {DropReason::shutdown, "shutdown"},
+    {DropReason::stale, "stale"},
+};
+
+template <typename E, std::size_t N>
+const char* lookup(const NameEntry<E> (&table)[N], E value)
 {
-    switch (t) {
-    case AddressType::icao: return "icao";
-    case AddressType::non_icao: return "non_icao";
-    case AddressType::tisb_trackfile: return "tisb_trackfile";
-    case AddressType::other: return "other";
-    }
-    return "other";
+    for (const auto& e : table)
+        if (e.value == value)
+            return e.name;
+    return nullptr;
 }
 
-std::optional<AddressType> parseAddressType(const std::string& s)
+template <typename E, std::size_t N>
+std::optional<E> parse(const NameEntry<E> (&table)[N], const std::string& text)
 {
-    for (auto t : {AddressType::icao, AddressType::non_icao, AddressType::tisb_trackfile, AddressType::other})
-        if (s == addressTypeName(t))
-            return t;
+    for (const auto& e : table)
+        if (text == e.name)
+            return e.value;
     return std::nullopt;
+}
+
+}  // namespace
+
+const char* lookupAddressTypeName(AddressType t) { return lookup(addressTypeTable, t); }
+const char* lookupSourceName(Source s) { return lookup(sourceTable, s); }
+const char* lookupDropReasonName(DropReason r) { return lookup(dropReasonTable, r); }
+
+const char* addressTypeName(AddressType t)
+{
+    const char* n = lookupAddressTypeName(t);
+    return n ? n : "other";
 }
 
 const char* sourceName(Source s)
 {
-    switch (s) {
-    case Source::adsb_1090: return "adsb_1090";
-    case Source::uat_978: return "uat_978";
-    case Source::tisb: return "tisb";
-    case Source::adsr: return "adsr";
-    case Source::mlat: return "mlat";
-    case Source::other: return "other";
-    }
-    return "other";
-}
-
-std::optional<Source> parseSource(const std::string& s)
-{
-    for (auto v : {Source::adsb_1090, Source::uat_978, Source::tisb, Source::adsr, Source::mlat, Source::other})
-        if (s == sourceName(v))
-            return v;
-    return std::nullopt;
+    const char* n = lookupSourceName(s);
+    return n ? n : "other";
 }
 
 const char* dropReasonName(DropReason r)
 {
-    switch (r) {
-    case DropReason::timeout: return "timeout";
-    case DropReason::filtered: return "filtered";
-    case DropReason::source_lost: return "source_lost";
-    case DropReason::shutdown: return "shutdown";
-    case DropReason::stale: return "stale";
-    }
-    return "timeout";
+    const char* n = lookupDropReasonName(r);
+    return n ? n : "timeout";
 }
 
-std::optional<DropReason> parseDropReason(const std::string& s)
-{
-    for (auto r : {DropReason::timeout, DropReason::filtered, DropReason::source_lost, DropReason::shutdown,
-                   DropReason::stale})
-        if (s == dropReasonName(r))
-            return r;
-    return std::nullopt;
-}
+std::optional<AddressType> parseAddressType(const std::string& s) { return parse(addressTypeTable, s); }
+std::optional<Source> parseSource(const std::string& s) { return parse(sourceTable, s); }
+std::optional<DropReason> parseDropReason(const std::string& s) { return parse(dropReasonTable, s); }
 
 }  // namespace skycued

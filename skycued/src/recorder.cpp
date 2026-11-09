@@ -47,8 +47,6 @@ const char* addressTypeName(AddressType t)
     return "other";
 }
 
-namespace {
-
 std::optional<AddressType> parseAddressType(const std::string& s)
 {
     for (auto t : {AddressType::icao, AddressType::non_icao, AddressType::tisb_trackfile, AddressType::other})
@@ -56,8 +54,6 @@ std::optional<AddressType> parseAddressType(const std::string& s)
             return t;
     return std::nullopt;
 }
-
-}  // namespace
 
 const char* sourceName(Source s)
 {
@@ -72,8 +68,6 @@ const char* sourceName(Source s)
     return "other";
 }
 
-namespace {
-
 std::optional<Source> parseSource(const std::string& s)
 {
     for (auto v : {Source::adsb_1090, Source::uat_978, Source::tisb, Source::adsr, Source::mlat, Source::other})
@@ -81,8 +75,6 @@ std::optional<Source> parseSource(const std::string& s)
             return v;
     return std::nullopt;
 }
-
-}  // namespace
 
 const char* dropReasonName(DropReason r)
 {
@@ -96,8 +88,6 @@ const char* dropReasonName(DropReason r)
     return "timeout";
 }
 
-namespace {
-
 std::optional<DropReason> parseDropReason(const std::string& s)
 {
     for (auto r : {DropReason::timeout, DropReason::filtered, DropReason::source_lost, DropReason::shutdown,
@@ -106,6 +96,8 @@ std::optional<DropReason> parseDropReason(const std::string& s)
             return r;
     return std::nullopt;
 }
+
+namespace {
 
 // ---- Field builders ----
 

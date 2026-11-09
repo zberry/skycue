@@ -240,11 +240,50 @@ convert_conf_empty_overrides_file() {
   [ "$rc" = 2 ] && grep -q 'hex.conf:1' "$tmp/err" || fail "hex port: exit $rc"
 }
 
+# A daemon without decoders on a free port: sets $pid and $port once /api/state answers.
+start_bare_daemon() { # start_bare_daemon [extra skycued args...]
+  local i
+  base >"$tmp/r.toml"
+  port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+  local cue
+  cue=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+  "$skycued" --config "$tmp/r.toml" --set web.port="$port" --set cues.tcp_port="$cue" --set inputs.readsb.enable=false \
+    --set inputs.dump978.enable=false "$@" >"$tmp/d.out" 2>&1 &
+  pid=$!
+  bg_pids+=("$pid")
+  for (( i=0; i<100*slowf; i++ )); do
+    curl -sf "http://127.0.0.1:$port/api/state" >/dev/null 2>&1 && return 0
+    kill -0 "$pid" 2>/dev/null || { cat "$tmp/d.out"; fail "skycued exited early"; }
+    sleep 0.1
+  done
+  cat "$tmp/d.out"; fail "no answer on /api/state"
+}
+
+restart_exits_75_when_allowed() {
+  start_bare_daemon --set web.allow_restart=true
+  out=$(curl -s -X POST -H 'Content-Type: application/json' -d '{}' "http://127.0.0.1:$port/api/restart")
+  case $out in *'"exit_status":75'*) ;; *) fail "reply: $out" ;; esac
+  wait "$pid"; rc=$?
+  [ "$rc" = 75 ] || { cat "$tmp/d.out"; fail "exit status $rc, want 75"; }
+}
+
+restart_forbidden_exit_unchanged() {
+  start_bare_daemon
+  code=$(curl -s -o "$tmp/body" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' \
+         "http://127.0.0.1:$port/api/restart")
+  [ "$code" = 403 ] || fail "status $code: $(cat "$tmp/body")"
+  sleep 0.6
+  kill -0 "$pid" 2>/dev/null || fail "skycued exited after a forbidden restart"
+  kill -TERM "$pid"
+  wait "$pid"; rc=$?
+  [ "$rc" = 0 ] || fail "exit status $rc after SIGTERM, want 0"
+}
+
 for t in dump_env_placeholder_position_is_empty dump_env_inputs_file_flag_even_empty \
          string_keys_take_raw_text_from_set_and_env unknown_environment_variables_warn_once \
          convert_conf_empty_overrides_file dump_env_shell_roundtrip dump_env_error_exit2_empty_stdout set_overrides_file_value \
          no_uat_flag_wins_over_set convert_conf_example_matches_toml_example convert_conf_overrides_style \
-         convert_conf_reports_dropped_comments; do
+         convert_conf_reports_dropped_comments restart_exits_75_when_allowed restart_forbidden_exit_unchanged; do
   current=$t
   "$t"
   echo "ok $t"

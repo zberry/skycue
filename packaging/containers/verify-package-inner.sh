@@ -111,6 +111,11 @@ checks() {
   grep -qx 'ExecStart=/usr/bin/skycued --config /etc/skycue/skycue.toml' "$unit" || fail "2 unit ExecStart"
   grep -qx 'User=skycue' "$unit" || fail "2 unit User"
   grep -qx 'RestartPreventExitStatus=2' "$unit" || fail "2 unit has no RestartPreventExitStatus=2"
+  grep -qx 'SuccessExitStatus=75' "$unit" || fail "2 unit has no SuccessExitStatus=75"
+  grep -qx 'RestartForceExitStatus=75' "$unit" || fail "2 unit has no RestartForceExitStatus=75"
+  # The packaged config lets the web UI restart the daemon (the unit restarts it on exit 75).
+  awk '/^\[/ { t = $0 } t == "[web]" && /^allow_restart = true( |$)/ { found = 1 } END { exit !found }' "$conf" ||
+    fail "2 $conf has no 'allow_restart = true' under [web]"
   grep -qx 'StateDirectory=skycue' "$unit" || fail "2 unit has no StateDirectory=skycue"
   if [ "$KIND" = deb ]; then
     [ -e /etc/systemd/system/multi-user.target.wants/skycued.service ] ||
@@ -277,9 +282,22 @@ systemd_checks() {
   wait_api "$base/api/state" /work/sd-state.json "$state_check" 30 ||
     { journalctl -u skycued --no-pager | tail -n 20 >&2; echo "verify: last error: $api_err" >&2
       fail "systemd: GET /api/state: $api_out, want tracks"; }
+  # POST /api/restart: the daemon exits 75 and systemd starts it again (daemon.started changes).
+  wait_api "$base/api/config" /work/sd-config.json "import json,sys; print('ok ' + json.load(open(sys.argv[1]))['daemon']['started'])" 10 ||
+    fail "systemd: GET /api/config: $api_err"
+  started=${api_out#ok }
+  out=$(curl -fsS -m 5 -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/restart") ||
+    fail "systemd: POST /api/restart failed"
+  case $out in *'"exit_status":75'*) ;; *) fail "systemd: POST /api/restart answered '$out', want exit_status 75" ;; esac
+  wait_api "$base/api/config" /work/sd-config.json \
+    "import json,sys; s=json.load(open(sys.argv[1]))['daemon']['started']; print('ok' if s != sys.argv[2] else 'same')" 15 "$started" ||
+    { journalctl -u skycued --no-pager | tail -n 20 >&2; fail "systemd: daemon.started is still $started 15 s after POST /api/restart"; }
+  s=$(systemctl is-active skycued || true)
+  [ "$s" = active ] || fail "systemd: skycued is $s after the restart, want active"
   systemctl stop skycued || fail "systemd: systemctl stop skycued"
   [ -f "$stats" ] || { journalctl -u skycued --no-pager | tail -n 20 >&2; fail "systemd: no $stats written under the unit"; }
   owner_is_skycue "$stats" || fail "systemd: $stats is not owned by skycue"
+  say "systemd: POST /api/restart: exit 75, restarted by systemd"
   say "systemd: skycued active (NRestarts=0), /api/state ${api_out#ok } tracks, $stats written"
 
   # No receiver position: the start fails once and is not retried.

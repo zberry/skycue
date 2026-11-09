@@ -5,7 +5,8 @@
 // Exit status: 0 after SIGINT/SIGTERM (or --help/--version), 1 on a runtime
 // failure (a port that cannot be bound, a recording directory that cannot be
 // created), 2 on a usage or configuration error (also an unreadable or
-// invalid file given to --convert-conf).
+// invalid file given to --convert-conf), 75 restart requested (the supervisor
+// starts skycued again) from the web UI under web.allow_restart.
 
 #include "check_inputs.hpp"
 #include "conf_convert.hpp"
@@ -592,6 +593,10 @@ int run(int argc, char** argv)
     daemon.dump978 = !replaying && use_dump978;
     // The web UI (web.bind:web.port); web.port=0: none.
     std::unique_ptr<WebServer> web;
+    int exit_code = 0;
+    bool shutting_down = false;
+    boost::asio::steady_timer restart_timer(io);
+    std::function<void(const std::string&)> shutdown;  // set below, once the exit machinery exists
     if (config.web_port == 0) {
         LOG_INFO("web UI disabled (web.port=0)");
     } else {
@@ -601,6 +606,16 @@ int run(int argc, char** argv)
         wc.www_dir = www_dir;
         wc.map_dir = config.map_dir;
         wc.daemon = &daemon;
+        wc.on_restart = [&] {
+            // Deferred so the 202 reply is written before the web server stops.
+            restart_timer.expires_after(std::chrono::milliseconds(250));
+            restart_timer.async_wait([&](const boost::system::error_code& ec) {
+                if (ec || shutting_down)
+                    return;
+                exit_code = 75;
+                shutdown("restart requested from the web UI");
+            });
+        };
         web = std::make_unique<WebServer>(io, *engine, *runtime, wc);
         try {
             web->start();
@@ -640,16 +655,21 @@ int run(int argc, char** argv)
                 pollExit();
         });
     };
-    signals.async_wait([&](const boost::system::error_code& ec, int sig) {
-        if (ec)
+    shutdown = [&](const std::string& why) {
+        if (shutting_down)
             return;
-        LOG_INFO("signal " << sig << ": shutting down");
+        shutting_down = true;
+        LOG_INFO(why << ": shutting down");
         if (web)
             web->stop();
         engine->stop();  // shutdown drops; the Forwarder closes its sockets within ~2 s
         hub.stop();      // the user outputs; the cue destinations are the Forwarder's to drain
         exit_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         pollExit();
+    };
+    signals.async_wait([&](const boost::system::error_code& ec, int sig) {
+        if (!ec)
+            shutdown("signal " + std::to_string(sig));
     });
     io.run();
     web.reset();
@@ -661,7 +681,7 @@ int run(int argc, char** argv)
         sent->flush();
     if (fisb)
         fisb->flush();
-    return 0;
+    return exit_code;
 }
 
 }  // namespace

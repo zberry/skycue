@@ -32,6 +32,7 @@ expected=(
   '#dir = "/var/lib/skycue/recordings"'
   'allow_list_file = "allow.list"'
   'block_list_file = "block.list"'
+  'allow_restart = true'
 )
 [ "$(grep -cxF -- "${expected[0]}" "$out")" = 1 ] || fail "$out: want exactly one line '${expected[0]}'"
 [ "$(grep -cxF -- "${expected[1]}" "$out")" = 1 ] || fail "$out: want exactly one line '${expected[1]}'"
@@ -44,7 +45,7 @@ for line in 'lat = 0.0' 'lon = 0.0' 'raw_port = 30978' 'json_port = 30047' \
             'tcp_port = 30500' 'port = 8080'; do
   [ "$(grep -cE -- "^$line( +#.*)?\$" "$out")" = 1 ] || fail "$out: want '$line' kept from the example"
 done
-# Nothing but those six lines differs from the example.
+# Nothing but those seven lines differs from the example.
 [ "$(wc -l <"$out")" = "$(wc -l <"$example")" ] || fail "$out and the example differ in line count"
 changed=$(paste -d '\n' "$example" "$out" | awk 'NR % 2 { a = $0; next } a != $0 { n++ } END { print n + 0 }')
 [ "$changed" = "${#expected[@]}" ] || fail "$changed lines differ from the example, want ${#expected[@]}"

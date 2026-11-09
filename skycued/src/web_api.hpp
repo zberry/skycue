@@ -9,6 +9,7 @@
 
 #include "engine_events.hpp"
 
+#include <functional>
 #include <skycue/types.hpp>
 
 #include <map>
@@ -81,6 +82,7 @@ struct ApiContext {
     const DaemonInfo* daemon = nullptr;  // GET /api/config (web_config.hpp); nullptr: that is a 500
     StatsApiState* stats = nullptr;      // /api/stats/* (web_stats.hpp); nullptr: reset is not rate-limited
     std::string map_dir = {};            // /api/tiles-available reads here (paths.map_dir); "": www_dir
+    const std::function<void()>* on_restart = nullptr;  // POST /api/restart; null or empty: a 500
 };
 
 // True for "/api" and every path under "/api/".

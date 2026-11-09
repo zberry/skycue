@@ -32,6 +32,7 @@
 // Threading: lives on the Engine's io_context; call everything from its
 // thread. The Engine and the RuntimeConfig must outlive it.
 
+#include <functional>
 #include <boost/asio/io_context.hpp>
 
 #include <chrono>
@@ -54,6 +55,9 @@ struct WebConfig {
     // When set, those paths are read from here only, never from www_dir.
     std::string map_dir;
     const DaemonInfo* daemon = nullptr;  // for GET /api/config; must outlive the server
+    // POST /api/restart calls this (web.allow_restart); it must only schedule the shutdown, so the
+    // reply can still be written. Empty: the route answers 500.
+    std::function<void()> on_restart;
     size_t max_ws_queue_bytes = 2u << 20;
     std::chrono::milliseconds ping_interval{15000};
     std::chrono::milliseconds idle_timeout{30000};  // HTTP keep-alive connections

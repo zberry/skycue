@@ -46,7 +46,7 @@ Reply request(uint16_t port, http::verb verb, const std::string& target, const s
     s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
     http::request<http::string_body> req{verb, target, 11};
     req.set(http::field::host, "127.0.0.1:" + std::to_string(port));
-    if (verb == http::verb::put) {
+    if (verb == http::verb::put || verb == http::verb::post) {
         req.set(http::field::content_type, "application/json");
         req.body() = body;
     }
@@ -107,6 +107,7 @@ struct ConfigFx {
     std::unique_ptr<RuntimeConfig> rc;
     std::unique_ptr<WebServer> web;
     uint16_t port = 0;
+    int restarts = 0;  // calls of WebConfig::on_restart
 
     // `setup`, when given, runs first with the temp dir: it may write files
     // there and returns more skycue.toml entries (dotted key -> TOML literal).
@@ -147,6 +148,7 @@ struct ConfigFx {
             wc.port = 0;
             wc.www_dir = info.www_dir;
             wc.daemon = &info;
+            wc.on_restart = [this] { ++restarts; };
             web = std::make_unique<WebServer>(fx->t.io, *fx->engine, *rc, wc);
             web->start();
             port = web->localPort();
@@ -649,4 +651,23 @@ BOOST_AUTO_TEST_CASE(put_unwritable_dir_500_names_state_dir)
     const std::string e = parsed(r.body).getString("error").value_or("");
     BOOST_TEST(e.find(f.tmp.path) != std::string::npos, e);
     BOOST_TEST(e.find("paths.state_dir") != std::string::npos, e);
+}
+
+BOOST_AUTO_TEST_CASE(restart_forbidden_by_default)
+{
+    ConfigFx f;
+    const auto r = request(f.port, http::verb::post, "/api/restart", "{}");
+    BOOST_TEST(r.status == 403u, r.body);
+    BOOST_TEST(r.body == "{\"error\":\"restart not allowed (web.allow_restart)\"}", r.body);
+    BOOST_TEST(f.restarts == 0);
+    BOOST_TEST(request(f.port, http::verb::get, "/api/restart").status == 405u);
+}
+
+BOOST_AUTO_TEST_CASE(restart_calls_hook_when_allowed)
+{
+    ConfigFx f(nullptr, {"web.allow_restart=true"});
+    const auto r = request(f.port, http::verb::post, "/api/restart", "{}");
+    BOOST_TEST(r.status == 202u, r.body);
+    BOOST_TEST(r.body == "{\"ok\":true,\"exit_status\":75}", r.body);
+    BOOST_TEST(f.restarts == 1);
 }

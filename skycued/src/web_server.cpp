@@ -251,7 +251,8 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
             const webapi::ApiRequest api = webapi::makeApiRequest(method, target, fields, std::move(req.body()),
                                                                   peer);
             webapi::ApiContext ctx{srv->engine,     srv->runtime,    srv->cfg.www_dir,
-                                   srv->cfg.daemon, &srv->stats_api, srv->cfg.map_dir};
+                                   srv->cfg.daemon, &srv->stats_api, srv->cfg.map_dir,
+                                   &srv->cfg.on_restart};
             const auto r = webapi::handleApi(api, ctx);
             if (r.status >= 500)
                 LOG_ERROR("web: " << method << " " << path << ": " << r.body);

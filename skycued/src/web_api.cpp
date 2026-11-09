@@ -1095,6 +1095,18 @@ ApiResponse handleApi(const ApiRequest& request, ApiContext& context)
             return postListRoute(path == "/api/lists/allow" ? ListKind::allow : ListKind::block, body, engine,
                                  runtime);
         }
+        if (path == "/api/restart") {
+            if (method != "POST")
+                return notAllowed("POST");
+            if (auto rejected = rejectUnsafe(request))
+                return *rejected;
+            if (!runtime.effective().web_allow_restart)
+                return error(403, "restart not allowed (web.allow_restart)");
+            if (!context.on_restart || !*context.on_restart)
+                return error(500, "restart is not wired up");
+            (*context.on_restart)();
+            return json(202, "{\"ok\":true,\"exit_status\":75}");
+        }
         if (path == "/api/config/schema")
             return get ? json(200, configSchemaJson()) : notAllowed("GET");
         if (path == "/api/config") {

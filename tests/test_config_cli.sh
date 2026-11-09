@@ -7,20 +7,7 @@
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 example=$2 old_example=$3 fixtures=$4
-tmp=$(mktemp -d)
-bg_pids=()
-cleanup() {
-  local p i
-  for p in "${bg_pids[@]}"; do kill "$p" 2>/dev/null; done
-  for p in "${bg_pids[@]}"; do
-    for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
-    kill -9 "$p" 2>/dev/null
-  done
-  wait 2>/dev/null
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-fail() { echo "FAIL ($current): $*"; exit 1; }
+test_init config_cli
 current=setup
 for f in "$skycued" "$example" "$old_example" "$fixtures/readsb-sample.jsonl"; do [ -e "$f" ] || fail "$f missing"; done
 
@@ -103,9 +90,8 @@ no_uat_flag_wins_over_set() {
   NAME=SKYCUE_INPUTS_DUMP978_HOST
   [ "$(v --set inputs.dump978.host=10.0.0.2 --dump978-host 10.0.0.4)" = 10.0.0.4 ] || fail "--dump978-host under --set"
   # The startup lines name the source of each such key.
-  "$skycued" --config "$tmp/f.toml" --replay "$fixtures/readsb-sample.jsonl" --replay-speed 0 \
-    --set web.port=0 --set cues.tcp_port=0 --set inputs.dump978.enable=true --no-uat >"$tmp/start.log" 2>&1 &
-  bg_pids+=($!)
+  bg "$skycued" --config "$tmp/f.toml" --replay "$fixtures/readsb-sample.jsonl" --replay-speed 0 \
+    --set web.port=0 --set cues.tcp_port=0 --set inputs.dump978.enable=true --no-uat >"$tmp/start.log" 2>&1
   wait_file "$tmp/start.log" 10 && wait_for 10 grep -q ' forwarding' "$tmp/start.log" || { cat "$tmp/start.log"; fail "no startup"; }
   grep -q 'config: inputs.dump978.enable = false (flag)' "$tmp/start.log" || { cat "$tmp/start.log"; fail "no flag line"; }
   grep -q 'config: web.port = 0 (--set)' "$tmp/start.log" || { cat "$tmp/start.log"; fail "no --set line"; }

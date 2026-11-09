@@ -17,23 +17,9 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 pingsim=$2 dump=$3 fixtures=$4
 sample="$fixtures/readsb-sample.jsonl"
-tmp=$(mktemp -d)
-bg_pids=()
-cleanup() {
-  local p i
-  for p in "${bg_pids[@]}"; do kill "$p" 2>/dev/null; done
-  for p in "${bg_pids[@]}"; do # SIGTERM first; SIGKILL whatever is left after 3 s
-    for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
-    kill -9 "$p" 2>/dev/null
-  done
-  wait 2>/dev/null
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-fail() {
-  echo "FAIL: $*"
+test_init pingsim
+fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }
-  exit 1
 }
 for f in "$skycued" "$pingsim" "$dump" "$sample"; do [ -e "$f" ] || fail "$f missing"; done
 
@@ -62,9 +48,8 @@ cat > "$tmp/inputs.json" <<EOF
   {"id":"replayed","type":"pingstation_cat021","transport":"udp","bind":"127.0.0.1","port":$replay_port}
  ]}
 EOF
-"$skycued" --no-readsb --no-uat --inputs-file "$tmp/inputs.json" --config "$tmp/skycue.toml" \
-  >"$tmp/skycued.log" 2>&1 &
-bg_pids+=($!)
+bg "$skycued" --no-readsb --no-uat --inputs-file "$tmp/inputs.json" --config "$tmp/skycue.toml" \
+  >"$tmp/skycued.log" 2>&1
 base="http://127.0.0.1:$web_port"
 for (( i=0; i<100*slowf; i++ )); do curl -fs -o /dev/null "$base/api/stats" && break; sleep 0.1; done
 curl -fs -o /dev/null "$base/api/stats" || fail "web server did not come up"

@@ -11,23 +11,9 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 dump=$2 fixtures=$3
 replay="$fixtures/readsb-sample.jsonl"
-tmp=$(mktemp -d)
-bg_pids=()
-cleanup() {
-  local p i
-  for p in "${bg_pids[@]}"; do kill "$p" 2>/dev/null; done
-  for p in "${bg_pids[@]}"; do # SIGTERM first; SIGKILL whatever is left after 3 s
-    for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
-    kill -9 "$p" 2>/dev/null
-  done
-  wait 2>/dev/null
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-fail() {
-  echo "FAIL: $*"
+test_init dump
+fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }
-  exit 1
 }
 for f in "$skycued" "$dump" "$replay"; do [ -e "$f" ] || fail "$f missing"; done
 
@@ -45,9 +31,8 @@ keyframe_interval_s = 2
 [web]
 port = 0
 EOF
-"$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue.toml" \
-  >"$tmp/skycued.log" 2>&1 &
-bg_pids+=($!)
+bg "$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue.toml" \
+  >"$tmp/skycued.log" 2>&1
 
 ts='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z '
 frame_re="${ts}(HELLO|UPDATE|DROP|HB|BAD)( |$)"
@@ -143,8 +128,7 @@ c.close()
 EOF
 start_peer() { # sets $peer to HOST:PORT of a fresh peer
   rm -f "$tmp/peerport"
-  python3 -I "$tmp/peer.py" "$tmp/peerport" &
-  bg_pids+=($!)
+  bg python3 -I "$tmp/peer.py" "$tmp/peerport"
   local i
   for (( i=0; i<50*slowf; i++ )); do [ -s "$tmp/peerport" ] && break; sleep 0.1; done
   [ -s "$tmp/peerport" ] || fail "(e) python peer did not start"
@@ -205,9 +189,8 @@ port = 0
 EOF
 timeout $((30*slowf)) "$dump" --tcp-listen "127.0.0.1:$listen_port" --count 10 --timeout $((15*slowf)) >"$tmp/f.out" 2>"$tmp/f.err" &
 dump_pid=$!
-"$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue-out.toml" \
-  >"$tmp/skycued-out.log" 2>&1 &
-bg_pids+=($!)
+bg "$skycued" --replay "$replay" --replay-speed 50 --replay-loop --config "$tmp/skycue-out.toml" \
+  >"$tmp/skycued-out.log" 2>&1
 wait "$dump_pid"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/f.err"; tail -n 20 "$tmp/skycued-out.log"; fail "(f) exit $rc"; }

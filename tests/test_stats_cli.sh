@@ -7,23 +7,9 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 stats=$2 fixtures=$3
 sample="$fixtures/readsb-sample.jsonl"
-tmp=$(mktemp -d)
-bg_pids=()
-cleanup() {
-  local p i
-  for p in "${bg_pids[@]}"; do kill "$p" 2>/dev/null; done
-  for p in "${bg_pids[@]}"; do # SIGTERM first; SIGKILL whatever is left after 3 s
-    for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
-    kill -9 "$p" 2>/dev/null
-  done
-  wait 2>/dev/null
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-fail() {
-  echo "FAIL: $*"
+test_init stats_cli
+fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }
-  exit 1
 }
 for f in "$skycued" "$stats" "$sample"; do [ -e "$f" ] || fail "$f missing"; done
 

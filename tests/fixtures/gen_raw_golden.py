@@ -5,7 +5,8 @@
   reduce LINES OUT_GZ [--dump-series DIR]
                         one object per address, gzip JSONL sorted by hex:
     {hex, positions, second{t,lat,lon}, last{t,lat,lon,alt_baro,gs,track,
-     baro_rate,geom_rate}, flight, category, squawk, nic, nac_p}
+     baro_rate,geom_rate,heading_mag_deg,heading_true_deg,ias_kt,tas_kt,mach,roll_deg,
+     track_rate_dps,sel_alt_ft,sel_alt_fms_ft,qnh_mb,sel_heading_deg,nav_modes}, flight, category, squawk, nic, nac_p}
 """
 import gzip
 import json
@@ -29,7 +30,13 @@ IDENT = (("flight", "flight"), ("category", "category"), ("squawk", "squawk"),
          ("nic", "nic"), ("nac_p", "nac_p"))
 # Fields of the "last" object (absent when that line has none).
 MOTION = (("alt_baro", "alt_baro"), ("gs", "gs"), ("track", "track"),
-          ("baro_rate", "baro_rate"), ("geom_rate", "geom_rate"))
+          ("baro_rate", "baro_rate"), ("geom_rate", "geom_rate"),
+          # Comm-B / TC29 / airspeed fields, stored under skycued's names (nav_modes sorted).
+          ("mag_heading", "heading_mag_deg"), ("true_heading", "heading_true_deg"),
+          ("ias", "ias_kt"), ("tas", "tas_kt"), ("mach", "mach"), ("roll", "roll_deg"),
+          ("track_rate", "track_rate_dps"), ("nav_altitude_mcp", "sel_alt_ft"),
+          ("nav_altitude_fms", "sel_alt_fms_ft"), ("nav_qnh", "qnh_mb"),
+          ("nav_heading", "sel_heading_deg"), ("nav_modes", "nav_modes"))
 
 
 def dump_series(lines, outdir):
@@ -73,7 +80,8 @@ def reduce(lines, out):
                     a["t"] = o.get("now")
                     # Everything below is the line that carried the newest position, so a
                     # comparison at our own latest position sees the same moment.
-                    a["motion"] = {dst: o[src] for src, dst in MOTION if src in o}
+                    a["motion"] = {dst: (sorted(o[src]) if dst == "nav_modes" else o[src])
+                                   for src, dst in MOTION if src in o}
                     a["ident"] = {}
                     for src, dst in IDENT:
                         if src in o:

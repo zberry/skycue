@@ -27,7 +27,12 @@ import sys
 IDENT = (("callsign", "flight"), ("category", "category"), ("squawk", "squawk"),
          ("nic", "nic"), ("nac_p", "nac_p"))
 MOTION = (("alt_baro_ft", "alt_baro"), ("gs_kt", "gs"), ("track_deg", "track"),
-          ("baro_rate_fpm", "baro_rate"), ("geom_rate_fpm", "geom_rate"))
+          ("baro_rate_fpm", "baro_rate"), ("geom_rate_fpm", "geom_rate"),
+          ("heading_mag_deg", "heading_mag_deg"), ("heading_true_deg", "heading_true_deg"),
+          ("ias_kt", "ias_kt"), ("tas_kt", "tas_kt"), ("mach", "mach"), ("roll_deg", "roll_deg"),
+          ("track_rate_dps", "track_rate_dps"), ("sel_alt_ft", "sel_alt_ft"),
+          ("sel_alt_fms_ft", "sel_alt_fms_ft"), ("qnh_mb", "qnh_mb"),
+          ("sel_heading_deg", "sel_heading_deg"), ("nav_modes", "nav_modes"))
 
 
 UAT_MOTION = MOTION + (("alt_geom_ft", "alt_geom"),)
@@ -86,7 +91,8 @@ def main(src, out, uat=False, golden=False, ref=None):
             a["all"].append([p[0], p[1]])
             a["pos"] = p
             a["t"] = o.get("time")
-            a["motion"] = {dst: o[src_k] for src_k, dst in motion if src_k in o}
+            a["motion"] = {dst: (sorted(o[src_k]) if dst == "nav_modes" and isinstance(o[src_k], list) else o[src_k])
+                           for src_k, dst in motion if src_k in o}
             if not uat:
                 a["ident"] = {}
                 for src_k, dst in IDENT:

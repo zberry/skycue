@@ -14,7 +14,14 @@ Criteria (those of the C++ golden test, dynamic fields raised to 97 %):
   positions: we decode single frames locally, so ours is not the same ordinal) and >= 98 % last positions within 1e-5 degrees;
   identity (flight, category, squawk) exact where both have a value;
   alt_baro, gs (+-1 kt), track (+-0.1 deg, circular), baro_rate, geom_rate, nac_p:
-  >= 97 % agreement per field where both have a value.
+  >= 97 % agreement per field where both have a value (baro_rate included: readsb's Comm-B
+  BDS 6,0 rates are decoded by skycued too);
+  heading_mag_deg, heading_true_deg, sel_heading_deg (+-0.5 deg, circular), ias_kt, tas_kt
+  (+-1 kt), mach (+-0.004), roll_deg (+-0.5), track_rate_dps (+-0.1), sel_alt_ft (+-32),
+  sel_alt_fms_ft (exact), qnh_mb (+-0.8), nav_modes (same set): >= 95 % per field where both
+  have a value, gated only when THEIRS has >= 20 positioned aircraft carrying the field, else
+  "not enough data" is printed. heading_true_deg is informational only (counts printed, never gated:
+  readsb derives it from the magnetic heading with a declination model). Not applied under --uat.
 --uat (dump978-fa golden, reduce_received.py --uat/--uat-golden): every THEIRS address with
 >= 1 position is positioned by OURS (100 %; UAT positions are absolute, one frame each) and
 >= 100 % of the second and of the last positions are within 1e-5 degrees; identity as above;
@@ -30,16 +37,27 @@ import sys
 POS_TOL = 1e-5
 POS_MIN = 0.98
 DYN_MIN = 0.97
-# baro_rate is held at 95 %: measured 96.8 % (5 of 157). readsb also takes the vertical rate from
-# Comm-B BDS 6,0 replies (DF20/21, 32 ft/min resolution), which skycued does not decode until
-# Comm-B support lands; 3 of the 5 mismatches carry values a TC19 stream cannot produce, the other 2
-# are one 64 ft/min step. Re-tighten to DYN_MIN (97 %) then.
-MIN_BY_FIELD = {"baro_rate": 0.95}
-NOTE_BY_FIELD = {"baro_rate": "known cause: readsb's Comm-B BDS 6,0 rate (32 ft/min), not decoded by skycued yet; "
-                              "mismatches that are one 64 ft/min step are timing/quantisation"}
+# New fields (Comm-B, TC29, airspeed): gated at NEW_MIN where the golden has at least
+# NEW_MIN_AIRCRAFT aircraft carrying the field, else "not enough data" and not gated.
+# heading_true_deg is informational: readsb derives true_heading from the magnetic heading and a
+# geomagnetic declination model, while skycued passes along only what the aircraft sends (true heading
+# reaches it only from UAT track-type 3), so the field is not comparable on 1090.
+INFO_ONLY = {"heading_true_deg": "readsb derives true_heading from mag_heading with a declination model; "
+                                 "skycued reports only a true heading the aircraft sends (UAT), so not comparable on 1090"}
+NEW_MIN = 0.95
+NEW_MIN_AIRCRAFT = 20
+MIN_BY_FIELD = {}
+NOTE_BY_FIELD = {}
 IDENT = ("flight", "category", "squawk")
 DYN = (("alt_baro", 0.0, False), ("gs", 1.0, False), ("track", 0.1, True),
        ("baro_rate", 0.0, False), ("geom_rate", 0.0, False))
+# sel_alt_ft and qnh_mb: the same value is quantised by two sources (BDS 4,0: 16 ft, 0.1 mb; TC29: 32 ft,
+# 0.8 mb) and an aircraft with only one source can differ from readsb by a step of the other; the
+# tolerances are those larger steps.
+NEW = (("heading_mag_deg", 0.5, True), ("heading_true_deg", 0.5, True), ("ias_kt", 1.0, False),
+       ("tas_kt", 1.0, False), ("mach", 0.004, False), ("roll_deg", 0.5, False),
+       ("track_rate_dps", 0.1, False), ("sel_alt_ft", 32.0, False), ("sel_alt_fms_ft", 0.0, False),
+       ("qnh_mb", 0.8, False), ("sel_heading_deg", 0.5, True), ("nav_modes", None, False))
 UAT_DYN = (("alt_geom", 0.0, False),)
 
 
@@ -157,6 +175,32 @@ def compare(ours, theirs, uat=False):
         if n == 0:
             print("  FAIL: no comparable rows for %s (a vacuous pass is not a pass)" % f)
         ok &= n > 0 and r >= need
+    if not uat:
+        for f, tol, circ in NEW:
+            n = good = theirs_n = 0
+            for h in positioned:
+                ov = ours[h]["last"].get(f)
+                tv = theirs[h]["last"].get(f)
+                theirs_n += tv is not None
+                if ov is None or tv is None:
+                    continue
+                n += 1
+                if (set(ov) == set(tv)) if f == "nav_modes" else close(ov, tv, tol, circ):
+                    good += 1
+                else:
+                    print("%s differs: %s ours %s theirs %s" % (f, h, ov, tv))
+            r = good / n if n else 0.0
+            if f in INFO_ONLY:
+                print("%s: informational, not gated: %d of %d agree, golden has %d aircraft, ours has %d (NOTE: %s)" % (
+                    f, good, n, theirs_n, sum(1 for h in positioned if ours[h]["last"].get(f) is not None), INFO_ONLY[f]))
+                continue
+            if theirs_n < NEW_MIN_AIRCRAFT:
+                print("%s: %d of %d agree (%.2f %%); not enough data (golden has %d aircraft, need %d), not gated" % (
+                    f, good, n, 100 * r, theirs_n, NEW_MIN_AIRCRAFT))
+                continue
+            print("%s: %d of %d agree (%.2f %%, need %.0f %%; golden has %d aircraft)" % (
+                f, good, n, 100 * r, 100 * NEW_MIN, theirs_n))
+            ok &= n > 0 and r >= NEW_MIN
     print("observation counts (report only): positions ours %d theirs %d; addresses ours %d theirs %d" % (
         sum(r.get("positions", 0) for r in ours.values()), sum(r.get("positions", 0) for r in theirs.values()),
         len(ours), len(theirs)))

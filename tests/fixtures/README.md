@@ -72,14 +72,16 @@ one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
 ## raw/modes-120s.golden.jsonl.gz
 
 Provenance: derived facts (ICAO addresses, positions, identity fields, counts)
-computed by readsb 3.16.21 from the pyModeS-hosted capture; no capture bytes are included.
+computed by readsb 3.16.21 (regenerated 2026-11-09, now also with the Comm-B, TC29 and airspeed fields) from the pyModeS-hosted capture; no capture bytes are included.
 
 What readsb 3.16.21 makes of `raw/modes-120s.csv.gz`, committed (about 13 KB; the
 capture itself is not) so `decode_golden` can compare the 1090 decoder with it. It is
 aircraft data only: one JSON object per address, sorted by hex, with `positions` (the
 number of changes of readsb's reported position), `second` and `last` position
 (`t`, `lat`, `lon`), and, from the line that carried the last position, `alt_baro`,
-`gs`, `track`, `baro_rate`, `geom_rate`, `flight`, `category`, `squawk`, `nic`, `nac_p`
+`gs`, `track`, `baro_rate`, `geom_rate`, `heading_mag_deg`, `heading_true_deg`, `ias_kt`, `tas_kt`, `mach`, `roll_deg`,
+`track_rate_dps`, `sel_alt_ft`, `sel_alt_fms_ft`, `qnh_mb`, `sel_heading_deg`, `nav_modes` (readsb's `mag_heading`, `true_heading`,
+`ias`, `tas`, `mach`, `roll`, `track_rate`, `nav_*`, under skycued's names), `flight`, `category`, `squawk`, `nic`, `nac_p`
 where readsb had them. `gen_raw_golden.sh READSB RAWPLAY CSV_GZ OUT_GZ` makes it: it
 starts readsb without `--lat`/`--lon` (global CPR decoding only, as the test feeds
 the decoder) with a raw input port and a JSON output port that includes aircraft
@@ -87,8 +89,8 @@ without positions, plays the capture in with `skycue-rawplay --speed 1` (real
 time, about two minutes; faster playback breaks readsb's position speed check, which
 uses its own clock), collects the JSON lines and reduces them with
 `gen_raw_golden.py` (Python 3 standard library only). Both binaries are arguments.
-readsb also decodes Comm-B and TC29 content that skycued does not, so vertical rates
-and `nac_p` appear in the golden more often than in the decoder's output.
+skycued decodes the same Comm-B and TC29 content; `heading_true_deg` is reported but not gated (readsb derives
+it from a declination model).
 
 ## raw/uat-sample.txt.gz
 

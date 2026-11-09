@@ -746,40 +746,9 @@ std::optional<int> startWeb(Stack& st, const Options& o, const Config& config, R
     return std::nullopt;
 }
 
-int run(int argc, char** argv)
+// Starts the engine, then serves until a signal or a restart request; the process exit status.
+int runLoop(Stack& st, const Options& o, const po::variables_map& vm, const Config& config, RunState& rs)
 {
-    const auto started = std::chrono::system_clock::now();
-    Options o;
-    po::variables_map vm;
-    if (const auto rc = parseOptions(argc, argv, o, vm))
-        return *rc;
-    auto& config_path = o.config_path;
-    auto& replay_path = o.replay_path;
-    auto& readsb_host = o.readsb_host;
-    auto& dump978_host = o.dump978_host;
-    auto& www_dir = o.www_dir;
-    auto& inputs_file = o.inputs_file;
-    const bool replaying = vm.count("replay") > 0;
-    const bool check_only = vm.count("check-inputs") > 0;
-
-    std::map<std::string, std::string> env;
-    Config config;
-    if (const auto rc = loadDaemonConfig(o, vm, config, env))
-        return *rc;
-    readsb_host = config.readsb_host;
-    dump978_host = config.dump978_host;
-    const bool use_dump978 = config.dump978_enable;
-    const bool use_readsb = config.inputs_readsb_enable;
-    if (!vm.count("www-dir"))
-        www_dir = defaultWwwDir();
-
-    if (check_only)
-        return runCheckInputs(config, vm.count("inputs-file") ? inputs_file : resolveInputsFile(config, config_path),
-                              use_readsb, readsb_host, use_dump978, dump978_host);
-
-    Stack st(config);
-    if (const auto rc = buildEngine(st, o, vm, config, env, started))
-        return *rc;
     auto& io = st.io;
     auto& signals = st.signals;
     auto& forwarder = st.forwarder;
@@ -789,13 +758,13 @@ int run(int argc, char** argv)
     auto& fisb = st.fisb;
     auto& engine = st.engine;
     auto& runtime = st.runtime;
-    RunState rs(io);
-    if (const auto rc = startWeb(st, o, config, rs))
-        return *rc;
     auto& web = st.web;
     auto& exit_code = rs.exit_code;
     auto& shutting_down = rs.shutting_down;
     auto& shutdown = rs.shutdown;
+    const auto& replay_path = o.replay_path;
+    const bool replaying = vm.count("replay") > 0;
+
     try {
         engine->start();
     } catch (const std::exception& e) {
@@ -854,6 +823,45 @@ int run(int argc, char** argv)
     if (fisb)
         fisb->flush();
     return exit_code;
+}
+
+int run(int argc, char** argv)
+{
+    const auto started = std::chrono::system_clock::now();
+    Options o;
+    po::variables_map vm;
+    if (const auto rc = parseOptions(argc, argv, o, vm))
+        return *rc;
+    auto& config_path = o.config_path;
+    auto& readsb_host = o.readsb_host;
+    auto& dump978_host = o.dump978_host;
+    auto& www_dir = o.www_dir;
+    auto& inputs_file = o.inputs_file;
+    const bool check_only = vm.count("check-inputs") > 0;
+
+    std::map<std::string, std::string> env;
+    Config config;
+    if (const auto rc = loadDaemonConfig(o, vm, config, env))
+        return *rc;
+    readsb_host = config.readsb_host;
+    dump978_host = config.dump978_host;
+    const bool use_dump978 = config.dump978_enable;
+    const bool use_readsb = config.inputs_readsb_enable;
+    if (!vm.count("www-dir"))
+        www_dir = defaultWwwDir();
+
+    if (check_only)
+        return runCheckInputs(config, vm.count("inputs-file") ? inputs_file : resolveInputsFile(config, config_path),
+                              use_readsb, readsb_host, use_dump978, dump978_host);
+
+    Stack st(config);
+    if (const auto rc = buildEngine(st, o, vm, config, env, started))
+        return *rc;
+    auto& io = st.io;
+    RunState rs(io);
+    if (const auto rc = startWeb(st, o, config, rs))
+        return *rc;
+    return runLoop(st, o, vm, config, rs);
 }
 
 }  // namespace

@@ -215,7 +215,6 @@ struct Client::Impl {
             listenTcp();
             return;
         case Config::Transport::udp:
-        default:
             bindUdp();
             return;
         }

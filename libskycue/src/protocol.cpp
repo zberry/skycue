@@ -45,6 +45,9 @@ enum PresenceBit : unsigned {
 constexpr unsigned kV1KnownCount = 11; // version 1 knows bits 0-10 only
 constexpr size_t kCategoryLen = 2;
 
+// Header byte offsets (the magic occupies bytes 0-3).
+constexpr size_t kOffVersion = 4, kOffType = 5, kOffLen = 6;
+
 constexpr uint8_t kFlagKeyframe = 0x01;
 constexpr uint8_t kFlagOnGround = 0x02;
 constexpr uint8_t kFlagAltIsGeom = 0x04;
@@ -62,21 +65,9 @@ public:
     }
 
     void u8(uint8_t v) { buf_.push_back(v); }
-    void u16(uint16_t v)
-    {
-        buf_.push_back(static_cast<uint8_t>(v & 0xFFu));
-        buf_.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
-    }
-    void u32(uint32_t v)
-    {
-        for (unsigned i = 0; i < 4; ++i)
-            buf_.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFFu));
-    }
-    void u64(uint64_t v)
-    {
-        for (unsigned i = 0; i < 8; ++i)
-            buf_.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFFu));
-    }
+    void u16(uint16_t v) { le(v, 2); }
+    void u32(uint32_t v) { le(v, 4); }
+    void u64(uint64_t v) { le(v, 8); }
     void i32(int32_t v) { u32(static_cast<uint32_t>(v)); }
     void f32(float v)
     {
@@ -95,12 +86,18 @@ public:
     {
         // Every payload this encoder builds is far below 64 KiB.
         size_t len = buf_.size() - kHeaderSize;
-        buf_[6] = static_cast<uint8_t>(len & 0xFFu);
-        buf_[7] = static_cast<uint8_t>((len >> 8) & 0xFFu);
+        buf_[kOffLen] = static_cast<uint8_t>(len & 0xFFu);
+        buf_[kOffLen + 1] = static_cast<uint8_t>((len >> 8) & 0xFFu);
         return std::move(buf_);
     }
 
 private:
+    void le(uint64_t v, unsigned bytes)
+    {
+        for (unsigned i = 0; i < bytes; ++i)
+            buf_.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFFu));
+    }
+
     std::vector<uint8_t> buf_;
 };
 
@@ -109,6 +106,7 @@ private:
 class Reader {
 public:
     explicit Reader(const std::vector<uint8_t>& v) : p_(v.data()), n_(v.size()) {}
+    Reader(const uint8_t* data, size_t n) : p_(data), n_(n) {}
 
     bool u8(uint8_t& v)
     {
@@ -180,6 +178,22 @@ private:
     size_t pos_ = 0;
 };
 
+void writeId(Writer& w, const TrackId& id)
+{
+    w.u32(id.address);
+    w.u8(static_cast<uint8_t>(id.type));
+}
+
+bool readId(Reader& r, TrackId& id)
+{
+    uint32_t address = 0;
+    uint8_t type = 0;
+    if (!(r.u32(address) && r.u8(type)))
+        return false;
+    id = TrackId{address, static_cast<AddressType>(type)};
+    return true;
+}
+
 int32_t scaleDegrees(double deg, double limit)
 {
     if (!std::isfinite(deg))
@@ -220,8 +234,7 @@ std::vector<uint8_t> encodeHello(const Hello& h)
 std::vector<uint8_t> encodeTrackUpdate(const Track& t)
 {
     Writer w(FrameType::track_update);
-    w.u32(t.id.address);
-    w.u8(static_cast<uint8_t>(t.id.type));
+    writeId(w, t.id);
     w.u8(static_cast<uint8_t>(t.source));
     uint8_t flags = 0;
     if (t.keyframe)
@@ -330,8 +343,7 @@ std::vector<uint8_t> encodeTrackUpdate(const Track& t)
 std::vector<uint8_t> encodeTrackDrop(const TrackDrop& d)
 {
     Writer w(FrameType::track_drop);
-    w.u32(d.id.address);
-    w.u8(static_cast<uint8_t>(d.id.type));
+    writeId(w, d.id);
     w.u8(static_cast<uint8_t>(d.reason));
     return w.finish();
 }
@@ -352,14 +364,17 @@ DecodeStatus decodeFrame(const uint8_t* data, size_t len, Frame& out, size_t& co
         if (data[i] != static_cast<uint8_t>(kMagic[i]))
             return DecodeStatus::bad_magic;
     }
-    if (data[4] < 1 || data[4] > max_version)
+    if (data[kOffVersion] < 1 || data[kOffVersion] > max_version)
         return DecodeStatus::bad_version;
-    size_t payload_len = static_cast<size_t>(data[6]) | (static_cast<size_t>(data[7]) << 8);
+    uint16_t len16 = 0;
+    Reader lr(data + kOffLen, kHeaderSize - kOffLen);
+    lr.u16(len16);
+    size_t payload_len = len16;
     if (len - kHeaderSize < payload_len)
         return DecodeStatus::need_more;
 
-    out.type = static_cast<FrameType>(data[5]);
-    out.version = data[4];
+    out.type = static_cast<FrameType>(data[kOffType]);
+    out.version = data[kOffVersion];
     out.payload.assign(data + kHeaderSize, data + kHeaderSize + payload_len);
     consumed = kHeaderSize + payload_len;
     return DecodeStatus::ok;
@@ -378,14 +393,14 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
     if (f.type != FrameType::track_update)
         return false;
     Reader r(f.payload);
-    uint32_t address = 0;
-    uint8_t type = 0, source = 0, flags = 0, reserved = 0;
+    TrackId id;
+    uint8_t source = 0, flags = 0, reserved = 0;
     uint64_t ms = 0;
     int32_t lat = 0, lon = 0;
     uint32_t presence = 0;
     if (f.version < 1 || f.version > kVersion)
         return false;
-    if (!(r.u32(address) && r.u8(type) && r.u8(source) && r.u8(flags) && r.u8(reserved) && r.u64(ms) &&
+    if (!(readId(r, id) && r.u8(source) && r.u8(flags) && r.u8(reserved) && r.u64(ms) &&
           r.i32(lat) && r.i32(lon)))
         return false;
     if (f.version == 1) {
@@ -399,7 +414,7 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
     const unsigned known = f.version == 1 ? kV1KnownCount : static_cast<unsigned>(p_known_count);
 
     Track t;
-    t.id = TrackId{address, static_cast<AddressType>(type)};
+    t.id = id;
     t.source = static_cast<Source>(source);
     t.keyframe = (flags & kFlagKeyframe) != 0;
     t.on_ground = (flags & kFlagOnGround) != 0;
@@ -425,7 +440,7 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
             return true;
         }
         bool ok = false;
-        switch (bit) {
+        switch (static_cast<PresenceBit>(bit)) {
         case p_alt_baro: ok = readOptional(r, t.alt_baro_ft, &Reader::i32); break;
         case p_alt_geom: ok = readOptional(r, t.alt_geom_ft, &Reader::i32); break;
         case p_ground_speed: ok = readOptional(r, t.ground_speed_kt, &Reader::f32); break;
@@ -458,7 +473,7 @@ bool decodeTrackUpdate(const Frame& f, Track& out)
         case p_track_rate: ok = readOptional(r, t.track_rate_dps, &Reader::f32); break;
         case p_emergency: ok = readOptional(r, t.emergency, &Reader::u8); break;
         case p_category: ok = readOptionalStr(r, t.category, kCategoryLen); break;
-        default: out = std::move(t); return true; // not reached: bit < known
+        case p_known_count: break; // bit < known excludes this
         }
         if (!ok)
             return false;
@@ -472,11 +487,11 @@ bool decodeTrackDrop(const Frame& f, TrackDrop& out)
     if (f.type != FrameType::track_drop)
         return false;
     Reader r(f.payload);
-    uint32_t address = 0;
-    uint8_t type = 0, reason = 0;
-    if (!(r.u32(address) && r.u8(type) && r.u8(reason)))
+    TrackId id;
+    uint8_t reason = 0;
+    if (!(readId(r, id) && r.u8(reason)))
         return false;
-    out.id = TrackId{address, static_cast<AddressType>(type)};
+    out.id = id;
     out.reason = static_cast<DropReason>(reason);
     return true;
 }

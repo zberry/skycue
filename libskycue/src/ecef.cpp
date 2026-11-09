@@ -210,10 +210,6 @@ Vec3 propagate(const EcefState& s, std::chrono::system_clock::time_point to) noe
             s.position.z + s.velocity->z * dt};
 }
 
-} // namespace skycue::geo
-
-namespace skycue::geo {
-
 std::optional<EcefState> toEcef(const Track& t, const Options& o)
 {
     auto c = compute(t, o, nullptr);

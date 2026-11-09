@@ -53,6 +53,7 @@
 #include <optional>
 #include <stdexcept>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -577,6 +578,13 @@ int run(int argc, char** argv)
         daemon.cli_overrides["inputs.dump978.enable"] = "false";
     if (vm.count("no-readsb"))
         daemon.cli_overrides["inputs.readsb.enable"] = "false";
+    // Keys a flag sets are pinned like the environment and --set: the Config tab cannot change them.
+    {
+        std::set<std::string> flag_keys;
+        for (const auto& kv : daemon.cli_overrides)
+            flag_keys.insert(kv.first);
+        runtime->setFlagKeys(std::move(flag_keys));
+    }
     // One line per key whose value is not the main file's or the default's, with where it came from.
     for (const auto& src : config.sources)
         if (!daemon.cli_overrides.count(src.key))
@@ -607,7 +615,12 @@ int run(int argc, char** argv)
         wc.map_dir = config.map_dir;
         wc.daemon = &daemon;
         wc.on_restart = [&] {
-            // Deferred so the 202 reply is written before the web server stops.
+            // Deferred so the 202 reply is written before the web server stops
+            // (250 ms is a heuristic: a local reply is written within a few ms,
+            // and the web server drops its connections as it stops). A signal
+            // that arrives first makes this a no-op (exit 0, shutting_down is
+            // set); once the timer has fired the restart wins (exit 75), and
+            // a later signal finds shutting_down set and does nothing.
             restart_timer.expires_after(std::chrono::milliseconds(250));
             restart_timer.async_wait([&](const boost::system::error_code& ec) {
                 if (ec || shutting_down)

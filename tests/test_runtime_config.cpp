@@ -1083,6 +1083,42 @@ BOOST_AUTO_TEST_CASE(overlay_left_next_to_the_config_warns_when_state_dir_is_set
     BOOST_TEST(!has(err2.text(), "skycue.runtime.json"), err2.text());
 }
 
+BOOST_AUTO_TEST_CASE(apply_config_path_keys_take_only_relative_names)
+{
+    RtFx f(headConf({}));
+    f.start();
+    using skycued::PathKeyError;
+    using skycued::ReadOnlyKeyError;
+    using V = skycued::toml_lite::Value;
+    f.fx->t.call([&] {
+        for (const char* key : {"inputs.file", "stats.file", "recording.dir", "paths.map_dir", "paths.locations_file",
+                                "filters.allow_list_file", "filters.block_list_file"}) {
+            BOOST_CHECK_THROW(f.rc->applyConfig({{key, V(std::string("/abs/x"))}}, {}, "ui"), PathKeyError);
+            BOOST_CHECK_THROW(f.rc->applyConfig({{key, V(std::string("../x"))}}, {}, "ui"), ReadOnlyKeyError);
+            BOOST_CHECK_THROW(f.rc->applyConfig({{key, V(std::string("a/../b"))}}, {}, "ui"), PathKeyError);
+        }
+        BOOST_CHECK(skycued::isRelativeName(""));
+        BOOST_CHECK(skycued::isRelativeName("a/b..c/..d"));
+        BOOST_CHECK(!skycued::isRelativeName(".."));
+        f.rc->applyConfig({{"recording.dir", V(std::string("recordings"))}}, {}, "ui");
+        f.rc->applyConfig({{"recording.dir", V(std::string())}}, {}, "ui");
+    });
+}
+
+BOOST_AUTO_TEST_CASE(flag_keys_are_pinned)
+{
+    RtFx f(headConf({}));
+    f.start();
+    using skycued::PinnedKeyError;
+    using V = skycued::toml_lite::Value;
+    f.fx->t.call([&] {
+        BOOST_TEST(f.rc->pinnedBy("inputs.readsb.enable") == "");
+        f.rc->setFlagKeys({"inputs.readsb.enable"});
+        BOOST_TEST(f.rc->pinnedBy("inputs.readsb.enable") == "flag");
+        BOOST_CHECK_THROW(f.rc->applyConfig({{"inputs.readsb.enable", V(true)}}, {}, "ui"), PinnedKeyError);
+    });
+}
+
 BOOST_AUTO_TEST_CASE(apply_config_orders_its_checks_and_reports_changes)
 {
     RtFx f(headConf({{"cues.max_interval_s", "10"}}));

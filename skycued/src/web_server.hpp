@@ -32,12 +32,12 @@
 // Threading: lives on the Engine's io_context; call everything from its
 // thread. The Engine and the RuntimeConfig must outlive it.
 
-#include <functional>
 #include <boost/asio/io_context.hpp>
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 

@@ -76,7 +76,8 @@ struct Config {
     // overrides file sits in paths.state_dir, else in this file's directory.
     std::string conf_path;
     // The dotted keys the main file assigns, and their values as TOML literals,
-    // whatever a higher layer replaces; parseConfigLayers fills them.
+    // whatever a higher layer replaces (in configValueText's text form, not as
+    // the TOML literal); parseConfigLayers fills them.
     std::set<std::string> file_keys;
     std::map<std::string, std::string> file_values;
     // The keys the overrides file assigns; its values replace the main file's.
@@ -139,6 +140,14 @@ const KeySpec& keySpec(const std::string& key);
 KeyClass keyClassOf(const std::string& key);
 // "live" | "restart" | "external" | "bootstrap"
 const char* keyClassName(KeyClass cls);
+// The path keys the web UI may set only to a relative name under
+// paths.state_dir (no absolute path, no ".." component): inputs.file,
+// stats.file, recording.dir, paths.map_dir, paths.locations_file,
+// filters.allow_list_file, filters.block_list_file. Hand edits are not
+// restricted.
+bool relativeOnlyKey(const std::string& key);
+// Whether `name` is a relative name without a ".." component ("" is).
+bool isRelativeName(const std::string& name);
 
 // dotted key -> the comment that documents it in the example text: the inline
 // "# ..." of its "key = value" line, else the comment block directly above it

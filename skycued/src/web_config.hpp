@@ -35,6 +35,11 @@ struct DaemonInfo {
     std::string supervisor;  // "systemd" | "launcher" | "none": what starts skycued again after it exits
 };
 
+// [{"key", "running", "configured"}, ...] for every key waiting for a restart
+// (RuntimeConfig::pendingRestartKeys()): the list GET /api/config and PUT
+// /api/config both return. Call on the RuntimeConfig's thread.
+std::string pendingRestartJson(const RuntimeConfig& runtime);
+
 // The FIS-B report locations at the time of the request (Engine).
 struct LocationFacts {
     std::string learned_path;   // fisb-locations.json; "" when it is not saved this run

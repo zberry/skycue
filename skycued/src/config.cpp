@@ -688,6 +688,30 @@ std::map<std::string, std::string> environmentOverrides(std::vector<std::string>
     return env;
 }
 
+bool relativeOnlyKey(const std::string& key)
+{
+    for (const char* k : {"inputs.file", "stats.file", "recording.dir", "paths.map_dir", "paths.locations_file",
+                          "filters.allow_list_file", "filters.block_list_file"})
+        if (key == k)
+            return true;
+    return false;
+}
+
+bool isRelativeName(const std::string& name)
+{
+    if (!name.empty() && name.front() == '/')
+        return false;
+    size_t at = 0;
+    while (at <= name.size()) {
+        const size_t slash = name.find('/', at);
+        const size_t end = slash == std::string::npos ? name.size() : slash;
+        if (name.compare(at, end - at, "..") == 0)
+            return false;
+        at = end + 1;
+    }
+    return true;
+}
+
 const std::vector<std::string>& overridesFileKeys()
 {
     static const std::vector<std::string> keys = [] {
@@ -705,6 +729,28 @@ std::string overridesPath(const Config& c)
     return c.state_dir.empty() ? overridesBeside(c.conf_path) : underDir(c.state_dir, kOverridesFileName);
 }
 
+namespace {
+
+// A TOML value in the text form configValueText uses: strings unquoted,
+// arrays space-joined, numbers in their shortest exact form.
+std::string literalText(const tl::Value& v)
+{
+    if (const auto* s = std::get_if<std::string>(&v))
+        return *s;
+    if (const auto* i = std::get_if<int64_t>(&v))
+        return std::to_string(*i);
+    if (const auto* d = std::get_if<double>(&v))
+        return formatRoundTrip(*d);
+    if (const auto* b = std::get_if<bool>(&v))
+        return *b ? "true" : "false";
+    std::string out;
+    for (const auto& e : std::get<tl::Array>(v))
+        out += (out.empty() ? "" : " ") + e;
+    return out;
+}
+
+}  // namespace
+
 Config parseConfigLayers(const std::string& main_text, const std::string& main_name,
                          const std::string& overrides_text, const std::string& overrides_name,
                          const std::vector<std::string>& set_args, const std::map<std::string, std::string>& env,
@@ -716,7 +762,7 @@ Config parseConfigLayers(const std::string& main_text, const std::string& main_n
     std::map<std::string, std::string> main_values;
     for (const auto& e : entries) {
         main_keys.insert(e.first);
-        main_values[e.first] = tl::formatValue(e.second.value);
+        main_values[e.first] = literalText(e.second.value);
     }
     std::set<std::string> override_keys;
     if (!overrides_text.empty()) {

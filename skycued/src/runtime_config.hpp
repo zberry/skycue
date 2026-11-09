@@ -76,7 +76,7 @@ struct PinnedKeyError : std::runtime_error {
     {
     }
     std::string key;
-    std::string source;  // "env" or "set"
+    std::string source;  // "env", "set" or "flag"
 };
 
 // A web edit of a bootstrap key (read only: it decides how skycued starts).
@@ -86,6 +86,19 @@ struct ReadOnlyKeyError : std::runtime_error {
     {
     }
     std::string key;
+
+protected:
+    ReadOnlyKeyError(const std::string& key_, const std::string& message) : std::runtime_error(message), key(key_) {}
+};
+
+// A web edit of a path key to an absolute path or one with a ".." component:
+// the web UI sets those only to a relative name under paths.state_dir (hand
+// edits of the files are not restricted).
+struct PathKeyError : ReadOnlyKeyError {
+    explicit PathKeyError(const std::string& key_)
+        : ReadOnlyKeyError(key_, key_ + ": only a relative name under paths.state_dir can be set from the web UI")
+    {
+    }
 };
 
 // What applyConfig changed: the keys whose configured value changed, and of
@@ -171,7 +184,8 @@ public:
     // value of a filter key it sets or clears, and applies the live keys with
     // `origin`. Checked in this order, changing nothing: an unknown key
     // (std::invalid_argument naming it), a bootstrap key (ReadOnlyKeyError), a
-    // key the environment or --set pins (PinnedKeyError), a key both set and
+    // key the environment, --set or a flag pins (PinnedKeyError), a path key set
+    // to an absolute path or a ".." name (PathKeyError, a ReadOnlyKeyError), a key both set and
     // cleared (std::invalid_argument), a value or combination skycued would
     // refuse (std::invalid_argument: the ConfigError message without the file
     // name and line). A
@@ -180,7 +194,11 @@ public:
     ConfigApplyResult applyConfig(const std::map<std::string, toml_lite::Value>& set,
                                   const std::set<std::string>& clear, const std::string& origin);
 
-    // "env" or "set" when that layer sets the (dotted) `key`, else "".
+    // The keys a command-line flag sets (main.cpp: --no-readsb, --web-port,
+    // ...); they are pinned like the environment and --set. Call once at startup.
+    void setFlagKeys(std::set<std::string> keys) { flag_keys_ = std::move(keys); }
+
+    // "env", "set" or "flag" when that layer sets the (dotted) `key`, else "".
     std::string pinnedBy(const std::string& key) const;
 
     // Writes the overlay into the baseline: filters.max_range_nm and
@@ -228,6 +246,7 @@ public:
     std::string overridesPath() const { return skycued::overridesPath(running_); }
 
 private:
+    std::set<std::string> flag_keys_;  // keys a command-line flag sets
     const std::string& listPath(ListKind kind) const;
     IdList& fileList(ListKind kind) { return kind == ListKind::allow ? allow_file_ : block_file_; }
     const IdList& fileList(ListKind kind) const { return kind == ListKind::allow ? allow_file_ : block_file_; }

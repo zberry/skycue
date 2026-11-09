@@ -451,6 +451,21 @@ BOOST_AUTO_TEST_CASE(config_entries_carry_class_editable_file_value_default)
     BOOST_TEST(!ek.by_key.at("filters.max_range_nm").getBool("editable").value_or(true));
 }
 
+BOOST_AUTO_TEST_CASE(file_value_uses_the_value_text_form)
+{
+    ConfigFx f([](const std::string&) {
+        return ConfigFx::ConfMap{{"recording.dir", "\"recs\""},
+                                 {"recording.formats", "[\"csv\", \"jsonl\"]"},
+                                 {"recording.max_gb", "2.50"},
+                                 {"fisb.enable", "false"}};
+    });
+    const auto keys = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+    BOOST_TEST(keys.by_key.at("recording.dir").getString("file_value").value_or("?") == "recs");
+    BOOST_TEST(keys.by_key.at("recording.formats").getString("file_value").value_or("?") == "csv jsonl");
+    BOOST_TEST(keys.by_key.at("recording.max_gb").getString("file_value").value_or("?") == "2.5");
+    BOOST_TEST(keys.by_key.at("fisb.enable").getString("file_value").value_or("?") == "false");
+}
+
 BOOST_AUTO_TEST_CASE(file_value_follows_hand_edits)
 {
     ConfigFx f([](const std::string&) { return ConfigFx::ConfMap{{"web.trail_seconds", "300"}}; });
@@ -630,6 +645,86 @@ BOOST_AUTO_TEST_CASE(put_bootstrap_403_pinned_409_unknown_400)
     BOOST_TEST(parsed(r.body).getString("source").value_or("") == "set");
 }
 
+BOOST_AUTO_TEST_CASE(put_class_and_pin_checks_come_before_the_type_check)
+{
+    ConfigFx f;
+    // A bootstrap key with the wrong JSON type is still a 403, not a 400.
+    auto r = put(f, R"({"set":{"web.bind":5}})");
+    BOOST_TEST(r.status == 403u, r.body);
+    BOOST_TEST(parsed(r.body).getString("key").value_or("") == "web.bind");
+    // As is a second key's class when the first has the wrong type.
+    BOOST_TEST(put(f, R"({"set":{"fisb.enable":1,"web.bind":"x"}})").status == 403u);
+    ConfigFx g(nullptr, {"filters.min_elevation_deg=2"});
+    r = put(g, R"({"set":{"filters.min_elevation_deg":"high"}})");
+    BOOST_TEST(r.status == 409u, r.body);
+    BOOST_TEST(parsed(r.body).getString("source").value_or("") == "set");
+}
+
+BOOST_AUTO_TEST_CASE(put_flag_set_key_409_and_not_editable)
+{
+    ConfigFx f;
+    f.info.cli_overrides["inputs.readsb.enable"] = "false";
+    f.fx->t.call([&] { f.rc->setFlagKeys({"inputs.readsb.enable"}); });
+    const auto r = put(f, R"({"set":{"inputs.readsb.enable":true}})");
+    BOOST_TEST(r.status == 409u, r.body);
+    BOOST_TEST(parsed(r.body).getString("key").value_or("") == "inputs.readsb.enable");
+    BOOST_TEST(parsed(r.body).getString("source").value_or("") == "flag");
+    BOOST_TEST(put(f, R"({"clear":["inputs.readsb.enable"]})").status == 409u);
+    const auto keys = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+    const auto& k = keys.by_key.at("inputs.readsb.enable");
+    BOOST_TEST(k.getString("source").value_or("") == "flag");
+    BOOST_TEST(!k.getBool("editable").value_or(true));
+    BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").empty());
+}
+
+BOOST_AUTO_TEST_CASE(put_returns_the_whole_pending_list)
+{
+    ConfigFx f;
+    BOOST_TEST_REQUIRE(put(f, R"({"set":{"fisb.enable":false}})").status == 200u);
+    const auto r = put(f, R"({"set":{"filters.max_range_nm":90}})");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    const auto p = parsed(r.body).getObjectArray("pending_restart");
+    BOOST_TEST_REQUIRE((p && p->size() == 1u));
+    BOOST_TEST((*p)[0].getString("key").value_or("") == "fisb.enable");
+}
+
+BOOST_AUTO_TEST_CASE(put_path_keys_take_only_relative_names)
+{
+    ConfigFx f;
+    for (const char* body : {R"({"set":{"recording.dir":"/etc"}})", R"({"set":{"recording.dir":"../x"}})",
+                             R"({"set":{"inputs.file":"a/../../b"}})", R"({"set":{"stats.file":"/tmp/s.json"}})"}) {
+        const auto r = put(f, body);
+        BOOST_TEST(r.status == 403u, body);
+        const std::string key = parsed(r.body).getString("key").value_or("");
+        BOOST_TEST(parsed(r.body).getString("error").value_or("") ==
+                   key + ": only a relative name under paths.state_dir can be set from the web UI");
+    }
+    BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").empty());
+    BOOST_TEST(put(f, R"({"set":{"recording.dir":"recordings"}})").status == 200u);
+    BOOST_TEST(put(f, R"({"set":{"recording.dir":""}})").status == 200u);
+    BOOST_TEST(put(f, R"({"clear":["recording.dir"]})").status == 200u);
+    const auto schema = parsed(request(f.port, http::verb::get, "/api/config/schema").body);
+    int relative_only = 0;
+    const auto schema_keys = schema.getObjectArray("keys");
+    BOOST_TEST_REQUIRE(schema_keys.has_value());
+    for (const auto& e : *schema_keys)
+        relative_only += e.getBool("relative_only").value_or(false) ? 1 : 0;
+    BOOST_TEST(relative_only == 7);
+}
+
+BOOST_AUTO_TEST_CASE(put_refuses_an_overrides_file_with_a_foreign_key)
+{
+    ConfigFx f;
+    std::ofstream(f.tmp.path + "/skycue.overrides.toml") << "[web]\nbind = \"0.0.0.0\"\n";
+    const auto r = put(f, R"({"set":{"fisb.enable":false}})");
+    BOOST_TEST(r.status == 500u, r.body);
+    const std::string e = parsed(r.body).getString("error").value_or("");
+    BOOST_TEST(e.find("skycue.overrides.toml") != std::string::npos, e);
+    BOOST_TEST(e.find("web.bind") != std::string::npos, e);
+    BOOST_TEST(e.find("by hand") != std::string::npos, e);
+    BOOST_TEST(slurp(f.tmp.path + "/skycue.overrides.toml").find("bind") != std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(put_cross_key_error_names_key)
 {
     ConfigFx f([](const std::string&) { return ConfigFx::ConfMap{{"cues.max_interval_s", "10"}}; });
@@ -681,7 +776,10 @@ BOOST_AUTO_TEST_CASE(put_external_key_listed_as_external)
     BOOST_TEST_REQUIRE(r.status == 200u, r.body);
     const auto j = parsed(r.body);
     BOOST_TEST(names(j, "external") == std::vector<std::string>{"sdr.gain_1090"}, boost::test_tools::per_element());
-    BOOST_TEST(j.getObjectArray("pending_restart")->empty());
+    // The pending list is the same one GET /api/config gives (it holds the external key too).
+    const auto p = j.getObjectArray("pending_restart");
+    BOOST_TEST_REQUIRE((p && p->size() == 1u), r.body);
+    BOOST_TEST((*p)[0].getString("key").value_or("") == "sdr.gain_1090");
 }
 
 BOOST_AUTO_TEST_CASE(put_unwritable_dir_500_names_state_dir)

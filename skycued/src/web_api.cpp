@@ -603,34 +603,37 @@ ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
     std::string problem;
     if (!BodyReader(body).read(raw, clear_list, problem))
         return error(400, problem);
-    std::map<std::string, toml_lite::Value> set;
-    for (const auto& [key, v] : raw) {
-        const KeySpec* spec = nullptr;
+    // The key's own checks first, as the spec orders them: unknown (400),
+    // bootstrap (403), pinned (409); only then the value types.
+    std::vector<std::string> touched(clear_list);
+    for (const auto& kv : raw)
+        touched.push_back(kv.first);
+    for (const auto& key : touched) {
         try {
-            spec = &keySpec(key);
+            keySpec(key);
         } catch (const std::invalid_argument&) {
             return keyError(400, "unknown key '" + key + "'", key);
         }
-        auto converted = toTomlValue(*spec, v);
+        if (keyClassOf(key) == KeyClass::bootstrap)
+            return keyError(403, ReadOnlyKeyError(key).what(), key);
+        const std::string pin = rc.pinnedBy(key);
+        if (!pin.empty()) {
+            const PinnedKeyError e(key, pin);
+            return json(409, JsonWriter().add("error", std::string(e.what())).add("key", key).add("source", pin).str());
+        }
+    }
+    std::map<std::string, toml_lite::Value> set;
+    for (const auto& [key, v] : raw) {
+        const KeySpec& spec = keySpec(key);
+        auto converted = toTomlValue(spec, v);
         if (!converted)
-            return keyError(400, key + ": expected " + typeWord(spec->type), key);
+            return keyError(400, key + ": expected " + typeWord(spec.type), key);
         if (!set.emplace(key, std::move(*converted)).second)
             return keyError(400, key + ": set twice", key);
     }
     const std::set<std::string> clear(clear_list.begin(), clear_list.end());
     try {
         const ConfigApplyResult r = rc.applyConfig(set, clear, "ui");
-        std::vector<std::string> pending;
-        for (const auto& k : r.pending_restart) {
-            // A value put back to the running one waits for nothing.
-            if (configValueText(rc.running(), k) == configValueText(rc.configured(), k))
-                continue;
-            pending.push_back(JsonWriter()
-                                  .add("key", k)
-                                  .add("running", configValueText(rc.running(), k))
-                                  .add("configured", configValueText(rc.configured(), k))
-                                  .str());
-        }
         std::vector<std::string> applied;
         for (const auto& k : r.applied)
             applied.push_back(jsonString(k));
@@ -640,7 +643,7 @@ ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
         return json(200, JsonWriter()
                              .add("ok", true)
                              .addRaw("applied", jsonArray(applied))
-                             .addRaw("pending_restart", jsonArray(pending))
+                             .addRaw("pending_restart", pendingRestartJson(rc))
                              .addRaw("external", jsonArray(external))
                              .str());
     } catch (const ReadOnlyKeyError& e) {

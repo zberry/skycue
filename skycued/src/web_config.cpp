@@ -96,11 +96,25 @@ std::string configSchemaJson()
             entry.add("max", spec.hi);
         if (!spec.values.empty())
             entry.addRaw("values", stringArray(spec.values));
+        if (relativeOnlyKey(spec.key))
+            entry.add("relative_only", true);
         keys.push_back(entry.str());
     }
     return JsonWriter().addRaw("keys", jsonArray(keys)).str();
     }();
     return cached;
+}
+
+std::string pendingRestartJson(const RuntimeConfig& runtime)
+{
+    std::vector<std::string> pending;
+    for (const auto& key : runtime.pendingRestartKeys())
+        pending.push_back(JsonWriter()
+                              .add("key", key)
+                              .add("running", configValueText(runtime.running(), key))
+                              .add("configured", configValueText(runtime.configured(), key))
+                              .str());
+    return jsonArray(pending);
 }
 
 std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, const LocationFacts& locations,
@@ -194,7 +208,7 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
                     running = run;
             }
         }
-        const bool editable = cls != KeyClass::bootstrap && source != "env" && source != "set";
+        const bool editable = cls != KeyClass::bootstrap && source != "env" && source != "set" && source != "flag";
         JsonWriter entry;
         entry.add("key", key)
             .add("value", value)
@@ -210,17 +224,10 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
         entry.add("default", defaultText(key));
         keys.push_back(entry.str());
     }
-    std::vector<std::string> pending;
-    for (const auto& key : runtime.pendingRestartKeys())
-        pending.push_back(JsonWriter()
-                              .add("key", key)
-                              .add("running", configValueText(runtime.running(), key))
-                              .add("configured", configValueText(runtime.configured(), key))
-                              .str());
     return JsonWriter()
         .addRaw("daemon", daemon.str())
         .addRaw("keys", jsonArray(keys))
-        .addRaw("pending_restart", jsonArray(pending))
+        .addRaw("pending_restart", pendingRestartJson(runtime))
         .str();
 }
 

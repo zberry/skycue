@@ -569,6 +569,12 @@ void RuntimeConfig::writeFile(SettledFile& file, const std::string& text)
 
 namespace {
 
+// The overrides file cannot be rewritten as it is (a key the web UI does not
+// write): not a write failure, so no hint about paths.state_dir.
+struct OverridesFileError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 // "2026-11-08T12:00:00Z"
 std::string isoUtcNow()
 {
@@ -587,11 +593,15 @@ void RuntimeConfig::writeOverrides(const std::map<std::string, toml_lite::Value>
     const std::string& path = overrides_watch_.path();
     std::map<std::string, toml_lite::Value> values;
     if (FileStamp::of(path).exists) {
-        // The keys it holds already stay; one that is not valid TOML is not
+        // The keys it holds already stay; one that is not valid TOML, or that
+        // is not an overrides key (a hand-written bootstrap key), is not
         // overwritten blind.
-        for (const auto& [key, entry] : toml_lite::parse(readFile(path), path).entries)
-            if (std::find(overridesFileKeys().begin(), overridesFileKeys().end(), key) != overridesFileKeys().end())
-                values[key] = entry.value;
+        for (const auto& [key, entry] : toml_lite::parse(readFile(path), path).entries) {
+            if (std::find(overridesFileKeys().begin(), overridesFileKeys().end(), key) == overridesFileKeys().end())
+                throw OverridesFileError(path + ": holds " + key +
+                                         ", which the web UI does not write here; fix it by hand");
+            values[key] = entry.value;
+        }
     }
     for (const auto& key : clear)
         values.erase(key);
@@ -647,6 +657,8 @@ void RuntimeConfig::writeOverlay(const Overlay& overlay)
 
 std::string RuntimeConfig::pinnedBy(const std::string& key) const
 {
+    if (flag_keys_.count(key))
+        return "flag";
     for (const auto& s : running_.sources)
         if (s.key == key && (s.source == "env" || s.source == "--set"))
             return s.source == "env" ? "env" : "set";
@@ -714,6 +726,12 @@ ConfigApplyResult RuntimeConfig::applyConfig(const std::map<std::string, toml_li
     for (const auto& key : touched)
         if (!pinnedBy(key).empty())
             throw PinnedKeyError(key, pinnedBy(key));
+    for (const auto& [key, value] : set)
+        if (relativeOnlyKey(key)) {
+            const auto* name = std::get_if<std::string>(&value);
+            if (name && !isRelativeName(*name))
+                throw PathKeyError(key);
+        }
     for (const auto& key : clear)
         if (set.count(key))
             throw std::invalid_argument(key + ": cannot be both set and cleared");
@@ -726,6 +744,8 @@ ConfigApplyResult RuntimeConfig::applyConfig(const std::map<std::string, toml_li
         const std::string what = e.what();
         const auto cut = what.find(": ");
         throw std::invalid_argument(cut == std::string::npos ? what : what.substr(cut + 2));
+    } catch (const OverridesFileError&) {
+        throw;
     } catch (const std::runtime_error& e) {
         throw std::runtime_error(std::string(e.what()) + "; the overrides file is " + overrides_watch_.path() +
                                  ", in paths.state_dir when that is set (set paths.state_dir to a directory"

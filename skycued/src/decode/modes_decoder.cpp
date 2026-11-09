@@ -584,10 +584,7 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
         }
     }
     if (o.geom_minus_baro_ft) o.geom_minus_baro_time = ks.gnss_diff.at;
-    o.gs_kt = ks.gs.fresh(now_, kFieldFresh);
-    o.track_deg = ks.track.fresh(now_, kFieldFresh);
-    o.heading_mag_deg = ks.heading_mag.fresh(now_, kFieldFresh);
-    o.heading_true_deg = ks.heading_true.fresh(now_, kFieldFresh);
+    fillCommon(o, ks, now_);
     o.ias_kt = ks.ias.fresh(now_, kFieldFresh);
     o.tas_kt = ks.tas.fresh(now_, kFieldFresh);
     o.mach = ks.mach.fresh(now_, kFieldFresh);
@@ -601,15 +598,6 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
     o.acas_ra = ks.acas_ra.fresh(now_, kAcasRaFresh);
     o.acas_sl = ks.acas_sl.fresh(now_, kFieldFresh);
     o.acas_ri = ks.acas_ri.fresh(now_, kFieldFresh);
-    o.baro_rate_fpm = ks.baro_rate.fresh(now_, kFieldFresh);
-    o.geom_rate_fpm = ks.geom_rate.fresh(now_, kFieldFresh);
-    o.callsign = ks.callsign.has ? std::optional(ks.callsign.value) : std::nullopt;  // identity: lives with the key
-    o.squawk = ks.squawk.has ? std::optional(ks.squawk.value) : std::nullopt;  // identity: lives with the key
-    o.emergency = ks.emergency.has ? std::optional(ks.emergency.value) : std::nullopt;  // identity: lives with the key (spec 14 item 5)
-    o.category = ks.category.has ? std::optional(ks.category.value) : std::nullopt;  // identity: lives with the key
-    o.nic = ks.nic.fresh(now_, kFieldFresh);
-    o.nac_p = ks.nac_p.fresh(now_, kFieldFresh);
-    o.rssi = ks.rssi.meanDb();
     o.raw_line = "*" + coding::toHex(f.bytes, true) + ";";
     o.input_id = input_id_;
     o.rebroadcast = ks.key.rebroadcast;

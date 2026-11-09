@@ -16,12 +16,14 @@
 #include <string>
 #include <vector>
 
+#include "fixture_io.hpp"
 #include "test_util.hpp"
 #include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
 #include "json_lite.hpp"
 
 using skycue_test::fileReadable;
+using skycue_test::forEachLine;
 
 using skycued::JsonObject;
 using namespace skycued::decode::uat;
@@ -96,9 +98,7 @@ std::optional<double> optNum(const JsonObject& o, const char* k) { return o.getD
 Report compare(const std::string& golden, const Variant& v)
 {
     Report r;
-    skycued::GzLineReader in(golden);
-    std::string line;
-    while (in.getline(line)) {
+    forEachLine(golden, [&](const std::string& line) {
         const auto g = JsonObject::parse(line);
         BOOST_REQUIRE(g);
         const std::string hex = g->getString("hex").value_or("");
@@ -171,7 +171,7 @@ Report compare(const std::string& golden, const Variant& v)
         cmp(r, hex, "category", cat, optStr(*g, "category"));
         cmp(r, hex, "emergency", em, optStr(*g, "emergency"));
         cmp(r, hex, "nac_p", nacp, optNum(*g, "nac_p"));
-    }
+    });
     return r;
 }
 

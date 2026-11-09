@@ -23,12 +23,14 @@
 #include <string>
 #include <vector>
 
+#include "fixture_io.hpp"
 #include "test_util.hpp"
 #include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
 #include "json_lite.hpp"
 
 using skycue_test::fileReadable;
+using skycue_test::forEachLine;
 
 using skycued::JsonObject;
 using namespace skycued::decode::uat;
@@ -90,26 +92,22 @@ std::vector<Row> loadRows()
 {
     std::map<std::string, JsonObject> golden;
     {
-        skycued::GzLineReader in(kGolden);
-        std::string line;
-        while (in.getline(line)) {
+        forEachLine(kGolden, [&](const std::string& line) {
             auto g = JsonObject::parse(line);
             BOOST_REQUIRE(g);
             const std::string hex = g->getString("hex").value_or("");
             golden.emplace(hex, std::move(*g));
-        }
+        });
     }
     std::vector<Row> rows;
-    skycued::GzLineReader in(kExpect);
-    std::string line;
-    while (in.getline(line)) {
+    forEachLine(kExpect, [&](const std::string& line) {
         auto e = JsonObject::parse(line);
         BOOST_REQUIRE(e);
         Row r{std::move(*e), std::nullopt};
         const auto it = golden.find(r.expect.getString("hex").value_or(""));
         if (it != golden.end()) r.golden = it->second;
         rows.push_back(std::move(r));
-    }
+    });
     return rows;
 }
 

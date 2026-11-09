@@ -4,6 +4,7 @@
 #include "decode/uat_decoder.hpp"
 #include "decode/uat_frame.hpp"
 #include "engine_test_support.hpp"
+#include "fixture_io.hpp"
 #include "gz_line_reader.hpp"
 #include "hub/raw_tap.hpp"
 #include "inputs/beast_raw_input.hpp"
@@ -93,31 +94,15 @@ struct Fixture {
     std::vector<std::string> down, up;  // lines without the stratux/rawrec prefix, ';'-terminated
 };
 
-Fixture sample()
+Fixture loadUatFixture(const std::string& file)
 {
     Fixture f;
-    skycued::GzLineReader in(kRaw + "uat-sample.txt.gz");
-    std::string line;
-    while (in.getline(line)) {
-        const auto u = skycued::parseUatLine(line);
-        if (!u)
-            continue;
-        (u->text[0] == '-' ? f.down : f.up).push_back(u->text);
-    }
-    return f;
-}
-
-Fixture stratux()
-{
-    Fixture f;
-    skycued::GzLineReader in(kRaw + "stratux-uat-2015.log.gz");
-    std::string line;
-    while (in.getline(line)) {
+    skycue_test::forEachLine(kRaw + file, [&](const std::string& line) {
         const auto u = skycued::parseUatLine(line);  // the <ns>, prefix; START, lines are refused
         if (!u)
-            continue;
+            return;
         (u->text[0] == '-' ? f.down : f.up).push_back(u->text);
-    }
+    });
     return f;
 }
 
@@ -234,7 +219,7 @@ std::string hexOf(const std::string& line)
 
 BOOST_AUTO_TEST_CASE(decode_off_counts_and_publishes_only, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     BOOST_REQUIRE_EQUAL(f.down.size(), 439u);
     Rig rig;
     const uint16_t port = freeTcpPort();
@@ -255,7 +240,7 @@ BOOST_AUTO_TEST_CASE(decode_off_counts_and_publishes_only, *skycue_test::needs_f
 
 BOOST_AUTO_TEST_CASE(builtin_dump978_does_not_decode_under_readsb, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     skycued::InputManagerConfig cfg;
     cfg.decode_raw = false;
     Rig rig;
@@ -270,7 +255,7 @@ BOOST_AUTO_TEST_CASE(builtin_dump978_does_not_decode_under_readsb, *skycue_test:
 
 BOOST_AUTO_TEST_CASE(builtin_dump978_decodes_under_skycued, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     skycued::InputManagerConfig cfg;
     cfg.decode_raw = true;
     Rig rig;
@@ -290,7 +275,7 @@ BOOST_AUTO_TEST_CASE(builtin_dump978_decodes_under_skycued, *skycue_test::needs_
 
 BOOST_AUTO_TEST_CASE(user_uat_raw_decodes_under_skycued, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     skycued::InputManagerConfig cfg;
     cfg.decode_raw = true;
     cfg.receiver_ref = std::make_pair(38.9, -77.0);
@@ -306,7 +291,7 @@ BOOST_AUTO_TEST_CASE(user_uat_raw_decodes_under_skycued, *skycue_test::needs_fix
 
 BOOST_AUTO_TEST_CASE(uplinks_still_go_to_fisb_when_decoding, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     BOOST_REQUIRE(!f.up.empty());
     Rig rig;
     const uint16_t port = runUat(rig, "up", true);
@@ -322,7 +307,7 @@ BOOST_AUTO_TEST_CASE(uplinks_still_go_to_fisb_when_decoding, *skycue_test::needs
 
 BOOST_AUTO_TEST_CASE(rssi_key_reaches_observation, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     // The first downlink that yields an observation on its own.
     std::string pick;
     for (const auto& l : f.down) {
@@ -382,7 +367,7 @@ BOOST_AUTO_TEST_CASE(rs_errors_of_the_line_are_counted)
 
 BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     std::map<int, int> per_qualifier, per_type;
     for (const auto& l : f.down) {
         const auto fr = uat::parseDownlinkLine(l);
@@ -425,7 +410,7 @@ BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier, *skycue_test::needs_fixture("
 
 BOOST_AUTO_TEST_CASE(stratux_log_decodes, *skycue_test::needs_fixture("raw/stratux-uat-2015.log.gz"))
 {
-    const auto f = stratux();
+    const auto f = loadUatFixture("stratux-uat-2015.log.gz");
     BOOST_REQUIRE(!f.down.empty());
     Rig rig;
     const uint16_t port = runUat(rig, "st", true);
@@ -440,7 +425,7 @@ BOOST_AUTO_TEST_CASE(stratux_log_decodes, *skycue_test::needs_fixture("raw/strat
 
 BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     int type1 = 0, with_both = 0, type0 = 0;
     for (const auto& l : f.down) {
         const auto fr = uat::parseDownlinkLine(l);
@@ -466,7 +451,7 @@ BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes, *skycue_test::needs_fixtu
 
 BOOST_AUTO_TEST_CASE(counters_in_state_json, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     Rig rig;
     const uint16_t port = runUat(rig, "cj", true);
     feed(rig, port, joined(f.down), f.down.size());
@@ -483,7 +468,7 @@ BOOST_AUTO_TEST_CASE(counters_in_state_json, *skycue_test::needs_fixture("raw/ua
 
 BOOST_AUTO_TEST_CASE(stop_mid_stream_no_callback_after_stop, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     Rig rig;
     rig.t.call([&] {
         rig.tap.setSink([&](const RawMessage&) { rig.in->stop(); }, [](RawKind) { return true; });
@@ -572,7 +557,7 @@ void sendUdp(uint16_t port, const std::string& s)
 
 BOOST_AUTO_TEST_CASE(two_feeds_one_aircraft_tracks_once, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
 {
-    const auto f = sample();
+    const auto f = loadUatFixture("uat-sample.txt.gz");
     // A downlink with a position, and its address.
     std::string line;
     uint32_t address = 0;

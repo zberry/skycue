@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "fixture_io.hpp"
 #include "test_util.hpp"
 #include "coding/bits.hpp"
 #include "decode/modes_decoder.hpp"
@@ -27,6 +28,7 @@
 #include "test_slow.hpp"
 
 using skycue_test::fileReadable;
+using skycue_test::forEachLine;
 
 using skycued::JsonObject;
 using skycued::TrackObservation;
@@ -130,38 +132,34 @@ BOOST_AUTO_TEST_CASE(golden_matches_readsb)
     });
 
     {
-        skycued::GzLineReader in(csv);
-        std::string line;
         std::vector<uint8_t> bytes;
-        while (in.getline(line)) {
+        forEachLine(csv, [&](const std::string& line) {
             const auto comma = line.find(',');
-            if (comma == std::string::npos) continue;
-            if (!skycued::coding::parseHex(line.substr(comma + 1), bytes)) continue;
+            if (comma == std::string::npos) return;
+            if (!skycued::coding::parseHex(line.substr(comma + 1), bytes)) return;
             const double epoch = std::stod(line.substr(0, comma));
             dec.feed(bytes,
                      ModesDecoder::Clock::time_point(
                          std::chrono::duration_cast<ModesDecoder::Clock::duration>(std::chrono::duration<double>(epoch))),
                      std::nullopt);
-        }
+        });
     }
 
     uint64_t golden_positions = 0;
     int eligible = 0, positioned = 0, second_ok = 0, last_ok = 0;
     {
-        skycued::GzLineReader in(golden);
-        std::string line;
-        while (in.getline(line)) {
+        forEachLine(golden, [&](const std::string& line) {
             const auto g = JsonObject::parse(line);
             BOOST_REQUIRE(g);
             const std::string hex = g->getString("hex").value_or("");
             const int64_t n = g->getInt("positions").value_or(0);
             golden_positions += static_cast<uint64_t>(n);
-            if (n < 2) continue;
+            if (n < 2) return;
             ++eligible;
             const auto it = ours.find(hex);
             if (it == ours.end() || it->second.positions.empty()) {
                 std::cout << "no position from us: " << hex << " (readsb " << n << ")\n";
-                continue;
+                return;
             }
             ++positioned;
             const auto& ps = it->second.positions;
@@ -193,7 +191,7 @@ BOOST_AUTO_TEST_CASE(golden_matches_readsb)
             if (const auto s = g->getString("squawk")) cmpStr(hex, "squawk", l.squawk, *s);
             if (const auto v = g->getInt("nic")) cmpNum(hex, "nic", asD(l.nic), static_cast<double>(*v), 0);
             if (const auto v = g->getInt("nac_p")) cmpNum(hex, "nac_p", asD(l.nac_p), static_cast<double>(*v), 0);
-        }
+        });
     }
 
     const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();

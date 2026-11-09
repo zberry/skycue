@@ -765,7 +765,7 @@ BOOST_AUTO_TEST_CASE(ra_lifecycle) {
     r.feed(df17(kAddr, velocity(0, 0)), 0.0);
     r.feed(df4(kAddr, ac13Alt(10000)), 0.5);
     r.obs.clear();
-    // t=1: a corrective "climb" RA (ARA bit 1 set, bit 2 = upward sense... text is the decoder's own)
+    // t=1: an RA with ARA bit 1 set and bit 3 set (a preventive "monitor vertical speed"; the text is the decoder's own)
     const auto ra = raOf(0x2000 | 0x0800, false, 0x0);
     r.feed(df16(kAddr, ac13Alt(10025), skycued::testing::acasRaMv(ra).v), 1.0);
     BOOST_CHECK_EQUAL(r.c().acas_ra, 1u);
@@ -1063,4 +1063,39 @@ BOOST_AUTO_TEST_CASE(nav_modes_replace_rules) {
     BOOST_REQUIRE(!r.obs.empty());
     BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavLnav);
     BOOST_CHECK_EQUAL(*r.obs.back().sel_alt_ft, 36992);
+}
+
+BOOST_AUTO_TEST_CASE(qnh_precedence_tc29_over_bds40) {
+    Rig r;
+    ready(r);
+    auto t = tsOf(true, true, false, false, false);
+    t.qnh_mb = 1013.6;
+    r.feed(df17(kAddr, targetState(t)), 1.0);
+    r.feed(df20(kAddr, ac13Alt(35025), bds40Mb().v), 2.0);  // QNH 1013.2, ignored: the TC29 value is fresh
+    BOOST_REQUIRE(!r.obs.empty() && r.obs.back().qnh_mb);
+    BOOST_CHECK_CLOSE(static_cast<double>(*r.obs.back().qnh_mb), 1013.6, 0.01);
+    r.obs.clear();
+    confirmedWithAlt(r, 35050, 69.0);
+    r.obs.clear();
+    r.feed(df20(kAddr, ac13Alt(35050), bds40Mb().v), 71.0);  // the TC29 is 70 s old: BDS 4,0 takes over
+    BOOST_REQUIRE(!r.obs.empty() && r.obs.back().qnh_mb);
+    BOOST_CHECK_CLOSE(static_cast<double>(*r.obs.back().qnh_mb), 1013.2, 0.01);
+}
+
+BOOST_AUTO_TEST_CASE(sel_alt_fms_precedence_tc29_over_bds40) {
+    Rig r;
+    ready(r);
+    skycued::decode::TargetState t;
+    t.sel_alt_fms_ft = 36992;
+    t.modes_valid = false;
+    r.feed(df17(kAddr, targetState(t)), 1.0);
+    r.feed(df20(kAddr, ac13Alt(35025), bds40Mb().v), 2.0);  // FMS 35008, ignored: the TC29 value is fresh
+    BOOST_REQUIRE(!r.obs.empty() && r.obs.back().sel_alt_fms_ft);
+    BOOST_CHECK_EQUAL(*r.obs.back().sel_alt_fms_ft, 36992);
+    r.obs.clear();
+    confirmedWithAlt(r, 35050, 69.0);
+    r.obs.clear();
+    r.feed(df20(kAddr, ac13Alt(35050), bds40Mb().v), 71.0);
+    BOOST_REQUIRE(!r.obs.empty() && r.obs.back().sel_alt_fms_ft);
+    BOOST_CHECK_EQUAL(*r.obs.back().sel_alt_fms_ft, 35008);
 }

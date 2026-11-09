@@ -51,8 +51,8 @@ std::optional<AcasRa> decodeAcasRaTc28(const Frame& f)
     return decodeBody(f.field56(32));
 }
 
-// Text. ARA bit k (1-based, bit 1 = 0x2000). With MTE = 0 and ARA bit 1 set
-// (a single threat, or several needing the same sense) bits 2..7 read pairwise:
+// Text. ARA bit k (1-based, bit 1 = 0x2000). With ARA bit 1 set (whatever MTE) bits 2..7
+// read pairwise:
 //   2 corrective (1) / preventive (0)      3 downward (1) / upward (0) sense
 //   4 increased rate   5 sense reversal    6 altitude crossing
 //   7 positive (1) / vertical speed limit (0)
@@ -62,16 +62,17 @@ std::optional<AcasRa> decodeAcasRaTc28(const Frame& f)
 //   VSL,       corrective -> "level off"
 //   VSL,       preventive -> "monitor vertical speed"
 // then ", increase" (bit 4, climb/descend only), ", reversal" (5), ", crossing" (6).
-// With MTE = 1 or ARA bit 1 clear the advisory is a multiple-threat one: the
-// text is the set ARA bits 8..13 joined by ", ": 8 "correct upward", 9 "climb",
-// 10 "correct downward", 11 "descend", 12 "crossing", 13 "sense reversal"
-// (14 reserved, ignored); none set -> "advisory". RAT: "clear of conflict", whatever the ARA says.
+// With ARA bit 1 clear and MTE = 1 (several threats, differing senses) bits 2..7 are
+// independent flags joined by ", ": 2 "correction upward", 3 "climb", 4 "correction
+// downward", 5 "descend", 6 "crossing", 7 "sense reversal"; none set -> "advisory".
+// ARA bit 1 clear and MTE = 0 -> "no RA". Bits 8..14 are never read.
+// RAT: "clear of conflict", whatever the ARA says.
 std::string acasRaText(const AcasRa& ra)
 {
     if (ra.rat)
         return "clear of conflict";
     auto bit = [&](unsigned k) { return ((ra.ara >> (14u - k)) & 1u) != 0; };
-    if (!ra.mte && bit(1)) {
+    if (bit(1)) {
         std::string s;
         const bool positive = bit(7), corrective = bit(2);
         if (positive)
@@ -86,14 +87,16 @@ std::string acasRaText(const AcasRa& ra)
             s += ", crossing";
         return s;
     }
-    static const char* const kMulti[] = {"correct upward", "climb", "correct downward", "descend", "crossing",
-                                         "sense reversal"};  // ARA bits 8..13; bit 14 is reserved
+    if (!ra.mte)
+        return "no RA";
+    static const char* const kMulti[] = {"correction upward", "climb", "correction downward", "descend",
+                                         "crossing", "sense reversal"};  // ARA bits 2..7
     std::string s;
-    for (unsigned k = 8; k <= 13; ++k) {
+    for (unsigned k = 2; k <= 7; ++k) {
         if (bit(k)) {
             if (!s.empty())
                 s += ", ";
-            s += kMulti[k - 8];
+            s += kMulti[k - 2];
         }
     }
     if (s.empty())

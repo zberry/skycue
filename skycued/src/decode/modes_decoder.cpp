@@ -208,7 +208,6 @@ void ModesDecoder::onDf11(const Frame& f, uint32_t residual, std::optional<uint8
     ++counters_.decoded;  // no observation from a DF11 (design 5.2)
 }
 
-// The three mode bits BDS 4,0 can state; autopilot, LNAV and TCAS (TC29 only) are kept.
 
 void ModesDecoder::applyAcasRa(KeyState& ks, const AcasRa& ra) {
     AcasRaState st;

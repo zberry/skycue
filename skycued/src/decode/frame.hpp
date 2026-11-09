@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "decode/altitude.hpp"
+#include "decode/field56.hpp"
 
 namespace skycued::decode {
 
@@ -22,6 +23,9 @@ struct Frame {  // a 7- or 14-byte Mode S frame, validated for length/DF
     // Big-endian bit field, first = 0..111. Throws std::out_of_range when the
     // field leaves the frame or count > 32.
     uint32_t bits(unsigned first, unsigned count) const;
+    // The 56 bits starting at frame bit `first` (0-based; 32 for ME/MB/MV) as a
+    // uint64_t with the first bit most significant. Throws std::out_of_range.
+    uint64_t field56(unsigned first) const;
 };
 
 // nullopt: length/DF mismatch or DF not listed.
@@ -40,8 +44,21 @@ struct Velocity {
     std::optional<int32_t> rate_fpm;
     bool rate_is_geom = false;
     std::optional<int32_t> gnss_baro_diff_ft;
+    // ST3/4 only: magnetic heading and airspeed (IAS or TAS by the type bit).
+    std::optional<float> heading_mag_deg;
+    std::optional<uint16_t> ias_kt, tas_kt;
 };
-std::optional<Velocity> decodeVelocity(const Frame& f);  // TC19 ST1-4 (ST3/4: no gs/track)
+std::optional<Velocity> decodeVelocity(const Frame& f);  // TC19 ST1-4 (ST3/4: heading/airspeed, no gs/track)
+
+// TC29 target state and status, subtype 1 (version 2). Subtype 0 -> nullopt.
+struct TargetState {
+    std::optional<int32_t> sel_alt_ft, sel_alt_fms_ft;  // by the altitude type bit
+    std::optional<float> qnh_mb, sel_heading_deg;
+    std::optional<uint8_t> nac_p;
+    bool modes_valid = false;
+    bool autopilot = false, vnav = false, althold = false, approach = false, tcas = false, lnav = false;
+};
+std::optional<TargetState> decodeTargetState(const Frame& f);
 
 struct SurfaceMovement {
     std::optional<float> gs_kt, track_deg;

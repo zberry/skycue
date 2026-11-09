@@ -482,6 +482,13 @@ target_compile_definitions(test_coding PRIVATE BOOST_TEST_DYN_LINK)
 skycue_set_warnings(test_coding)
 add_test(NAME coding COMMAND test_coding)
 
+# Comm-B BDS 4,0/5,0/6,0 inference, ACAS RA decoding (frame level, pure).
+add_executable(test_decode_commb test_decode_commb.cpp)
+target_link_libraries(test_decode_commb PRIVATE skycued_core Boost::unit_test_framework)
+target_compile_definitions(test_decode_commb PRIVATE BOOST_TEST_DYN_LINK)
+skycue_set_warnings(test_decode_commb)
+add_test(NAME decode_commb COMMAND test_decode_commb)
+
 # Mode S frame fields and altitude/squawk code tables.
 add_executable(test_decode_fields test_decode_fields.cpp)
 target_link_libraries(test_decode_fields PRIVATE skycued_core Boost::unit_test_framework)

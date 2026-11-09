@@ -10,6 +10,7 @@
 #include "coding/bits.hpp"
 #include "decode/altitude.hpp"
 #include "decode/frame.hpp"
+#include "decode_test_support.hpp"
 
 using namespace skycued;
 using namespace skycued::decode;
@@ -489,4 +490,113 @@ BOOST_AUTO_TEST_CASE(capability_and_flight_status)
     setBits(d4, 0, 5, 4);
     setBits(d4, 5, 1, 1);
     BOOST_CHECK(!verticalStatusGround(asFrame(d4)));
+}
+
+BOOST_AUTO_TEST_CASE(velocity_subtype3_heading_and_ias)
+{
+    const Frame f = asFrame(testing::df17(0xABCDEF, testing::velocityAirspeed(3, 123.75f, 250, false, -640)));
+    const auto v = decodeVelocity(f);
+    BOOST_REQUIRE(v.has_value());
+    BOOST_REQUIRE(v->heading_mag_deg.has_value());
+    BOOST_CHECK_SMALL(*v->heading_mag_deg - 123.75f, 0.01f);
+    BOOST_REQUIRE(v->ias_kt.has_value());
+    BOOST_CHECK_EQUAL(*v->ias_kt, 250);
+    BOOST_CHECK(!v->tas_kt.has_value());
+    BOOST_CHECK(!v->track_deg.has_value());
+    BOOST_CHECK(!v->gs_kt.has_value());
+    BOOST_REQUIRE(v->rate_fpm.has_value());
+    BOOST_CHECK_EQUAL(*v->rate_fpm, -640);
+}
+
+BOOST_AUTO_TEST_CASE(velocity_subtype3_public_example)
+{
+    // The Riddle's airspeed example: heading 243.98 deg, TAS 375 kt.
+    const auto v = decodeVelocity(frameFromHex(kVelB));
+    BOOST_REQUIRE(v.has_value());
+    BOOST_REQUIRE(v->heading_mag_deg.has_value());
+    BOOST_CHECK_SMALL(*v->heading_mag_deg - 243.98f, 0.01f);
+    BOOST_REQUIRE(v->tas_kt.has_value());
+    BOOST_CHECK_EQUAL(*v->tas_kt, 375);
+    BOOST_CHECK(!v->ias_kt.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(velocity_subtype4_tas_4kt_lsb)
+{
+    const Frame f = asFrame(testing::df17(0xABCDEF, testing::velocityAirspeed(4, 10.0f, 480, true)));
+    const auto v = decodeVelocity(f);
+    BOOST_REQUIRE(v.has_value());
+    BOOST_REQUIRE(v->tas_kt.has_value());
+    BOOST_CHECK_EQUAL(*v->tas_kt, 480);
+    BOOST_CHECK(!v->ias_kt.has_value());
+    BOOST_REQUIRE(v->heading_mag_deg.has_value());
+    BOOST_CHECK_SMALL(*v->heading_mag_deg - 10.0f, 0.36f);
+}
+
+BOOST_AUTO_TEST_CASE(velocity_airspeed_missing_fields)
+{
+    testing::Me me = testing::velocityAirspeed(3, 90.0f, 250, false);
+    me.set(13, 1, 0).set(25, 10, 0);  // heading status 0, airspeed none
+    const auto v = decodeVelocity(asFrame(testing::df17(0x123456, me)));
+    BOOST_REQUIRE(v.has_value());
+    BOOST_CHECK(!v->heading_mag_deg.has_value());
+    BOOST_CHECK(!v->ias_kt.has_value());
+    BOOST_CHECK(!v->tas_kt.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(target_state_subtype1_fields)
+{
+    TargetState in;
+    in.sel_alt_ft = 35008;
+    in.qnh_mb = 1012.8f;
+    in.sel_heading_deg = 270.0f;
+    in.nac_p = 9;
+    in.modes_valid = true;
+    in.autopilot = true;
+    in.lnav = true;
+    const auto t = decodeTargetState(asFrame(testing::df17(0xABCDEF, testing::targetState(in))));
+    BOOST_REQUIRE(t.has_value());
+    BOOST_REQUIRE(t->sel_alt_ft.has_value());
+    BOOST_CHECK_EQUAL(*t->sel_alt_ft, 35008);
+    BOOST_CHECK(!t->sel_alt_fms_ft.has_value());
+    BOOST_REQUIRE(t->qnh_mb.has_value());
+    BOOST_CHECK_SMALL(*t->qnh_mb - 1012.8f, 0.01f);
+    BOOST_REQUIRE(t->sel_heading_deg.has_value());
+    BOOST_CHECK_SMALL(*t->sel_heading_deg - 270.0f, 0.71f);
+    BOOST_REQUIRE(t->nac_p.has_value());
+    BOOST_CHECK_EQUAL(*t->nac_p, 9);
+    BOOST_CHECK(t->modes_valid);
+    BOOST_CHECK(t->autopilot);
+    BOOST_CHECK(t->lnav);
+    BOOST_CHECK(!t->vnav);
+    BOOST_CHECK(!t->althold);
+    BOOST_CHECK(!t->approach);
+    BOOST_CHECK(!t->tcas);
+}
+
+BOOST_AUTO_TEST_CASE(target_state_fms_altitude_and_empty_fields)
+{
+    TargetState in;
+    in.sel_alt_fms_ft = 12000;
+    in.modes_valid = true;
+    in.vnav = true;
+    in.althold = true;
+    in.approach = true;
+    in.tcas = true;
+    const auto t = decodeTargetState(asFrame(testing::df17(0xABCDEF, testing::targetState(in))));
+    BOOST_REQUIRE(t.has_value());
+    BOOST_CHECK(!t->sel_alt_ft.has_value());
+    BOOST_REQUIRE(t->sel_alt_fms_ft.has_value());
+    BOOST_CHECK_EQUAL(*t->sel_alt_fms_ft, 12000);
+    BOOST_CHECK(!t->qnh_mb.has_value());
+    BOOST_CHECK(!t->sel_heading_deg.has_value());
+    BOOST_CHECK(t->vnav && t->althold && t->approach && t->tcas);
+    BOOST_CHECK(!t->autopilot && !t->lnav);
+}
+
+BOOST_AUTO_TEST_CASE(target_state_subtype0_is_nullopt)
+{
+    testing::Me me = testing::targetState(TargetState{});
+    me.set(5, 2, 0);
+    BOOST_CHECK(!decodeTargetState(asFrame(testing::df17(0xABCDEF, me))).has_value());
+    BOOST_CHECK(!decodeTargetState(frameFromHex(kIdent)).has_value());
 }

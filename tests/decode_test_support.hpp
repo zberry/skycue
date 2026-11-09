@@ -12,7 +12,9 @@
 #include <vector>
 
 #include "coding/modes_crc.hpp"
+#include "decode/acas.hpp"
 #include "decode/cpr.hpp"
+#include "decode/frame.hpp"
 
 namespace skycued::testing {
 
@@ -43,6 +45,19 @@ struct Me {
         const uint64_t mask = (n >= 64 ? ~0ull : ((1ull << n) - 1)) << shift;
         v = (v & ~mask) | ((val << shift) & mask);
         return *this;
+    }
+};
+
+// The 56-bit MB (Comm-B) and MV (DF16) fields have the same shape as the ME
+// field, so Me is reused for them: bit 0 is the field's first (most
+// significant) bit, i.e. amendment bit N is index N - 1. Mb adds 1-based
+// setters that take the amendment's bit numbers directly, and a two's
+// complement setter for the signed register fields.
+struct Mb : Me {
+    Mb& at(unsigned first1, unsigned n, uint64_t val) { set(first1 - 1, n, val); return *this; }
+    // n-bit two's complement value (the sign bit is the first bit).
+    Mb& sat(unsigned first1, unsigned n, int64_t val) {
+        return at(first1, n, static_cast<uint64_t>(val) & ((1ull << n) - 1));
     }
 };
 
@@ -117,6 +132,25 @@ inline Bytes shortAp(int df, int fs3, uint32_t field13, uint32_t addr, bool isLo
 inline Bytes df4(uint32_t addr, uint32_t ac13, int fs = 0) { return shortAp(4, fs, ac13, addr, false); }
 inline Bytes df5(uint32_t addr, uint32_t id13, int fs = 0) { return shortAp(5, fs, id13, addr, false); }
 
+// Long frames carrying a 56-bit field at frame bits 32..87. field13 sits at
+// frame bits 19..31 as in shortAp; the parity is XORed with the address.
+inline Bytes longAp(int df, int low3, uint32_t field13, uint32_t addr, uint64_t field56) {
+    Bytes f = shortAp(df, low3, field13, addr, true);
+    for (int i = 0; i < 7; ++i) f[4 + i] = static_cast<uint8_t>(field56 >> (8 * (6 - i)));
+    putParity(f, addr);
+    return f;
+}
+inline Bytes df20(uint32_t addr, uint32_t ac13, uint64_t mb, int fs = 0) { return longAp(20, fs, ac13, addr, mb); }
+inline Bytes df21(uint32_t addr, uint32_t id13, uint64_t mb, int fs = 0) { return longAp(21, fs, id13, addr, mb); }
+// DF16: VS at bit 5, SL at bits 8..10, RI at bits 13..16, AC13 at 19..31, MV after.
+inline Bytes df16(uint32_t addr, uint32_t ac13, uint64_t mv, bool vs_ground = false, uint8_t sl = 2, uint8_t ri = 3) {
+    Bytes f = longAp(16, vs_ground ? 4 : 0, ac13, addr, mv);
+    f[1] = static_cast<uint8_t>(((sl & 7) << 5) | ((ri & 0xF) >> 1));
+    f[2] = static_cast<uint8_t>((f[2] & 0x1F) | ((ri & 1) << 7));
+    putParity(f, addr);
+    return f;
+}
+
 // ---- ME bodies ----
 
 inline Me airbornePosition(int tc, const cpr_msg& m, int32_t alt_ft, bool bit8 = false) {
@@ -166,6 +200,62 @@ inline Me velocity(int east_kt, int north_kt, int rate_fpm = 0, bool rate_baro =
     if (diff_ft != 0) {
         me.set(48, 1, diff_ft < 0 ? 1 : 0).set(49, 7, static_cast<uint64_t>(std::abs(diff_ft) / 25 + 1));
     }
+    return me;
+}
+
+// TC19 subtype 3 (1 kt) or 4 (4 kt) heading and airspeed; rate_fpm as in velocity().
+inline Me velocityAirspeed(int subtype, float heading_deg, uint16_t speed_kt, bool tas, int rate_fpm = 0) {
+    Me me;
+    me.set(0, 5, 19).set(5, 3, static_cast<uint64_t>(subtype));
+    me.set(13, 1, 1).set(14, 10, static_cast<uint64_t>(std::lround(heading_deg * 1024.0 / 360.0)) & 0x3FFu);
+    me.set(24, 1, tas ? 1 : 0).set(25, 10, static_cast<uint64_t>(speed_kt / (subtype == 4 ? 4 : 1) + 1));
+    me.set(35, 1, 1);
+    if (rate_fpm != 0) {
+        me.set(36, 1, rate_fpm < 0 ? 1 : 0).set(37, 9, static_cast<uint64_t>(std::abs(rate_fpm) / 64 + 1));
+    }
+    return me;
+}
+
+// TC29 subtype 1 from a TargetState (sel_alt_fms_ft selects the FMS altitude type).
+inline Me targetState(const skycued::decode::TargetState& t) {
+    Me me;
+    me.set(0, 5, 29).set(5, 2, 1);
+    if (t.sel_alt_ft || t.sel_alt_fms_ft) {
+        me.set(8, 1, t.sel_alt_fms_ft ? 1 : 0);
+        me.set(9, 11, static_cast<uint64_t>((t.sel_alt_fms_ft ? *t.sel_alt_fms_ft : *t.sel_alt_ft) / 32 + 1));
+    }
+    if (t.qnh_mb) me.set(20, 9, static_cast<uint64_t>(std::lround((*t.qnh_mb - 800.0) / 0.8)) + 1);
+    if (t.sel_heading_deg) {
+        me.set(29, 1, 1).set(30, 9, static_cast<uint64_t>(std::lround(*t.sel_heading_deg * 256.0 / 180.0)) & 0x1FFu);
+    }
+    me.set(39, 4, t.nac_p.value_or(0));
+    me.set(46, 1, t.modes_valid ? 1 : 0).set(47, 1, t.autopilot).set(48, 1, t.vnav).set(49, 1, t.althold);
+    me.set(51, 1, t.approach).set(52, 1, t.tcas).set(53, 1, t.lnav);
+    return me;
+}
+
+// The 48-bit ACAS RA body shared by the DF16 MV field and TC28 subtype 2 (bits
+// 8..55 of the 56-bit field; 0-based): ARA, RAC, RAT, MTE, TTI, TID. TID for
+// TTI 1: the address in the low 24 bits; TTI 2: AC13 altitude, range, bearing.
+inline Me acasBody(const skycued::decode::AcasRa& ra) {
+    Me me;
+    me.set(8, 14, ra.ara).set(22, 4, ra.rac).set(26, 1, ra.rat).set(27, 1, ra.mte).set(28, 2, ra.tti);
+    if (ra.tti == 1 && ra.threat_address) me.set(32, 24, *ra.threat_address);
+    if (ra.tti == 2) {
+        if (ra.threat_alt_ft) me.set(30, 13, ac13Alt(*ra.threat_alt_ft));
+        if (ra.threat_range_nm) me.set(43, 7, static_cast<uint64_t>(std::lround(*ra.threat_range_nm * 10.0f)) + 1);
+        if (ra.threat_bearing_deg) me.set(50, 6, static_cast<uint64_t>(std::lround(*ra.threat_bearing_deg / 6.0f)) + 1);
+    }
+    return me;
+}
+inline Me acasRaTc28(const skycued::decode::AcasRa& ra) {
+    Me me = acasBody(ra);
+    me.set(0, 5, 28).set(5, 3, 2);
+    return me;
+}
+inline Me acasRaMv(const skycued::decode::AcasRa& ra) {
+    Me me = acasBody(ra);
+    me.set(0, 8, 0x30);
     return me;
 }
 

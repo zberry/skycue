@@ -80,6 +80,11 @@ uint32_t Frame::bits(unsigned first, unsigned count) const
     return v;
 }
 
+uint64_t Frame::field56(unsigned first) const
+{
+    return (static_cast<uint64_t>(bits(first, 28)) << 28) | bits(first + 28, 28);
+}
+
 std::optional<Frame> classify(const std::vector<uint8_t>& bytes)
 {
     if (bytes.size() != 7 && bytes.size() != 14)
@@ -163,7 +168,21 @@ std::optional<Velocity> decodeVelocity(const Frame& f)
             v.track_deg = static_cast<float>(trk);
         }
     }
-    // ST 3/4 carry heading and airspeed, not a ground vector: left absent.
+    // ST 3/4 carry heading and airspeed, not a ground vector. ME bits (1-based)
+    // 14 heading status, 15-24 magnetic heading (360/1024 deg), 25 airspeed type
+    // (0 IAS, 1 TAS), 26-35 airspeed ((value - 1) x 1 kt ST3, x 4 kt ST4; 0 = none).
+    if (st >= 3) {
+        if (f.bits(45, 1))
+            v.heading_mag_deg = static_cast<float>(f.bits(46, 10) * 360.0 / 1024.0);
+        const uint32_t as = f.bits(57, 10);
+        if (as != 0) {
+            const uint32_t kt = (as - 1) * (st == 4 ? 4u : 1u);
+            if (f.bits(56, 1))
+                v.tas_kt = static_cast<uint16_t>(kt);
+            else
+                v.ias_kt = static_cast<uint16_t>(kt);
+        }
+    }
 
     // Vertical rate source bit: 0 GNSS (geometric), 1 barometric (Doc 9871
     // Table A-2-9; The 1090 MHz Riddle, airborne velocity chapter).
@@ -179,6 +198,41 @@ std::optional<Velocity> decodeVelocity(const Frame& f)
         v.gnss_baro_diff_ft = f.bits(80, 1) ? -mag : mag;
     }
     return v;
+}
+
+std::optional<TargetState> decodeTargetState(const Frame& f)
+{
+    if (typeCode(f) != 29 || f.bits(37, 2) != 1)
+        return std::nullopt;
+    // ME bits (1-based): 9 altitude type, 10-20 altitude ((v-1) x 32 ft), 21-29
+    // barometric setting ((v-1) x 0.8 + 800 mb), 30 heading status, 31 sign,
+    // 32-39 heading (180/256 deg, two's complement over bits 31-39), 40-43 NACp,
+    // 47 mode status, 48 autopilot, 49 VNAV, 50 altitude hold, 52 approach,
+    // 53 TCAS operational, 54 LNAV.
+    const uint64_t me = f.field56(32);
+    TargetState t;
+    const uint32_t alt = field56(me, 10, 11);
+    if (alt != 0) {
+        const int32_t ft = static_cast<int32_t>(alt - 1) * 32;
+        if (field56(me, 9, 1))
+            t.sel_alt_fms_ft = ft;
+        else
+            t.sel_alt_ft = ft;
+    }
+    const uint32_t qnh = field56(me, 21, 9);
+    if (qnh != 0)
+        t.qnh_mb = static_cast<float>(800.0 + 0.8 * static_cast<double>(qnh - 1));
+    if (field56(me, 30, 1))
+        t.sel_heading_deg = static_cast<float>(field56(me, 31, 9) * 180.0 / 256.0);
+    t.nac_p = static_cast<uint8_t>(field56(me, 40, 4));
+    t.modes_valid = field56(me, 47, 1) != 0;
+    t.autopilot = field56(me, 48, 1) != 0;
+    t.vnav = field56(me, 49, 1) != 0;
+    t.althold = field56(me, 50, 1) != 0;
+    t.approach = field56(me, 52, 1) != 0;
+    t.tcas = field56(me, 53, 1) != 0;
+    t.lnav = field56(me, 54, 1) != 0;
+    return t;
 }
 
 SurfaceMovement decodeSurfaceMovement(const Frame& f)

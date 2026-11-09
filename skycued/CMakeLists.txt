@@ -25,7 +25,9 @@ add_library(skycued_core STATIC
   src/change_detector.cpp
   src/coding/bits.cpp
   src/coding/modes_crc.cpp
+  src/decode/acas.cpp
   src/decode/altitude.cpp
+  src/decode/commb.cpp
   src/decode/cpr.cpp
   src/decode/frame.cpp
   src/decode/uat_decoder.cpp

@@ -10,6 +10,7 @@
 #include "web_api.hpp"
 #include "web_outputs.hpp"
 #include "web_server.hpp"
+#include "web_test_support.hpp"
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -33,6 +34,7 @@ using skycued::webapi::ApiResponse;
 namespace beast = boost::beast;
 namespace http = boost::beast::http;
 namespace websocket = boost::beast::websocket;
+using skycue_test::WsClient;
 using Headers = std::map<std::string, std::string>;
 
 namespace {
@@ -249,72 +251,6 @@ struct Fx {
             m.input = "test";
             hub->publish(m);
         });
-    }
-};
-
-// ---- a minimal WebSocket client ----
-
-struct WsClient {
-    asio::io_context io;
-    websocket::stream<tcp::socket> ws{io};
-    std::thread reader;
-    std::mutex m;
-    std::condition_variable cv;
-    std::vector<std::string> msgs;
-    bool closed = false;
-
-    explicit WsClient(uint16_t port)
-    {
-        auto& s = ws.next_layer();
-        s.open(tcp::v4());
-        s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
-        ws.handshake("127.0.0.1", "/ws");
-        reader = std::thread([this] { loop(); });
-    }
-    ~WsClient()
-    {
-        ::shutdown(ws.next_layer().native_handle(), SHUT_RDWR);
-        if (reader.joinable())
-            reader.join();
-        boost::system::error_code ec;
-        ws.next_layer().close(ec);
-    }
-    void loop()
-    {
-        for (;;) {
-            beast::flat_buffer b;
-            boost::system::error_code ec;
-            ws.read(b, ec);
-            std::lock_guard<std::mutex> lk(m);
-            if (ec) {
-                closed = true;
-                cv.notify_all();
-                return;
-            }
-            msgs.emplace_back(asio::buffers_begin(b.data()), asio::buffers_end(b.data()));
-            cv.notify_all();
-        }
-    }
-    template <class Pred> bool waitFor(Pred p, std::chrono::milliseconds timeout = kWait)
-    {
-        std::unique_lock<std::mutex> lk(m);
-        return cv.wait_for(lk, timeout, p);
-    }
-    std::string waitForMessage(const std::vector<std::string>& needles, std::chrono::milliseconds timeout = kWait)
-    {
-        std::string found;
-        waitFor(
-            [&] {
-                for (const auto& msg : msgs) {
-                    if (std::all_of(needles.begin(), needles.end(), [&](const std::string& n) { return has(msg, n); })) {
-                        found = msg;
-                        return true;
-                    }
-                }
-                return false;
-            },
-            timeout);
-        return found;
     }
 };
 

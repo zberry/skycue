@@ -838,6 +838,7 @@ test('decoderLine_appends_commb_and_ra_counts_when_non_zero', () => {
   const cur = { decoding: true, frames: 10, crc_fail: 0, commb_bds40: 2, commb_bds50: 3, commb_bds60: 4, acas_ra: 1 };
   assert.ok(P.decoderLine(cur, null, 1).endsWith(' · unknown 0 · Comm-B 4,0 2 · 5,0 3 · 6,0 4 · RA 1'));
   assert.ok(P.decoderLine({ decoding: true, frames: 1, acas_ra: 1 }, null, 1).endsWith('Comm-B 4,0 0 · 5,0 0 · 6,0 0 · RA 1'));
+  assert.ok(P.decoderLine({ decoding: true, frames: 1, acas_ra: 1, acas_ra_tc28: 2 }, null, 1).endsWith('RA 3'));
   assert.ok(P.decoderLine({ decoding: true, frames: 1, commb_ambiguous: 5 }, null, 1).indexOf('Comm-B') < 0);
 });
 

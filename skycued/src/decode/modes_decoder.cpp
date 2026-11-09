@@ -227,6 +227,7 @@ void ModesDecoder::applyAcasRa(KeyState& ks, const AcasRa& ra) {
     st.at = now_;
     // A change of advisory, or the return of one after the field expired, is sent at once (like emergency).
     const auto prev = ks.acas_ra.fresh(now_, kAcasRaFresh);
+    if (ra.rat && !prev) return;  // a RAT with no advisory to end: nothing to report
     if (!prev || prev->active != st.active || prev->ara != st.ara || prev->rac != st.rac ||
         prev->mte != st.mte)
         ks.dirty = true;
@@ -235,9 +236,9 @@ void ModesDecoder::applyAcasRa(KeyState& ks, const AcasRa& ra) {
 
 void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
     // A field an ADS-B message set in the last 60 s keeps that value (ADS-B outranks Comm-B).
-    const auto setCommb = [this](Timed<float>& f, bool& from_commb, float v) {
-        if (f.fresh(now_, kFieldFresh) && !from_commb) return;
-        f.set(v, now_);
+    const auto setCommb = [this](Timed<float>& field, bool& from_commb, float v) {
+        if (field.fresh(now_, kFieldFresh) && !from_commb) return;
+        field.set(v, now_);
         from_commb = true;
     };
     CommbContext ctx;
@@ -252,15 +253,16 @@ void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
     case CommbKind::bds40:
         ++counters_.commb_bds40;
         if (r.b40) {
-            if (r.b40->sel_alt_mcp_ft) ks.sel_alt.set(*r.b40->sel_alt_mcp_ft, now_);
-            if (r.b40->sel_alt_fms_ft) ks.sel_alt_fms.set(*r.b40->sel_alt_fms_ft, now_);
-            if (r.b40->qnh_mb) ks.qnh.set(*r.b40->qnh_mb, now_);
+            // Intent fields mark the key dirty when the value changes (like identity).
+            if (r.b40->sel_alt_mcp_ft) setField(ks, ks.sel_alt, *r.b40->sel_alt_mcp_ft, now_, true);
+            if (r.b40->sel_alt_fms_ft) setField(ks, ks.sel_alt_fms, *r.b40->sel_alt_fms_ft, now_, true);
+            if (r.b40->qnh_mb) setField(ks, ks.qnh, *r.b40->qnh_mb, now_, true);
             if (r.b40->modes_valid) {
                 uint8_t m = ks.nav_modes.fresh(now_, kFieldFresh).value_or(0) & ~kBds40ModeMask;
                 if (r.b40->vnav) m |= kNavVnav;
                 if (r.b40->althold) m |= kNavAltHold;
                 if (r.b40->approach) m |= kNavApproach;
-                ks.nav_modes.set(m, now_);
+                setField(ks, ks.nav_modes, m, now_, true);
             }
         }
         break;
@@ -454,10 +456,10 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
         }
     } else if (tc == 29) {
         if (const auto t = decodeTargetState(f)) {
-            if (t->sel_alt_ft) ks.sel_alt.set(*t->sel_alt_ft, now_);
-            if (t->sel_alt_fms_ft) ks.sel_alt_fms.set(*t->sel_alt_fms_ft, now_);
-            if (t->qnh_mb) ks.qnh.set(*t->qnh_mb, now_);
-            if (t->sel_heading_deg) ks.sel_heading.set(*t->sel_heading_deg, now_);
+            if (t->sel_alt_ft) setField(ks, ks.sel_alt, *t->sel_alt_ft, now_, true);
+            if (t->sel_alt_fms_ft) setField(ks, ks.sel_alt_fms, *t->sel_alt_fms_ft, now_, true);
+            if (t->qnh_mb) setField(ks, ks.qnh, *t->qnh_mb, now_, true);
+            if (t->sel_heading_deg) setField(ks, ks.sel_heading, *t->sel_heading_deg, now_, true);
             // NACp stays TC31-only: taking the TC29 value drops nac_p agreement with readsb below its floor.
             if (t->modes_valid) {  // the flags mean nothing while the status bit is 0
                 uint8_t m = 0;
@@ -467,7 +469,7 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
                 if (t->approach) m |= kNavApproach;
                 if (t->lnav) m |= kNavLnav;
                 if (t->tcas) m |= kNavTcas;
-                ks.nav_modes.set(m, now_);
+                setField(ks, ks.nav_modes, m, now_, true);
             }
             ++counters_.decoded;
         } else {

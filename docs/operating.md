@@ -394,14 +394,17 @@ pressure setting, VNAV, altitude hold, approach), 5,0 (roll, true track, ground
 speed, track angle rate, true airspeed) and 6,0 (magnetic heading, indicated
 airspeed, Mach, barometric and inertial vertical rate) and accepts a register
 only when exactly one passes its range and reserved-bit checks; when two pass,
-the aircraft's own track, ground speed and barometric rate (from ADS-B) decide,
+the track's known state (track, ground speed and barometric rate) decides,
 and when that does not settle it the reply is counted `commb_ambiguous` and
 nothing is set. Replies that are empty, another register (identification, data
 link capability) or none of the three count in `commb_empty`, `commb_other` and
 `commb_unknown`; the accepted ones in `commb_bds40`, `commb_bds50` and
 `commb_bds60`. Like altitude and squawk, a Comm-B reply is used only for an
 address confirmed in the last 60 s. The values are kept for 60 s with the other
-dynamic fields. ACAS resolution advisories come from DF 16 (`acas_ra`) and from
+dynamic fields; track, ground speed and the vertical rates from a Comm-B
+reply never replace a value an ADS-B message set in the last 60 s, and a
+change of the selected altitude, pressure setting, selected heading or
+autopilot modes is reported at once. ACAS resolution advisories come from DF 16 (`acas_ra`) and from
 the ADS-B status message (`acas_ra_tc28`); the advisory is reported as active
 for 30 s after its last message, a message that ends it reports "clear of
 conflict" for 30 s, and then the field is dropped. The ADS-B target-state

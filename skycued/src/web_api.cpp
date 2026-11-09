@@ -99,7 +99,8 @@ void putStats(JsonWriter& w, const EngineStats& s)
                 .add("commb_bds40", n(in.decoder.commb_bds40))
                 .add("commb_bds50", n(in.decoder.commb_bds50))
                 .add("commb_bds60", n(in.decoder.commb_bds60))
-                .add("acas_ra", n(in.decoder.acas_ra));
+                .add("acas_ra", n(in.decoder.acas_ra))
+                .add("acas_ra_tc28", n(in.decoder.acas_ra_tc28));
         inputs.push_back(line.str());
     }
     w.addRaw("inputs", jsonArray(inputs));

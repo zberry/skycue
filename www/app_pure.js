@@ -1013,9 +1013,9 @@
     var line = 'frames/s ' + formatNum(rate, 1) + ' · CRC fail ' + formatNum(pct, 1, '%') + ' · fixed ' + n(state.crc_fixed) +
       ' · pending ' + n(state.cpr_pending) + ' · rejected ' + n(state.cpr_rejected) + ' · unknown ' + n(state.unknown_type);
     // Comm-B registers and ACAS resolution advisories, once any was decoded.
-    if (n(state.commb_bds40) + n(state.commb_bds50) + n(state.commb_bds60) + n(state.acas_ra) > 0)
+    if (n(state.commb_bds40) + n(state.commb_bds50) + n(state.commb_bds60) + n(state.acas_ra) + n(state.acas_ra_tc28) > 0)
       line += ' · Comm-B 4,0 ' + n(state.commb_bds40) + ' · 5,0 ' + n(state.commb_bds50) + ' · 6,0 ' + n(state.commb_bds60) +
-        ' · RA ' + n(state.acas_ra);
+        ' · RA ' + (n(state.acas_ra) + n(state.acas_ra_tc28));
     return line;
   }
 

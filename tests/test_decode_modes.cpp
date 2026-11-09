@@ -624,8 +624,8 @@ namespace {
 using skycued::testing::Mb;
 using skycued::kNavAltHold;
 using skycued::kNavAutopilot;
-using skycued::kNavApproach;
 using skycued::kNavLnav;
+using skycued::kNavTcas;
 using skycued::kNavVnav;
 
 // Hand-built registers; Mb bit numbers are the amendment's (1-based).
@@ -717,6 +717,7 @@ BOOST_AUTO_TEST_CASE(commb_bds50_sets_track_gs_roll) {
     confirmedWithAlt(r, 35000);
     r.feed(df20(kAddr, ac13Alt(35025), bds50Mb().v), 1.0);
     BOOST_CHECK_EQUAL(r.c().commb_bds50, 1u);
+    BOOST_CHECK_EQUAL(r.c().commb_bds40 + r.c().commb_bds60 + r.c().commb_ambiguous + r.c().commb_unknown + r.c().commb_other + r.c().commb_empty, 0u);
     BOOST_REQUIRE(!r.obs.empty());
     const auto& o = r.obs.back();
     BOOST_REQUIRE(o.track_deg && o.gs_kt && o.roll_deg && o.track_rate_dps && o.tas_kt);
@@ -733,26 +734,6 @@ BOOST_AUTO_TEST_CASE(commb_unconfirmed_address_counts_ap_unconfirmed) {
     BOOST_CHECK_EQUAL(r.c().ap_unconfirmed, 1u);
     BOOST_CHECK_EQUAL(r.c().commb_bds60, 0u);
     BOOST_CHECK(r.obs.empty());
-}
-
-BOOST_AUTO_TEST_CASE(tie_break_uses_tc19_rate) {
-    // A 5,0-or-6,0 reply whose 6,0 baro rate is +2500 ft/min. The TC19 baro rate is -1216, so
-    // 6,0 is contradicted and 5,0 (plausible) wins. The TC19 vector is (-141, -141) kt:
-    // track 225, GS 199, which also supports 5,0, so the rate is checked on its own below.
-    Rig r;
-    r.feed(df17(kAddr, velocity(-141, -141, -1216, true)), 0.0);
-    r.feed(df4(kAddr, ac13Alt(2000)), 0.1);
-    r.feed(df20(kAddr, ac13Alt(2025), ambiguousMb(78).v), 1.0);  // 78 * 32 = 2496 ft/min
-    BOOST_CHECK_EQUAL(r.c().commb_bds50, 1u);
-    BOOST_CHECK_EQUAL(r.c().commb_bds60, 0u);
-    BOOST_CHECK_EQUAL(r.c().commb_ambiguous, 0u);
-    // With a TC19 rate that agrees with 6,0 and a track that disagrees with 5,0, 6,0 wins.
-    Rig q;
-    q.feed(df17(kAddr, velocity(100, 0, 2496, true)), 0.0);  // track 90, GS 100, baro rate +2496
-    q.feed(df4(kAddr, ac13Alt(2000)), 0.1);
-    q.feed(df20(kAddr, ac13Alt(2025), ambiguousMb(78).v), 1.0);
-    BOOST_CHECK_EQUAL(q.c().commb_bds60, 1u);
-    BOOST_CHECK_EQUAL(q.c().commb_bds50, 0u);
 }
 
 BOOST_AUTO_TEST_CASE(ambiguous_counts_and_sets_nothing) {
@@ -827,47 +808,6 @@ BOOST_AUTO_TEST_CASE(tc28_st2_ra) {
     BOOST_CHECK_EQUAL(r.obs.back().acas_ra->rac, 5);
 }
 
-BOOST_AUTO_TEST_CASE(tc29_sets_selected_altitude_and_modes) {
-    Rig r;
-    r.feed(df17(kAddr, velocity(0, 0)), 0.0);
-    r.feed(df4(kAddr, ac13Alt(10000)), 0.5);
-    r.obs.clear();
-    skycued::decode::TargetState t;
-    t.sel_alt_ft = 36000;
-    t.qnh_mb = 1013.6;
-    t.sel_heading_deg = 90.0f;
-    t.nac_p = 9;
-    t.modes_valid = true;
-    t.autopilot = true;
-    t.lnav = true;
-    t.vnav = true;
-    r.feed(df17(kAddr, skycued::testing::targetState(t)), 1.0);
-    BOOST_CHECK_EQUAL(r.c().unmapped, 0u);
-    // A TC29 does not emit by itself; the next change carries the fields.
-    r.feed(df4(kAddr, ac13Alt(10100)), 2.0);
-    BOOST_REQUIRE(!r.obs.empty());
-    const auto& o = r.obs.back();
-    BOOST_REQUIRE(o.sel_alt_ft && o.qnh_mb && o.sel_heading_deg && o.nav_modes);
-    BOOST_CHECK_EQUAL(*o.sel_alt_ft, 36000);
-    BOOST_CHECK(!o.sel_alt_fms_ft);
-    BOOST_CHECK_SMALL(static_cast<double>(*o.sel_heading_deg) - 90.0, 1.0);
-    BOOST_CHECK_EQUAL(*o.nav_modes, kNavAutopilot | kNavLnav | kNavVnav);
-    BOOST_CHECK(!o.nac_p);  // NACp stays TC31-only
-    // The mode flags are gated on modes_valid: flags set but status 0 sets nothing.
-    Rig q;
-    q.feed(df17(kAddr, velocity(0, 0)), 0.0);
-    q.feed(df4(kAddr, ac13Alt(10000)), 0.5);
-    q.obs.clear();
-    skycued::decode::TargetState u = t;
-    u.modes_valid = false;
-    q.feed(df17(kAddr, skycued::testing::targetState(u)), 1.0);
-    q.feed(df4(kAddr, ac13Alt(10100)), 2.0);
-    BOOST_REQUIRE(!q.obs.empty());
-    BOOST_CHECK(!q.obs.back().nav_modes);
-    BOOST_CHECK(q.obs.back().sel_alt_ft);
-    (void)kNavApproach;
-}
-
 BOOST_AUTO_TEST_CASE(tc19_st3_heading_ias_no_track) {
     Rig r;
     r.feed(df17(kAddr, velocityAirspeed(3, 90.0f, 250, false, -640)), 0.0);
@@ -892,21 +832,216 @@ BOOST_AUTO_TEST_CASE(tc19_st3_heading_ias_no_track) {
     BOOST_CHECK(!q.obs.back().ias_kt);
 }
 
-BOOST_AUTO_TEST_CASE(commb_does_not_replace_fresh_adsb_velocity) {
-    // ADS-B outranks Comm-B for track and ground speed while its value is fresh; the register
-    // still counts. After 60 s without ADS-B the Comm-B value is taken.
-    Rig r;
-    r.feed(df17(kAddr, velocity(-141, -141)), 0.0);  // track 225, GS 199
-    r.feed(df4(kAddr, ac13Alt(35000)), 0.1);
-    r.feed(df20(kAddr, ac13Alt(35025), bds50Mb().v), 1.0);  // 5,0: track 271.4, GS 452 contradicts the context
-    BOOST_CHECK_EQUAL(r.c().commb_bds50 + r.c().commb_ambiguous + r.c().commb_unknown, 1u);
-    for (const auto& o : r.obs)
-        if (o.track_deg) BOOST_CHECK_CLOSE(static_cast<double>(*o.track_deg), 225.0, 0.5);
+
+namespace {
+skycued::decode::TargetState tsOf(bool valid, bool ap, bool vnav, bool lnav, bool tcas, int32_t sel_alt = 36000) {
+    skycued::decode::TargetState t;
+    t.sel_alt_ft = sel_alt;
+    t.modes_valid = valid;
+    t.autopilot = ap;
+    t.vnav = vnav;
+    t.lnav = lnav;
+    t.tcas = tcas;
+    return t;
+}
+// Confirmed key with a known altitude; observations cleared.
+void ready(Rig& r) {
+    confirmedWithAlt(r, 35000);
     r.obs.clear();
-    r.feed(df17(kAddr, identification(4, 3, "KLM1023")), 50.0);
-    r.feed(df4(kAddr, ac13Alt(35000)), 65.0);
-    r.feed(df20(kAddr, ac13Alt(35025), bds50Mb().v), 66.0);
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(tie_break_uses_tc19_rate) {
+    // No track and no ground speed: only the TC19 barometric rate separates 5,0 from 6,0.
+    // The reply's 6,0 baro rate is 0 ft/min.
+    {
+        Rig r;
+        r.feed(df17(kAddr, velocityAirspeed(3, 90.0f, 250, false, -1216)), 0.0);
+        r.feed(df4(kAddr, ac13Alt(2000)), 0.1);
+        r.feed(df20(kAddr, ac13Alt(2025), ambiguousMb().v), 1.0);
+        BOOST_CHECK_EQUAL(r.c().commb_bds50, 1u);
+        BOOST_CHECK_EQUAL(r.c().commb_bds60 + r.c().commb_ambiguous, 0u);
+    }
+    {
+        Rig r;
+        r.feed(df17(kAddr, velocityAirspeed(3, 90.0f, 250, false, 320)), 0.0);
+        r.feed(df4(kAddr, ac13Alt(2000)), 0.1);
+        r.feed(df20(kAddr, ac13Alt(2025), ambiguousMb().v), 1.0);
+        BOOST_CHECK_EQUAL(r.c().commb_bds60, 1u);
+        BOOST_CHECK_EQUAL(r.c().commb_bds50 + r.c().commb_ambiguous, 0u);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(commb_value_replaced_by_later_adsb_and_then_blocked) {
+    Rig r;
+    ready(r);
+    r.feed(df20(kAddr, ac13Alt(35025), bds50Mb().v), 1.0);  // no ADS-B value: Comm-B is stored
     BOOST_REQUIRE(!r.obs.empty());
-    BOOST_REQUIRE(r.obs.back().track_deg);
     BOOST_CHECK_CLOSE(static_cast<double>(*r.obs.back().track_deg), 271.4, 0.1);
+    BOOST_CHECK_EQUAL(*r.obs.back().gs_kt, 452.0f);
+    r.feed(df17(kAddr, velocity(-141, -141)), 2.0);  // ADS-B replaces it at once (track 225, GS 199)
+    r.obs.clear();
+    r.feed(df20(kAddr, ac13Alt(35050), bds50Mb().v), 3.0);  // and now blocks the next 5,0 reply
+    BOOST_CHECK_EQUAL(r.c().commb_bds50, 2u);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK_CLOSE(static_cast<double>(*r.obs.back().track_deg), 225.0, 0.5);
+    BOOST_CHECK_CLOSE(static_cast<double>(*r.obs.back().gs_kt), 199.4, 0.5);
+    // Other fields of the register are not blocked.
+    BOOST_REQUIRE(r.obs.back().roll_deg && r.obs.back().tas_kt);
+    BOOST_CHECK_EQUAL(*r.obs.back().tas_kt, 470.0f);
+    // After 60 s without ADS-B the Comm-B value is taken again.
+    r.feed(df4(kAddr, ac13Alt(35000)), 70.0);
+    r.obs.clear();
+    r.feed(df17(kAddr, identification(4, 3, "KLM1023")), 71.0);
+    r.feed(df20(kAddr, ac13Alt(35025), bds50Mb().v), 73.0);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK_CLOSE(static_cast<double>(*r.obs.back().track_deg), 271.4, 0.1);
+}
+
+BOOST_AUTO_TEST_CASE(commb_rate_precedence_for_baro_and_geom_rates) {
+    Rig r;
+    ready(r);
+    r.feed(df20(kAddr, ac13Alt(35025), bds60Mb().v), 1.0);  // baro -1216, inertial -1184 stored
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK_EQUAL(*r.obs.back().baro_rate_fpm, -1216.0f);
+    BOOST_CHECK_EQUAL(*r.obs.back().geom_rate_fpm, -1184.0f);
+    r.feed(df17(kAddr, velocity(0, 0, 640, true)), 2.0);   // TC19 baro rate
+    r.feed(df17(kAddr, velocity(0, 0, 320, false)), 2.1);  // TC19 geometric rate
+    r.obs.clear();
+    r.feed(df20(kAddr, ac13Alt(35050), bds60Mb().v), 3.0);
+    BOOST_CHECK_EQUAL(r.c().commb_bds60, 2u);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK_EQUAL(*r.obs.back().baro_rate_fpm, 640.0f);
+    BOOST_CHECK_EQUAL(*r.obs.back().geom_rate_fpm, 320.0f);
+    BOOST_REQUIRE(r.obs.back().heading_mag_deg && r.obs.back().ias_kt && r.obs.back().mach);
+}
+
+BOOST_AUTO_TEST_CASE(intent_change_emits_without_position) {
+    Rig r;
+    ready(r);
+    r.feed(df17(kAddr, targetState(tsOf(true, true, false, false, false, 36000))), 1.0);
+    BOOST_CHECK(r.obs.empty());  // first appearance: not a change
+    r.feed(df17(kAddr, targetState(tsOf(true, true, false, false, false, 36992))), 3.0);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
+    BOOST_CHECK_EQUAL(*r.obs[0].sel_alt_ft, 36992);
+    // A BDS 4,0 change emits on its own as well.
+    r.feed(df20(kAddr, ac13Alt(35000), bds40Mb().v), 5.0);  // MCP 36000: changes 36992 -> 36000
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 2u);
+    BOOST_CHECK_EQUAL(*r.obs[1].sel_alt_ft, 36000);
+}
+
+BOOST_AUTO_TEST_CASE(air_data_alone_does_not_emit) {
+    Rig r;
+    ready(r);
+    r.feed(df20(kAddr, ac13Alt(35000), bds60Mb().v), 1.0);  // same altitude: nothing changed
+    r.feed(df20(kAddr, ac13Alt(35000), bds50Mb().v), 2.0);
+    BOOST_CHECK_EQUAL(r.c().commb_bds60 + r.c().commb_bds50, 2u);
+    BOOST_CHECK(r.obs.empty());
+    r.feed(df17(kAddr, velocityAirspeed(3, 90.0f, 250, false)), 3.0);
+    BOOST_CHECK(r.obs.empty());
+}
+
+BOOST_AUTO_TEST_CASE(rat_without_prior_ra_is_ignored) {
+    Rig r;
+    ready(r);
+    r.feed(df16(kAddr, ac13Alt(35000), acasRaMv(raOf(0x2000, true)).v), 1.0);
+    BOOST_CHECK(r.obs.empty());  // no dirty
+    r.feed(df4(kAddr, ac13Alt(35100)), 2.0);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK(!r.obs.back().acas_ra);
+    // The same through TC28 subtype 2.
+    r.obs.clear();
+    r.feed(df17(kAddr, acasRaTc28(raOf(0x2000, true))), 4.0);
+    r.feed(df4(kAddr, ac13Alt(35200)), 5.0);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK(!r.obs.back().acas_ra);
+}
+
+BOOST_AUTO_TEST_CASE(ra_expires_without_rat) {
+    Rig r;
+    ready(r);
+    r.feed(df16(kAddr, ac13Alt(35000), acasRaMv(raOf(0x2000 | 0x0800)).v), 1.0);
+    r.obs.clear();
+    r.feed(df4(kAddr, ac13Alt(35100)), 25.0);  // 24 s: still active
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_REQUIRE(r.obs.back().acas_ra);
+    BOOST_CHECK(r.obs.back().acas_ra->active);
+    r.obs.clear();
+    r.feed(df4(kAddr, ac13Alt(35200)), 40.0);  // 39 s: gone
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK(!r.obs.back().acas_ra);
+}
+
+BOOST_AUTO_TEST_CASE(df0_sets_acas_sl_and_ri) {
+    Rig r;
+    ready(r);
+    Bytes f = shortAp(0, 0, ac13Alt(35100), kAddr, false);
+    const uint8_t sl = 5, ri = 7;
+    f[1] = static_cast<uint8_t>(((sl & 7) << 5) | ((ri & 0xF) >> 1));
+    f[2] = static_cast<uint8_t>((f[2] & 0x1F) | ((ri & 1) << 7));
+    putParity(f, kAddr);
+    r.feed(f, 1.0);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_REQUIRE(r.obs.back().acas_sl && r.obs.back().acas_ri);
+    BOOST_CHECK_EQUAL(*r.obs.back().acas_sl, 5);
+    BOOST_CHECK_EQUAL(*r.obs.back().acas_ri, 7);
+}
+
+BOOST_AUTO_TEST_CASE(tc29_subtype0_is_unmapped) {
+    Rig r;
+    ready(r);
+    Me me = typeOnly(29);  // subtype 0 (version 1)
+    r.feed(df17(kAddr, me), 1.0);
+    BOOST_CHECK_EQUAL(r.c().unmapped, 1u);
+}
+
+BOOST_AUTO_TEST_CASE(tc29_sets_selected_altitude_and_modes) {
+    Rig r;
+    ready(r);
+    auto t = tsOf(true, true, true, true, false);
+    t.qnh_mb = 1013.6;
+    t.sel_heading_deg = 90.0f;
+    t.nac_p = 9;
+    r.feed(df17(kAddr, targetState(t)), 1.0);
+    BOOST_CHECK_EQUAL(r.c().unmapped, 0u);
+    r.feed(df4(kAddr, ac13Alt(35100)), 2.0);
+    BOOST_REQUIRE(!r.obs.empty());
+    const auto& o = r.obs.back();
+    BOOST_REQUIRE(o.sel_alt_ft && o.qnh_mb && o.sel_heading_deg && o.nav_modes);
+    BOOST_CHECK_EQUAL(*o.sel_alt_ft, 36000);
+    BOOST_CHECK(!o.sel_alt_fms_ft);
+    BOOST_CHECK_SMALL(static_cast<double>(*o.sel_heading_deg) - 90.0, 1.0);
+    BOOST_CHECK_EQUAL(*o.nav_modes, kNavAutopilot | kNavLnav | kNavVnav);
+    BOOST_CHECK(!o.nac_p);  // NACp stays TC31-only
+    // Flags set but the status bit clear: nothing is taken.
+    Rig q;
+    ready(q);
+    q.feed(df17(kAddr, targetState(tsOf(false, true, true, true, true))), 1.0);
+    q.feed(df4(kAddr, ac13Alt(35100)), 2.0);
+    BOOST_REQUIRE(!q.obs.empty());
+    BOOST_CHECK(!q.obs.back().nav_modes);
+    BOOST_CHECK(q.obs.back().sel_alt_ft);
+}
+
+BOOST_AUTO_TEST_CASE(nav_modes_merge_rules) {
+    // 4,0 keeps the bits it cannot state (autopilot, lnav, tcas) from a TC29.
+    Rig r;
+    ready(r);
+    r.feed(df17(kAddr, targetState(tsOf(true, true, false, true, true))), 1.0);
+    r.feed(df20(kAddr, ac13Alt(35025), bds40Mb().v), 2.0);  // vnav + althold
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavAutopilot | kNavLnav | kNavTcas | kNavVnav | kNavAltHold);
+    // A TC29 with the status set and a mode off replaces the whole set.
+    r.obs.clear();
+    r.feed(df17(kAddr, targetState(tsOf(true, true, false, false, false))), 4.0);
+    BOOST_REQUIRE(!r.obs.empty());  // nav_modes changed: emitted on its own
+    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavAutopilot);
+    // A 4,0 whose mode status bit is clear leaves nav_modes untouched.
+    Mb m = bds40Mb();
+    m.at(48, 1, 0).at(49, 1, 0).at(50, 1, 0);
+    r.obs.clear();
+    r.feed(df20(kAddr, ac13Alt(35050), m.v), 6.0);
+    BOOST_CHECK_EQUAL(r.c().commb_bds40, 2u);
+    BOOST_REQUIRE(!r.obs.empty());
+    BOOST_CHECK_EQUAL(*r.obs.back().nav_modes, kNavAutopilot);
 }

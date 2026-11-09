@@ -233,7 +233,6 @@
     function schedule() {
       clearTimeout(st.liveTimer);
       st.liveTimer = null;
-      flowSchedule(true);
       if (!st.open || !liveOn()) return;
       st.liveTimer = setTimeout(function () {
         st.liveTimer = null;
@@ -265,7 +264,7 @@
       if (!st.open) return;
       if (liveOn()) refreshNow().then(schedule);
       else schedule();
-      flowSchedule(false);
+      flowSchedule();
     });
     $('stats-reset').addEventListener('click', function () {
       if (!window.confirm(RESET_QUESTION)) return;
@@ -287,8 +286,9 @@
       clearTimeout(st.disposeTimer);
       st.disposeTimer = null;
       st.slowDue = true;
+      flow.win = S.flowWindow();
       refreshNow().then(schedule);
-      flowSchedule(false);
+      flowSchedule();
     }
     function close() {
       if (!st.open) return;
@@ -472,27 +472,31 @@
 
 
     // ---- Flow (Sankey of the pipeline, its own 5 s timer) ------------------------
-    var flow = { win: S.flowWindow(), timer: null, failed: false, busy: false, lastHeight: 0, graph: null, rates: null };
-    function flowStop() { clearTimeout(flow.timer); flow.timer = null; }
-    // (Re)arms the flow timer; now: tick at once (the view just opened or live went on).
-    function flowSchedule(afterRefresh) {
-      if (flow.timer !== null) { if (afterRefresh) return; flowStop(); }
+    var flow = { win: S.flowWindow(), timer: null, gen: 0, failed: false, lastHeight: 0, graph: null, rates: null };
+    // Stops the timer and retires any tick in flight (it checks flow.gen).
+    function flowStop() { clearTimeout(flow.timer); flow.timer = null; flow.gen++; }
+    // (Re)starts the flow timer from scratch; the first tick runs at once.
+    // Called on open and when live goes on; the timer is the card's own.
+    function flowSchedule() {
+      flowStop();
       if (!st.open || !liveOn()) return;
-      flow.timer = setTimeout(flowTick, afterRefresh ? FLOW_MS : 0);
+      flow.timer = setTimeout(flowTick, 0);
     }
     function flowTick() {
       flow.timer = null;
+      var gen = flow.gen;
       if (!st.open || !liveOn()) return;
       if (document.hidden) { flow.timer = setTimeout(flowTick, FLOW_MS); return; }
       Promise.all(['api/stats', 'api/inputs', 'api/cues/clients', 'api/config', 'api/outputs'].map(get)).then(function (r) {
+        if (gen !== flow.gen) return;
         var cfg = r[3] || {};
         S.flowPush(flow.win, { t: host.dataNow(), stats: r[0], inputs: (r[1] && r[1].inputs) || [], clients: r[2],
           files: (cfg.daemon && cfg.daemon.recording_files) || [], outputs: (r[4] && r[4].outputs) || [] });
         flow.failed = false;
-      }, function () { flow.failed = true; }).then(function () {
+      }, function () { if (gen === flow.gen) flow.failed = true; }).then(function () {
+        if (gen !== flow.gen) return;
         if (st.open) flowDraw();
-      }).then(function () {
-        if (st.open && liveOn()) flow.timer = setTimeout(flowTick, FLOW_MS);
+        if (st.open && liveOn() && flow.timer === null) flow.timer = setTimeout(flowTick, FLOW_MS);
       });
     }
     function flowDraw() {
@@ -517,8 +521,10 @@
         var tag = tagText[n.name];
         if (tag && n.tall) lines.push(tag);
         else if (tag) lines[0] += ' ' + tag;
-        var first = '{n|' + lines[0] + '}';
-        var rest = lines.slice(1).map(function (l) { return '{s|' + l + '}'; });
+        
+        var rich = function (t) { return String(t).replace(/[{}|]/g, ' '); };
+        var first = '{n|' + rich(lines[0]) + '}';
+        var rest = lines.slice(1).map(function (l) { return '{s|' + rich(l) + '}'; });
         return { name: n.name, depth: n.depth, itemStyle: { color: n.color, borderColor: n.color },
           label: { formatter: [first].concat(rest).join('\n'),
             rich: { n: { color: n.idle ? muted : text, fontSize: 12 } } } };
@@ -562,7 +568,7 @@
       var grid = sectionEl('traffic');
       var flowCard = addCard(grid, 'traffic-flow', 'Flow');
       flowCard.addAction('CSV', function () { if (flow.rates) downloadCsv('flow', S.flowCsvRows(flow.rates)); });
-      flowDraw();
+      flowDraw();   // the card is made here, after the first tick may have fetched: draw what is held
       var inputs = addCard(grid, 'traffic-inputs', 'Observations by input');
       inputs.addAction('CSV', function () {
         if (data.series) downloadCsv('observations-by-input', S.seriesCsvRows(data.series));

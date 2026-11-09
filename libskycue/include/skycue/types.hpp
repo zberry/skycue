@@ -93,6 +93,15 @@ inline const char* emergencyName(uint8_t code)
     return code < 7 ? names[code] : "unknown";
 }
 
+// Names of the bits of Track::nav_modes, least significant first: autopilot, vnav, althold,
+// approach, lnav, tcas.
+inline constexpr unsigned kNavModeCount = 6;
+inline const char* navModeName(unsigned bit)
+{
+    static const char* const names[kNavModeCount] = {"autopilot", "vnav", "althold", "approach", "lnav", "tcas"};
+    return bit < kNavModeCount ? names[bit] : "unknown";
+}
+
 // The wire code of an emergency name; nullopt for a name not in the table.
 inline std::optional<uint8_t> emergencyCode(const std::string& name)
 {

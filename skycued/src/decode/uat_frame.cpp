@@ -1,6 +1,8 @@
 #include "decode/uat_frame.hpp"
 
 #include <cerrno>
+#include <skycue/types.hpp>
+
 #include <cmath>
 #include <cstdlib>
 
@@ -278,11 +280,9 @@ std::optional<ModeStatus> decodeModeStatus(const UatFrame& f)
     // Codes 0..2 and 4..6 agree with dump978-fa (which names 4..6 nordo, unlawful, downed). Code 3
     // is minimum fuel in the public spec text; dump978-fa prints "invalid" for it, ours keeps the
     // spec name. Code 7 is reserved: dump978-fa prints "reserved", ours has no value.
-    static const char* const names[] = {"none", "general", "medical", "minimum_fuel",
-                                        "no_comms", "unlawful_interference", "downed_aircraft"};
     const uint32_t em = bitsAt(b, kEmergencyBit, 3);
     if (em <= 6)
-        ms.emergency = names[em];
+        ms.emergency = skycue::emergencyName(static_cast<uint8_t>(em));
     ms.nac_p = static_cast<uint8_t>(bitsAt(b, kNacpBit, 4));
     return ms;
 }

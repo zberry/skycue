@@ -1284,6 +1284,60 @@ BOOST_AUTO_TEST_CASE(recorder_jsonl_phase6_keys)
     BOOST_TEST(*j->getDouble("acas_ra_age_s") == 4.5);
 }
 
+BOOST_AUTO_TEST_CASE(sent_jsonl_phase6_keys)
+{
+    TempDir tmp;
+    skycue::Track t;
+    t.id = {0xa1b2c3, skycue::AddressType::icao};
+    t.source = skycue::Source::adsb_1090;
+    t.position_time = std::chrono::system_clock::time_point{std::chrono::seconds{1700000000}};
+    t.heading_mag_deg = 91.5f;
+    t.heading_true_deg = 93.25f;
+    t.ias_kt = static_cast<uint16_t>(250);
+    t.tas_kt = static_cast<uint16_t>(310);
+    t.mach = 0.78f;
+    t.roll_deg = -12.5f;
+    t.track_rate_dps = 1.5f;
+    t.sel_alt_ft = 35000;
+    t.sel_alt_fms_ft = 34000;
+    t.qnh_mb = 1013.25f;
+    t.sel_heading_deg = 270.0f;
+    t.nav_modes = static_cast<uint8_t>(0x15);  // autopilot, althold, lnav
+    t.acas_ra = skycue::AcasRaWire{0x2080, static_cast<uint8_t>(0x5 | 0x10 | 0x40)};
+    t.emergency = static_cast<uint8_t>(3);
+    t.category = std::string("A3");
+    Recorder sent(RecorderConfig{tmp.path, true, true, 1ull << 20, 3600s}, "sent");
+    sent.writeTrack(t, "update");
+    sent.flush();
+    const auto lines = readLines(sent.currentPath("jsonl"));
+    BOOST_REQUIRE(lines.size() == 1u);
+    auto j = skycued::JsonObject::parse(lines[0]);
+    BOOST_REQUIRE(j);
+    BOOST_TEST(*j->getDouble("heading_mag_deg") == 91.5);
+    BOOST_TEST(*j->getDouble("heading_true_deg") == 93.25);
+    BOOST_TEST(*j->getInt("ias_kt") == 250);
+    BOOST_TEST(*j->getInt("tas_kt") == 310);
+    BOOST_TEST(*j->getDouble("mach") > 0.77);
+    BOOST_TEST(*j->getDouble("roll_deg") == -12.5);
+    BOOST_TEST(*j->getDouble("track_rate_dps") == 1.5);
+    BOOST_TEST(*j->getInt("sel_alt_ft") == 35000);
+    BOOST_TEST(*j->getInt("sel_alt_fms_ft") == 34000);
+    BOOST_TEST(*j->getDouble("qnh_mb") == 1013.25);
+    BOOST_TEST(*j->getDouble("sel_heading_deg") == 270.0);
+    auto modes = j->getStringArray("nav_modes");
+    BOOST_REQUIRE(modes);
+    BOOST_TEST((*modes == std::vector<std::string>{"autopilot", "althold", "lnav"}), "modes");
+    auto ra = j->getObject("acas_ra");
+    BOOST_REQUIRE(ra);
+    BOOST_TEST(*ra->getBool("active") == true);
+    BOOST_TEST(*ra->getInt("ara") == 0x2080);
+    BOOST_TEST(*ra->getInt("rac") == 5);
+    BOOST_TEST(*ra->getBool("rat") == true);
+    BOOST_TEST(*ra->getBool("mte") == false);
+    BOOST_TEST(*j->getString("emergency") == "minimum_fuel");
+    BOOST_TEST(*j->getString("category") == "A3");
+}
+
 BOOST_AUTO_TEST_CASE(received_jsonl_round_trips_new_fields)
 {
     TempDir tmp;

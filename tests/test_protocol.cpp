@@ -565,3 +565,19 @@ BOOST_AUTO_TEST_CASE(v2_full_size_matches_docs)
     t.alt_geom_uncertainty_ft = static_cast<uint16_t>(9);
     BOOST_TEST(decodeOne(encodeTrackUpdate(t)).payload.size() == 131u); // docs/protocol.md
 }
+
+BOOST_AUTO_TEST_CASE(v2_bytes_of_acas_ias_nav_modes_category)
+{
+    // Hand-computed: presence bits 11, 14, 22 and 25 = 0x02404800, little endian at payload offset 24;
+    // then acas_ra (u16 ara 0x2A5B, u8 flags 0x4F), ias_kt (u16 250), nav_modes (u8 0x2B) and category
+    // (length 2, "A3"), in ascending bit order.
+    Track t;
+    t.acas_ra = AcasRaWire{0x2A5B, 0x4F};
+    t.ias_kt = static_cast<uint16_t>(250);
+    t.nav_modes = static_cast<uint8_t>(0x2B);
+    t.category = std::string("A3");
+    const Frame f = decodeOne(encodeTrackUpdate(t));
+    const std::vector<uint8_t> expect{0x00, 0x48, 0x40, 0x02, 0x5B, 0x2A, 0x4F, 0xFA, 0x00, 0x2B, 0x02, 0x41, 0x33};
+    BOOST_REQUIRE(f.payload.size() == 24u + expect.size());
+    BOOST_TEST(std::vector<uint8_t>(f.payload.begin() + 24, f.payload.end()) == expect, boost::test_tools::per_element());
+}

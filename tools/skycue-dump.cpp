@@ -226,13 +226,12 @@ std::string updateLine(bool json, const Track& t)
     addOpt(l, "qnh_mb", "qnh", t.qnh_mb, f);
     addOpt(l, "sel_heading_deg", "sel_hdg", t.sel_heading_deg, f);
     if (t.nav_modes) {
-        static const char* const names[] = {"autopilot", "vnav", "althold", "approach", "lnav", "tcas"};
         std::string arr = "[", words;
-        for (unsigned b = 0; b < 6; ++b) {
+        for (unsigned b = 0; b < skycue::kNavModeCount; ++b) {
             if (!(*t.nav_modes & (1u << b)))
                 continue;
-            arr += std::string(arr.size() > 1 ? "," : "") + "\"" + names[b] + "\"";
-            words += std::string(words.empty() ? "" : "+") + names[b];
+            arr += std::string(arr.size() > 1 ? "," : "") + "\"" + skycue::navModeName(b) + "\"";
+            words += std::string(words.empty() ? "" : "+") + skycue::navModeName(b);
         }
         l.add("nav_modes", arr + "]", "nav=" + (words.empty() ? std::string("none") : words));
     }

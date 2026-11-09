@@ -2,14 +2,14 @@
 
 #include "time_util.hpp"
 
+#include <skycue/types.hpp>
+
 #include <cmath>
 #include <limits>
 
 namespace skycued {
 
 namespace {
-const char* const kNavNames[] = {"autopilot", "vnav", "althold", "approach", "lnav", "tcas"};
-
 std::optional<float> readFloat(const JsonObject& o, const char* k)
 {
     auto v = o.getDouble(k);
@@ -22,9 +22,9 @@ std::optional<float> readFloat(const JsonObject& o, const char* k)
 std::vector<std::string> navModeNames(uint8_t mask)
 {
     std::vector<std::string> out;
-    for (int i = 0; i < 6; ++i)
+    for (unsigned i = 0; i < skycue::kNavModeCount; ++i)
         if (mask & (1u << i))
-            out.emplace_back(kNavNames[i]);
+            out.emplace_back(skycue::navModeName(i));
     return out;
 }
 
@@ -44,8 +44,8 @@ std::optional<uint8_t> parseNavModes(const JsonObject& j, const char* key)
     uint8_t mask = 0;
     for (const auto& n : *names) {
         bool known = false;
-        for (int i = 0; i < 6; ++i)
-            if (n == kNavNames[i]) {
+        for (unsigned i = 0; i < skycue::kNavModeCount; ++i)
+            if (n == skycue::navModeName(i)) {
                 mask |= static_cast<uint8_t>(1u << i);
                 known = true;
             }

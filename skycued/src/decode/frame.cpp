@@ -7,6 +7,8 @@
 // downlink formats. Bit numbers below are 0-based frame bits; the ME field
 // starts at bit 32.
 
+#include <skycue/types.hpp>
+
 #include <cmath>
 #include <stdexcept>
 
@@ -284,12 +286,10 @@ std::optional<std::string> decodeEmergency(const Frame& f)
 {
     if (typeCode(f) != 28 || f.bits(37, 3) != 1)
         return std::nullopt;
-    static const char* const names[] = {"none", "general", "medical", "minimum_fuel",
-                                        "no_comms", "unlawful_interference", "downed_aircraft"};
     const uint32_t e = f.bits(40, 3);
     if (e > 6)
         return std::nullopt;
-    return std::string(names[e]);
+    return std::string(skycue::emergencyName(static_cast<uint8_t>(e)));
 }
 
 std::optional<std::string> decodeSquawkTc28(const Frame& f)

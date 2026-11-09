@@ -57,11 +57,6 @@ product handling of fisb-decode (same copyright and licence as above). It is
 an independent C++ implementation written from docs/fisb-reference.md; no
 fisb-decode source code is copied into it.
 
-The Mode S CRC and the UAT Reed-Solomon encoder in tools/iqgen/ are
-written from the published definitions, with the Reed-Solomon parameters
-taken from dump978's uat_protocol.h and fec.cc (BSD-2-Clause); no readsb or
-libfec code is copied.
-
 Test data used locally, not distributed
 ---------------------------------------
 

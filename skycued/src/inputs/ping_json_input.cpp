@@ -64,28 +64,8 @@ InputState PingJsonInput::state() const
         InputCounters& c = s.counters;
         s.decoding = true;
         s.decoder_keys = modes_->keys() + uat_->keys();
-        c.frames = m.frames + u.frames;
-        c.crc_fail = m.crc_fail + u.crc_fail;
-        c.crc_fixed = m.crc_fixed + u.crc_fixed;
-        c.ap_unconfirmed = m.ap_unconfirmed + u.ap_unconfirmed;
-        c.no_position = m.no_position + u.no_position;
-        c.cpr_pending = m.cpr_pending + u.cpr_pending;
-        c.cpr_rejected = m.cpr_rejected + u.cpr_rejected;
-        c.decoded = m.decoded + u.decoded;
-        c.unmapped = m.unmapped + u.unmapped;
-        c.unknown_type = m.unknown_type + u.unknown_type;
-        c.evicted = m.evicted + u.evicted;
-        c.commb_bds40 = m.commb_bds40;
-        c.commb_bds50 = m.commb_bds50;
-        c.commb_bds60 = m.commb_bds60;
-        c.commb_ambiguous = m.commb_ambiguous;
-        c.commb_other = m.commb_other;
-        c.commb_empty = m.commb_empty;
-        c.commb_unknown = m.commb_unknown;
-        c.acas_ra = m.acas_ra;
-        c.acas_ra_tc28 = m.acas_ra_tc28;
-        c.rs_errors = m.rs_errors + u.rs_errors;
-        c.decoder_observations = m.observations + u.observations;
+        addDecodeCounters(c, m);
+        addDecodeCounters(c, u);
     }
     return s;
 }

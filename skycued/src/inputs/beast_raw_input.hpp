@@ -29,6 +29,7 @@
 
 #include "inputs/capture_writer.hpp"
 #include "decode/frame_source.hpp"
+#include "decode/decoder_types.hpp"
 #include "decode/modes_decoder.hpp"
 #include "inputs/input.hpp"
 #include "raw_formats.hpp"
@@ -49,7 +50,13 @@ struct RawDecodeOptions {
     bool enabled = false;
     std::optional<std::pair<double, double>> reference;  // {lat, lon} (InputManager::inputReference); none: global CPR only
     std::function<std::chrono::system_clock::time_point()> clock;  // arrival time; empty = system_clock::now
+
+    std::chrono::system_clock::time_point now() const;  // clock ? clock() : system_clock::now()
 };
+
+// The decoder configuration a raw input builds from its options: the reference position, if any;
+// the key limit and idle eviction stay at their defaults.
+decode::DecoderConfig decoderConfigFrom(const RawDecodeOptions& o);
 
 class BeastRawInput : public TransportInput {
 public:
@@ -84,7 +91,7 @@ private:
     uint64_t avr_rejected_ = 0;
     std::unique_ptr<decode::ModesDecoder> decoder_;  // null unless decode_raw
     decode::FrameSourceCounters source_counters_;
-    std::function<std::chrono::system_clock::time_point()> clock_;
+    RawDecodeOptions decode_;  // the clock (and the reference, used at construction)
     std::unique_ptr<BeastCaptureWriter> capture_;  // null unless capture and a record_dir
 };
 

@@ -16,11 +16,8 @@ UatRawInput::UatRawInput(boost::asio::io_context& io, InputDef def, const Record
     if (this->def().capture && !record.record_dir.empty())
         capture_ = std::make_unique<UatCaptureWriter>(record.record_dir, this->def().id, record.max_bytes);
     if (decode.enabled) {
-        decode::DecoderConfig cfg;
-        if (decode.reference)
-            cfg.reference = decode::cpr::Position{decode.reference->first, decode.reference->second};
-        clock_ = std::move(decode.clock);
-        decoder_ = std::make_unique<decode::UatDecoder>(cfg, this->def().id);
+        decode_ = std::move(decode);
+        decoder_ = std::make_unique<decode::UatDecoder>(decoderConfigFrom(decode_), this->def().id);
         decoder_->onObservation([this](const TrackObservation& o) { emitObservation(o); });
     }
 }
@@ -52,19 +49,7 @@ InputState UatRawInput::state() const
         InputCounters& c = s.counters;
         s.decoding = true;
         s.decoder_keys = decoder_->keys();
-        c.frames = d.frames;
-        c.crc_fail = d.crc_fail;
-        c.crc_fixed = d.crc_fixed;
-        c.ap_unconfirmed = d.ap_unconfirmed;
-        c.no_position = d.no_position;
-        c.cpr_pending = d.cpr_pending;
-        c.cpr_rejected = d.cpr_rejected;
-        c.decoded = d.decoded;
-        c.unmapped = d.unmapped;
-        c.unknown_type = d.unknown_type;
-        c.evicted = d.evicted;
-        c.rs_errors = d.rs_errors;
-        c.decoder_observations = d.observations;
+        addDecodeCounters(c, d);
     }
     return s;
 }
@@ -103,7 +88,7 @@ void UatRawInput::decodeDownlink(const uint8_t* line, std::size_t size)
     if (!running())
         return;
     if (const auto frame = decode::uat::parseDownlinkLine(std::string_view(reinterpret_cast<const char*>(line), size)))
-        decoder_->feed(*frame, clock_ ? clock_() : std::chrono::system_clock::now());
+        decoder_->feed(*frame, decode_.now());
     else
         ++counters_.rejected;  // not hex, odd length, or not an 18/34 byte frame
 }

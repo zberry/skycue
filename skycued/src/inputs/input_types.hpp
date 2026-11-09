@@ -3,6 +3,8 @@
 // Types shared by the network inputs (pingStation JSON and CAT021) and the
 // code that reports on them.
 
+#include "decode/decoder_types.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -90,6 +92,34 @@ struct InputCounters {
         return *this;
     }
 };
+
+// Adds a decoder's counters to the decoder fields of `c`. A pingStation decode input calls it
+// once per decoder (1090 and UAT), so the sums stay in one place.
+inline void addDecodeCounters(InputCounters& c, const decode::DecodeCounters& d)
+{
+    c.frames += d.frames;
+    c.crc_fail += d.crc_fail;
+    c.crc_fixed += d.crc_fixed;
+    c.ap_unconfirmed += d.ap_unconfirmed;
+    c.no_position += d.no_position;
+    c.cpr_pending += d.cpr_pending;
+    c.cpr_rejected += d.cpr_rejected;
+    c.decoded += d.decoded;
+    c.unmapped += d.unmapped;
+    c.unknown_type += d.unknown_type;
+    c.evicted += d.evicted;
+    c.commb_bds40 += d.commb_bds40;
+    c.commb_bds50 += d.commb_bds50;
+    c.commb_bds60 += d.commb_bds60;
+    c.commb_ambiguous += d.commb_ambiguous;
+    c.commb_other += d.commb_other;
+    c.commb_empty += d.commb_empty;
+    c.commb_unknown += d.commb_unknown;
+    c.acas_ra += d.acas_ra;
+    c.acas_ra_tc28 += d.acas_ra_tc28;
+    c.rs_errors += d.rs_errors;
+    c.decoder_observations += d.observations;
+}
 
 // One input's line in the periodic stats report.
 struct InputStatsLine {

@@ -55,6 +55,26 @@ bool sameExceptEnabled(InputDef a, const InputDef& b)
     return a == b;
 }
 
+// The 403 for a change to something built in (only enabling or disabling is allowed).
+void builtinGuard(const std::string& id, bool builtin, const char* noun)
+{
+    if (builtin)
+        throw InputForbidden(std::string(noun) + " '" + id + "' is built in: it can only be enabled or disabled");
+}
+
+template <class Def>
+void builtinGuard(const Def& def, const char* noun)
+{
+    builtinGuard(def.id, def.builtin, noun);
+}
+
+// Iterator to the element whose id is `id`, or end().
+template <class Vec>
+auto findById(Vec& v, const std::string& id)
+{
+    return std::find_if(v.begin(), v.end(), [&](const auto& e) { return e.id == id; });
+}
+
 }  // namespace
 
 UplinkDedupe::UplinkDedupe(std::chrono::milliseconds window) : window_(window) {}
@@ -283,8 +303,7 @@ InputEntry InputManager::replace(const std::string& id, const InputDef& def)
     Slot* s = slot(id);
     if (!s)
         throw InputNotFound("no input '" + id + "'");
-    if (s->def.builtin)
-        throw InputForbidden("input '" + id + "' is built in: it can only be enabled or disabled");
+    builtinGuard(s->def, "input");
     const InputDef d = normalized(def);
     if (d.id != id)
         throw InputDefError("id must stay '" + id + "'");
@@ -340,8 +359,7 @@ void InputManager::remove(const std::string& id)
     Slot* s = slot(id);
     if (!s)
         throw InputNotFound("no input '" + id + "'");
-    if (s->def.builtin)
-        throw InputForbidden("input '" + id + "' is built in: it can only be enabled or disabled");
+    builtinGuard(s->def, "input");
     auto user = userDefs();
     user.erase(std::remove_if(user.begin(), user.end(), [&](const InputDef& u) { return u.id == id; }), user.end());
     persist(user, outputs_, builtinStates());
@@ -514,10 +532,10 @@ OutputDef InputManager::createOutput(const OutputDef& def)
 OutputDef InputManager::replaceOutput(const std::string& id, const OutputDef& def)
 {
     checkWritable();
-    if (std::find(builtin_outputs_.begin(), builtin_outputs_.end(), id) != builtin_outputs_.end())
-        throw InputForbidden("output '" + id + "' is built in: it can only be enabled or disabled");
+    builtinGuard(id, std::find(builtin_outputs_.begin(), builtin_outputs_.end(), id) != builtin_outputs_.end(),
+                 "output");
     auto next = outputs_;
-    const auto it = std::find_if(next.begin(), next.end(), [&](const OutputDef& o) { return o.id == id; });
+    const auto it = findById(next, id);
     if (it == next.end())
         throw InputNotFound("no output '" + id + "'");
     OutputDef d = normalizedOutput(def);
@@ -547,7 +565,7 @@ void InputManager::setOutputEnabled(const std::string& id, bool enabled)
         return;
     }
     auto next = outputs_;
-    const auto it = std::find_if(next.begin(), next.end(), [&](const OutputDef& o) { return o.id == id; });
+    const auto it = findById(next, id);
     if (it == next.end())
         throw InputNotFound("no output '" + id + "'");
     if (it->enabled == enabled)
@@ -562,10 +580,10 @@ void InputManager::setOutputEnabled(const std::string& id, bool enabled)
 void InputManager::removeOutput(const std::string& id)
 {
     checkWritable();
-    if (std::find(builtin_outputs_.begin(), builtin_outputs_.end(), id) != builtin_outputs_.end())
-        throw InputForbidden("output '" + id + "' is built in: it can only be enabled or disabled");
+    builtinGuard(id, std::find(builtin_outputs_.begin(), builtin_outputs_.end(), id) != builtin_outputs_.end(),
+                 "output");
     auto next = outputs_;
-    const auto it = std::find_if(next.begin(), next.end(), [&](const OutputDef& o) { return o.id == id; });
+    const auto it = findById(next, id);
     if (it == next.end())
         throw InputNotFound("no output '" + id + "'");
     next.erase(it);
@@ -759,7 +777,7 @@ void InputManager::applyFile(const std::vector<InputDef>& user, const std::vecto
     for (auto& kv : old) {
         const std::string& id = kv.first;  // not a structured binding: C++17 lambdas cannot capture one
         Slot& s = kv.second;
-        const auto next = std::find_if(user.begin(), user.end(), [&](const InputDef& d) { return d.id == id; });
+        const auto next = findById(user, id);
         if (next == user.end())
             retire(s, false);
         else if (!sameExceptEnabled(s.def, *next))

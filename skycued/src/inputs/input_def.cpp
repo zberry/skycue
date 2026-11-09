@@ -28,7 +28,9 @@ const char* const kEditions[] = {"2.2", "2.3", "2.4", "2.5", "2.6", "2.7"};
 bool isDigit(char c) { return c >= '0' && c <= '9'; }
 bool isAlnum(char c) { return isDigit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
-bool validId(const std::string& id)
+}  // namespace
+
+bool isValidInputId(const std::string& id)
 {
     if (id.empty() || id.size() > kMaxIdChars)
         return false;
@@ -38,7 +40,7 @@ bool validId(const std::string& id)
 
 // Valid UTF-8 (shortest form, no surrogates, at most U+10FFFF) of at most
 // kMaxNameChars code points, none a C0 or C1 control character or DEL.
-bool validName(const std::string& name)
+bool isValidInputName(const std::string& name)
 {
     std::size_t chars = 0;
     std::size_t i = 0;
@@ -80,8 +82,10 @@ bool validName(const std::string& name)
     return chars <= kMaxNameChars;
 }
 
+namespace {
+
 // The code point of the well-formed UTF-8 sequence at name[i] and its
-// length, or a length of 0 when there is none (the validName rules).
+// length, or a length of 0 when there is none (the isValidInputName rules).
 std::size_t utf8At(const std::string& name, std::size_t i, std::uint32_t& cp)
 {
     const auto u = static_cast<unsigned char>(name[i]);
@@ -114,7 +118,9 @@ std::size_t utf8At(const std::string& name, std::size_t i, std::uint32_t& cp)
     return len;
 }
 
-bool isIpv4(const std::string& s)
+}  // namespace
+
+bool isIpv4Literal(const std::string& s)
 {
     int parts = 0;
     std::size_t i = 0;
@@ -139,9 +145,9 @@ bool isIpv4(const std::string& s)
 // counted) whose labels are 1..63 letters, digits and '-', not starting or
 // ending with '-'. A name ending in an all-digit label must be an IPv4
 // address ("999.1.1.1" is neither).
-bool isHost(const std::string& host)
+bool isValidHost(const std::string& host)
 {
-    if (isIpv4(host))
+    if (isIpv4Literal(host))
         return true;
     std::string name = host;
     if (!name.empty() && name.back() == '.')
@@ -165,13 +171,15 @@ bool isHost(const std::string& host)
     return !last_all_digits;
 }
 
-bool isMulticastV4(const std::string& s)
+bool isIpv4Multicast(const std::string& s)
 {
-    if (!isIpv4(s))
+    if (!isIpv4Literal(s))
         return false;
     const int first = std::stoi(s.substr(0, s.find('.')));
     return first >= 224 && first <= 239;
 }
+
+namespace {
 
 bool isNull(const JsonObject& o, const char* key)
 {
@@ -322,9 +330,6 @@ bool isTrackType(InputType type)
     return type != InputType::dump978 && type != InputType::beast_raw && type != InputType::uat_raw;
 }
 
-bool isIpv4Literal(const std::string& s) { return isIpv4(s); }
-bool isValidHost(const std::string& s) { return isHost(s); }
-bool isIpv4Multicast(const std::string& s) { return isMulticastV4(s); }
 
 bool InputDef::operator==(const InputDef& o) const
 {
@@ -350,7 +355,7 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
     if (!o.has("id"))
         fail("id is required");
     d.id = getText(o, "id", "a string");
-    if (!validId(d.id))
+    if (!isValidInputId(d.id))
         fail("id must be 1 to 32 characters of a-z, 0-9 and -");
     for (const char* reserved : kReservedIds)
         if (d.id == reserved)
@@ -381,7 +386,7 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
 
     if (o.has("name")) {
         d.name = getText(o, "name", "a string");
-        if (!validName(d.name)) {
+        if (!isValidInputName(d.name)) {
             if (rule != NameRule::repair)
                 fail("name must be at most 64 printable characters");
             d.name = repairInputName(d.name);
@@ -397,13 +402,13 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
     if (listens(d.transport)) {
         if (d.transport == InputTransport::udp) {
             d.group = getOptionalText(o, "group", "a multicast address");
-            if (!d.group.empty() && !isMulticastV4(d.group))
+            if (!d.group.empty() && !isIpv4Multicast(d.group))
                 fail("group must be a multicast address (224.0.0.0 to 239.255.255.255)");
             d.iface = getOptionalText(o, "interface", "an IPv4 address");
             if (!d.iface.empty()) {
                 if (d.group.empty())
                     fail("interface applies to a multicast group only");
-                if (!isIpv4(d.iface))
+                if (!isIpv4Literal(d.iface))
                     fail("interface must be an IPv4 address");
             }
         }
@@ -411,17 +416,17 @@ InputDef parseInputDef(const JsonObject& o, NameRule rule, bool* repaired)
             if (!d.group.empty())
                 fail("bind does not apply when group is set");
             d.bind = getText(o, "bind", "an IPv4 address");
-            if (!isIpv4(d.bind))
+            if (!isIpv4Literal(d.bind))
                 fail("bind must be an IPv4 address");
         }
         d.peer = getOptionalText(o, "peer", "an IPv4 address");
-        if (!d.peer.empty() && !isIpv4(d.peer))
+        if (!d.peer.empty() && !isIpv4Literal(d.peer))
             fail("peer must be an IPv4 address");
     } else {
         if (!o.has("host"))
             fail("host is required");
         d.host = getText(o, "host", "a string");
-        if (!isHost(d.host))
+        if (!isValidHost(d.host))
             fail("host must be an IPv4 address or a hostname of at most 253 characters");
     }
     if (d.type == InputType::pingstation_cat021) {
@@ -558,15 +563,13 @@ std::optional<HttpUrl> parseHttpUrl(const std::string& url)
             return std::nullopt;
         out.port = static_cast<uint16_t>(value);
     }
-    if (!isHost(out.host))
+    if (!isValidHost(out.host))
         return std::nullopt;
     if (end < url.size())
         out.target = url[end] == '/' ? url.substr(end) : "/" + url.substr(end);
     return out;
 }
 
-bool isValidInputId(const std::string& id) { return validId(id); }
-bool isValidInputName(const std::string& name) { return validName(name); }
 
 std::string repairInputName(const std::string& name)
 {

@@ -7,6 +7,19 @@
 
 namespace skycued {
 
+decode::DecoderConfig decoderConfigFrom(const RawDecodeOptions& o)
+{
+    decode::DecoderConfig cfg;
+    if (o.reference)
+        cfg.reference = decode::cpr::Position{o.reference->first, o.reference->second};
+    return cfg;
+}
+
+std::chrono::system_clock::time_point RawDecodeOptions::now() const
+{
+    return clock ? clock() : std::chrono::system_clock::now();
+}
+
 BeastRawInput::BeastRawInput(boost::asio::io_context& io, InputDef def, const RecordOptions& record,
                              RawDecodeOptions decode)
     : TransportInput(io, std::move(def)), avr_(this->def().format == "avr"),
@@ -15,18 +28,15 @@ BeastRawInput::BeastRawInput(boost::asio::io_context& io, InputDef def, const Re
     if (this->def().capture && !record.record_dir.empty())
         capture_ = std::make_unique<BeastCaptureWriter>(record.record_dir, this->def().id, record.max_bytes);
     if (decode.enabled) {
-        decode::DecoderConfig cfg;
-        if (decode.reference)
-            cfg.reference = decode::cpr::Position{decode.reference->first, decode.reference->second};
-        clock_ = std::move(decode.clock);
-        decoder_ = std::make_unique<decode::ModesDecoder>(cfg, this->def().id);
+        decode_ = std::move(decode);
+        decoder_ = std::make_unique<decode::ModesDecoder>(decoderConfigFrom(decode_), this->def().id);
         decoder_->onObservation([this](const TrackObservation& o) { emitObservation(o); });
     }
 }
 
 std::chrono::system_clock::time_point BeastRawInput::arrival() const
 {
-    return clock_ ? clock_() : std::chrono::system_clock::now();
+    return decode_.now();
 }
 
 void BeastRawInput::decodeFrame(const beast::Frame& f)
@@ -53,27 +63,7 @@ InputState BeastRawInput::state() const
         InputCounters& c = s.counters;
         s.decoding = true;
         s.decoder_keys = decoder_->keys();
-        c.frames = d.frames;
-        c.crc_fail = d.crc_fail;
-        c.crc_fixed = d.crc_fixed;
-        c.ap_unconfirmed = d.ap_unconfirmed;
-        c.no_position = d.no_position;
-        c.cpr_pending = d.cpr_pending;
-        c.cpr_rejected = d.cpr_rejected;
-        c.decoded = d.decoded;
-        c.unmapped = d.unmapped;
-        c.unknown_type = d.unknown_type;
-        c.evicted = d.evicted;
-        c.commb_bds40 = d.commb_bds40;
-        c.commb_bds50 = d.commb_bds50;
-        c.commb_bds60 = d.commb_bds60;
-        c.commb_ambiguous = d.commb_ambiguous;
-        c.commb_other = d.commb_other;
-        c.commb_empty = d.commb_empty;
-        c.commb_unknown = d.commb_unknown;
-        c.acas_ra = d.acas_ra;
-        c.acas_ra_tc28 = d.acas_ra_tc28;
-        c.decoder_observations = d.observations;
+        addDecodeCounters(c, d);
         c.mlat_skipped = source_counters_.mlat_skipped;
         c.modeac_skipped = source_counters_.modeac_skipped;
         c.other_skipped = source_counters_.other_skipped;

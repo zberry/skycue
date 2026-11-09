@@ -63,7 +63,7 @@ private:
 
     uint64_t downlink_ = 0, uplink_ = 0;
     std::unique_ptr<decode::UatDecoder> decoder_;  // null unless decode_raw
-    std::function<std::chrono::system_clock::time_point()> clock_;
+    RawDecodeOptions decode_;  // the clock (and the reference, used at construction)
     std::unique_ptr<UatCaptureWriter> capture_;  // null unless capture and a record_dir
 };
 

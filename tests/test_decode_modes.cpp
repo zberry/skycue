@@ -1099,3 +1099,14 @@ BOOST_AUTO_TEST_CASE(sel_alt_fms_precedence_tc29_over_bds40) {
     BOOST_REQUIRE(!r.obs.empty() && r.obs.back().sel_alt_fms_ft);
     BOOST_CHECK_EQUAL(*r.obs.back().sel_alt_fms_ft, 35008);
 }
+
+BOOST_AUTO_TEST_CASE(no_ra_record_is_inactive) {
+    Rig r;
+    r.feed(df17(kAddr, velocity(0, 0)), 0.0);
+    r.feed(df4(kAddr, ac13Alt(10000)), 0.5);
+    r.obs.clear();
+    r.feed(df16(kAddr, ac13Alt(10025), skycued::testing::acasRaMv(raOf(0x0000)).v), 1.0);  // bit 1 and MTE clear
+    BOOST_REQUIRE(!r.obs.empty() && r.obs.back().acas_ra);
+    BOOST_CHECK(!r.obs.back().acas_ra->active);
+    BOOST_CHECK_EQUAL(r.obs.back().acas_ra->text, "no RA");
+}

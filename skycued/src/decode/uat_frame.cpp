@@ -1,8 +1,8 @@
 #include "decode/uat_frame.hpp"
 
-#include <cerrno>
 #include <skycue/types.hpp>
 
+#include <cerrno>
 #include <cmath>
 #include <cstdlib>
 

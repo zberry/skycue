@@ -11,10 +11,10 @@
 
 namespace skycued {
 
-// An ACAS resolution advisory as a decoded DF16 or TC28 reported it.
 // How long an advisory is shown after `at`, even when nothing more is received.
 inline constexpr std::chrono::seconds kAcasRaLife{30};
 
+// An ACAS resolution advisory as a decoded DF16 or TC28 reported it.
 struct AcasRaState {
     bool active = false;
     uint16_t ara = 0;  // 14 bits, 0x2000 is bit 1 of the field

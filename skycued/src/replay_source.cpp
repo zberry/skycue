@@ -205,6 +205,13 @@ void ReplaySource::emitNext()
             obs.received_time = shifted(obs.received_time, shift);
             if (obs.position_time)
                 *obs.position_time = shifted(*obs.position_time, shift);
+            // Every time that is relative to the recording's clock moves with it, or the data would
+            // look older than it is (an advisory is dropped 30 s after its `at`).
+            for (auto* t : {&obs.alt_baro_time, &obs.alt_geom_time, &obs.geom_minus_baro_time})
+                if (*t)
+                    **t = shifted(**t, shift);
+            if (obs.acas_ra)
+                obs.acas_ra->at = shifted(obs.acas_ra->at, shift);
             on_observation_(obs);
         }
     }

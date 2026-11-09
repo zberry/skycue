@@ -211,7 +211,7 @@ void ModesDecoder::onDf11(const Frame& f, uint32_t residual, std::optional<uint8
 
 void ModesDecoder::applyAcasRa(KeyState& ks, const AcasRa& ra) {
     AcasRaState st;
-    st.active = !ra.rat;
+    st.active = !ra.rat && !(!(ra.ara & 0x2000) && !ra.mte);  // ARA bit 1 clear and MTE clear: no vertical RA
     st.ara = ra.ara;
     st.rac = ra.rac;
     st.rat = ra.rat;
@@ -252,7 +252,7 @@ void ModesDecoder::applyCommb(KeyState& ks, const Frame& f) {
         ++counters_.commb_bds40;
         if (r.b40) {
             // Intent fields mark the key dirty when the value changes (like identity). A TC29
-            // value under 60 s old outranks BDS 4,0 (which readsb prefers, too); a later TC29
+            // value under 60 s old outranks BDS 4,0; a later TC29
             // replaces a 4,0 value at once.
             const auto setIntent = [&](auto& field, bool& from_commb, const auto& v) {
                 if (field.fresh(now_, kFieldFresh) && !from_commb) return;

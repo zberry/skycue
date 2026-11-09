@@ -900,6 +900,11 @@ BOOST_AUTO_TEST_CASE(replay_loop_shifts_timestamps_monotonic)
         o.lat = 1.0;
         o.lon = 2.0;
         o.position_time = o.received_time - 500ms;
+        skycued::AcasRaState ra;
+        ra.active = true;
+        ra.text = "climb";
+        ra.at = o.received_time - 2s;
+        o.acas_ra = ra;
         recorded.push_back(o);
     }
     const std::string path = recordObservations(tmp.path, recorded);
@@ -927,6 +932,11 @@ BOOST_AUTO_TEST_CASE(replay_loop_shifts_timestamps_monotonic)
         BOOST_TEST((*got[i].position_time - got[i].received_time == sys_clock::duration(-500ms)), i);
     }
     BOOST_TEST((got[5].received_time == t0 + 5s));
+    // The advisory keeps its age against received_time on every pass.
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        BOOST_REQUIRE(got[i].acas_ra);
+        BOOST_TEST((got[i].received_time - got[i].acas_ra->at == sys_clock::duration(2s)), i);
+    }
 }
 
 BOOST_AUTO_TEST_CASE(recorder_sent_jsonl_has_source_and_uncertainty)

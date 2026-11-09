@@ -16,36 +16,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <list>
 #include <optional>
 #include <string>
-#include <unordered_map>
 
 #include "decode/decoder_types.hpp"
 #include "decode/key_state.hpp"
+#include "decode/key_table.hpp"
 #include "decode/uat_frame.hpp"
 #include "observation.hpp"
 
 namespace skycued::decode {
-
-struct UatKeyState {
-    StateKey key;
-    skycue::Source source = skycue::Source::uat_978;
-    TimePoint last_seen{};
-    std::list<StateKey>::iterator lru;
-
-    std::optional<cpr::Position> first_pos;  // anchor of the range check without a reference
-
-    Timed<std::string> callsign, category, squawk, emergency;
-    Timed<int32_t> alt_baro, alt_geom;
-    Timed<float> gs, track, baro_rate, geom_rate, heading_mag, heading_true;
-    Timed<uint8_t> nic, nac_p;
-    Timed<bool> on_ground;
-
-    RssiRing rssi;  // level (dBFS) of the last frames that carried one, as mean power
-
-    EmitGate gate;  // dirty flag and emission times (spec 7.2)
-};
 
 class UatDecoder {
 public:
@@ -61,8 +41,6 @@ public:
     void setReference(std::optional<cpr::Position> reference) { cfg_.reference = reference; }
 
 private:
-    UatKeyState& obtain(const StateKey& k, skycue::Source src);
-    void evictIdle();
 
     DecoderConfig cfg_;
     std::string input_id_;
@@ -70,8 +48,7 @@ private:
     DecodeCounters counters_;
     TimePoint now_{};  // max-so-far arrival time
     bool have_now_ = false;
-    std::unordered_map<StateKey, UatKeyState, StateKeyHash> keys_;
-    std::list<StateKey> lru_;  // oldest first
+    KeyTable<UatKeyState> keys_;
 };
 
 }  // namespace skycued::decode

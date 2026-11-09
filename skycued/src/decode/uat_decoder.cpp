@@ -37,42 +37,12 @@ void setIdentity(UatKeyState& ks, Timed<T>& f, const T& v, TimePoint now) {
 
 }  // namespace
 
-UatDecoder::UatDecoder(DecoderConfig cfg, std::string input_id) : cfg_(cfg), input_id_(std::move(input_id)) {}
+UatDecoder::UatDecoder(DecoderConfig cfg, std::string input_id)
+    : cfg_(cfg), input_id_(std::move(input_id)), keys_(cfg.max_keys, cfg.idle_evict, counters_.evicted) {}
 
 void UatDecoder::onObservation(std::function<void(const skycued::TrackObservation&)> h) { handler_ = std::move(h); }
 const DecodeCounters& UatDecoder::counters() const { return counters_; }
 std::size_t UatDecoder::keys() const { return keys_.size(); }
-
-UatKeyState& UatDecoder::obtain(const StateKey& k, Source src) {
-    auto it = keys_.find(k);
-    UatKeyState* ks = it == keys_.end() ? nullptr : &it->second;
-    if (!ks) {
-        if (cfg_.max_keys > 0 && keys_.size() >= cfg_.max_keys && !lru_.empty()) {
-            keys_.erase(lru_.front());  // oldest first when full
-            lru_.pop_front();
-            ++counters_.evicted;
-        }
-        lru_.push_back(k);
-        ks = &keys_[k];
-        ks->key = k;
-        ks->lru = std::prev(lru_.end());
-    } else {
-        lru_.splice(lru_.end(), lru_, ks->lru);
-    }
-    ks->last_seen = now_;
-    ks->source = src;
-    return *ks;
-}
-
-void UatDecoder::evictIdle() {
-    while (!lru_.empty()) {
-        const auto it = keys_.find(lru_.front());
-        if (it != keys_.end() && now_ - it->second.last_seen <= cfg_.idle_evict) break;
-        if (it != keys_.end()) keys_.erase(it);
-        lru_.pop_front();
-        ++counters_.evicted;
-    }
-}
 
 void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::optional<double> rssi_dbfs) {
     ++counters_.frames;
@@ -87,13 +57,13 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
         now_ = arrival;
         have_now_ = true;
     }
-    evictIdle();
+    keys_.evictIdle(now_);
 
     StateKey key;
     key.address = f.address();
     key.type = map->type;
     key.rebroadcast = map->rebroadcast;
-    UatKeyState& ks = obtain(key, map->source);
+    UatKeyState& ks = keys_.obtain(key, map->source, now_);
     const auto level = rssi_dbfs ? rssi_dbfs : f.rssi_dbfs;
     if (level && std::isfinite(*level)) ks.rssi.pushPower(RssiRing::fromDbfs(*level));
 

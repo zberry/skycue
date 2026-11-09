@@ -115,4 +115,19 @@ struct KeyState : KeyBase {
     EmitGate gate;
 };
 
+// Per-key state of the 978 decoder: no CPR, every state vector carries a whole position.
+struct UatKeyState : KeyBase {
+    std::optional<cpr::Position> first_pos;  // anchor of the range check without a reference
+
+    Timed<std::string> callsign, category, squawk, emergency;
+    Timed<int32_t> alt_baro, alt_geom;
+    Timed<float> gs, track, baro_rate, geom_rate, heading_mag, heading_true;
+    Timed<uint8_t> nic, nac_p;
+    Timed<bool> on_ground;
+
+    RssiRing rssi;  // level (dBFS) of the last frames that carried one, as mean power
+
+    EmitGate gate;  // dirty flag and emission times (spec 7.2)
+};
+
 }  // namespace skycued::decode

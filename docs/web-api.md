@@ -334,7 +334,9 @@ changes nothing does not touch the file. Everything is applied or nothing is.
 - **200** `{"ok": true, "applied": [key...], "pending_restart": [...],
   "external": [key...]}`: `applied` every key whose configured value changed;
   `pending_restart` the whole list, as in `GET /api/config`, after the save
-  (keys waiting from earlier saves too, not just this request's); `external` the
+  (keys waiting from earlier saves too, not just this request's; never an
+  `[sdr]` key, which a restart of skycued does not apply: those are listed in
+  `external`); `external` the
   `[sdr]` keys saved, which the launcher reads when it next starts readsb and
   dump978-fa. A `PUT` of a filter key also removes that key's value from the
   runtime overlay, so the saved value is the running one and the overlay does

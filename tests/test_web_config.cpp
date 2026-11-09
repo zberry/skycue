@@ -776,10 +776,30 @@ BOOST_AUTO_TEST_CASE(put_external_key_listed_as_external)
     BOOST_TEST_REQUIRE(r.status == 200u, r.body);
     const auto j = parsed(r.body);
     BOOST_TEST(names(j, "external") == std::vector<std::string>{"sdr.gain_1090"}, boost::test_tools::per_element());
-    // The pending list is the same one GET /api/config gives (it holds the external key too).
-    const auto p = j.getObjectArray("pending_restart");
-    BOOST_TEST_REQUIRE((p && p->size() == 1u), r.body);
-    BOOST_TEST((*p)[0].getString("key").value_or("") == "sdr.gain_1090");
+    // A restart of skycued does not apply an external key: it is not pending.
+    BOOST_TEST(j.getObjectArray("pending_restart")->empty(), r.body);
+    const auto g = parsed(request(f.port, http::verb::get, "/api/config").body);
+    BOOST_TEST(g.getObjectArray("pending_restart")->empty());
+}
+
+BOOST_AUTO_TEST_CASE(hand_edited_external_key_is_not_pending)
+{
+    ConfigFx f;
+    f.fx->t.call([&] { f.rc->startWatching(); });
+    std::ofstream(f.conf) << skycue_test::tomlConf({{"receiver.lat", "38.9"}, {"receiver.lon", "-77.0"},
+                                                    {"filters.max_range_nm", "120"}, {"sdr.gain_1090", "\"49.6\""},
+                                                    {"web.trail_seconds", "400"}});
+    for (int i = 0; i < 100; ++i) {
+        const auto j = parsed(request(f.port, http::verb::get, "/api/config").body);
+        const auto p = j.getObjectArray("pending_restart");
+        if (p && !p->empty()) {
+            BOOST_TEST(p->size() == 1u);
+            BOOST_TEST((*p)[0].getString("key").value_or("") == "web.trail_seconds");
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    BOOST_ERROR("the hand edit was not picked up");
 }
 
 BOOST_AUTO_TEST_CASE(put_unwritable_dir_500_names_state_dir)

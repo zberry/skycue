@@ -3569,6 +3569,7 @@
 
   function renderConfig(c, pending) {
     config.data = c;
+    $('config-external-note').textContent = '';
     renderConfigDaemon(c.daemon || {});
     renderConfigGroups(c.keys || [], config.schema);
     // An empty list from PUT is an answer too: nothing waits.
@@ -3622,6 +3623,8 @@
         renderConfig(c, res.pending_restart);
         var ext = res.external && res.external.length ? ' (' + res.external.length + ' for the launcher)' : '';
         showMsg($('config-msg'), 'Applied' + ext);
+        $('config-external-note').textContent = res.external && res.external.length ?
+          res.external.join(', ') + ' are read by the programs that start the decoders on their next start' : '';
       });
     }).catch(function (e) {
       if (e.status === 400 && e.key !== undefined && config.rows[e.key]) {

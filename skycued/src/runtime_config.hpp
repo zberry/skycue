@@ -235,7 +235,16 @@ public:
     Overlay overlay() const { return overlay_; }
     // The restart keys whose value in skycue.toml (and the layers above it)
     // differs from the running one: edits waiting for a restart.
-    std::vector<std::string> pendingRestartKeys() const { return restartKeysChanged(running_, file_conf_); }
+    // The keys a restart would apply (not the external ones: the launcher reads
+    // those when it next starts the decoders).
+    std::vector<std::string> pendingRestartKeys() const
+    {
+        std::vector<std::string> out;
+        for (const auto& k : restartKeysChanged(running_, file_conf_))
+            if (keyClassOf(k) != KeyClass::external)
+                out.push_back(k);
+        return out;
+    }
     // The configuration as loaded at startup (restart keys as running).
     const Config& running() const { return running_; }
     // The last good parse of skycue.toml and the layers above it.

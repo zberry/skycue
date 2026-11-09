@@ -55,57 +55,6 @@ constexpr std::size_t kStaticFileLimit = 8u << 20;        // larger files are no
 constexpr std::size_t kLingerDrainLimit = 1u << 20;       // bytes read and discarded before closing
 constexpr auto kLingerTime = std::chrono::seconds(2);
 
-enum class FileRead { ok, missing, too_large, error };
-
-// A regular file's content into `text`. missing: no such file, or not a
-// regular file; too_large: over kStaticFileLimit; error: unreadable.
-// O_NONBLOCK keeps open() from waiting for a writer when the path is a FIFO
-// (that would stall the io thread); it is cleared once the file is known to
-// be regular.
-FileRead readRegularFile(const std::string& path, std::string& text)
-{
-    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
-    if (fd < 0)
-        return errno == ENOENT || errno == ENOTDIR || errno == EISDIR || errno == ENXIO ? FileRead::missing
-                                                                                        : FileRead::error;
-    struct stat st{};
-    FileRead result = FileRead::ok;
-    if (::fstat(fd, &st) != 0)
-        result = FileRead::error;
-    else if (!S_ISREG(st.st_mode))
-        result = FileRead::missing;
-    else if (static_cast<std::size_t>(st.st_size) > kStaticFileLimit)
-        result = FileRead::too_large;
-    if (result == FileRead::ok) {
-        const int flags = ::fcntl(fd, F_GETFL);
-        if (flags < 0 || ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0)
-            result = FileRead::error;
-    }
-    if (result != FileRead::ok) {
-        ::close(fd);
-        return result;
-    }
-    text.clear();
-    text.reserve(static_cast<std::size_t>(st.st_size));
-    char buf[16384];
-    for (;;) {
-        const ssize_t n = ::read(fd, buf, sizeof buf);
-        if (n < 0) {
-            ::close(fd);
-            return FileRead::error;
-        }
-        if (n == 0)
-            break;
-        text.append(buf, static_cast<std::size_t>(n));
-        if (text.size() > kStaticFileLimit) {  // grew while being read
-            ::close(fd);
-            return FileRead::too_large;
-        }
-    }
-    ::close(fd);
-    return FileRead::ok;
-}
-
 std::string endpointText(const tcp::socket& s)
 {
     error_code ec;
@@ -272,16 +221,16 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
         const bool map_file = !srv->cfg.map_dir.empty() && (rel->compare(0, 7, "/tiles/") == 0 ||
                                                             rel->compare(0, 10, "/overlays/") == 0);
         std::string file;
-        switch (readRegularFile((map_file ? srv->cfg.map_dir : srv->cfg.www_dir) + *rel, file)) {
-        case FileRead::ok: break;
-        case FileRead::missing:
+        switch (readRegularFile((map_file ? srv->cfg.map_dir : srv->cfg.www_dir) + *rel, kStaticFileLimit, file)) {
+        case ReadStatus::ok: break;
+        case ReadStatus::missing:
             respond(version, keep, 404, "not found\n", "text/plain; charset=utf-8", "no-cache");
             return;
-        case FileRead::too_large:
+        case ReadStatus::too_large:
             LOG_WARN("web: " << *rel << " is over " << (kStaticFileLimit >> 20) << " MiB; not served");
             respond(version, keep, 500, "file too large to serve\n", "text/plain; charset=utf-8", "no-store");
             return;
-        case FileRead::error:
+        case ReadStatus::error:
             LOG_WARN("web: " << *rel << ": cannot read: " << std::strerror(errno));
             respond(version, keep, 500, "cannot read the file\n", "text/plain; charset=utf-8", "no-store");
             return;

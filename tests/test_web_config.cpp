@@ -10,6 +10,7 @@
 #include "web_api.hpp"
 #include "web_config.hpp"
 #include "web_server.hpp"
+#include "web_test_support.hpp"
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -29,35 +30,13 @@ using skycued::JsonObject;
 using skycued::RuntimeConfig;
 using skycued::WebConfig;
 using skycued::WebServer;
+using skycue_test::Reply;
+using skycue_test::request;
+
 namespace beast = boost::beast;
 namespace http = boost::beast::http;
 
 namespace {
-
-struct Reply {
-    unsigned status = 0;
-    std::string body;
-};
-
-Reply request(uint16_t port, http::verb verb, const std::string& target, const std::string& body = "")
-{
-    asio::io_context io;
-    tcp::socket s(io);
-    s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
-    http::request<http::string_body> req{verb, target, 11};
-    req.set(http::field::host, "127.0.0.1:" + std::to_string(port));
-    if (verb == http::verb::put || verb == http::verb::post) {
-        req.set(http::field::content_type, "application/json");
-        req.body() = body;
-    }
-    req.keep_alive(false);
-    req.prepare_payload();
-    http::write(s, req);
-    beast::flat_buffer buf;
-    http::response<http::string_body> res;
-    http::read(s, buf, res);
-    return Reply{res.result_int(), res.body()};
-}
 
 JsonObject parsed(const std::string& text)
 {

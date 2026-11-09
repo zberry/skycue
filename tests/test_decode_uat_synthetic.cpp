@@ -23,9 +23,12 @@
 #include <string>
 #include <vector>
 
+#include "test_util.hpp"
 #include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
 #include "json_lite.hpp"
+
+using skycue_test::fileReadable;
 
 using skycued::JsonObject;
 using namespace skycued::decode::uat;
@@ -35,12 +38,11 @@ namespace {
 const std::string kGolden = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-synthetic.golden.jsonl.gz";
 const std::string kExpect = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-synthetic.expect.jsonl.gz";
 
-bool exists(const std::string& p) { return std::ifstream(p).good(); }
 
 struct RequireGoldens {
     RequireGoldens()
     {
-        if (!exists(kGolden) || !exists(kExpect)) {
+        if (!fileReadable(kGolden) || !fileReadable(kExpect)) {
             std::cout << "SKIP: raw/uat-synthetic.golden.jsonl.gz or raw/uat-synthetic.expect.jsonl.gz is missing "
                          "(gen_uat_synthetic.sh makes them)\n";
             std::exit(77);

@@ -16,9 +16,12 @@
 #include <string>
 #include <vector>
 
+#include "test_util.hpp"
 #include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
 #include "json_lite.hpp"
+
+using skycue_test::fileReadable;
 
 using skycued::JsonObject;
 using namespace skycued::decode::uat;
@@ -30,7 +33,6 @@ const std::string kGolden = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-sample.g
 const std::string kStratux = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux.golden.jsonl.gz";
 const std::string kStratuxB = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux-b.golden.jsonl.gz";  // the 2015 "problem" log
 
-bool exists(const std::string& p) { return std::ifstream(p).good(); }
 
 // A decoder variant: the faithful one, or one with a deliberate fault.
 struct Variant {
@@ -188,7 +190,7 @@ void print(const std::string& label, const Report& r)
 struct RequireGoldens {
     RequireGoldens()
     {
-        if (!exists(kGolden) || !exists(kStratux) || !exists(kStratuxB)) {
+        if (!fileReadable(kGolden) || !fileReadable(kStratux) || !fileReadable(kStratuxB)) {
             std::cout << "SKIP: raw/uat-sample.golden.jsonl.gz or raw/uat-stratux.golden.jsonl.gz or raw/uat-stratux-b.golden.jsonl.gz is missing "
                          "(gen_uat_golden.sh makes them)\n";
             std::exit(77);

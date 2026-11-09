@@ -19,11 +19,14 @@
 #include <utility>
 #include <vector>
 
+#include "test_util.hpp"
 #include "coding/bits.hpp"
 #include "decode/modes_decoder.hpp"
 #include "gz_line_reader.hpp"
 #include "json_lite.hpp"
 #include "test_slow.hpp"
+
+using skycue_test::fileReadable;
 
 using skycued::JsonObject;
 using skycued::TrackObservation;
@@ -34,7 +37,6 @@ namespace {
 
 const std::string kFixtures = SKYCUE_FIXTURE_DIR;
 
-bool exists(const std::string& p) { return std::ifstream(p).good(); }
 
 struct Snap {  // one position observation of ours with the fields it carried
     double lat = 0, lon = 0;
@@ -96,7 +98,7 @@ std::optional<double> asD(const std::optional<T>& v)
 BOOST_AUTO_TEST_CASE(golden_matches_readsb)
 {
     const std::string csv = kFixtures + "/raw/modes-120s.csv.gz", golden = kFixtures + "/raw/modes-120s.golden.jsonl.gz";
-    if (!exists(csv) || !exists(golden)) {
+    if (!fileReadable(csv) || !fileReadable(golden)) {
         std::cout << "SKIP: raw/modes-120s.csv.gz or raw/modes-120s.golden.jsonl.gz is missing "
                      "(scripts/fixtures/fetch-test-captures.sh fetches the capture)\n";
         return;

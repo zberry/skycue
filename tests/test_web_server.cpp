@@ -1,6 +1,7 @@
 #define BOOST_TEST_MODULE skycued_web_server
 #include <boost/test/unit_test.hpp>
 
+#include "test_util.hpp"
 #include "conf_support.hpp"
 #include "decode_test_support.hpp"
 #include "engine_test_support.hpp"
@@ -36,6 +37,8 @@
 #include <map>
 #include <regex>
 
+using skycue_test::fileExists;
+
 extern char** environ;
 
 using namespace enginetest;
@@ -55,11 +58,6 @@ void writeFile(const std::string& path, const std::string& text)
     out << text;
 }
 
-bool exists(const std::string& path)
-{
-    struct stat st{};
-    return ::stat(path.c_str(), &st) == 0;
-}
 
 bool has(const std::string& text, const std::string& needle) { return text.find(needle) != std::string::npos; }
 
@@ -1010,7 +1008,7 @@ BOOST_AUTO_TEST_CASE(put_filters_applies_and_drops)
                 BOOST_TEST(t.range_nm <= 20.0);
     });
     BOOST_TEST(ev.waitFor([&] { return ev.dropsWith(DropReason::filtered) > filtered_before; }));
-    BOOST_TEST(exists(f.tmp.path + "/skycue.runtime.json"));
+    BOOST_TEST(fileExists(f.tmp.path + "/skycue.runtime.json"));
     BOOST_TEST(has(readAll(f.tmp.path + "/skycue.runtime.json"), "\"max_range_nm\": 20"));
     BOOST_TEST(get(f.port, "/api/filters").body == r.body);
 
@@ -1033,7 +1031,7 @@ BOOST_AUTO_TEST_CASE(put_filters_applies_and_drops)
     BOOST_TEST(s.body == "{\"ok\":true,\"unsaved\":\"\"}");
     BOOST_TEST(readAll(f.conf) == conf_before);  // the main file is never written
     BOOST_TEST(has(readAll(f.tmp.path + "/skycue.overrides.toml"), "[filters]\nmax_range_nm = 20.0\n"));
-    BOOST_TEST(!exists(f.tmp.path + "/skycue.runtime.json"));
+    BOOST_TEST(!fileExists(f.tmp.path + "/skycue.runtime.json"));
     BOOST_TEST(get(f.port, "/api/filters").body == "{\"max_range_nm\":20,\"min_elevation_deg\":0,\"overlay_active\":false}");
     client.stop();
 }
@@ -1275,7 +1273,7 @@ BOOST_AUTO_TEST_CASE(put_filters_null_clears_overlay)
     BOOST_TEST(has(overlay, "\"min_elevation_deg\": 3"));
     r = request(f.port, http::verb::put, "/api/filters", "{\"min_elevation_deg\":null}");
     BOOST_TEST(r.body == "{\"max_range_nm\":120,\"min_elevation_deg\":1,\"overlay_active\":false}");
-    BOOST_TEST(!exists(f.tmp.path + "/skycue.runtime.json"));  // empty overlay: deleted
+    BOOST_TEST(!fileExists(f.tmp.path + "/skycue.runtime.json"));  // empty overlay: deleted
     // Clearing what is not set is no change; the baseline conf is untouched.
     BOOST_TEST(request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":null}").status == 200u);
     BOOST_TEST(has(readAll(f.conf), "max_range_nm = 120"));
@@ -1354,7 +1352,7 @@ BOOST_AUTO_TEST_CASE(bad_json_400)
         BOOST_TEST(!parseJson(r.body).get<std::string>("error").empty(), body);
     }
     BOOST_TEST(get(f.port, "/api/filters").body == "{\"max_range_nm\":150,\"min_elevation_deg\":0,\"overlay_active\":false}");
-    BOOST_TEST(!exists(f.tmp.path + "/skycue.runtime.json"));
+    BOOST_TEST(!fileExists(f.tmp.path + "/skycue.runtime.json"));
     for (const char* body : {"{\"add\":\"3a3a3a\"}", "{\"add\":[[1]]}", "{\"del\":[\"3a3a3a\"]}", "nope"}) {
         const Reply r = request(f.port, http::verb::post, "/api/lists/block", body);
         BOOST_TEST(r.status == 400u, body);
@@ -1421,7 +1419,7 @@ BOOST_AUTO_TEST_CASE(put_without_json_content_type_415)
     // Nothing changed.
     BOOST_TEST(get(f.port, "/api/filters").body == "{\"max_range_nm\":150,\"min_elevation_deg\":0,\"overlay_active\":false}");
     BOOST_TEST(get(f.port, "/api/lists").body == "{\"allow\":[],\"block\":[],\"overlay_active\":false}");
-    BOOST_TEST(!exists(f.tmp.path + "/skycue.runtime.json"));
+    BOOST_TEST(!fileExists(f.tmp.path + "/skycue.runtime.json"));
     // With a charset parameter (and in any case) it is accepted; GET needs none.
     BOOST_TEST(requestWith(f.port, http::verb::put, "/api/filters", body,
                            {{"Content-Type", "Application/JSON; charset=utf-8"}})
@@ -1692,8 +1690,8 @@ BOOST_AUTO_TEST_CASE(state_dir_holds_state_files)
         return false;
     }));
     BOOST_TEST(d.terminate() == 0);
-    BOOST_TEST(exists(state + "/skycue.stats.json"));
-    BOOST_TEST(!exists(etc + "/skycue.stats.json"));
+    BOOST_TEST(fileExists(state + "/skycue.stats.json"));
+    BOOST_TEST(!fileExists(etc + "/skycue.stats.json"));
 }
 
 BOOST_AUTO_TEST_CASE(state_dir_missing_exits_2)

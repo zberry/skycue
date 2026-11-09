@@ -5,6 +5,7 @@
 // (docs/web-api.md "FIS-B"), over an Engine replaying
 // fixtures/fisb/received-with-uplinks.jsonl (2015 uplinks) unpaced.
 
+#include "test_util.hpp"
 #include "conf_support.hpp"
 #include "engine_test_support.hpp"
 #include "restricted_fixtures.hpp"
@@ -27,6 +28,8 @@
 
 #include <map>
 #include <set>
+
+using skycue_test::fileExists;
 
 using namespace enginetest;
 using skycued::RuntimeConfig;
@@ -79,7 +82,6 @@ struct StderrCapture {
     }
 };
 
-bool exists(const std::string& path) { return ::access(path.c_str(), F_OK) == 0; }
 
 pt::ptree parseJson(const std::string& text)
 {
@@ -939,7 +941,7 @@ BOOST_AUTO_TEST_CASE(locations_persisted_and_reloaded, *skycue_test::needs_fixtu
         first = locationsOf(get(f.port, "/api/fisb/locations").body);
         f.t.call([&] { f.engine->stop(); });
     }
-    BOOST_REQUIRE(exists(file));
+    BOOST_REQUIRE(fileExists(file));
     BOOST_TEST(savedIds(file).size() == 42u);
     BOOST_TEST(first.size() == 42u);
 
@@ -990,7 +992,7 @@ BOOST_AUTO_TEST_CASE(malformed_locations_file_renamed_rejected)
     BOOST_REQUIRE_NO_THROW(f = std::make_unique<FisbWebFx>(o));
     err.restore();
     BOOST_TEST(readAll(file + ".rejected") == "{");
-    BOOST_TEST(!exists(file));
+    BOOST_TEST(!fileExists(file));
     std::size_t errors = 0;
     std::istringstream lines(err.text());
     for (std::string line; std::getline(lines, line);)
@@ -1033,7 +1035,7 @@ BOOST_AUTO_TEST_CASE(locations_saved_on_the_tick, *skycue_test::needs_fixture("f
     FisbWebFx f(o);
     BOOST_REQUIRE(f.waitReplayed(uplinks, 0));
     const std::string file = dir.path + "/fisb-locations.json";
-    BOOST_REQUIRE(eventually([&] { return exists(file) && savedIds(file).size() == 42u; }));
+    BOOST_REQUIRE(eventually([&] { return fileExists(file) && savedIds(file).size() == 42u; }));
 }
 
 // A save that keeps failing is warned about once, and the recovery is logged.
@@ -1051,7 +1053,7 @@ BOOST_AUTO_TEST_CASE(locations_save_failure_warned_once, *skycue_test::needs_fix
     std::this_thread::sleep_for(3s);  // three more ticks, each retrying
     BOOST_TEST(linesWith(err.text(), "fisb locations not saved") == 1u);
     BOOST_REQUIRE(::mkdir(sub.c_str(), 0755) == 0);
-    BOOST_TEST(eventually([&] { return exists(sub + "/fisb-locations.json"); }));
+    BOOST_TEST(eventually([&] { return fileExists(sub + "/fisb-locations.json"); }));
     BOOST_TEST(eventually([&] { return linesWith(err.text(), "saved again") == 1u; }));
     err.restore();
     BOOST_TEST(linesWith(err.text(), "fisb locations not saved") == 1u, err.text());
@@ -1083,7 +1085,7 @@ BOOST_AUTO_TEST_CASE(locations_paths_that_are_directories)
     BOOST_TEST(has(err.text(), learned + ": not a regular file"), err.text());
     struct stat st {};
     BOOST_TEST((::stat(learned.c_str(), &st) == 0 && S_ISDIR(st.st_mode)));
-    BOOST_TEST(!exists(learned + ".rejected"));
+    BOOST_TEST(!fileExists(learned + ".rejected"));
 }
 
 // A learned file that cannot be read is set aside, so the first save does not overwrite it.

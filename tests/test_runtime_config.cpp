@@ -1,6 +1,7 @@
 #define BOOST_TEST_MODULE runtime_config
 #include <boost/test/unit_test.hpp>
 
+#include "test_util.hpp"
 #include "engine_test_support.hpp"
 
 #include "conf_support.hpp"
@@ -11,6 +12,8 @@
 
 #include <cstdio>
 #include <map>
+
+using skycue_test::fileExists;
 
 using namespace enginetest;
 using skycued::FilterConfig;
@@ -25,11 +28,6 @@ void writeFile(const std::string& path, const std::string& text)
     out << text;
 }
 
-bool exists(const std::string& path)
-{
-    struct stat st{};
-    return ::stat(path.c_str(), &st) == 0;
-}
 
 bool has(const std::string& text, const std::string& needle) { return text.find(needle) != std::string::npos; }
 
@@ -194,7 +192,7 @@ BOOST_AUTO_TEST_CASE(malformed_or_missing_overlay_ignored_on_load)
         BOOST_TEST(has(err.text(), "ERROR"));
         BOOST_TEST(has(err.text(), "skycue.runtime.json.rejected"));
         // Moved aside, so a later change from the UI cannot overwrite it.
-        BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+        BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
         BOOST_TEST(readAll(f.path("skycue.runtime.json.rejected")) == "{\"version\":1,");
     }
     {
@@ -234,7 +232,7 @@ BOOST_AUTO_TEST_CASE(apply_ui_writes_overlay_and_engine)
     BOOST_TEST(has(json, "\"min_elevation_deg\": 5"));
     BOOST_TEST(!has(json, "max_range_nm"));
     BOOST_TEST(has(json, "\"c0ffee\""));
-    BOOST_TEST(!exists(f.path("skycue.runtime.json.tmp")));
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json.tmp")));
     BOOST_TEST(readAll(f.conf) == conf_text);  // only promote writes skycue.toml
     BOOST_TEST(has(f.sent(), "ui: max_range_nm=150 min_elevation_deg=5"));
 
@@ -289,7 +287,7 @@ BOOST_AUTO_TEST_CASE(apply_ui_remove_of_file_entry_and_readd)
     BOOST_TEST(f.allow() == (Strings{"a1b2c3"}));
     BOOST_TEST(f.overlay().allow_remove.empty());
     BOOST_TEST(f.overlay().allow_add.empty());  // already in the file
-    BOOST_TEST(!exists(f.path("skycue.runtime.json")));  // the overlay is empty again
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));  // the overlay is empty again
 }
 
 // The overrides file as save-as-baseline writes it: a header line, a blank
@@ -336,8 +334,8 @@ BOOST_AUTO_TEST_CASE(save_baseline_writes_overrides_toml)
     BOOST_TEST(readAll(f.conf) == before);  // byte for byte: skycued never writes the main file
     const std::string text = readAll(overrides);
     BOOST_TEST(isOverridesText(text, "max_range_nm = 42.5\nmin_elevation_deg = -1.25\n"), text);
-    BOOST_TEST(!exists(overrides + ".tmp"));
-    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+    BOOST_TEST(!fileExists(overrides + ".tmp"));
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
     BOOST_TEST(!f.overlay().max_range_nm);
     BOOST_TEST(f.filters().max_range_nm == 42.5);
     BOOST_TEST(f.filters().min_elevation_deg == -1.25);
@@ -411,7 +409,7 @@ BOOST_AUTO_TEST_CASE(promote_appends_to_list_files_and_clears_overlay)
                                                  "G-ABCD\n");
     BOOST_TEST(readAll(f.path("block.txt")) == "dead01\n");
     BOOST_TEST(readAll(f.conf) == conf_before);  // no filter override: not rewritten
-    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
     BOOST_TEST(f.overlay().allow_add.empty());
     BOOST_TEST(f.overlay().allow_remove.empty());
     BOOST_TEST(f.overlay().block_add.empty());
@@ -574,11 +572,11 @@ BOOST_AUTO_TEST_CASE(list_file_relative_to_state_dir)
     f.applyUi(d);
     BOOST_TEST(f.allow() == (Strings{"a1b2c3", "N123AB"}));
     BOOST_TEST(has(readAll(state + "/skycue.runtime.json"), "N123AB"));
-    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
     // Save as baseline appends to the list file in paths.state_dir.
     BOOST_TEST(f.promote() == "");
     BOOST_TEST(has(readAll(state + "/allow.list"), "N123AB"));
-    BOOST_TEST(!exists(f.path("allow.list")));
+    BOOST_TEST(!fileExists(f.path("allow.list")));
 }
 
 BOOST_AUTO_TEST_CASE(list_reload_resolves_against_the_running_state_dir)
@@ -660,8 +658,8 @@ BOOST_AUTO_TEST_CASE(atomic_write_preserves_symlink)
     BOOST_TEST(has(readAll(real_overrides), "min_elevation_deg = 1\n"));  // the keys it held stay
     BOOST_TEST(!has(readAll(real_conf), "55"));
     BOOST_TEST(readAll(real_allow) == "a1b2c3\nc0ffee\n");
-    BOOST_TEST(!exists(real_overrides + ".tmp"));
-    BOOST_TEST(!exists(f.path("skycue.overrides.toml.tmp")));
+    BOOST_TEST(!fileExists(real_overrides + ".tmp"));
+    BOOST_TEST(!fileExists(f.path("skycue.overrides.toml.tmp")));
     BOOST_TEST(f.filters().max_range_nm == 55.0);
 }
 
@@ -792,8 +790,8 @@ BOOST_AUTO_TEST_CASE(promote_with_state_dir_leaves_conf_untouched)
     BOOST_TEST(readAll(f.conf) == conf_text);  // byte for byte
     BOOST_TEST(isOverridesText(readAll(state + "/skycue.overrides.toml"), "max_range_nm = 90.0\n"));
     BOOST_TEST(has(readAll(state + "/block.list"), "N123AB"));
-    BOOST_TEST(!exists(state + "/skycue.runtime.json"));
-    BOOST_TEST(!exists(f.path("skycue.overrides.toml")));
+    BOOST_TEST(!fileExists(state + "/skycue.runtime.json"));
+    BOOST_TEST(!fileExists(f.path("skycue.overrides.toml")));
     BOOST_TEST(skycued::parseConfigFile(f.conf).max_range_nm == 90);
     BOOST_TEST(f.overlay().empty());
     BOOST_TEST(f.filters().max_range_nm == 90.0);
@@ -940,7 +938,7 @@ BOOST_AUTO_TEST_CASE(promote_without_state_dir_writes_the_overrides_file_beside_
     BOOST_TEST(f.promote() == "");
     BOOST_TEST(readAll(f.conf) == conf_text);  // the main file is never written
     BOOST_TEST(isOverridesText(readAll(f.path("skycue.overrides.toml")), "max_range_nm = 90.0\n"));
-    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
 }
 
 BOOST_AUTO_TEST_CASE(save_baseline_readonly_dir_names_state_dir)
@@ -965,7 +963,7 @@ BOOST_AUTO_TEST_CASE(save_baseline_readonly_dir_names_state_dir)
     BOOST_TEST(has(err, f.path("skycue.overrides.toml")), err);
     BOOST_TEST(has(err, "paths.state_dir"), err);
     BOOST_TEST(readAll(f.conf) == before);  // the main file is never written
-    BOOST_TEST(!exists(f.path("skycue.overrides.toml")));
+    BOOST_TEST(!fileExists(f.path("skycue.overrides.toml")));
     BOOST_TEST(f.overlay().max_range_nm.value_or(0) == 90.0);  // stays in the overlay
     BOOST_TEST(f.filters().max_range_nm == 90.0);
 }
@@ -1018,7 +1016,7 @@ BOOST_AUTO_TEST_CASE(promote_skips_pinned_keys)
     BOOST_TEST(!has(overrides, "max_range_nm"), overrides);
     BOOST_TEST(has(overrides, "min_elevation_deg = 6.0"), overrides);
     BOOST_TEST(f.overlay().empty());
-    BOOST_TEST(!exists(f.path("skycue.runtime.json")));
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
     BOOST_TEST(f.filters().max_range_nm == 88.0);
 }
 

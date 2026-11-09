@@ -4,6 +4,7 @@
 // The Engine's wiring of the StatsStore (spec §4): what feeds it, when it
 // is saved, loaded and reset.
 
+#include "test_util.hpp"
 #include "engine_events.hpp"
 #include "engine_test_support.hpp"
 #include "filters.hpp"
@@ -16,6 +17,8 @@
 
 #include <numeric>
 
+using skycue_test::fileExists;
+
 using namespace enginetest;
 using skycued::StatsLoad;
 using skycued::StatsRes;
@@ -23,11 +26,6 @@ using skycued::StatsStore;
 
 namespace {
 
-bool exists(const std::string& path)
-{
-    struct ::stat st{};
-    return ::stat(path.c_str(), &st) == 0;
-}
 
 // The file's mtime in nanoseconds; -1 when it does not exist.
 long long mtimeNs(const std::string& path)
@@ -145,9 +143,9 @@ BOOST_AUTO_TEST_CASE(stop_saves_and_reload_restores)
         fx.t.call([&] { fx.engine->loadStats(path, std::chrono::seconds(300)); });
         BOOST_TEST(fx.t.call([&] { return fx.engine->statsPath(); }) == path);
         fx.t.call([&] { src->emit(nearbyObservation(0xA00001, 0)); });
-        BOOST_TEST(!exists(path));  // not yet: 300 s
+        BOOST_TEST(!fileExists(path));  // not yet: 300 s
         fx.stop();
-        BOOST_TEST(exists(path));
+        BOOST_TEST(fileExists(path));
         BOOST_TEST(!fx.t.call([&] { return fx.engine->statsStore().dirty(); }));
     }
     FakeSource* src = nullptr;
@@ -191,7 +189,7 @@ BOOST_AUTO_TEST_CASE(periodic_save_when_dirty)
     o.received_time = std::chrono::system_clock::time_point(std::chrono::seconds(now_s - now_s % 60 + 5));
     o.position_time = o.received_time;
     fx.t.call([&] { src->emit(o); });
-    BOOST_REQUIRE(waitUntil([&] { return exists(path); }, slow(3s)));
+    BOOST_REQUIRE(waitUntil([&] { return fileExists(path); }, slow(3s)));
     BOOST_REQUIRE(waitUntil([&] { return !fx.t.call([&] { return fx.engine->statsStore().dirty(); }); }, slow(3s)));
     const long long before = mtimeNs(path);
     const auto bucket = fx.t.call([&] { return fx.engine->statsStore().series(StatsRes::minute).back().start_s; });
@@ -213,16 +211,16 @@ BOOST_AUTO_TEST_CASE(failed_save_is_retried)
     fx.t.call([&] { fx.engine->loadStats(path, std::chrono::seconds(0)); });
     fx.t.call([&] { src->emit(nearbyObservation(0xA00001, 0)); });
     std::this_thread::sleep_for(1500ms);
-    BOOST_TEST(!exists(path));
+    BOOST_TEST(!fileExists(path));
     BOOST_TEST(fx.t.call([&] { return fx.engine->statsStore().dirty(); }));  // still to save
     BOOST_REQUIRE(::mkdir((dir.path + "/no-such-dir").c_str(), 0700) == 0);
-    BOOST_TEST(waitUntil([&] { return exists(path); }, slow(3s)));
+    BOOST_TEST(waitUntil([&] { return fileExists(path); }, slow(3s)));
 }
 
 BOOST_AUTO_TEST_CASE(empty_path_disables_persistence)
 {
     TempDir dir;
-    const bool had_default = exists("skycue.stats.json");
+    const bool had_default = fileExists("skycue.stats.json");
     {
         FakeSource* src = nullptr;
         EngineFx fx(baseConfig(), fakeSource(src));
@@ -239,7 +237,7 @@ BOOST_AUTO_TEST_CASE(empty_path_disables_persistence)
                                  [&](const std::string& e) { return e == dir.path + "/." || e == dir.path + "/.."; }),
                   entries.end());
     BOOST_TEST(entries.empty());
-    BOOST_TEST(exists("skycue.stats.json") == had_default);  // the config default is not used on its own
+    BOOST_TEST(fileExists("skycue.stats.json") == had_default);  // the config default is not used on its own
 }
 
 BOOST_AUTO_TEST_CASE(reset_empties_and_saves)
@@ -262,7 +260,7 @@ BOOST_AUTO_TEST_CASE(reset_empties_and_saves)
         BOOST_TEST(*s.sinceS() >= clock_s - 5);
         BOOST_TEST(!s.dirty());  // saved at once
     });
-    BOOST_REQUIRE(exists(path));
+    BOOST_REQUIRE(fileExists(path));
     BOOST_TEST(aircraftInFile(path) == 0u);
 }
 
@@ -461,7 +459,7 @@ BOOST_AUTO_TEST_CASE(not_regular_stats_file_disables_persistence)
         fx.t.call([&] { src->emit(nearbyObservation(0xA00001, 0)); });
         std::this_thread::sleep_for(1500ms);  // a tick or more: no save is attempted
         fx.stop();
-        BOOST_TEST(!exists(path + ".bad"), path);
-        BOOST_TEST(exists(path), path);
+        BOOST_TEST(!fileExists(path + ".bad"), path);
+        BOOST_TEST(fileExists(path), path);
     }
 }

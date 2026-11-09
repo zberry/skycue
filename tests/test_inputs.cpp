@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 
 
+#include "test_util.hpp"
 #include "asterix/cat021.hpp"
 #include "asterix/cat021_encode.hpp"
 #include "engine_test_support.hpp"
@@ -26,6 +27,8 @@
 
 #include <atomic>
 #include <cmath>
+
+using skycue_test::fileExists;
 
 using namespace enginetest;
 using asio::ip::udp;
@@ -93,7 +96,6 @@ std::vector<std::string> dirEntries(const std::string& dir)
     return out;
 }
 
-bool exists(const std::string& path) { return ::access(path.c_str(), F_OK) == 0; }
 
 std::string fixture(const std::string& name)
 {
@@ -708,7 +710,7 @@ BOOST_AUTO_TEST_CASE(create_invalid_400_message_verbatim)
     reserved.id = "readsb";
     BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.create(reserved); }), InputDefError);
     BOOST_TEST(m.ids().empty());
-    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_TEST(!fileExists(cfg.inputs_file));
 }
 
 BOOST_AUTO_TEST_CASE(replace_resets_connection_keeps_counters)
@@ -921,11 +923,11 @@ BOOST_AUTO_TEST_CASE(no_file_until_first_change)
     FakeHub hub;
     Mgr m(t, cfg, [&](InputManager& im) { im.addBuiltin(fakeReadsb(hub)); });
     BOOST_TEST(m.ids() == std::vector<std::string>{"readsb"});
-    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_TEST(!fileExists(cfg.inputs_file));
     m.on([](InputManager& im) { return im.setEnabled("readsb", true); });  // no change
-    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_TEST(!fileExists(cfg.inputs_file));
     m.on([](InputManager& im) { return im.setEnabled("readsb", false); });
-    BOOST_TEST(exists(cfg.inputs_file));
+    BOOST_TEST(fileExists(cfg.inputs_file));
 }
 
 BOOST_AUTO_TEST_CASE(malformed_file_at_load_renamed_rejected)
@@ -938,7 +940,7 @@ BOOST_AUTO_TEST_CASE(malformed_file_at_load_renamed_rejected)
     FakeHub hub;
     Mgr m(t, cfg, [&](InputManager& im) { im.addBuiltin(fakeReadsb(hub)); });
     BOOST_TEST(m.ids() == std::vector<std::string>{"readsb"});
-    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_TEST(!fileExists(cfg.inputs_file));
     BOOST_TEST(readAll(cfg.inputs_file + ".rejected") == text);
     BOOST_TEST(m.on([&](InputManager&) { return hub.starts; }) == 1);
 }
@@ -969,8 +971,8 @@ BOOST_AUTO_TEST_CASE(bad_name_in_file_repaired_at_load)
         BOOST_TEST(m.find("a")->def.name == "North");
         BOOST_TEST(m.find("b")->def.name == "ps\xEF\xBF\xBD\xEF\xBF\xBD" "bc");
         BOOST_TEST(m.find("c")->def.name == "South");
-        BOOST_TEST(!exists(cfg.inputs_file + ".rejected"));
-        BOOST_TEST(exists(cfg.inputs_file));
+        BOOST_TEST(!fileExists(cfg.inputs_file + ".rejected"));
+        BOOST_TEST(fileExists(cfg.inputs_file));
         log = cap.text();
     }
     BOOST_TEST(contains(log, "ERROR"), log);
@@ -993,14 +995,14 @@ BOOST_AUTO_TEST_CASE(capture_without_record_dir_in_file_keeps_inputs)
         BOOST_TEST(m.ids() == (std::vector<std::string>{"a", "b"}));
         BOOST_TEST(m.find("a")->def.capture);
         BOOST_REQUIRE(eventually([&] { return m.state("a").connected; }));
-        BOOST_TEST(!exists(cfg.inputs_file + ".rejected"));
+        BOOST_TEST(!fileExists(cfg.inputs_file + ".rejected"));
         BOOST_TEST(readAll(cfg.inputs_file) == text);
 
         // A hand edit that adds another capture entry is applied too.
         handWrite(cfg.inputs_file, fileOf({psJson("a", a, R"(,"capture":true)"), psJson("b", b),
                                            psJson("c", c, R"(,"capture":true)")}));
         BOOST_REQUIRE(eventuallyWithin(3s, [&] { return m.find("c").has_value(); }));
-        BOOST_TEST(!exists(cfg.inputs_file + ".rejected"));
+        BOOST_TEST(!fileExists(cfg.inputs_file + ".rejected"));
         BOOST_TEST(m.ids().size() == 3u);
 
         // An API write of an unrelated entry still succeeds; one that asks
@@ -1056,8 +1058,8 @@ BOOST_AUTO_TEST_CASE(hand_edit_with_one_bad_entry_keeps_previous_set)
     const std::string text = R"({"version":1,"inputs":[)" + skycued::inputDefJson(psJson("a", a)) +
                              R"(,{"id":"c","type":"pingstation_json","port":0}]})";
     handWrite(cfg.inputs_file, text);
-    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return exists(cfg.inputs_file + ".rejected"); }));
-    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return fileExists(cfg.inputs_file + ".rejected"); }));
+    BOOST_TEST(!fileExists(cfg.inputs_file));
     BOOST_TEST(m.ids() == std::vector<std::string>{"a"});
     BOOST_TEST(m.state("a").connected);
     BOOST_TEST(m.state("a").counters.connects == 1u);
@@ -1083,7 +1085,7 @@ BOOST_AUTO_TEST_CASE(new_file_after_rejected_is_loaded)
     BOOST_REQUIRE(eventually([&] { return m.state("a").counters.messages == 1; }));
 
     handWrite(cfg.inputs_file, "{ not json");
-    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return exists(cfg.inputs_file + ".rejected"); }));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return fileExists(cfg.inputs_file + ".rejected"); }));
     BOOST_TEST(m.state("a").connected);
 
     const uint16_t b = freeUdpPort();
@@ -1488,8 +1490,8 @@ BOOST_AUTO_TEST_CASE(hand_edit_back_to_v1_rejected_and_outputs_keep_running)
     BOOST_REQUIRE(at != std::string::npos);
     text.replace(at, 12, "\"version\": 1");
     handWrite(cfg.inputs_file, text);
-    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return exists(cfg.inputs_file + ".rejected"); }));
-    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return fileExists(cfg.inputs_file + ".rejected"); }));
+    BOOST_TEST(!fileExists(cfg.inputs_file));
     BOOST_TEST(w.find(m, "bo")->up);
     BOOST_TEST((w.find(m, "bo")->def == o));
     BOOST_TEST(m.state("ps").connected);
@@ -1510,7 +1512,7 @@ BOOST_AUTO_TEST_CASE(invalid_output_edit_renamed_rejected)
     BOOST_REQUIRE(eventually([&] { return w.find(m, "bo")->up; }));
     const std::string bad = R"({"version":2,"outputs":[{"id":"bo","kind":"beast","transport":"tcp_listen","port":0}]})";
     handWrite(cfg.inputs_file, bad);
-    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return exists(cfg.inputs_file + ".rejected"); }));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return fileExists(cfg.inputs_file + ".rejected"); }));
     BOOST_TEST(readAll(cfg.inputs_file + ".rejected") == bad);
     BOOST_TEST(w.find(m, "bo")->up);
     BOOST_TEST(w.find(m, "bo")->def.port == port);
@@ -1543,7 +1545,7 @@ BOOST_AUTO_TEST_CASE(output_on_v1_input_port_rejected_input_untouched)
     const std::string clash = fileWith({cat021("cat", "tcp_listen", port), cat021("new", "tcp_listen", other)},
                                        {beastOut("bo", port)});
     handWrite(cfg.inputs_file, clash);
-    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return exists(cfg.inputs_file + ".rejected"); }));
+    BOOST_REQUIRE(eventuallyWithin(3s, [&] { return fileExists(cfg.inputs_file + ".rejected"); }));
     BOOST_TEST(m.ids() == std::vector<std::string>{"cat"});
     BOOST_TEST(!w.find(m, "bo").has_value());
     tcp::socket client = connectWhenListening(t.io, port);  // the input still accepts
@@ -1565,7 +1567,7 @@ BOOST_AUTO_TEST_CASE(output_on_cue_port_rejected)
                    "port " + std::to_string(cue) + "/tcp is already used by the cue stream (cues.tcp_port)");
     }
     BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.createOutput(beastOut("bw", web)); }), InputDefError);
-    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_TEST(!fileExists(cfg.inputs_file));
     // A disabled output on the cue port is not a clash.
     m.on([&](InputManager& im) { return im.createOutput(beastOut("off", cue, R"(,"enabled":false)")); });
 }
@@ -1682,7 +1684,7 @@ BOOST_AUTO_TEST_CASE(builtin_cue_outputs_only_enable_and_disable)
     OutputDef reserved = beastOut("x", 5000);
     reserved.id = "cue-tcp";
     BOOST_CHECK_THROW(m.on([&](InputManager& im) { return im.createOutput(reserved); }), InputDefError);
-    BOOST_TEST(!exists(cfg.inputs_file));
+    BOOST_TEST(!fileExists(cfg.inputs_file));
 
     m.on([](InputManager& im) { im.setOutputEnabled("cue-tcp", false); return 0; });
     auto file = skycued::parseInputsFile(readAll(cfg.inputs_file));

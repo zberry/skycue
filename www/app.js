@@ -525,13 +525,6 @@
     else { if (!initial) citiesFailed = false; drawCities(); }
   }
 
-  function fetchJson(url) {
-    return fetch(url).then(function (r) {
-      if (!r.ok) throw new Error(url + ': HTTP ' + r.status);
-      return r.json();
-    });
-  }
-
   // Borders: one GeoJSON layer of admin0 and admin1 lines, each feature
   // tagged with its kind; admin1 is drawn transparent below zoom 5.
   function showBorders() {
@@ -544,7 +537,9 @@
     var files = overlayMeta && overlayMeta.files ? overlayMeta.files : {};
     var kinds = ['admin0', 'admin1'].filter(function (k) { return files[k]; });
     bordersLoading = Promise.all(kinds.map(function (k) {
-      return fetchJson(overlayFile(k)).then(function (g) {
+      return request('GET', overlayFile(k)).then(function (g) {
+        // request turns a body that is not JSON into {}: not a GeoJSON file
+        if (!g || g.type === undefined) throw new Error(overlayFile(k) + ': not a GeoJSON file');
         var feats = g && Array.isArray(g.features) ? g.features : [];
         feats.forEach(function (f) { f.properties = { kind: k }; });
         return feats;
@@ -589,7 +584,8 @@
     }
     if (!citiesData) {
       if (citiesLoading || citiesFailed) return;   // a failed load is retried when the box is ticked again
-      citiesLoading = fetchJson(overlayFile('cities')).then(function (g) {
+      citiesLoading = request('GET', overlayFile('cities')).then(function (g) {
+        if (!g || g.type === undefined) throw new Error(overlayFile('cities') + ': not a GeoJSON file');
         citiesData = (g && Array.isArray(g.features) ? g.features : []).map(function (f) {
           var p = f.properties || {}, c = f.geometry && f.geometry.coordinates;
           return { name: String(p.name || ''), rank: Number(p.rank), pop: Number(p.pop) || 0,
@@ -1597,7 +1593,7 @@
   function fmtTime(iso) {
     var ms = Date.parse(iso);
     if (isNaN(ms)) return String(iso);
-    return new Date(ms).toISOString().substr(11, 8) + 'Z · ' + P.formatAge(ms, dataNow());
+    return P.isoClock(iso, 'hms') + ' · ' + P.formatAge(ms, dataNow());
   }
   function yesNo(v) { return v ? 'yes' : 'no'; }
   function signed(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + P.thousands(Math.abs(v)); }
@@ -2398,7 +2394,7 @@
     var rel = a < 60000 ? Math.round(a / 1000) + ' s' : a < 3600000 ? Math.round(a / 60000) + ' min' :
       a < 172800000 ? Math.floor(a / 3600000) + ' h ' + Math.round(a % 3600000 / 60000) + ' min' :
       Math.round(a / 86400000) + ' d';
-    return new Date(ms).toISOString().substr(0, 19).replace('T', ' ') + 'Z · ' + (d > 0 ? 'in ' + rel : rel + ' ago');
+    return P.isoClock(iso, 'date-hms') + ' · ' + (d > 0 ? 'in ' + rel : rel + ' ago');
   }
   function altText(p) {
     var lo = p.alt_low_ft, hi = p.alt_high_ft;
@@ -2462,10 +2458,7 @@
     if (fisb.text.delete(key)) fisb.wxDirty = fisb.symDirty = true;
     if (fisb.reportRec === key) hideShape();
   }
-  function hhmm(iso) {
-    var ms = Date.parse(iso);
-    return isNaN(ms) ? '—' : new Date(ms).toISOString().substr(11, 5) + 'Z';
-  }
+  function hhmm(iso) { return P.isoClock(iso, 'hm', '—'); }
   function shortAge(ms, now) { return P.formatAge(ms, now).replace(/ ago$/, ''); }
 
   function renderWx(force) {
@@ -2813,9 +2806,9 @@
   function pollFisb() {
     if (!connected) return;
     var gen = fisb.gen;
-    request('GET', 'api/fisb/status').then(function (st) {
+    P.quietly(request('GET', 'api/fisb/status').then(function (st) {
       if (gen === fisb.gen) applyFisbStatus(st);
-    }).catch(function () { /* the WebSocket watchdog reports a dead skycued */ });
+    })); // the WebSocket watchdog reports a dead skycued
   }
   function radarAgeTick() {
     var parts = [], newest = NaN;
@@ -3035,7 +3028,7 @@
     return request('GET', 'api/inputs').then(function (j) { applyInputs(j.inputs); });
   }
   function pollInputs() {
-    if (connected) refreshInputs().catch(function () { /* the WebSocket watchdog reports a dead skycued */ });
+    if (connected) P.quietly(refreshInputs()); // the WebSocket watchdog reports a dead skycued
   }
 
   function makeCard(inp) {
@@ -3221,12 +3214,7 @@
       ul.appendChild(li);
     });
   }
-  function uplinkTime(iso) {
-    var ms = Date.parse(iso);
-    if (isNaN(ms)) return '—';
-    var t = new Date(ms).toISOString();
-    return t.substr(0, 10) + ' ' + t.substr(11, 8) + 'Z';
-  }
+  function uplinkTime(iso) { return P.isoClock(iso, 'date-hms', '—'); }
   function renderHealth() {
     var st = fisb.status || {}, counts = st.counts || {}, s = rx.stats || {};
     var body = $('decoder-health').tBodies[0];
@@ -3257,7 +3245,8 @@
   // ring: the last updates and drops; dropRing: the last drops alone, so
   // "Drops only" still has them when max-interval resends fill `ring`.
   var CUES_DROPS_ONLY_KEY = 'skycue.cues.dropsOnly';   // a view option in localStorage
-  var cues = { ring: [], dropRing: [], dropsOnly: false, recentDirty: true, historySeq: 0, clientsSeq: 0, clients: null };
+  var cues = { ring: [], dropRing: [], dropsOnly: false, recentDirty: true, clients: null,
+    guardHistory: P.latest(), guardClients: P.latest() };
 
   function onDecision(it) {
     var row = P.decisionRow(it);
@@ -3271,10 +3260,7 @@
     storeSet(CUES_DROPS_ONLY_KEY, cues.dropsOnly ? '1' : '0');
     renderCueRecent();
   }
-  function clockTime(iso) {
-    var ms = Date.parse(iso);
-    return isNaN(ms) ? '' : new Date(ms).toISOString().substr(11, 8) + 'Z';
-  }
+  function clockTime(iso) { return P.isoClock(iso, 'hms', ''); }
   function renderCueCounters() {
     var body = $('cues-counters').tBodies[0], s = rx.stats || {};
     if (!body.rows.length) {
@@ -3352,16 +3338,12 @@
   }
   // A response that an answer to a later request overtook is not shown.
   function fetchCueHistory() {
-    var seq = ++cues.historySeq;
-    request('GET', 'api/filters/history').then(function (h) {
-      if (seq === cues.historySeq) renderCueFilters(h.changes || []);
-    }).catch(function () { /* the WebSocket watchdog reports a dead skycued */ });
+    P.quietly(cues.guardHistory(request('GET', 'api/filters/history'), function (h) {
+      renderCueFilters(h.changes || []);
+    })); // the WebSocket watchdog reports a dead skycued
   }
   function fetchCueClients() {
-    var seq = ++cues.clientsSeq;
-    request('GET', 'api/cues/clients').then(function (c) {
-      if (seq === cues.clientsSeq) renderCueClients(c);
-    }).catch(function () { /* as above */ });
+    P.quietly(cues.guardClients(request('GET', 'api/cues/clients'), renderCueClients)); // as above
   }
   function showCues() {
     renderCueCounters();
@@ -3836,16 +3818,15 @@
     var inp = card && inputById(card.getAttribute('data-id'));
     if (!inp) return;
     var act = b.getAttribute('data-act'), path = 'api/inputs/' + encodeURIComponent(inp.id);
-    var done = function () { showMsg($('inputs-msg'), ''); return refreshInputs(); };
-    var failed = function (err) { showMsg($('inputs-msg'), err.message, true); };
+    var outcome = P.act(function (m, e) { showMsg($('inputs-msg'), m, e); }, refreshInputs);
     if (act === 'toggle') {
-      request('POST', path + (inp.enabled ? '/disable' : '/enable'), {}).then(done).catch(failed);
+      request('POST', path + (inp.enabled ? '/disable' : '/enable'), {}).then(outcome.done).catch(outcome.failed);
     } else if (act === 'edit') {
       editInput(inp);
     } else if (act === 'remove') {
       if (!window.confirm('Remove input ' + inp.id + '?')) return;
       if (rx.editing === inp.id) resetForm();
-      request('DELETE', path).then(done).catch(failed);
+      request('DELETE', path).then(outcome.done).catch(outcome.failed);
     } else if (act === 'show') {
       // Pans, keeping the zoom; from a zoom below SHOW_MIN_ZOOM with the
       // device out of view it zooms in to SHOW_MIN_ZOOM.
@@ -3876,7 +3857,7 @@
   }
   function pollOutputs() {
     // A skycued without outputs answers 404: the section stays empty.
-    if (connected && tabShown('receiver')) refreshOutputs().catch(function () { /* the watchdog reports a dead skycued */ });
+    if (connected && tabShown('receiver')) P.quietly(refreshOutputs()); // the watchdog reports a dead skycued
   }
   function makeOutputCard(out) {
     var card = el('div', 'output-card');
@@ -4033,16 +4014,15 @@
     var out = card && outputById(card.getAttribute('data-id'));
     if (!out) return;
     var act = b.getAttribute('data-act'), path = 'api/outputs/' + encodeURIComponent(out.id);
-    var done = function () { showMsg($('outputs-msg'), ''); return refreshOutputs(); };
-    var failed = function (err) { showMsg($('outputs-msg'), err.message, true); };
+    var outcome = P.act(function (m, e) { showMsg($('outputs-msg'), m, e); }, refreshOutputs);
     if (act === 'toggle') {
-      request('POST', path + (out.enabled ? '/disable' : '/enable'), {}).then(done).catch(failed);
+      request('POST', path + (out.enabled ? '/disable' : '/enable'), {}).then(outcome.done).catch(outcome.failed);
     } else if (act === 'edit') {
       editOutput(out);
     } else if (act === 'remove') {
       if (!window.confirm('Remove output ' + out.id + '?')) return;
       if (rx.outEditing === out.id) resetOutForm();
-      request('DELETE', path).then(done).catch(failed);
+      request('DELETE', path).then(outcome.done).catch(outcome.failed);
     }
   }
 
@@ -4548,8 +4528,8 @@
   // fetched only then (no request, no 404, without overlays).
   var overlaysReady = tilesReady.then(function (tiles) {
     if (!tiles || tiles.overlays !== true) { overlayMeta = null; return; }
-    return fetchJson('overlays/meta.json').then(function (m) {
-      overlayMeta = m && typeof m === 'object' ? m : null;
+    return request('GET', 'overlays/meta.json').then(function (m) {
+      overlayMeta = m && typeof m === 'object' && (m.files !== undefined || m.tiles !== undefined) ? m : null;
     }, function () { overlayMeta = null; });
   });
   Promise.all([tilesReady, overlaysReady]).then(function (r) {

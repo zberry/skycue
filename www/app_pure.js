@@ -2212,6 +2212,39 @@
     return dist(m.nm) + ' nm · ' + dist(m.km) + ' km · ' + bs + '°T';
   }
 
+  // A UTC clock text from an ISO time: style 'hms' is HH:MM:SSZ, 'hm' is
+  // HH:MMZ, 'date-hms' is YYYY-MM-DD HH:MM:SSZ. An unparseable time gives
+  // the fallback, or String(iso) when no fallback is given.
+  function isoClock(iso, style, fallback) {
+    var ms = Date.parse(iso);
+    if (isNaN(ms)) return fallback !== undefined ? fallback : String(iso);
+    var t = new Date(ms).toISOString();
+    if (style === 'hm') return t.substr(11, 5) + 'Z';
+    if (style === 'date-hms') return t.substr(0, 10) + ' ' + t.substr(11, 8) + 'Z';
+    return t.substr(11, 8) + 'Z';
+  }
+
+  // "The latest response wins": guard(promise, apply) runs apply(value) only
+  // when no later guard() call has happened; a rejection still rejects.
+  function latest() {
+    var seq = 0;
+    return function (promise, apply) {
+      var mine = ++seq;
+      return promise.then(function (v) { if (mine === seq) apply(v); });
+    };
+  }
+
+  // The policy for a background poll: a failure is ignored.
+  function quietly(promise) { return promise.catch(function () {}); }
+
+  // The done/failed pair of a button action: report the outcome, refresh on success.
+  function act(report, refresh) {
+    return {
+      done: function () { report('', false); return refresh(); },
+      failed: function (err) { report(err.message, true); }
+    };
+  }
+
   var api = {
     EARTH_RADIUS_M: EARTH_RADIUS_M, METRES_PER_NM: METRES_PER_NM, DECISION_COLORS: DECISION_COLORS,
     rangeNm: rangeNm, bearingDeg: bearingDeg, elevationDeg: elevationDeg, elevationRingNm: elevationRingNm,
@@ -2280,7 +2313,8 @@
     ALT_BOUNDS_FT: ALT_BOUNDS_FT, ALT_COLORS: ALT_COLORS, altitudeStep: altitudeStep, altitudeColor: altitudeColor,
     altitudeLegend: altitudeLegend, altitudeRuns: altitudeRuns,
     TRAIL_MAX_KT: TRAIL_MAX_KT, TRAIL_BACKSTEP_S: TRAIL_BACKSTEP_S, trailStep: trailStep,
-    rulerMeasure: rulerMeasure, rulerLabel: rulerLabel
+    rulerMeasure: rulerMeasure, rulerLabel: rulerLabel,
+    isoClock: isoClock, latest: latest, quietly: quietly, act: act
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

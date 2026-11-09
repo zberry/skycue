@@ -2110,5 +2110,62 @@ test('formatNavModes and formatAcasRa', () => {
   assert.strictEqual(P.formatAcasRa(null), '—');
 });
 
-console.log(passed + ' passed, ' + failed + ' failed');
-process.exit(failed ? 1 : 0);
+test('isoClock formats the three styles in UTC', () => {
+  const iso = '2026-11-09T04:05:06.789Z';
+  assert.strictEqual(P.isoClock(iso, 'hms'), '04:05:06Z');
+  assert.strictEqual(P.isoClock(iso, 'hm'), '04:05Z');
+  assert.strictEqual(P.isoClock(iso, 'date-hms'), '2026-11-09 04:05:06Z');
+});
+
+test('isoClock returns the fallback for an unparseable time', () => {
+  assert.strictEqual(P.isoClock('garbage', 'hms', '—'), '—');
+  assert.strictEqual(P.isoClock('', 'hm', ''), '');
+  assert.strictEqual(P.isoClock(null, 'hms', '—'), '—');
+  assert.strictEqual(P.isoClock('garbage', 'hms'), 'garbage');
+});
+
+test('act reports success and failure and refreshes once', () => {
+  const calls = [];
+  const a = P.act(function (m, e) { calls.push([m, e]); }, function () { calls.push('refresh'); return 7; });
+  assert.strictEqual(a.done(), 7);
+  assert.deepStrictEqual(calls, [['', false], 'refresh']);
+  a.failed(new Error('x'));
+  assert.deepStrictEqual(calls[2], ['x', true]);
+  assert.strictEqual(calls.length, 3);
+});
+
+const asyncTests = [];
+function testAsync(name, fn) {
+  asyncTests.push(fn().then(function () {
+    passed++;
+    console.log('ok   ' + name);
+  }, function (e) {
+    failed++;
+    console.log('FAIL ' + name + ': ' + (e && e.message));
+  }));
+}
+
+testAsync('latest applies only the newest response', async () => {
+  const guard = P.latest();
+  let res1, res2;
+  const applied = [];
+  const p1 = guard(new Promise(function (r) { res1 = r; }), function (v) { applied.push(v); });
+  const p2 = guard(new Promise(function (r) { res2 = r; }), function (v) { applied.push(v); });
+  res2('second');
+  res1('first');
+  await Promise.all([p1, p2]);
+  assert.deepStrictEqual(applied, ['second']);
+  const rejected = guard(Promise.reject(new Error('boom')), function () { applied.push('no'); });
+  await assert.rejects(rejected, /boom/);
+  assert.deepStrictEqual(applied, ['second']);
+});
+
+testAsync('quietly swallows a rejection and resolves', async () => {
+  assert.strictEqual(await P.quietly(Promise.reject(new Error('x'))), undefined);
+  assert.strictEqual(await P.quietly(Promise.resolve(5)), 5);
+});
+
+Promise.all(asyncTests).then(function () {
+  console.log(passed + ' passed, ' + failed + ' failed');
+  process.exit(failed ? 1 : 0);
+});

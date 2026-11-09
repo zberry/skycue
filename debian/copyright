@@ -27,15 +27,15 @@ Comment: Apache ECharts 5.6.0 is Apache-2.0. The parts it embeds from d3.js
  /usr/share/skycue/www/vendor/echarts/, and the d3.js licence as
  /usr/share/skycue/www/vendor/echarts/licenses/LICENSE-d3.
 
-Files: tests/fixtures/fisb/gen_*.py
-       tests/fixtures/fisb/README.md
+Files: tests/data/fisb/gen_*.py
+       tests/data/fisb/README.md
 Copyright: 2026 the skycue authors
 License: Apache-2.0
-Comment: skycue's own generator scripts and notes for the FIS-B fixtures.
+Comment: skycue's own generator scripts and notes for the FIS-B test data.
  The third-party test captures (stratux, dump978, fisb-decode, pyModeS) and
  the files derived from them are not part of the source or of any binary
- package: scripts/fixtures/fetch-test-captures.sh downloads them on demand for tests
- and tests/fixtures/README.md gives each one's origin and licence text.
+ package: scripts/test-data/fetch-test-captures.sh downloads them on demand for tests
+ and tests/data/README.md gives each one's origin and licence text.
 
 License: Apache-2.0
  Licensed under the Apache License, Version 2.0 (the "License");
@@ -102,4 +102,4 @@ License: BSD-3-Clause
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Comment: Text of the d3.js licence (licenses/LICENSE-d3 in the ECharts
  tarball). The stratux licence reads the same with "the Christopher Young" in
- place of "the author"; its verbatim text is in tests/fixtures/README.md.
+ place of "the author"; its verbatim text is in tests/data/README.md.

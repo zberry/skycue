@@ -60,17 +60,17 @@ int64_t epochMs(TP t)
 
 double secondsBetween(TP a, TP b) { return std::chrono::duration<double>(a - b).count(); }
 
-std::string fixture(const std::string& name)
+std::string loadSample(const std::string& name)
 {
-    std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/pingstation/" + name, std::ios::binary);
-    BOOST_REQUIRE_MESSAGE(in, "cannot open fixture " << name);
+    std::ifstream in(std::string(SKYCUE_TEST_DATA_DIR) + "/pingstation/" + name, std::ios::binary);
+    BOOST_REQUIRE_MESSAGE(in, "cannot open sample " << name);
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 std::string replaced(std::string text, const std::string& from, const std::string& to)
 {
     const auto pos = text.find(from);
-    BOOST_REQUIRE_MESSAGE(pos != std::string::npos, "fixture lacks " << from);
+    BOOST_REQUIRE_MESSAGE(pos != std::string::npos, "sample lacks " << from);
     return text.replace(pos, from.size(), to);
 }
 
@@ -277,7 +277,7 @@ BOOST_AUTO_TEST_CASE(huge_rates_dropped)
 
 BOOST_AUTO_TEST_CASE(traffic_1090_maps)
 {
-    const std::string text = fixture("traffic-1090.json");
+    const std::string text = loadSample("traffic-1090.json");
     const auto r = parsePingDatagram(text, PingContext{kSampleArrival, TimeMode::utc});
     BOOST_TEST(r.rejected == 0u);
     BOOST_TEST(r.clock_rejects == 0u);
@@ -319,7 +319,7 @@ BOOST_AUTO_TEST_CASE(traffic_1090_maps)
 BOOST_AUTO_TEST_CASE(traffic_1090_clamped_when_far)
 {
     const TP arrival = utc(2030, 1, 1, 0, 0, 0);
-    const auto r = parsePingDatagram(fixture("traffic-1090.json"), PingContext{arrival, TimeMode::utc});
+    const auto r = parsePingDatagram(loadSample("traffic-1090.json"), PingContext{arrival, TimeMode::utc});
     BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
     const auto& o = r.observations[0];
     BOOST_REQUIRE(o.position_time);
@@ -334,7 +334,7 @@ BOOST_AUTO_TEST_CASE(traffic_1090_clamped_when_far)
 BOOST_AUTO_TEST_CASE(gps_time_mode_subtracts_18s)
 {
     const TP arrival = utc(2026, 11, 2, 11, 59, 40);
-    const auto r = parsePingDatagram(fixture("traffic-1090.json"), PingContext{arrival, TimeMode::gps});
+    const auto r = parsePingDatagram(loadSample("traffic-1090.json"), PingContext{arrival, TimeMode::gps});
     BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
     BOOST_TEST((r.observations[0].position_time.value() == arrival));
     BOOST_TEST(r.clock_offset_s.value_or(1) == 0.0);
@@ -343,7 +343,7 @@ BOOST_AUTO_TEST_CASE(gps_time_mode_subtracts_18s)
 
 BOOST_AUTO_TEST_CASE(utcsync_zero_uses_arrival)
 {
-    const auto text = replaced(fixture("traffic-1090.json"), R"("utcSync":1)", R"("utcSync":0)");
+    const auto text = replaced(loadSample("traffic-1090.json"), R"("utcSync":1)", R"("utcSync":0)");
     const auto r = parsePingDatagram(text, PingContext{kSampleArrival, TimeMode::utc});
     BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
     BOOST_TEST((r.observations[0].position_time.value() == kSampleArrival));
@@ -355,7 +355,7 @@ BOOST_AUTO_TEST_CASE(utcsync_zero_uses_arrival)
 
 BOOST_AUTO_TEST_CASE(curly_quote_status_is_rejected)
 {
-    const std::string text = fixture("status-curly-quotes.json");
+    const std::string text = loadSample("status-curly-quotes.json");
     PingResult r;
     BOOST_CHECK_NO_THROW(r = parsePingDatagram(text, PingContext{kSampleArrival, TimeMode::utc}));
     BOOST_TEST(r.rejected == 1u);
@@ -366,7 +366,7 @@ BOOST_AUTO_TEST_CASE(curly_quote_status_is_rejected)
 
 BOOST_AUTO_TEST_CASE(status_maps)
 {
-    const std::string text = fixture("status.json");
+    const std::string text = loadSample("status.json");
     const TP arrival = utc(2026, 11, 2, 11, 59, 59);
     const auto r = parsePingDatagram(text, PingContext{arrival, TimeMode::utc});
     BOOST_TEST(r.rejected == 0u);
@@ -396,7 +396,7 @@ BOOST_AUTO_TEST_CASE(status_maps)
 BOOST_AUTO_TEST_CASE(uat_detail_maps)
 {
     const TP arrival = utc(2026, 11, 2, 12, 0, 0);
-    const auto r = parsePingDatagram(fixture("uat-detail.json"), PingContext{arrival, TimeMode::utc});
+    const auto r = parsePingDatagram(loadSample("uat-detail.json"), PingContext{arrival, TimeMode::utc});
     BOOST_TEST(r.rejected == 0u);
     BOOST_REQUIRE_EQUAL(r.observations.size(), 1u);
     const auto& o = r.observations[0];
@@ -1323,9 +1323,9 @@ BOOST_AUTO_TEST_CASE(cat021_encode_round_trip_through_map)
     }
 }
 
-BOOST_AUTO_TEST_CASE(encoders_on_readsb_fixture)
+BOOST_AUTO_TEST_CASE(encoders_on_readsb_sample)
 {
-    std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/readsb-sample.jsonl");
+    std::ifstream in(std::string(SKYCUE_TEST_DATA_DIR) + "/readsb-sample.jsonl");
     BOOST_REQUIRE(in);
     std::size_t n = 0;
     for (std::string line; std::getline(in, line);) {

@@ -200,7 +200,7 @@ BOOST_AUTO_TEST_CASE(airborne_position_fields)
     BOOST_CHECK_EQUAL(*alt, 38000);
 }
 
-// TC 22 frame from tests/fixtures/opensky/n722bd_2026-11-01_florida/n722bd_position_data4.csv
+// TC 22 frame from tests/data/opensky/n722bd_2026-11-01_florida/n722bd_position_data4.csv
 // (rawmsg column): the 12-bit field is 605 m of GNSS height, OpenSky reports 605.028 m = 1985 ft.
 // The barometric Q-bit rule would give 6525 ft.
 BOOST_AUTO_TEST_CASE(tc22_altitude_is_gnss_height_in_metres)

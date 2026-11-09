@@ -1,7 +1,7 @@
 #define BOOST_TEST_MODULE skycued_support_headers
 #include <boost/test/unit_test.hpp>
 
-#include "fixture_io.hpp"
+#include "test_data_io.hpp"
 #include "temp_dir.hpp"
 #include "test_util.hpp"
 

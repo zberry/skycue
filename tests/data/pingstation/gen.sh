@@ -2,20 +2,20 @@
 # Regenerates traffic-1090.json, status.json and status-curly-quotes.json in
 # this directory with the project's own simulator.
 #
-#   gen.sh [--check] <skycue-pingsim> <skycue-fixtures-dir>
+#   gen.sh [--check] <skycue-pingsim> <skycue-test-data-dir>
 #
 # With --check nothing is written: the three files are regenerated into a
 # temporary directory and compared with the committed ones, and the generated
 # CAT021 block is compared with kSampleBlock in tests/test_cat021.cpp except for
 # the three I021/073 bytes. Exit status 1 on any difference.
 #
-# <skycue-fixtures-dir> is tests/fixtures (it holds readsb-sample.jsonl; the
+# <skycue-test-data-dir> is tests/data (it holds readsb-sample.jsonl; the
 # outputs go to its pingstation/ subdirectory). python3 is the only other tool.
 #
 # The generator command, run once with a UDP listener on a free local port:
 #
 #   skycue-pingsim --udp 127.0.0.1:PORT --as json --speed 0 --status-interval 1 \
-#       --status-lat 38.9 --status-lon -77.0 tests/fixtures/readsb-sample.jsonl
+#       --status-lat 38.9 --status-lon -77.0 tests/data/readsb-sample.jsonl
 #
 # The simulator stamps every datagram with the send time, so a plain run is not
 # reproducible. The first aircraft datagram and the first status datagram are
@@ -38,7 +38,7 @@
 # The CAT021 vector of tests/test_cat021.cpp (kSampleBlock) comes from the same
 # input file with the generator command
 #
-#   skycue-pingsim --udp 127.0.0.1:PORT --as cat021 --speed 0 tests/fixtures/readsb-sample.jsonl
+#   skycue-pingsim --udp 127.0.0.1:PORT --as cat021 --speed 0 tests/data/readsb-sample.jsonl
 #
 # whose first datagram is one 51-byte block. This script runs it too and prints
 # that block as hex. Only the I021/073 time-of-message-reception bytes depend on
@@ -52,7 +52,7 @@ if [ "${1:-}" = "--check" ]; then
     shift
 fi
 if [ $# -ne 2 ]; then
-    echo "usage: $0 [--check] <skycue-pingsim> <skycue-fixtures-dir>" >&2
+    echo "usage: $0 [--check] <skycue-pingsim> <skycue-test-data-dir>" >&2
     exit 2
 fi
 SIM=$1

@@ -777,7 +777,7 @@ test('flowWindow drops a sample after a counter reset', () => {
   assert.ok(S.flowRates(w));
 });
 
-test('flowRates per-second values from the fixture', () => {
+test('flowRates per-second values from the sample', () => {
   const r = S.flowRates(flowWin(3));
   assert.strictEqual(r.span_s, 10);
   assert.strictEqual(r.inputs.readsb.msg_s, 1420);

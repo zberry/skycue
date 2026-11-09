@@ -12,8 +12,8 @@ Read `ARCHITECTURE.md` first for the data flow and the glossary.
 - `www/`: the web page. `app_pure.js` and friends are pure helpers tested under node.
 - `tools/`: `skycue-*` command-line tools; `tools/iqgen/` makes IQ test files.
 - `examples/`: client demos (minimal, ECEF callbacks, ECEF `takeChanges()`, parent project).
-- `tests/`: Boost.Test unit tests, shell tests, `js/`, `ui/` (browser), `fuzz/`, `fixtures/`.
-- `scripts/`: `dev/` (sanitizers, fuzz, static, fetch web libs), `fixtures/`, `maps/`, `lib/`.
+- `tests/`: Boost.Test unit tests, shell tests, `js/`, `ui/` (browser), `fuzz/`, `data/`.
+- `scripts/`: `dev/` (sanitizers, fuzz, static, fetch web libs), `test-data/`, `maps/`, `lib/`.
 - `packaging/`, `debian/`, `cmake/`: packages, systemd unit, CMake modules. `docs/`: documentation.
 
 ## Build and test
@@ -25,14 +25,14 @@ Read `ARCHITECTURE.md` first for the data flow and the glossary.
   (exit 77) without `node_modules/@playwright/test`; see `tests/ui/README.md` for setup.
 - Test families, variables and the reasons tests skip: `tests/README.md`. Contributor rules: `CONTRIBUTING.md`.
 - Skips are normal: ctest reports exit 77 as Skipped. A skip is not a pass; say which tests skipped.
-- Fetched fixtures: `scripts/fixtures/fetch-test-captures.sh`. Tests using `tests/fixtures/raw`,
+- Fetched test data: `scripts/test-data/fetch-test-captures.sh`. Tests using `tests/data/raw`,
   `fisb/tg30.978` and the UAT/Stratux captures skip without them (`decode_differential*`, `rawtools`,
-  `hub`, FIS-B golden). IQ samples: `scripts/fixtures/fetch-iq-samples.sh`.
+  `hub`, FIS-B golden). IQ samples: `scripts/test-data/fetch-iq-samples.sh`.
 - External decoders (optional, for fresh reference runs): `SKYCUE_READSB` (readsb) and
   `SKYCUE_DUMP978` (dump978-fa) name executables for `decode_differential` and `decode_differential_uat`;
   `SKYCUE_TEST_READSB` (CMake cache variable) does the same for `rawtools`. Unset: the committed
   goldens stand and the live run is skipped. Never put a path to them in a file.
-- Sanitizers, fuzzing, static analysis, soak: `docs/hardening.md`. Test fixtures: `tests/fixtures/README.md`.
+- Sanitizers, fuzzing, static analysis, soak: `docs/hardening.md`. Test test data: `tests/data/README.md`.
 
 ## Dependencies (fixed set)
 - Allowed: Boost, the vendored Leaflet and ECharts tarballs, the C++17 standard library, system libraries (zlib).
@@ -50,13 +50,13 @@ Read `ARCHITECTURE.md` first for the data flow and the glossary.
 
 ## Conventions
 - Test first; keep commits small, one change per commit, with a message that says why.
-- Goldens: `tests/fixtures/gen_raw_golden.sh` (readsb, Mode S), `gen_uat_golden.sh` (dump978-fa),
+- Goldens: `tests/data/gen_raw_golden.sh` (readsb, Mode S), `gen_uat_golden.sh` (dump978-fa),
   `fisb/gen_*.py` and `docs/fisb-golden.md` (FIS-B). Regenerate only when behaviour change is intended,
   and say so in the commit. Differential tests: `tests/test_decode_differential*.sh`.
 - Keep in step: `packaging/skycue.toml.example` is the single example config, which the tests read directly;
   `docs/protocol.md` with the encoder in `libskycue/`; `docs/recording-format.md` with the recorder key
-  tables; `docs/web-api.md` with the routes; `tests/fixtures/config-copy.toml` with `configText` in
-  `www/app_pure.js`; `skycued/src/icao_tables.inc` via `scripts/fixtures/gen-icao-tables.py`.
+  tables; `docs/web-api.md` with the routes; `tests/data/config-copy.toml` with `configText` in
+  `www/app_pure.js`; `skycued/src/icao_tables.inc` via `scripts/test-data/gen-icao-tables.py`.
 - Never commit fetched third-party data (captures, OpenSky data, tarballs). They stay git-ignored.
 - Never hard-code paths to external tools; take them from environment variables or arguments.
 - The web page is plain JavaScript (ES2017 as `www/README.md` states) with no build step, no framework,
@@ -70,7 +70,7 @@ Read `ARCHITECTURE.md` first for the data flow and the glossary.
 - Wire protocol or library API: `docs/protocol.md`, `docs/libskycue.md`.
 - Recordings: `docs/recording-format.md`. FIS-B: `docs/fisb.md`, `docs/fisb-reference.md`.
 - Install, packaging: `docs/installing.md`, `docs/releasing.md`. Visible changes: `README.md`.
-- New third-party material: `NOTICE`, `debian/copyright`, `tests/fixtures/README.md`.
+- New third-party material: `NOTICE`, `debian/copyright`, `tests/data/README.md`.
 
 ## Don't
 - Do not add dependencies, vendored code, or network access at build or run time.

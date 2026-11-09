@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ctest ui_playwright: the Playwright suite (ui.spec.js) in headless Chromium
-# against a skycued replaying the readsb JSON fixture in real time, on
+# against a skycued replaying the readsb JSON sample in real time, on
 # ephemeral web/cue ports with a temporary skycue.toml, and two more for the
 # FIS-B cases, each replaying a received recording with uplinks unpaced:
 # fisb/received-with-uplinks.jsonl (2015: text, NOTAMs) and
@@ -11,19 +11,19 @@
 # .bin) and NODE_PATH. One more, the
 # "receivers" skycued, runs no built-in decoder inputs and one
 # pingstation_json input, ps-sim, that skycue-pingsim feeds the readsb
-# fixture to (with a device status every 2 s), one beast tcp_listen output
+# sample to (with a device status every 2 s), one beast tcp_listen output
 # (beast-out, port in SKYCUE_RX_OUTPUT_PORT) and one cue UDP target, for the
 # Receiver tab cases;
-# the "acas" skycued, replaying tests/fixtures/acas-ra.jsonl (an active ACAS
+# the "acas" skycued, replaying tests/data/acas-ra.jsonl (an active ACAS
 # resolution advisory);
-# and the "stats" skycued, the readsb fixture at 20x with its statistics in
+# and the "stats" skycued, the readsb sample at 20x with its statistics in
 # a stats.json, which the ledger case restarts.
-# usage: run.sh SKYCUED FIXTURE_DIR WWW_STAGE PINGSIM [PLAYWRIGHT ARGS...]
+# usage: run.sh SKYCUED DATA_DIR WWW_STAGE PINGSIM [PLAYWRIGHT ARGS...]
 # (extra arguments go to `playwright test`, e.g. --grep NAME).
 # Every process it starts is stopped on every way out: normal end, a
 # failure, or SIGINT/SIGTERM/SIGHUP (a ctest timeout, Ctrl-C).
 set -u
-skycued=$1 fixtures=$2 www=$3 pingsim=$4
+skycued=$1 data_dir=$2 www=$3 pingsim=$4
 shift 4
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/test_common.sh"   # free_port only; the teardown below is this script's own
@@ -118,7 +118,7 @@ write_conf "$tmp/skycue.toml" "$web_port" "$cue_port" ""
 
 # The spec restarts skycued (reconnect case) with this same command; `exec`
 # keeps the PID the one of skycued itself, written to $pidfile.
-start_cmd="echo \$\$ > '$pidfile'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/skycue.toml' --www-dir '$www' >>'$tmp/skycued.log' 2>&1"
+start_cmd="echo \$\$ > '$pidfile'; exec '$skycued' --replay '$data_dir/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/skycue.toml' --www-dir '$www' >>'$tmp/skycued.log' 2>&1"
 bash -c "$start_cmd" &
 base="http://127.0.0.1:$web_port"
 up=0
@@ -178,10 +178,10 @@ EOP
 # The 2015 sample's one ground station (San Jose area); tg30's (central
 # Indiana), inside both of its NEXRAD mosaics (regional 36.7-43.3 N,
 # 90.4-81.6 W; CONUS 20-53 N, 132-60 W).
-fisb_rec="$fixtures/fisb/received-with-uplinks.jsonl"
-radar_rec="$fixtures/fisb/received-tg30.jsonl"
+fisb_rec="$data_dir/fisb/received-with-uplinks.jsonl"
+radar_rec="$data_dir/fisb/received-tg30.jsonl"
 # The recordings are derived from third-party captures by
-# scripts/fixtures/fetch-test-captures.sh. Without one, its daemon is not started, its
+# scripts/test-data/fetch-test-captures.sh. Without one, its daemon is not started, its
 # URL is not exported and ui.spec.js skips the describes that need it; the
 # rest of the suite runs.
 fisb_base="" radar_base=""
@@ -189,16 +189,16 @@ if [ -e "$fisb_rec" ]; then
   fisb_base=$(start_fisb fisb-2015 "$fisb_rec" 37.32 -121.75) || fail "FIS-B skycued (2015) did not come up"
   wait_fisb "$fisb_base" "$(grep -c '"uat_uplink"' "$fisb_rec")" || fail "2015 uplinks not decoded"
 else
-  echo "SKIP: FIS-B captures not fetched ($fisb_rec; run scripts/fixtures/fetch-test-captures.sh): the 2015-sample FIS-B tests are skipped"
+  echo "SKIP: FIS-B captures not fetched ($fisb_rec; run scripts/test-data/fetch-test-captures.sh): the 2015-sample FIS-B tests are skipped"
 fi
 if [ -e "$radar_rec" ]; then
   radar_base=$(start_fisb fisb-tg30 "$radar_rec" 40.04 -86.26) || fail "FIS-B skycued (tg30) did not come up"
   wait_fisb "$radar_base" "$(grep -c '"uat_uplink"' "$radar_rec")" || fail "tg30 uplinks not decoded"
 else
-  echo "SKIP: FIS-B captures not fetched ($radar_rec; run scripts/fixtures/fetch-test-captures.sh): the tg30 radar tests are skipped"
+  echo "SKIP: FIS-B captures not fetched ($radar_rec; run scripts/test-data/fetch-test-captures.sh): the tg30 radar tests are skipped"
 fi
 
-# Map tiles: one more skycued (the readsb fixture) serving a copy of the www
+# Map tiles: one more skycued (the readsb sample) serving a copy of the www
 # directory (without its own tiles/) with generated tiles while meta.json
 # claims zoom 0..6: 2/1/1 in four coloured quadrants (the fallback for the
 # zoom-6 tiles around the receiver, 4 levels up), one native zoom-6 tile,
@@ -218,7 +218,7 @@ done
 # line and three cities around the receiver (38.9 N, 77.0 W) of ranks 1, 4
 # and 7, shown from zoom 0, 5 and 7.
 mkdir -p "$tiles_www/overlays" || fail "overlays www dir"
-printf '%s\n' '{"files":{"admin0":{"file":"admin0.json"},"cities":{"file":"cities.json"}},"source":"test fixture"}' \
+printf '%s\n' '{"files":{"admin0":{"file":"admin0.json"},"cities":{"file":"cities.json"}},"source":"test sample"}' \
   > "$tiles_www/overlays/meta.json"
 printf '%s\n' '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[-78,38],[-77.5,39],[-76,39.5]]}}]}' \
   > "$tiles_www/overlays/admin0.json"
@@ -227,7 +227,7 @@ printf '%s\n' '{"type":"FeatureCollection","features":[' \
   '{"type":"Feature","properties":{"name":"Bravoton","rank":4,"pop":120000},"geometry":{"type":"Point","coordinates":[-76.8,38.75]}},' \
   '{"type":"Feature","properties":{"name":"Charlie Falls","rank":7,"pop":20000},"geometry":{"type":"Point","coordinates":[-77.2,39.05]}}]}' \
   > "$tiles_www/overlays/cities.json"
-python3 -I - "$tiles_www/tiles" <<'EOP' || fail "tiles fixture PNGs"
+python3 -I - "$tiles_www/tiles" <<'EOP' || fail "tiles sample PNGs"
 import os, struct, sys, zlib
 def chunk(kind, data):
     return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
@@ -245,7 +245,7 @@ printf '%s\n' '{"minZoom":0,"maxZoom":6,"bbox":[-180,-85,180,85],"regions":[{"na
   > "$tiles_www/tiles/meta.json"
 tiles_port=$(free_port)
 write_conf "$tmp/tiles.toml" "$tiles_port" 0 ""
-bash -c "echo \$\$ > '$tmp/fisb-tiles.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/tiles.toml' --www-dir '$tiles_www' >>'$tmp/tiles.log' 2>&1" </dev/null >/dev/null 2>&1 &
+bash -c "echo \$\$ > '$tmp/fisb-tiles.pid'; exec '$skycued' --replay '$data_dir/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/tiles.toml' --www-dir '$tiles_www' >>'$tmp/tiles.log' 2>&1" </dev/null >/dev/null 2>&1 &
 tiles_base="http://127.0.0.1:$tiles_port"
 up=0
 for (( i=0; i<100; i++ )); do
@@ -254,7 +254,7 @@ for (( i=0; i<100; i++ )); do
 done
 [ "$up" = 1 ] || fail "tiles skycued did not come up"
 
-# Overlays without tiles: one more skycued (the readsb fixture) whose www
+# Overlays without tiles: one more skycued (the readsb sample) whose www
 # has no tiles/ and an overlays/ with the border line, while meta.json lists
 # a cities.json that is not there (its fetch fails with a 404).
 ov_www="$tmp/www-overlays"
@@ -263,10 +263,10 @@ for f in "$tiles_www"/*; do
   case $(basename "$f") in tiles|overlays) continue ;; esac
   cp -r "$f" "$ov_www/" || fail "overlays-only www copy"
 done
-cp "$tiles_www/overlays/meta.json" "$tiles_www/overlays/admin0.json" "$ov_www/overlays/" || fail "overlays-only fixture"
+cp "$tiles_www/overlays/meta.json" "$tiles_www/overlays/admin0.json" "$ov_www/overlays/" || fail "overlays-only sample"
 ov_port=$(free_port)
 write_conf "$tmp/overlays.toml" "$ov_port" 0 ""
-bash -c "echo \$\$ > '$tmp/fisb-overlays.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/overlays.toml' --www-dir '$ov_www' >>'$tmp/overlays.log' 2>&1" </dev/null >/dev/null 2>&1 &
+bash -c "echo \$\$ > '$tmp/fisb-overlays.pid'; exec '$skycued' --replay '$data_dir/readsb-sample.jsonl' --replay-speed 1 --replay-loop --config '$tmp/overlays.toml' --www-dir '$ov_www' >>'$tmp/overlays.log' 2>&1" </dev/null >/dev/null 2>&1 &
 ov_base="http://127.0.0.1:$ov_port"
 up=0
 for (( i=0; i<100; i++ )); do
@@ -298,15 +298,15 @@ for (( i=0; i<100; i++ )); do
   sleep 0.1
 done
 [ "$up" = 1 ] || fail "receivers skycued did not come up"
-bash -c "echo \$\$ > '$tmp/pingsim.pid'; exec '$pingsim' --udp '127.0.0.1:$ps_port' --as json --loop --speed 5 --status-interval 2 --status-lat 38.9 --status-lon -77.0 '$fixtures/readsb-sample.jsonl' >>'$tmp/pingsim.log' 2>&1" </dev/null >/dev/null 2>&1 &
+bash -c "echo \$\$ > '$tmp/pingsim.pid'; exec '$pingsim' --udp '127.0.0.1:$ps_port' --as json --loop --speed 5 --status-interval 2 --status-lat 38.9 --status-lon -77.0 '$data_dir/readsb-sample.jsonl' >>'$tmp/pingsim.log' 2>&1" </dev/null >/dev/null 2>&1 &
 
-# Stats: one more skycued (the readsb fixture at 20x, looping) whose
+# Stats: one more skycued (the readsb sample at 20x, looping) whose
 # statistics are saved to stats.json beside its conf, for the ledger-across-
 # a-restart case: the spec stops it and starts it again with this command
 # (the replay's clock then starts over behind the reloaded series).
 st_port=$(free_port)
 write_conf "$tmp/stats.toml" "$st_port" 0 "stats.json" "save_s = 10"
-st_start_cmd="echo \$\$ > '$tmp/stats.pid'; exec '$skycued' --replay '$fixtures/readsb-sample.jsonl' --replay-speed 20 --replay-loop --config '$tmp/stats.toml' --www-dir '$www' >>'$tmp/stats.log' 2>&1"
+st_start_cmd="echo \$\$ > '$tmp/stats.pid'; exec '$skycued' --replay '$data_dir/readsb-sample.jsonl' --replay-speed 20 --replay-loop --config '$tmp/stats.toml' --www-dir '$www' >>'$tmp/stats.log' 2>&1"
 bash -c "$st_start_cmd" </dev/null >/dev/null 2>&1 &
 st_base="http://127.0.0.1:$st_port"
 up=0
@@ -321,7 +321,7 @@ done
 # aircraft-box and alert case.
 acas_port=$(free_port)
 write_conf "$tmp/acas.toml" "$acas_port" 0 ""
-bash -c "echo \$\$ > '$tmp/acas.pid'; exec '$skycued' --replay '$fixtures/acas-ra.jsonl' --replay-speed 1 --replay-loop --config '$tmp/acas.toml' --www-dir '$www' >>'$tmp/acas.log' 2>&1" </dev/null >/dev/null 2>&1 &
+bash -c "echo \$\$ > '$tmp/acas.pid'; exec '$skycued' --replay '$data_dir/acas-ra.jsonl' --replay-speed 1 --replay-loop --config '$tmp/acas.toml' --www-dir '$www' >>'$tmp/acas.log' 2>&1" </dev/null >/dev/null 2>&1 &
 acas_base="http://127.0.0.1:$acas_port"
 up=0
 for (( i=0; i<100; i++ )); do

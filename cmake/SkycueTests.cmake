@@ -3,12 +3,12 @@
 #
 # skycue_add_unit_test(<name>
 #   [SOURCE <file>] [EXTRA_SOURCES <files...>] [LIBS <targets...>]
-#   [DEFS <KEY=VALUE...>] [FIXTURE_DIR] [NET_SUPPORT]
+#   [DEFS <KEY=VALUE...>] [DATA_DIR] [NET_SUPPORT]
 #   [TIMEOUT <seconds>] [SKIPPABLE] [LABELS <labels...>])
 #   A Boost.Test executable test_<name> (source test_<name>.cpp unless SOURCE
 #   is given), registered as ctest <name>. Links skycued_core unless LIBS is
-#   given, and always Boost::unit_test_framework. FIXTURE_DIR defines
-#   SKYCUE_FIXTURE_DIR as <this directory>/fixtures; NET_SUPPORT adds
+#   given, and always Boost::unit_test_framework. DATA_DIR defines
+#   SKYCUE_TEST_DATA_DIR as <this directory>/data; NET_SUPPORT adds
 #   net/tests to the include path. SKIPPABLE: exit status 77 is a skip.
 #   Labels always include "unit".
 #
@@ -38,7 +38,7 @@ function(skycue_test_warnings target)
 endfunction()
 
 function(skycue_add_unit_test name)
-  cmake_parse_arguments(PARSE_ARGV 1 A "FIXTURE_DIR;NET_SUPPORT;SKIPPABLE"
+  cmake_parse_arguments(PARSE_ARGV 1 A "DATA_DIR;NET_SUPPORT;SKIPPABLE"
     "SOURCE;TIMEOUT" "EXTRA_SOURCES;LIBS;DEFS;LABELS")
   if(A_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "skycue_add_unit_test(${name}): unknown arguments ${A_UNPARSED_ARGUMENTS}")
@@ -53,9 +53,9 @@ function(skycue_add_unit_test name)
   add_executable(${target} ${A_SOURCE} ${A_EXTRA_SOURCES})
   target_link_libraries(${target} PRIVATE ${A_LIBS} Boost::unit_test_framework)
   target_compile_definitions(${target} PRIVATE BOOST_TEST_DYN_LINK ${A_DEFS})
-  if(A_FIXTURE_DIR)
+  if(A_DATA_DIR)
     target_compile_definitions(${target} PRIVATE
-      SKYCUE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+      SKYCUE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
   if(A_NET_SUPPORT)
     target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/net/tests)

@@ -4,21 +4,21 @@
 # stratux logs), resample
 # (file and stdin), the input error paths, the size guard, no frames, and a
 # write failure.
-# usage: test_iqgen_cli.sh SKYCUE_IQGEN FIXTURE_DIR
+# usage: test_iqgen_cli.sh SKYCUE_IQGEN DATA_DIR
 set -u
-iqgen=$1 fixtures=$2
-modes="$fixtures/raw/modes-120s.csv.gz"
-uat="$fixtures/raw/uat-sample.txt.gz"
-stratux="$fixtures/raw/stratux-uat-2015.log.gz"
+iqgen=$1 data_dir=$2
+modes="$data_dir/raw/modes-120s.csv.gz"
+uat="$data_dir/raw/uat-sample.txt.gz"
+stratux="$data_dir/raw/stratux-uat-2015.log.gz"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-# fixtures/raw/ is fetched by scripts/fixtures/fetch-test-captures.sh (fixtures/README.md):
+# data/raw/ is fetched by scripts/test-data/fetch-test-captures.sh (data/README.md):
 # without it the sections that read those captures are skipped and the
 # checks on generated inputs still run.
 have_raw=1
 for f in "$modes" "$uat" "$stratux"; do
-  [ -e "$f" ] || { have_raw=0; echo "SKIP the fixture sections: $f not fetched: run scripts/fixtures/fetch-test-captures.sh"; break; }
+  [ -e "$f" ] || { have_raw=0; echo "SKIP the test data sections: $f not fetched: run scripts/test-data/fetch-test-captures.sh"; break; }
 done
 [ -e "$iqgen" ] || fail "$iqgen missing"
 # A Mode S input for the usage and option errors, which do not need the capture.
@@ -54,7 +54,7 @@ expect_exit 2 no_o "$iqgen" modes "$any"
 expect_exit 2 badopt "$iqgen" modes "$any" -o "$tmp/x.cu8" --no-such-option
 [ -e "$tmp/x.cu8" ] && fail "usage error wrote an output"
 
-if [ "$have_raw" = 1 ]; then  # up to the stratux summary: fixtures/raw/
+if [ "$have_raw" = 1 ]; then  # up to the stratux summary: data/raw/
 # ---- modes: a 1 s slice -------------------------------------------------------
 start=$(date +%s%N)
 expect_exit 0 a "$iqgen" modes "$modes" --duration 1 -o "$tmp/a.1090.cu8"
@@ -75,7 +75,7 @@ awk 'NR > 1 && $1 < prev { bad = 1 } { prev = $1 } END { exit bad }' "$side" || 
 [ "$(grep -c ' expected' "$side")" -eq "$(field a expected)" ] || fail "sidecar expected count != summary"
 [ "$(grep -c ' expected overlap$' "$side")" -eq 0 ] || fail "an overlapped frame is marked expected"
 [ "$(awk 'NR == 1 { print $1 }' "$side")" -eq 120000 ] || fail "first frame not at the 50 ms pad (sample 120000)"
-[ "$(field a overlaps)" -gt 0 ] || fail "the fixture's first second should have overlaps"
+[ "$(field a overlaps)" -gt 0 ] || fail "the sample's first second should have overlaps"
 grep -q "^skycue-iqgen: warning: $(field a overlaps) pairs of frames overlap; overlapped frames are marked optional" "$tmp/a.err" ||
   { cat "$tmp/a.err"; fail "no overlap warning"; }
 ls "$tmp" | grep -q 'tmp' && { ls "$tmp"; fail "temporary output files left behind"; }
@@ -87,13 +87,13 @@ skip_frames=$(field skip frames)
 [ "$skip_frames" -ne "$frames" ] || fail "--skip-seconds 1: still $frames frames"
 first_a=$(awk 'NR == 1 { print $2 }' "$side") first_s=$(awk 'NR == 1 { print $2 }' "$tmp/s.frames.txt")
 [ "$first_a" != "$first_s" ] || fail "--skip-seconds 1: same first frame $first_a"
-# Cross-check on the fixture itself (in time order, ties in file order): the
+# Cross-check on the sample itself (in time order, ties in file order): the
 # first frame at least 1 s after the earliest, and the frames in the second after it.
 want=$(zcat "$modes" | awk -F, '{ t[NR] = $1; h[NR] = $2; if (NR == 1 || $1 < t0) t0 = $1 }
   END { for (i = 1; i <= NR; i++) if (t[i] - t0 >= 1 && (!s || t[i] < t1)) { t1 = t[i]; s = i }
         for (i = 1; i <= NR; i++) if (t[i] - t0 >= 1 && t[i] - t1 < 1) n++
         print h[s], n }')
-[ "$want" = "$first_s $skip_frames" ] || fail "--skip-seconds 1: got '$first_s $skip_frames', the fixture says '$want'"
+[ "$want" = "$first_s $skip_frames" ] || fail "--skip-seconds 1: got '$first_s $skip_frames', the sample says '$want'"
 [ "$(awk 'NR == 1 { print $1 }' "$tmp/s.frames.txt")" -eq 120000 ] || fail "--skip-seconds: first kept frame not at the pad"
 echo "skip-seconds: frames $frames -> $skip_frames, first frame $first_a -> $first_s"
 rm -f "$tmp/s.cu8" "$tmp/s.frames.txt"
@@ -311,5 +311,5 @@ fi  # have_raw
 if [ "$have_raw" = 1 ]; then
   echo "iqgen_cli: all checks passed"
 else
-  echo "iqgen_cli: all checks on generated inputs passed (fixture sections skipped)"
+  echo "iqgen_cli: all checks on generated inputs passed (test data sections skipped)"
 fi

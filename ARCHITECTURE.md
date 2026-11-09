@@ -48,8 +48,8 @@ store in `skycued/src/fisb/`, which keeps the current picture for the map.
 | `www/` | the web page, plain JavaScript |
 | `tools/` | the `skycue-*` command-line tools |
 | `examples/` | client demos |
-| `tests/` | unit, script, browser and fuzz tests, and fixtures |
-| `scripts/` | development, fixture and map scripts |
+| `tests/` | unit, script, browser and fuzz tests, and test data |
+| `scripts/` | development, test data and map scripts |
 | `packaging/`, `debian/`, `cmake/` | packages, the systemd unit, CMake modules |
 | `docs/` | documentation |
 

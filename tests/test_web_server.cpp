@@ -90,7 +90,7 @@ template <class Pred> bool pollUntil(Pred p, std::chrono::milliseconds timeout =
 
 const char* const kIndex = "<!doctype html><title>skycue test</title>\n";
 
-// ---- the fixture: conf + www in a temp dir, Engine, RuntimeConfig, WebServer ----
+// ---- the test setup: conf + www in a temp dir, Engine, RuntimeConfig, WebServer ----
 
 using ConfMap = std::map<std::string, std::string>;  // dotted key -> TOML literal
 
@@ -112,7 +112,7 @@ std::string headConf(const ConfMap& extra = {})
 std::string str(const std::string& text) { return "\"" + text + "\""; }
 
 struct WebOptions {
-    bool replay = false;  // the readsb fixture at 20x, else a FakeSource
+    bool replay = false;  // the readsb sample at 20x, else a FakeSource
     bool www = true;      // create www/ with index.html
     size_t max_ws_queue_bytes = 2u << 20;
     ConfMap extra_conf;
@@ -835,7 +835,7 @@ BOOST_AUTO_TEST_CASE(track_json_estimated_keys)
 
 BOOST_AUTO_TEST_CASE(track_json_no_geom_has_no_new_keys)
 {
-    auto ts = geomSnapshot();  // a v1 consumer's fixture: no geometric altitude at all
+    auto ts = geomSnapshot();  // a v1 consumer's sample: no geometric altitude at all
     BOOST_TEST(skycued::webapi::trackJson(ts) ==
                "{\"hex\":\"a1b2c3\",\"addr_type\":\"icao\",\"source\":\"adsb_1090\",\"alt_baro_ft\":35000,"
                "\"on_ground\":false,\"alt_is_geom\":false,\"range_nm\":0,\"elevation_deg\":0,"
@@ -1398,7 +1398,7 @@ BOOST_AUTO_TEST_CASE(web_port_zero_disabled)
     TempDir tmp;
     const std::string conf = tmp.path + "/skycue.toml", log = tmp.path + "/log";
     writeFile(conf, headConf({{"web.port", "0"}, {"cues.tcp_port", "0"}}));
-    const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture, "--replay-loop"}, log);
+    const pid_t pid = spawnSkycued({"--config", conf, "--replay", kTestData, "--replay-loop"}, log);
     BOOST_TEST(pollUntil([&] { return has(readAll(log), "web UI disabled"); }));
     ::kill(pid, SIGTERM);
     BOOST_TEST(waitExit(pid, slow(5s)) == 0);
@@ -1416,7 +1416,7 @@ BOOST_AUTO_TEST_CASE(sigterm_during_startup_exits_cleanly_and_promptly)
     writeFile(conf, headConf({{"web.port", "0"}, {"cues.tcp_port", "0"}}));
     for (int i = 0; i < 20; ++i) {
         const std::string log = tmp.path + "/log" + std::to_string(i);
-        const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture, "--replay-loop"}, log);
+        const pid_t pid = spawnSkycued({"--config", conf, "--replay", kTestData, "--replay-loop"}, log);
         BOOST_TEST(pollUntil([&] { return has(readAll(log), "web UI disabled"); }));
         const auto t0 = steady::now();
         ::kill(pid, SIGTERM);
@@ -1432,7 +1432,7 @@ BOOST_AUTO_TEST_CASE(web_bind_failure_exits_1)
     TestServer busy;  // holds the port
     const std::string conf = tmp.path + "/skycue.toml", log = tmp.path + "/log";
     writeFile(conf, headConf({{"web.port", std::to_string(busy.port())}, {"cues.tcp_port", "0"}}));
-    const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture}, log);
+    const pid_t pid = spawnSkycued({"--config", conf, "--replay", kTestData}, log);
     BOOST_TEST(waitExit(pid, 5s) == 1);
     BOOST_TEST(has(readAll(log), "web: cannot listen on 127.0.0.1:" + std::to_string(busy.port())));
 }
@@ -1475,7 +1475,7 @@ BOOST_AUTO_TEST_CASE(main_serves_with_overrides)
     ::mkdir(www.c_str(), 0755);
     writeFile(www + "/index.html", kIndex);
     writeFile(conf, headConf({{"web.port", "0"}, {"web.bind", str("0.0.0.0")}, {"cues.tcp_port", "0"}}));
-    const auto [pid, port] = spawnServing(conf, {"--replay", kFixture, "--replay-loop", "--www-dir", www}, log);
+    const auto [pid, port] = spawnServing(conf, {"--replay", kTestData, "--replay-loop", "--www-dir", www}, log);
     BOOST_REQUIRE(pid > 0);
     BOOST_TEST(get(port, "/").body == kIndex);
     BOOST_TEST(get(port, "/api/state").status == 200u);
@@ -1567,7 +1567,7 @@ BOOST_AUTO_TEST_CASE(state_dir_holds_state_files)
     const std::string conf = etc + "/skycue.toml";
     writeFile(conf, headConf({{"cues.tcp_port", "0"}, {"paths.state_dir", str(state)}}));
     // A replay, so the statistics change and are saved at exit.
-    Spawned d(spawnServing(conf, {"--replay", kFixture, "--replay-loop"}, tmp.path + "/log"));
+    Spawned d(spawnServing(conf, {"--replay", kTestData, "--replay-loop"}, tmp.path + "/log"));
     const pt::ptree config = d.json("/api/config");
     BOOST_TEST(config.get<std::string>("daemon.inputs_path") == state + "/skycue.inputs.json");
     BOOST_TEST(config.get<std::string>("daemon.overlay_path") == state + "/skycue.runtime.json");
@@ -1590,13 +1590,13 @@ BOOST_AUTO_TEST_CASE(state_dir_missing_exits_2)
     TempDir tmp;
     const std::string conf = tmp.path + "/skycue.toml", log = tmp.path + "/log";
     writeFile(conf, headConf({{"web.port", "0"}, {"cues.tcp_port", "0"}, {"paths.state_dir", str(tmp.path + "/nope")}}));
-    const pid_t pid = spawnSkycued({"--config", conf, "--replay", kFixture}, log);
+    const pid_t pid = spawnSkycued({"--config", conf, "--replay", kTestData}, log);
     BOOST_TEST(waitExit(pid, 5s) == 2);
     BOOST_TEST(has(readAll(log), "skycued: paths.state_dir " + tmp.path + "/nope is not a directory"));
     // A file is not a directory either.
     writeFile(tmp.path + "/file", "x\n");
     writeFile(conf, headConf({{"web.port", "0"}, {"cues.tcp_port", "0"}, {"paths.state_dir", str(tmp.path + "/file")}}));
-    const pid_t pid2 = spawnSkycued({"--config", conf, "--replay", kFixture}, log);
+    const pid_t pid2 = spawnSkycued({"--config", conf, "--replay", kTestData}, log);
     BOOST_TEST(waitExit(pid2, 5s) == 2);
     BOOST_TEST(has(readAll(log), "skycued: paths.state_dir " + tmp.path + "/file is not a directory"));
 }
@@ -2435,7 +2435,7 @@ BOOST_AUTO_TEST_CASE(check_inputs_with_replay_is_usage_error)
     TempDir tmp;
     const std::string conf = tmp.path + "/skycue.toml", log = tmp.path + "/log";
     writeFile(conf, checkConf({}));
-    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs", "--replay", kFixture}, log);
+    const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs", "--replay", kTestData}, log);
     BOOST_TEST(waitExit(pid, 10s) == 2);
 }
 

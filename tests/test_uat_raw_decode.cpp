@@ -4,7 +4,7 @@
 #include "decode/uat_decoder.hpp"
 #include "decode/uat_frame.hpp"
 #include "engine_test_support.hpp"
-#include "fixture_io.hpp"
+#include "test_data_io.hpp"
 #include "gz_line_reader.hpp"
 #include "hub/raw_tap.hpp"
 #include "inputs/beast_raw_input.hpp"
@@ -15,7 +15,7 @@
 #include "inputs/uat_raw_input.hpp"
 #include "json_lite.hpp"
 #include "raw_formats.hpp"
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 #include "uat_test_support.hpp"
 #include "web_inputs.hpp"
 
@@ -43,7 +43,7 @@ namespace uat = skycued::decode::uat;
 
 namespace {
 
-const std::string kRaw = std::string(SKYCUE_FIXTURE_DIR) + "/raw/";
+const std::string kRaw = std::string(SKYCUE_TEST_DATA_DIR) + "/raw/";
 
 template <class F> bool eventually(F pred)
 {
@@ -90,13 +90,13 @@ RawDecodeOptions decodeOn()
     return o;
 }
 
-struct Fixture {
+struct UatSample {
     std::vector<std::string> down, up;  // lines without the stratux/rawrec prefix, ';'-terminated
 };
 
-Fixture loadUatFixture(const std::string& file)
+UatSample loadUatSample(const std::string& file)
 {
-    Fixture f;
+    UatSample f;
     skycue_test::forEachLine(kRaw + file, [&](const std::string& line) {
         const auto u = skycued::parseUatLine(line);  // the <ns>, prefix; START, lines are refused
         if (!u)
@@ -217,9 +217,9 @@ std::string hexOf(const std::string& line)
 
 }  // namespace
 
-BOOST_AUTO_TEST_CASE(decode_off_counts_and_publishes_only, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(decode_off_counts_and_publishes_only, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     BOOST_REQUIRE_EQUAL(f.down.size(), 439u);
     Rig rig;
     const uint16_t port = freeTcpPort();
@@ -238,9 +238,9 @@ BOOST_AUTO_TEST_CASE(decode_off_counts_and_publishes_only, *skycue_test::needs_f
     BOOST_TEST(rig.obsCount() == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(builtin_dump978_does_not_decode_under_readsb, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(builtin_dump978_does_not_decode_under_readsb, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     skycued::InputManagerConfig cfg;
     cfg.decode_raw = false;
     Rig rig;
@@ -253,9 +253,9 @@ BOOST_AUTO_TEST_CASE(builtin_dump978_does_not_decode_under_readsb, *skycue_test:
     BOOST_TEST(rig.published_count() == f.down.size());
 }
 
-BOOST_AUTO_TEST_CASE(builtin_dump978_decodes_under_skycued, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(builtin_dump978_decodes_under_skycued, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     skycued::InputManagerConfig cfg;
     cfg.decode_raw = true;
     Rig rig;
@@ -273,9 +273,9 @@ BOOST_AUTO_TEST_CASE(builtin_dump978_decodes_under_skycued, *skycue_test::needs_
         BOOST_REQUIRE_EQUAL(o.input_id, "dump978");
 }
 
-BOOST_AUTO_TEST_CASE(user_uat_raw_decodes_under_skycued, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(user_uat_raw_decodes_under_skycued, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     skycued::InputManagerConfig cfg;
     cfg.decode_raw = true;
     cfg.receiver_ref = std::make_pair(38.9, -77.0);
@@ -289,9 +289,9 @@ BOOST_AUTO_TEST_CASE(user_uat_raw_decodes_under_skycued, *skycue_test::needs_fix
         BOOST_REQUIRE_EQUAL(o.input_id, "ux");
 }
 
-BOOST_AUTO_TEST_CASE(uplinks_still_go_to_fisb_when_decoding, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(uplinks_still_go_to_fisb_when_decoding, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     BOOST_REQUIRE(!f.up.empty());
     Rig rig;
     const uint16_t port = runUat(rig, "up", true);
@@ -305,9 +305,9 @@ BOOST_AUTO_TEST_CASE(uplinks_still_go_to_fisb_when_decoding, *skycue_test::needs
     BOOST_TEST(rig.uplinks.front() == hexOf(f.up.front()));
 }
 
-BOOST_AUTO_TEST_CASE(rssi_key_reaches_observation, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(rssi_key_reaches_observation, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     // The first downlink that yields an observation on its own.
     std::string pick;
     for (const auto& l : f.down) {
@@ -365,9 +365,9 @@ BOOST_AUTO_TEST_CASE(rs_errors_of_the_line_are_counted)
                std::string::npos);
 }
 
-BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(sample_counts_per_qualifier, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     std::map<int, int> per_qualifier, per_type;
     for (const auto& l : f.down) {
         const auto fr = uat::parseDownlinkLine(l);
@@ -385,7 +385,7 @@ BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier, *skycue_test::needs_fixture("
         seen += " q" + std::to_string(kv.first) + "=" + std::to_string(kv.second);
     for (const auto& kv : per_type)
         seen += " t" + std::to_string(kv.first) + "=" + std::to_string(kv.second);
-    BOOST_TEST_MESSAGE("fixture:" << seen << " | frames " << k.frames << " decoded " << k.decoded << " unmapped "
+    BOOST_TEST_MESSAGE("sample:" << seen << " | frames " << k.frames << " decoded " << k.decoded << " unmapped "
                                   << k.unmapped << " no_position " << k.no_position << " cpr_rejected "
                                   << k.cpr_rejected << " unknown_type " << k.unknown_type << " obs "
                                   << k.decoder_observations);
@@ -408,9 +408,9 @@ BOOST_AUTO_TEST_CASE(fixture_counts_per_qualifier, *skycue_test::needs_fixture("
     BOOST_TEST(k.decoder_observations == 439u);
 }
 
-BOOST_AUTO_TEST_CASE(stratux_log_decodes, *skycue_test::needs_fixture("raw/stratux-uat-2015.log.gz"))
+BOOST_AUTO_TEST_CASE(stratux_log_decodes, *skycue_test::needs_test_data("raw/stratux-uat-2015.log.gz"))
 {
-    const auto f = loadUatFixture("stratux-uat-2015.log.gz");
+    const auto f = loadUatSample("stratux-uat-2015.log.gz");
     BOOST_REQUIRE(!f.down.empty());
     Rig rig;
     const uint16_t port = runUat(rig, "st", true);
@@ -423,9 +423,9 @@ BOOST_AUTO_TEST_CASE(stratux_log_decodes, *skycue_test::needs_fixture("raw/strat
     BOOST_TEST(rig.uplinkCount() == f.up.size());
 }
 
-BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     int type1 = 0, with_both = 0, type0 = 0;
     for (const auto& l : f.down) {
         const auto fr = uat::parseDownlinkLine(l);
@@ -449,9 +449,9 @@ BOOST_AUTO_TEST_CASE(long_frames_carry_both_altitudes, *skycue_test::needs_fixtu
     BOOST_TEST(with_both == type1);
 }
 
-BOOST_AUTO_TEST_CASE(counters_in_state_json, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(counters_in_state_json, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     Rig rig;
     const uint16_t port = runUat(rig, "cj", true);
     feed(rig, port, joined(f.down), f.down.size());
@@ -466,9 +466,9 @@ BOOST_AUTO_TEST_CASE(counters_in_state_json, *skycue_test::needs_fixture("raw/ua
         BOOST_TEST(text.find(std::string("\"") + name + "\":") != std::string::npos, name);
 }
 
-BOOST_AUTO_TEST_CASE(stop_mid_stream_no_callback_after_stop, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(stop_mid_stream_no_callback_after_stop, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     Rig rig;
     rig.t.call([&] {
         rig.tap.setSink([&](const RawMessage&) { rig.in->stop(); }, [](RawKind) { return true; });
@@ -555,9 +555,9 @@ void sendUdp(uint16_t port, const std::string& s)
 
 }  // namespace
 
-BOOST_AUTO_TEST_CASE(two_feeds_one_aircraft_tracks_once, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(two_feeds_one_aircraft_tracks_once, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto f = loadUatFixture("uat-sample.txt.gz");
+    const auto f = loadUatSample("uat-sample.txt.gz");
     // A downlink with a position, and its address.
     std::string line;
     uint32_t address = 0;

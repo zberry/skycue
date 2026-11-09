@@ -1,5 +1,5 @@
 // The 1090 decoder against OpenSky's own decoding of the same frames
-// (tests/fixtures/opensky, fetched by scripts/fixtures/fetch-test-captures.sh).
+// (tests/data/opensky, fetched by scripts/test-data/fetch-test-captures.sh).
 //
 // Each OpenSky "incident-data" tarball (CC BY 4.0) holds Trino tables for one
 // aircraft. This test reads the position, velocity and identification tables. Every row carries the raw frame (`rawmsg`, hex) with its
@@ -58,7 +58,7 @@ using skycued::decode::ModesDecoder;
 namespace {
 
 namespace fs = std::filesystem;
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
 
 constexpr double kMsToKt = 1.0 / 0.514444;  // 1 kt = 0.514444 m/s
 constexpr double kFtToM = 0.3048;
@@ -137,12 +137,12 @@ std::string hexOf(const TrackObservation& o)
 BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
 {
     std::vector<fs::path> dirs;
-    if (fs::is_directory(kFixtures + "/opensky"))
-        for (const auto& e : fs::directory_iterator(kFixtures + "/opensky"))
+    if (fs::is_directory(kTestData + "/opensky"))
+        for (const auto& e : fs::directory_iterator(kTestData + "/opensky"))
             if (e.is_directory()) dirs.push_back(e.path());
     std::sort(dirs.begin(), dirs.end());
     if (dirs.empty()) {
-        std::cout << "SKIP: opensky/ is missing (scripts/fixtures/fetch-test-captures.sh fetches and unpacks it)\n";
+        std::cout << "SKIP: opensky/ is missing (scripts/test-data/fetch-test-captures.sh fetches and unpacks it)\n";
         return;
     }
 
@@ -305,7 +305,7 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
         show("track", trk, "deg");
         show("callsign", cs, "");
 
-        // A few corrupt rows are tolerated; more is a broken fixture.
+        // A few corrupt rows are tolerated; more is a broken sample.
         BOOST_TEST(bad <= 5, name << ": " << bad << " unparsable rows");
 
         // Where both have a value, they must agree.

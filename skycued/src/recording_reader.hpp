@@ -4,7 +4,7 @@
 // docs/recording-format.md): a received-stream record ("type": "obs" or
 // "uat_uplink"), a sent-stream record ("event": "update", "keyframe", "drop"
 // or "filter_change"), or a readsb JSON-port aircraft line (a numeric "now"
-// and no "time", as in tests/fixtures/readsb-sample.jsonl).
+// and no "time", as in tests/data/readsb-sample.jsonl).
 //
 // ReplaySource plays the received and readsb lines; skycue-stats reads all of
 // them.

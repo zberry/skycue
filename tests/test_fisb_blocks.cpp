@@ -1,7 +1,7 @@
 #define BOOST_TEST_MODULE skycued_fisb_blocks
 #include <boost/test/unit_test.hpp>
 
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 
 #include "gz_line_reader.hpp"
 #include "fisb/apdu.hpp"
@@ -23,9 +23,9 @@ using namespace skycued::fisb;
 
 namespace {
 
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
-const std::string kSample = kFixtures + "/raw/uat-sample.txt.gz";
-const std::string kTg30 = kFixtures + "/fisb/tg30.978";
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
+const std::string kSample = kTestData + "/raw/uat-sample.txt.gz";
+const std::string kTg30 = kTestData + "/fisb/tg30.978";
 
 std::vector<std::string> readLines(const std::string& path)
 {
@@ -44,7 +44,7 @@ struct Apdu {
     std::vector<uint8_t> payload;
 };
 
-// Every global-block APDU in a fixture, in order.
+// Every global-block APDU in a sample, in order.
 std::vector<Apdu> blockApdus(const std::string& path)
 {
     std::vector<Apdu> out;
@@ -111,7 +111,7 @@ struct Tally {
     std::set<uint8_t> scales, alt_codes;
 };
 
-std::map<uint16_t, Tally> tallyFixture(const std::string& path)
+std::map<uint16_t, Tally> tallySample(const std::string& path)
 {
     std::map<uint16_t, Tally> t;
     for (const auto& a : blockApdus(path)) {
@@ -138,7 +138,7 @@ std::map<uint16_t, Tally> tallyFixture(const std::string& path)
 
 }  // namespace
 
-BOOST_AUTO_TEST_CASE(every_rle_block_in_tg30_totals_128, *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(every_rle_block_in_tg30_totals_128, *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     uint64_t rle = 0, lists = 0, empty = 0, raw_checked = 0;
     for (const auto& a : blockApdus(kTg30)) {
@@ -179,8 +179,8 @@ BOOST_AUTO_TEST_CASE(every_rle_block_in_tg30_totals_128, *skycue_test::needs_fix
 }
 
 BOOST_AUTO_TEST_CASE(empty_block_lists_decode_including_last_byte_case,
-                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
-                     *skycue_test::needs_fixture("fisb/tg30.978"))
+                     *skycue_test::needs_test_data("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     // Hand-built: L = 0, the high nibble alone lists b+1..b+4 (MUT/STX emit
     // nothing for this; §5.4).
@@ -229,7 +229,7 @@ BOOST_AUTO_TEST_CASE(empty_block_lists_decode_including_last_byte_case,
     }
 
     // The 2015 sample: 200 regional APDUs, all empty-block lists.
-    auto s = tallyFixture(kSample);
+    auto s = tallySample(kSample);
     BOOST_TEST(s.size() == 1u);
     const auto& r = s[63];
     BOOST_TEST(r.apdus == 200u);
@@ -241,7 +241,7 @@ BOOST_AUTO_TEST_CASE(empty_block_lists_decode_including_last_byte_case,
 
     // Reference §5.4 [V]: 1025 empty-block lists across the sample and tg30,
     // 415 of them with L = 0.
-    auto t = tallyFixture(kTg30);
+    auto t = tallySample(kTg30);
     uint64_t lists = r.lists, l0 = r.l0, empty = r.empty;
     for (const auto& kv : t) {
         lists += kv.second.lists;
@@ -253,7 +253,7 @@ BOOST_AUTO_TEST_CASE(empty_block_lists_decode_including_last_byte_case,
     BOOST_TEST(empty == 1342u + 2934u + 381u + 190u + 176u + 230u + 861u);
 }
 
-BOOST_AUTO_TEST_CASE(block_geometry_known_numbers, *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(block_geometry_known_numbers, *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     // Block 0: SW corner at (0°N, 0°E) (§5.2), so NW corner at 4'.
     auto g = blockGeometry(0, 0, false);
@@ -318,7 +318,7 @@ BOOST_AUTO_TEST_CASE(block_geometry_known_numbers, *skycue_test::needs_fixture("
     }
 }
 
-BOOST_AUTO_TEST_CASE(conus_vs_regional_scale, *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(conus_vs_regional_scale, *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     std::set<uint8_t> s63, s64;
     uint64_t n64 = 0;
@@ -408,9 +408,9 @@ BOOST_AUTO_TEST_CASE(high_latitude_skipped_unless_experimental)
     BOOST_TEST(d->empty_blocks == (std::vector<uint32_t>{405448, 405000, 405002}), boost::test_tools::per_element());
 }
 
-BOOST_AUTO_TEST_CASE(other_rasters_70_71_84_90_91_103_decode_as_levels, *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(other_rasters_70_71_84_90_91_103_decode_as_levels, *skycue_test::needs_test_data("fisb/tg30.978"))
 {
-    auto t = tallyFixture(kTg30);
+    auto t = tallySample(kTg30);
     struct Want {
         uint16_t pid;
         uint64_t apdus, rle, lists, empty;
@@ -498,7 +498,7 @@ BOOST_AUTO_TEST_CASE(other_rasters_70_71_84_90_91_103_decode_as_levels, *skycue_
     BOOST_TEST(!parse(413, hex("843c2af8f8f8e809")));
 }
 
-BOOST_AUTO_TEST_CASE(fuzz_blocks_no_throw, *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(fuzz_blocks_no_throw, *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     std::mt19937 rng(20261102);
     std::uniform_int_distribution<int> byte(0, 255);

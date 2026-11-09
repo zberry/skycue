@@ -3,9 +3,9 @@
 output port (--net-json-port), one aircraft object per line with a leading
 "now" (seconds since the epoch), keys in readsb's order.
 
-Regenerate the committed fixture with (from the repository root):
+Regenerate the committed sample with (from the repository root):
 
-    python3 -I tests/fixtures/gen_readsb_jsonl.py > tests/fixtures/readsb-sample.jsonl
+    python3 -I tests/data/gen_readsb_jsonl.py > tests/data/readsb-sample.jsonl
 
 Standard library only and deterministic (random.seed(1)), so rerunning gives a
 byte-identical file.

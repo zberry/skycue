@@ -14,10 +14,10 @@
 # gen_uat_golden.sh makes a fresh golden from the same sample (skycue-iqgen: the optional
 # fourth argument) and ours is compared with that too. Two deliberately wrong copies of ours
 # must fail the comparison.
-# usage: test_decode_differential_uat.sh SKYCUED RAWPLAY FIXTURE_DIR [IQGEN]
+# usage: test_decode_differential_uat.sh SKYCUED RAWPLAY DATA_DIR [IQGEN]
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 rawplay=$2 fixtures=$3 iqgen=${4:-}
+skycued=$1 rawplay=$2 data_dir=$3 iqgen=${4:-}
 test_init decode_differential_uat
 fail_context() {
   for f in skycued.log play.log gen.log reduce.log; do
@@ -26,7 +26,7 @@ fail_context() {
 }
 command -v python3 >/dev/null || { echo "SKIP: python3 missing"; exit 77; }
 command -v curl >/dev/null || { echo "SKIP: curl missing"; exit 77; }
-for f in "$skycued" "$rawplay" "$fixtures/reduce_received.py" "$fixtures/compare_tracks.py"; do
+for f in "$skycued" "$rawplay" "$data_dir/reduce_received.py" "$data_dir/compare_tracks.py"; do
   [ -e "$f" ] || fail "$f missing"
 done
 
@@ -63,7 +63,7 @@ print(statistics.median(a for a, _ in p), statistics.median(b for _, b in p))' "
   if [ "$want_fresh" = 1 ]; then
     if [ -n "${SKYCUE_DUMP978:-}" ] && [ -x "$SKYCUE_DUMP978" ] && [ -x "$iqgen" ]; then
       fresh="$d/golden-fresh.jsonl.gz"
-      bash "$fixtures/gen_uat_golden.sh" "$SKYCUE_DUMP978" "$iqgen" "$sample" "$fresh" >"$tmp/gen.log" 2>&1 &
+      bash "$data_dir/gen_uat_golden.sh" "$SKYCUE_DUMP978" "$iqgen" "$sample" "$fresh" >"$tmp/gen.log" 2>&1 &
       gen_pid=$!; bg_pids+=("$gen_pid")
     else
       echo "run (b) skipped: SKYCUE_DUMP978 is not set to an executable (or skycue-iqgen is missing); the committed golden stands for dump978-fa"
@@ -124,10 +124,10 @@ EOF
   for p in "${bg_pids[@]}"; do [ "$p" != "$sk" ] && keep+=("$p"); done
   bg_pids=("${keep[@]}")
   [ -n "$(rcv)" ] || fail "$name: no received-*.jsonl under recording.dir"
-  python3 -I "$fixtures/reduce_received.py" --uat "$(rcv)" "$d/ours.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
+  python3 -I "$data_dir/reduce_received.py" --uat "$(rcv)" "$d/ours.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
     || fail "$name: reduce_received.py --uat failed"
   echo "ours: $(cat "$tmp/reduce.log") (received lines $(wc -l < "$(rcv)"))"
-  python3 -I "$fixtures/reduce_received.py" --uat-golden "$ref_lat" "$ref_lon" "$golden" "$d/golden.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
+  python3 -I "$data_dir/reduce_received.py" --uat-golden "$ref_lat" "$ref_lon" "$golden" "$d/golden.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
     || fail "$name: reduce_received.py --uat-golden failed"
   echo "committed golden: $(cat "$tmp/reduce.log")"
   grep -q "^excluded=$expect " <(tail -n 1 "$tmp/reduce.log") \
@@ -137,23 +137,23 @@ EOF
   if [ -n "$fresh" ]; then
     wait_for 300 bash -c "! kill -0 $gen_pid 2>/dev/null" || fail "gen_uat_golden.sh did not finish"
     wait "$gen_pid" || fail "gen_uat_golden.sh failed"
-    python3 -I "$fixtures/reduce_received.py" --uat-golden "$ref_lat" "$ref_lon" "$fresh" "$d/fresh.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
+    python3 -I "$data_dir/reduce_received.py" --uat-golden "$ref_lat" "$ref_lon" "$fresh" "$d/fresh.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
       || fail "$name: reduce_received.py --uat-golden failed on the fresh golden"
     echo "run (b): fresh dump978-fa golden made: $(cat "$tmp/reduce.log")"
     echo "-- $name: ours against the fresh dump978-fa golden"
-    python3 -I "$fixtures/compare_tracks.py" --uat "$d/ours.jsonl.gz" "$d/fresh.jsonl.gz" \
+    python3 -I "$data_dir/compare_tracks.py" --uat "$d/ours.jsonl.gz" "$d/fresh.jsonl.gz" \
       || { echo "FAIL: $name differs from fresh dump978-fa"; status=1; }
   fi
   echo "-- $name: ours against the committed golden"
-  python3 -I "$fixtures/compare_tracks.py" --uat "$d/ours.jsonl.gz" "$d/golden.jsonl.gz" \
+  python3 -I "$data_dir/compare_tracks.py" --uat "$d/ours.jsonl.gz" "$d/golden.jsonl.gz" \
     || { echo "FAIL: $name differs from committed golden"; status=1; }
 
   # negative self-tests: a wrong copy of ours must fail the comparison
   local kind
   for kind in pos dyn; do
-    python3 -I "$fixtures/compare_tracks.py" --shift "$kind" "$d/ours.jsonl.gz" "$d/shifted-$kind.jsonl.gz" \
+    python3 -I "$data_dir/compare_tracks.py" --shift "$kind" "$d/ours.jsonl.gz" "$d/shifted-$kind.jsonl.gz" \
       || fail "$name: could not make the shifted copy ($kind)"
-    if python3 -I "$fixtures/compare_tracks.py" --uat "$d/shifted-$kind.jsonl.gz" "$d/golden.jsonl.gz" >"$d/neg-$kind.out" 2>&1; then
+    if python3 -I "$data_dir/compare_tracks.py" --uat "$d/shifted-$kind.jsonl.gz" "$d/golden.jsonl.gz" >"$d/neg-$kind.out" 2>&1; then
       echo "FAIL: $name negative self-test ($kind): the shifted copy PASSED the comparison"
       status=1
     else
@@ -164,10 +164,10 @@ EOF
 
 status=0
 ran=0  # cases that were not skipped
-raw="$fixtures/raw"
+raw="$data_dir/raw"
 run_case sample "$raw/uat-sample.txt.gz" "$raw/uat-sample.golden.jsonl.gz" 1 "37.4 -122.1" 1 1
 run_case stratux "$raw/stratux-uat-2015.log.gz" "$raw/uat-stratux.golden.jsonl.gz" 0 median 0 0
 run_case stratux-b "$raw/stratux-uat-2015b.log.gz" "$raw/uat-stratux-b.golden.jsonl.gz" 0 median 0 0
 [ "$status" = 0 ] || exit 1
-[ "$ran" -gt 0 ] || { echo "SKIP: every case was skipped (fetch the captures: scripts/fixtures/fetch-test-captures.sh)"; exit 77; }
+[ "$ran" -gt 0 ] || { echo "SKIP: every case was skipped (fetch the captures: scripts/test-data/fetch-test-captures.sh)"; exit 77; }
 echo "PASS: decode_differential_uat ($ran of 3 cases ran)"

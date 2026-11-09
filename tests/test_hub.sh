@@ -6,11 +6,11 @@
 # Phase 2 replays in a loop and adds a consumer that never reads: it must be cut
 # at the TCP send cap while the others keep receiving, and removing the output
 # with such a consumer backlogged must not disturb anything else.
-# usage: test_hub.sh SKYCUED RAWPLAY FIXTURE_DIR
+# usage: test_hub.sh SKYCUED RAWPLAY DATA_DIR
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 rawplay=$2 fixtures=$3
-csv="$fixtures/raw/modes-120s.csv.gz"
+skycued=$1 rawplay=$2 data_dir=$3
+csv="$data_dir/raw/modes-120s.csv.gz"
 speed1=${SKYCUE_HUB_SPEED1:-20}   # phase 1: 120 s of capture in about 6 s
 speed2=${SKYCUE_HUB_SPEED2:-40}   # phase 2: the 1 MiB cap of a stalled consumer trips in about 3 s
 test_init hub
@@ -19,7 +19,7 @@ fail_context() {
     [ -s "$tmp/$f" ] && { echo "--- $f:"; tail -n 15 "$tmp/$f"; }
   done
 }
-[ -e "$csv" ] || { echo "SKIP: $csv not fetched: run scripts/fixtures/fetch-test-captures.sh"; exit 77; }
+[ -e "$csv" ] || { echo "SKIP: $csv not fetched: run scripts/test-data/fetch-test-captures.sh"; exit 77; }
 command -v python3 >/dev/null || { echo "SKIP: python3 missing"; exit 77; }
 command -v curl >/dev/null || { echo "SKIP: curl missing"; exit 77; }
 for f in "$skycued" "$rawplay"; do [ -e "$f" ] || fail "$f missing"; done

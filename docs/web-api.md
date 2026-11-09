@@ -960,8 +960,8 @@ WebSocket snapshot. Never any blocks: it is built from counts and mosaic
 heads, without copying the store's records or blocks, so `/api/state` and a
 WebSocket connect stay cheap however large the mosaics are. (`text` and
 `shapes` copy the records; `radar` and `raster` copy only the one mosaic
-asked for.) From the 2015 fixture
-(`tests/fixtures/fisb/received-with-uplinks.jsonl`):
+asked for.) From the 2015 sample
+(`tests/data/fisb/received-with-uplinks.jsonl`):
 
 ```json
 {"enabled":true,"uplinks":704,"products":561,"bad_frames":0,"segments_open":0,"mosaic_blocks":671,"uplink_duplicates":0,

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Tests scripts/fixtures/gen-capture-seeds.py and its use by scripts/dev/run-fuzz.sh.
+# Tests scripts/test-data/gen-capture-seeds.py and its use by scripts/dev/run-fuzz.sh.
 #
-# The generator needs the fetched captures (tests/fixtures/raw/*.gz,
+# The generator needs the fetched captures (tests/data/raw/*.gz,
 # fisb/tg30.978, fisb/received-with-uplinks.jsonl; override the directory with
-# SKYCUE_FIXTURES). Checks:
-#   - an empty fixtures dir: exit 3, nothing written;
+# SKYCUE_TEST_DATA). Checks:
+#   - an empty test data directory: exit 3, nothing written;
 #   - with the captures: two runs are byte-identical, and each target gets
 #     exactly the seeds docs/hardening.md lists;
 #   - while tests/fuzz/seeds still holds the committed copies: every generated file
@@ -17,8 +17,8 @@ set -u
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-gen="$repo/scripts/fixtures/gen-capture-seeds.py"
-fx=${SKYCUE_FIXTURES:-$repo/tests/fixtures}
+gen="$repo/scripts/test-data/gen-capture-seeds.py"
+fx=${SKYCUE_TEST_DATA:-$repo/tests/data}
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -33,15 +33,15 @@ check() { # description, command...
 }
 count() { find "$1" -type f 2> /dev/null | wc -l; }
 
-[ -f "$gen" ] || { bad "scripts/fixtures/gen-capture-seeds.py missing"; exit 1; }
+[ -f "$gen" ] || { bad "scripts/test-data/gen-capture-seeds.py missing"; exit 1; }
 
-# ---- empty fixtures dir: exit 3, nothing written ----
+# ---- empty test data directory: exit 3, nothing written ----
 mkdir -p "$tmp/empty"
 python3 -I "$gen" "$tmp/empty" "$tmp/out-empty" > "$tmp/empty.out" 2>&1
 rc=$?
-[ "$rc" = 3 ] && ok "empty fixtures dir exits 3" || bad "empty fixtures dir exit $rc, want 3"
-[ "$(count "$tmp/out-empty")" = 0 ] && ok "empty fixtures dir writes nothing" || bad "empty fixtures dir wrote files"
-grep -q 'missing' "$tmp/empty.out" && ok "empty fixtures dir says what is missing" || bad "no 'missing' message"
+[ "$rc" = 3 ] && ok "empty test data directory exits 3" || bad "empty test data directory exit $rc, want 3"
+[ "$(count "$tmp/out-empty")" = 0 ] && ok "empty test data directory writes nothing" || bad "empty test data directory wrote files"
+grep -q 'missing' "$tmp/empty.out" && ok "empty test data directory says what is missing" || bad "no 'missing' message"
 
 # ---- one capture missing: that target only is skipped ----
 if [ -f "$fx/fisb/tg30.978" ] && [ -f "$fx/raw/uat-sample.txt.gz" ]; then
@@ -49,9 +49,9 @@ if [ -f "$fx/fisb/tg30.978" ] && [ -f "$fx/raw/uat-sample.txt.gz" ]; then
   cp "$fx/fisb/tg30.978" "$tmp/partial/fisb/"
   python3 -I "$gen" "$tmp/partial" "$tmp/out-partial" > /dev/null 2>&1
   rc=$?
-  [ "$rc" = 3 ] && ok "partial fixtures exit 3" || bad "partial fixtures exit $rc"
+  [ "$rc" = 3 ] && ok "partial test data exit 3" || bad "partial test data exit $rc"
   [ "$(count "$tmp/out-partial/fisb_decoder")" = 12 ] && [ ! -e "$tmp/out-partial/raw_formats" ] \
-    && ok "partial fixtures: fisb_decoder written, raw_formats not" || bad "partial fixtures output wrong"
+    && ok "partial test data: fisb_decoder written, raw_formats not" || bad "partial test data output wrong"
 fi
 
 # ---- the stub harness tree for run-fuzz ----
@@ -76,12 +76,12 @@ rm -f "$stripped"/fisb_decoder/seed-{1,2,3,4,5,6}.bin "$stripped"/fisb_decoder/s
 rm -f "$stripped"/iqgen_coding/seed-{1,2}.bin
 rm -f "$stripped"/recording/seed-{1,2,3,4,5,6}.jsonl
 
-runfuzz() { # work-name, fixtures dir, extra args...
+runfuzz() { # work-name, test data directory, extra args...
   local w=$1 f=$2
   shift 2
   STUB_LIST="$tmp/$w.list" bash "$repo/scripts/dev/run-fuzz.sh" all --seconds 1 \
     --bin-dir "$stubs" --work "$tmp/$w" --findings "$tmp/$w-findings" \
-    --seeds "$stripped" --fixtures "$f" "$@" > "$tmp/$w.out" 2>&1
+    --seeds "$stripped" --test-data "$f" "$@" > "$tmp/$w.out" 2>&1
 }
 listed() { wc -l < "$tmp/$1.list.fuzz_$2"; }
 
@@ -104,7 +104,7 @@ mkdir -p "$tmp/seeds-none"
 cp -r "$stripped"/. "$tmp/seeds-none/"
 rm -f "$tmp/seeds-none"/fisb_decoder/*
 STUB_LIST="$tmp/none.list" bash "$repo/scripts/dev/run-fuzz.sh" fisb_decoder --seconds 1 --bin-dir "$stubs" \
-  --work "$tmp/none" --findings "$tmp/none-findings" --seeds "$tmp/seeds-none" --fixtures "$tmp/empty" \
+  --work "$tmp/none" --findings "$tmp/none-findings" --seeds "$tmp/seeds-none" --test-data "$tmp/empty" \
   > "$tmp/none.out" 2>&1
 rc=$?
 if [ "$rc" = 1 ] && grep -q 'no committed seed' "$tmp/none.out"; then
@@ -117,7 +117,7 @@ fi
 if [ ! -f "$fx/raw/uat-sample.txt.gz" ] || [ ! -f "$fx/raw/stratux-uat-2015.log.gz" ] \
   || [ ! -f "$fx/raw/modes-120s.csv.gz" ] || [ ! -f "$fx/fisb/tg30.978" ] \
   || [ ! -f "$fx/fisb/received-with-uplinks.jsonl" ]; then
-  echo "SKIP: the captures are not fetched (run scripts/fixtures/fetch-test-captures.sh); nothing to generate from" >&2
+  echo "SKIP: the captures are not fetched (run scripts/test-data/fetch-test-captures.sh); nothing to generate from" >&2
   [ "$fails" = 0 ] || exit 1
   exit 77
 fi

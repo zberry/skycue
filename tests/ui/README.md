@@ -1,7 +1,7 @@
 # Headless browser tests of the web UI (dev machines only)
 
 `ui.spec.js` drives the page in headless Chromium with Playwright against a
-real skycued replaying `../fixtures/readsb-sample.jsonl` in real time. It
+real skycued replaying `../data/readsb-sample.jsonl` in real time. It
 is a development check: node, npm and Playwright are never needed by a
 package build or the containers. A build that does not want them configures
 skycue with `-DSKYCUE_UI_TESTS=OFF`, and otherwise the ctest
@@ -35,7 +35,7 @@ cmake --build build
 ctest --test-dir build -R ui_playwright --output-on-failure
 ```
 
-or directly: `bash run.sh <skycued> <fixtures dir> <build>/www-stage <skycue-pingsim> [playwright args]`
+or directly: `bash run.sh <skycued> <test data directory> <build>/www-stage <skycue-pingsim> [playwright args]`
 with absolute paths (the reconnect case restarts skycued from the spec's
 directory); extra arguments go to `playwright test`, e.g. `--grep
 range_change --project desktop-1920`. Every daemon it started is stopped
@@ -54,9 +54,9 @@ stops skycued and copies the `skycue-*.png` screenshots to
 For the FIS-B cases it starts two more skycueds, each replaying a received
 recording with uplinks unpaced (`--replay-speed 0`, no loop) and waits
 until every uplink is decoded and the NEXRAD published:
-`../fixtures/fisb/received-with-uplinks.jsonl` (2015: METAR/TAF/PIREP/winds,
+`../data/fisb/received-with-uplinks.jsonl` (2015: METAR/TAF/PIREP/winds,
 point NOTAMs, a SIGMET; receiver at its ground station, 37.32 N 121.75 W)
-as `SKYCUE_FISB_URL`, and `../fixtures/fisb/received-tg30.jsonl` (2020:
+as `SKYCUE_FISB_URL`, and `../data/fisb/received-tg30.jsonl` (2020:
 NEXRAD regional and CONUS with echoes, rasters, AIRMETs; receiver at its
 ground station, 40.04 N 86.26 W, inside both mosaics) as
 `SKYCUE_RADAR_URL`. Their `fisb-*.png` screenshots go to
@@ -66,7 +66,7 @@ ground station, 40.04 N 86.26 W, inside both mosaics) as
 For the Feeds tab cases it starts one more skycued, `--no-readsb
 --no-uat` with a temporary `recording.dir` and an inputs file holding one
 `pingstation_json` input, `ps-sim`, on a free UDP port, and
-`skycue-pingsim` sending the readsb fixture to it as pingStation JSON
+`skycue-pingsim` sending the readsb sample to it as pingStation JSON
 (`--loop --speed 5`, a device status every 2 s at 38.9 N 77.0 W), as
 `SKYCUE_RECEIVERS_URL`. The cases there leave its inputs as they found them.
 
@@ -111,7 +111,7 @@ FIS-B, against the 2015 skycued:
 
 14. `tfr_polygon_rendered_and_clickable`: the TFR layer draws every
     NOTAM shape; clicking one shows its text, key and times in the panel.
-    The fixtures have no TFR polygon, so live items injected through the
+    The test data have no TFR polygon, so live items injected through the
     page's own handler add a polygon, a circle (radius from `radius_nm`)
     and a cancelled (dashed) shape, replace a record's shapes by key, and
     `fisb_expired` removes them and closes their details.
@@ -125,7 +125,7 @@ FIS-B, against the 2015 skycued:
     `stations` in the strip, stations as in `/api/fisb/status`.
 18. `fisb_screenshots_weather`: a clicked NOTAM, SIGMET and a filtered list.
 
-Map tiles, against a fourth skycued (the readsb fixture) serving a copy of
+Map tiles, against a fourth skycued (the readsb sample) serving a copy of
 the www directory (without its `tiles/`) with generated tiles while
 `meta.json` says zoom 0..6 (`SKYCUE_TILES_URL`): `2/1/1` in four coloured
 quadrants, and the receiver's zoom-6 tile `6/18/24`, transparent in its west

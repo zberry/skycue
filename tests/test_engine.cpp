@@ -58,7 +58,7 @@ BOOST_AUTO_TEST_CASE(replay_to_tcp_client_end_to_end)
 {
     Config cfg = baseConfig();
     cfg.track_timeout_s = 5;
-    EngineFx fx(cfg, replay(20));  // the 120 s fixture takes 6 s
+    EngineFx fx(cfg, replay(20));  // the 120 s sample takes 6 s
     Events ev;
     skycue::Client client(clientConfig(fx.port()));
     ev.attach(client);
@@ -177,7 +177,7 @@ BOOST_AUTO_TEST_CASE(oversize_line_discarded)
 {
     std::string valid;
     {
-        std::ifstream in(kFixture);
+        std::ifstream in(kTestData);
         std::getline(in, valid);
     }
     TestServer server;
@@ -344,16 +344,16 @@ BOOST_AUTO_TEST_CASE(keyframes_not_recorded_but_updates_are)
 
 BOOST_AUTO_TEST_CASE(replay_reads_a_readsb_capture)
 {
-    // The fixture is readsb JSON-port output, not a received recording.
+    // The sample is readsb JSON-port output, not a received recording.
     size_t parseable = 0;
     {
-        std::ifstream in(kFixture);
+        std::ifstream in(kTestData);
         std::string line;
         while (std::getline(in, line))
             parseable += skycued::parseReadsbLine(line) ? 1 : 0;
     }
     asio::io_context io;
-    skycued::ReplayObservationSource src(io, kFixture, 0, false);
+    skycued::ReplayObservationSource src(io, kTestData, 0, false);
     std::vector<bool> conns;
     size_t got = 0;
     src.onObservation([&](const TrackObservation&) { ++got; });
@@ -436,7 +436,7 @@ TrackObservation from(const std::string& input, uint32_t address, double lat_off
     return o;
 }
 
-// A client on the fixture's port, started and given time to connect.
+// A client on the sample's port, started and given time to connect.
 struct Watch {
     Events ev;
     skycue::Client client;

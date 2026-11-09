@@ -1,6 +1,6 @@
 'use strict';
 // The Feeds tab's Inputs and Outputs cards: the markup the panels render
-// from a fixed snapshot (tests/js/panel_fixture.js), compared with
+// from a fixed snapshot (tests/js/panel_sample.js), compared with
 // resource_panel_golden.json, which was captured from the page's code from
 // before the two panels shared a module. The panels' descriptors live in
 // www/app.js between the markers `panels:begin` and `panels:end`; this
@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const shim = require('./dom_shim.js');
-const fx = require('./panel_fixture.js');
+const fx = require('./panel_sample.js');
 const golden = require('./resource_panel_golden.json');
 
 const www = path.resolve(process.argv[2] || path.join(__dirname, '..', '..', 'www'));

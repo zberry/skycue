@@ -115,9 +115,9 @@ std::size_t column(const std::string& header, const std::string& name)
     return static_cast<std::size_t>(it - cols.begin());
 }
 
-std::vector<TrackObservation> fixtureObservations(std::size_t n)
+std::vector<TrackObservation> sampleObservations(std::size_t n)
 {
-    std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/readsb-sample.jsonl");
+    std::ifstream in(std::string(SKYCUE_TEST_DATA_DIR) + "/readsb-sample.jsonl");
     std::vector<TrackObservation> out;
     std::string line;
     while (out.size() < n && std::getline(in, line))
@@ -212,7 +212,7 @@ BOOST_AUTO_TEST_CASE(jsonl_and_csv_written_with_headers)
 {
     TempDir tmp;
     const std::string dir = tmp.path + "/nested/rec";  // created on demand
-    auto obs = fixtureObservations(1).at(0);
+    auto obs = sampleObservations(1).at(0);
     std::string received_jsonl, received_csv;
     {
         Recorder rec(RecorderConfig{dir, true, true, 1ull << 20, 3600s}, "received");
@@ -486,7 +486,7 @@ BOOST_AUTO_TEST_CASE(rotation_by_size)
     TempDir tmp;
     Recorder rec(RecorderConfig{tmp.path, true, true, 2048, 3600s}, "received");
     const std::string first_jsonl = rec.currentPath("jsonl");
-    for (const auto& o : fixtureObservations(20))
+    for (const auto& o : sampleObservations(20))
         rec.writeObservation(o);
     rec.flush();
     auto jsonl = filesWithSuffix(tmp.path, ".jsonl");
@@ -551,7 +551,7 @@ BOOST_AUTO_TEST_CASE(retention_cap_on_start_and_rotation)
     BOOST_TEST(!pathExists(tmp.path + "/raw/beast-20200101-000000.bin"));
     BOOST_TEST(pathExists(tmp.path + "/raw/beast-20200102-000000.bin"));
     BOOST_TEST(pathExists(tmp.path + "/notes.txt"));
-    for (const auto& o : fixtureObservations(60)) {
+    for (const auto& o : sampleObservations(60)) {
         rec.writeObservation(o);
         // Retention never removes the files being written.
         BOOST_REQUIRE(pathExists(rec.currentPath("jsonl")));
@@ -643,7 +643,7 @@ BOOST_AUTO_TEST_CASE(uplink_record)
 BOOST_AUTO_TEST_CASE(replay_roundtrip)
 {
     TempDir tmp;
-    auto original = fixtureObservations(50);
+    auto original = sampleObservations(50);
     BOOST_REQUIRE(original.size() == 50u);
     const std::string path = recordObservations(tmp.path, original);
 
@@ -694,7 +694,7 @@ BOOST_AUTO_TEST_CASE(replay_roundtrip)
             BOOST_TEST(b.raw_line == a.raw_line);
         }
     }
-    BOOST_TEST(with_position > 40u);  // the fixture's positions were exercised
+    BOOST_TEST(with_position > 40u);  // the sample's positions were exercised
 }
 
 BOOST_AUTO_TEST_CASE(replay_reads_hand_edited_records_and_skips_bad_lines)
@@ -754,7 +754,7 @@ BOOST_AUTO_TEST_CASE(replay_pacing)
 }
 
 // Found by fuzz_recording (mode 0) on seed 5, a readsb line of
-// fixtures/fisb/received-with-uplinks.jsonl (2015) against a replay started
+// data/fisb/received-with-uplinks.jsonl (2015) against a replay started
 // in 2026 at speed 1e-6: the delay was clamped above only, so a record before
 // the first one (a hand-edited file need not be in order) gave -3.7e23 s,
 // and the double-to-int64 nanosecond conversion overflowed (undefined

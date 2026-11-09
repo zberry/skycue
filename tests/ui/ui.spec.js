@@ -1,5 +1,5 @@
 // The skycued web UI in headless Chromium, against the live skycued that
-// run.sh starts (fixture replay at real-time speed, looped). Every check is
+// run.sh starts (sample replay at real-time speed, looped). Every check is
 // on the DOM, the page's test hooks (window.skycueApp) or the HTTP API,
 // never on pixels. Both viewport projects run this file against the same
 // skycued, one test at a time, and every test leaves the filters and lists
@@ -16,7 +16,7 @@ const WS_BASE = BASE.replace(/^http/, 'ws');
 const COLOR = { send: 'sent', allow_listed: 'allow_listed', out_of_range: 'out_of_range',
   below_elevation: 'below_elevation', blocked: 'blocked' };
 // A forwarded aircraft well clear of the others (60 nm east, inbound) with a
-// registration: the fixture's UAL1423.
+// registration: the sample's UAL1423.
 const TARGET = 'a4f2c1';
 
 async function api(path, init) {
@@ -244,7 +244,7 @@ test('hide_filtered_removes_filtered_markers', async ({ page }) => {
       domFiltered: document.querySelectorAll('.ac-marker:not(.decision-sent):not(.decision-allow_listed)').length,
       domTrails: document.querySelectorAll('path.trail').length };
   });
-  expect(r.filtered, 'fixture has filtered-out aircraft').toBeGreaterThan(0);
+  expect(r.filtered, 'sample has filtered-out aircraft').toBeGreaterThan(0);
   expect(r.leftover).toBe(0);
   expect(r.domFiltered).toBe(0);
   expect(r.hidden).toBe(r.filtered);
@@ -1036,7 +1036,7 @@ test('config_tab_shows_effective_values_and_sources', async ({ page }) => {
   await expect(row('filters.max_range_nm').locator('.badge.live')).toHaveText('live');
   await expect(page.locator('#pane-config table[data-table="paths"] tr[data-key="paths.locations_file"]')).toHaveCount(1);
   await expect(page.locator('#config-daemon')).toContainText('skycued');
-  // run.sh's skycued replays the readsb fixture in real time, looped.
+  // run.sh's skycued replays the readsb sample in real time, looped.
   await expect(page.locator('#config-daemon tr', { hasText: 'Runs' })).toContainText(/replay of \S*readsb-sample\.jsonl \(speed 1, looped\)/);
   await expect(page.locator('#config-daemon tr', { hasText: 'Learned locations' })).toContainText(/learned, kept in \S*fisb-locations\.json/);
   await expect(page.locator('#config-daemon tr', { hasText: 'Operator locations' })).toContainText('no paths.locations_file');
@@ -1280,7 +1280,7 @@ test('trail_signal_colours_trail_and_persists', async ({ page }) => {
   await expect(page.locator('#view-trail-color')).toHaveValue('signal');
   await expect(page.locator('#trail-signal-legend')).toBeVisible();
   expect(await page.evaluate(() => window.skycueApp.getViewFilters().trailColor)).toBe('signal');
-  // The fixture's own tracks are drawn in runs too (their updates carry rssi).
+  // The sample's own tracks are drawn in runs too (their updates carry rssi).
   await expect.poll(() => page.locator('path.trail-run').count(), { timeout: 20000 }).toBeGreaterThan(0);
   await page.locator('#view-trail-color').selectOption('decision');
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('skycue.view'))).trailColor).toBe('decision');
@@ -1567,7 +1567,7 @@ test('trail_project_ahead', async ({ page }) => {
   expect(Math.abs(far.bearing - 60)).toBeLessThan(0.2);
   expect(a.color).toBe((await page.evaluate((h) => window.skycueApp.trail(h), hex)).color);
   expect(a.weight).toBe(1.5);
-  // The fixture's aircraft with a track and a speed get one too: one dashed line per aircraft.
+  // The sample's aircraft with a track and a speed get one too: one dashed line per aircraft.
   const total = await page.locator('path.trail-ahead').count();
   expect(total).toBeGreaterThan(1);
   expect(await page.locator('path.trail[stroke-dasharray], path.trail-run[stroke-dasharray]').count()).toBe(0);
@@ -1683,7 +1683,7 @@ test('trails_settings_in_sets_and_reload', async ({ page }) => {
   await page.locator('body').press('0');
 });
 
-// The ruler: away from the fixture's aircraft (around 38.9 N 77 W), two
+// The ruler: away from the sample's aircraft (around 38.9 N 77 W), two
 // clicks 300 px apart on one row at zoom 8 near 30 N are 84..88 nm
 // (611.5 m/px at the equator x cos(lat)), heading east.
 test('ruler_measures_without_touching_selection', async ({ page }) => {
@@ -2002,7 +2002,7 @@ test('radar_opacity_disabled_without_products', async ({ page }) => {
 });
 
 test.describe('fisb radar (tg30)', () => {
-  test.skip(!RADAR_BASE, 'FIS-B captures not fetched: run scripts/fixtures/fetch-test-captures.sh');
+  test.skip(!RADAR_BASE, 'FIS-B captures not fetched: run scripts/test-data/fetch-test-captures.sh');
   test.use({ baseURL: RADAR_BASE });
 
   test('radar_canvas_drawn_when_radar_present', async ({ page }) => {
@@ -2438,7 +2438,7 @@ test.describe('fisb radar (tg30)', () => {
 });
 
 test.describe('fisb text and airspace (2015 sample)', () => {
-  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fixtures/fetch-test-captures.sh');
+  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/test-data/fetch-test-captures.sh');
   test.use({ baseURL: FISB_BASE });
 
   test('header_fits_one_row_at_1280_with_fisb_stats', async ({ page }) => {
@@ -2475,7 +2475,7 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     await expect(card.locator('[data-field="key"]')).toHaveText(key);
     await expect(card.locator('[data-field="cancelled"]')).toHaveText('no');
 
-    // The fixtures have no TFR polygon (their NOTAMs are points): live items
+    // The test data have no TFR polygon (their NOTAMs are points): live items
     // with a polygon, a circle and a cancelled shape, through the page's
     // own WebSocket item handler.
     const tfr = {
@@ -2685,7 +2685,7 @@ test.describe('fisb text and airspace (2015 sample)', () => {
     await expect(page.locator('#stat-fisb-uplinks')).toHaveText(/^\d+$/, { timeout: 15000 });
     await expect(page.locator('#stat-fisb-products')).toHaveText(/^\d+$/);
     await expect(page.locator('#stat-radar-age')).toHaveText(/\d+ (s|min)/);
-    // No product time runs ahead of the fixture's data clock: no skew warning.
+    // No product time runs ahead of the sample's data clock: no skew warning.
     expect(status.clock_skew_s).toBeUndefined();
     await expect(page.locator('#stat-fisb-skew')).toBeHidden();
   });
@@ -2782,7 +2782,7 @@ test.describe('map tiles fallback', () => {
     expect(pageErrors).toEqual([]);
   });
 
-  // Map style and overlays: the same skycued's www has a fixture
+  // Map style and overlays: the same skycued's www has a sample
   // overlays/ (run.sh): a border line and three cities around the receiver,
   // Alphaville (rank 1), Bravoton (rank 4), Charlie Falls (rank 7).
   test('dark_style_filters_tile_pane_only', async ({ page }) => {
@@ -2841,7 +2841,7 @@ test.describe('map tiles fallback', () => {
     names = await labelsAt(4);
     await expect(names).toHaveText(['Alphaville']);
 
-    // Borders: the fixture line in its own pane; off again removes it.
+    // Borders: the sample line in its own pane; off again removes it.
     await page.locator('#ov-borders').check();
     await expect.poll(() => page.locator('.leaflet-borders-pane path').count()).toBeGreaterThan(0);
     // Both toggles are kept across a reload.
@@ -3555,7 +3555,7 @@ test.describe('receiver tab (outputs)', () => {
 });
 
 test.describe('receiver tab (FIS-B, 2015 sample)', () => {
-  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fixtures/fetch-test-captures.sh');
+  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/test-data/fetch-test-captures.sh');
   test.use({ baseURL: FISB_BASE });
 
   // Clicking the station marker deselects, like a map click; while the
@@ -3656,7 +3656,7 @@ test('left_panel_groups_output_then_display_filters', async ({ page }, testInfo)
 });
 
 // ---- View section (this browser only): narrows the table ---------------------
-// Fixture facts (tests/fixtures/readsb-sample.jsonl, looped every ~122 s):
+// Sample facts (tests/data/readsb-sample.jsonl, looped every ~122 s):
 // 12 aircraft, all at US addresses except the TIS-B track ~2c4a1f, which
 // skycued reports as hex 2c4a1f, addr_type non_icao (no country). RPA4521 (ac5e81) is heard only in the first
 // 59 s of each loop and times out (60 s) for a few seconds before the loop
@@ -3698,7 +3698,7 @@ test('view_count_stays_live_with_the_table_closed', async ({ page }) => {
 test('view_altitude_band_and_ground', async ({ page }) => {
   await openTable(page);
   await page.fill('#view-alt-min', '10000');
-  // At or above 10,000 ft in the fixture: a2f7b9 FDX1520 24,000, a4f2c1
+  // At or above 10,000 ft in the sample: a2f7b9 FDX1520 24,000, a4f2c1
   // UAL1423 36,000, a6e9d2 JBU1187 38,000, a8c3e5 DAL872 28,000, ab12f0
   // AAL2291 12,000-15,600, and ac5e81 RPA4521 18,000: 6 (5 while RPA4521
   // is timed out, see above).
@@ -3710,7 +3710,7 @@ test('view_altitude_band_and_ground', async ({ page }) => {
   }).toBe(true);
   await page.fill('#view-alt-min', '');
   await page.uncheck('#view-ground');
-  // The fixture's on-ground aircraft is UAL455 (a7d3e6); inject one more.
+  // The sample's on-ground aircraft is UAL455 (a7d3e6); inject one more.
   await page.evaluate(() => window.skycueApp.injectTestMarker({ hex: 'abcdef', decision: 'send', on_ground: true, alt_baro_ft: 0, lat: 38.9, lon: -77.0, position_time: new Date().toISOString() }));
   await expect.poll(async () => hexes(await tableRows(page)).filter((h) => h === 'abcdef' || h === 'a7d3e6')).toEqual([]);
   await expect(page.locator('#view-badge')).toHaveText('· 1');
@@ -4021,7 +4021,7 @@ test('settings_import_bad_and_hostile_files', async ({ page }) => {
 });
 
 // The map (spec §5). RPA4521 (ac5e81) times out for ~3 s of each ~122 s
-// fixture loop, so marker totals are compared with a tolerance of one.
+// sample loop, so marker totals are compared with a tolerance of one.
 const near = (a, b) => Math.abs(a - b) <= 1;
 test('view_hide_mode_removes_non_matching_markers', async ({ page }) => {
   await openPage(page); await waitMarkers(page, 10);
@@ -4124,7 +4124,7 @@ test('view_composes_with_hide_filtered', async ({ page }) => {
   await openBox(page, 'aircraft');
   const hiddenText = await page.locator('#hidden-count').textContent();
   await page.fill('#view-search', 'ual');
-  // UAL1423 (sent) and UAL455 (sent or filtered, as the fixture has it).
+  // UAL1423 (sent) and UAL455 (sent or filtered, as the sample has it).
   await expect.poll(() => page.evaluate(() => {
     const ms = window.skycueApp.markers();
     return ms.length >= 1 && ms.length <= 2 && ms.every((m) => m.decision === 'sent' || m.decision === 'allow_listed');
@@ -4532,7 +4532,7 @@ test('stats_weather_follows_uat_seen', async ({ page }) => {
 });
 
 test.describe('stats weather (FIS-B daemon)', () => {
-  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/fixtures/fetch-test-captures.sh');
+  test.skip(!FISB_BASE, 'FIS-B captures not fetched: run scripts/test-data/fetch-test-captures.sh');
   test.use({ baseURL: FISB_BASE });
   test('stats_weather_uat_lines_shown_then_hidden', async ({ page }) => {
     expect((await apiAt(FISB_BASE, '/api/stats/summary')).body.uat_seen).toBe(true);
@@ -4668,7 +4668,7 @@ test('stats_aircraft_table_search_and_pager', async ({ page }, testInfo) => {
   await restoreMap(page);
 });
 
-// Sorted by max range, which differs across the fixture's aircraft (the
+// Sorted by max range, which differs across the sample's aircraft (the
 // observation counts can all tie early on, and then both orders are the key
 // order). Each order is read from the table in one go: the row keys and the
 // column, so the two always belong to the same render.
@@ -5093,7 +5093,7 @@ test('stats_signal_rssi_vs_range_and_histogram', async ({ page }, testInfo) => {
 });
 
 // The remainder bar ('other', many countries) is muted, shows no pointer
-// and its click changes nothing. The fixture has two countries, so the
+// and its click changes nothing. The sample has two countries, so the
 // summary is answered with 17 and a remainder.
 test('stats_fleet_country_other_bar_is_not_a_filter', async ({ page }) => {
   await openCards(page, FLEET_CARDS);
@@ -5162,7 +5162,7 @@ const drawnCards = async (page) => (await statsState(page)).cards.filter((c) => 
 // skycued itself (the afterEach hook fails on any request to another host).
 test('stats_every_card_renders_canvas', async ({ page }, testInfo) => {
   await openAircraftSection(page);
-  // The detail card too: open the fixture's target.
+  // The detail card too: open the sample's target.
   await searchAircraft(page, TARGET);
   await page.locator(`#stats-aircraft-table tbody tr[data-key="${TARGET_KEY}"]`).click();
   await expect(page.locator('#stats-detail')).toBeVisible();
@@ -5328,7 +5328,7 @@ test('stats_cards_save_as_image', async ({ page }) => {
   await restoreMap(page);
 });
 
-// The "stats" skycued (run.sh) replays the fixture at 20x and saves its
+// The "stats" skycued (run.sh) replays the sample at 20x and saves its
 // statistics to stats.json. Stopped and started again, it reloads the
 // ledger (every entry kept, `since` the same), while the replay's clock
 // starts over behind the reloaded series, which therefore restart (shorter
@@ -5362,7 +5362,7 @@ test('stats_ledger_survives_restart', async () => {
   const s0 = (await apiAt(STATS_BASE, '/api/stats/summary')).body;
   const m0 = await minutes();
   const rows0 = (await apiAt(STATS_BASE, '/api/stats/aircraft?sort=observations&limit=1000')).body.rows;
-  expect(s0.aircraft_total).toBeGreaterThanOrEqual(12);   // the fixture's 12, at least
+  expect(s0.aircraft_total).toBeGreaterThanOrEqual(12);   // the sample's 12, at least
   expect(rows0.length).toBe(s0.aircraft_total);
   const k = rows0[0];
   const lines0 = restartLines();
@@ -5451,7 +5451,7 @@ test('box_shows_est_marker', async ({ page }) => {
 });
 
 // ---- ACAS resolution advisory ------------------------------------------------------
-// The "acas" daemon replays tests/fixtures/acas-ra.jsonl: one aircraft with an
+// The "acas" daemon replays tests/data/acas-ra.jsonl: one aircraft with an
 // active RA, air data and intent. The aircraft box shows the grouped rows and
 // the RA line in the blocked colour; the Alerts strip counts one acas_ra alert.
 test.describe('acas replay', () => {

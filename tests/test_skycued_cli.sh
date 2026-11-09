@@ -2,19 +2,19 @@
 # skycued's command line before any configuration is read: --help byte for byte,
 # --version, the usage errors (status 2, one "skycued: " line on stderr), the
 # --dump-env output, an unreadable config file, and a clean start with SIGTERM.
-# usage: test_skycued_cli.sh SKYCUED FIXTURE_DIR VERSION
+# usage: test_skycued_cli.sh SKYCUED DATA_DIR VERSION
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 fixtures=$2 version=$3
+skycued=$1 data_dir=$2 version=$3
 test_init skycued_cli
 current=setup
-for f in "$skycued" "$fixtures/skycued-help.txt"; do [ -e "$f" ] || fail "$f missing"; done
+for f in "$skycued" "$data_dir/skycued-help.txt"; do [ -e "$f" ] || fail "$f missing"; done
 
 for v in $(compgen -e | grep '^SKYCUE_'); do unset "$v"; done
 
-help_is_the_fixture() {
+help_is_the_sample() {
   "$skycued" --help >"$tmp/help" 2>"$tmp/err" || fail "--help exit $?"
-  cmp -s "$tmp/help" "$fixtures/skycued-help.txt" || fail "--help differs: $(diff "$tmp/help" "$fixtures/skycued-help.txt" | head -5)"
+  cmp -s "$tmp/help" "$data_dir/skycued-help.txt" || fail "--help differs: $(diff "$tmp/help" "$data_dir/skycued-help.txt" | head -5)"
   [ ! -s "$tmp/err" ] || fail "--help wrote to stderr"
   "$skycued" -h >"$tmp/h" 2>/dev/null || fail "-h exit $?"
   cmp -s "$tmp/h" "$tmp/help" || fail "-h differs from --help"
@@ -105,7 +105,7 @@ clean_start_and_sigterm_exit_0() {
   [ "$rc" = 0 ] || fail "SIGTERM: exit $rc"
 }
 
-for t in help_is_the_fixture version_prints_the_project_version usage_errors_exit_2 unknown_flag_shows_the_table \
+for t in help_is_the_sample version_prints_the_project_version usage_errors_exit_2 unknown_flag_shows_the_table \
   missing_config_exits_2 dump_env_prints_assignments convert_conf_exits_0 check_inputs_exit_codes \
   clean_start_and_sigterm_exit_0; do
   current=$t

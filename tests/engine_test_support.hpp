@@ -1,6 +1,6 @@
 #pragma once
 
-// Fixtures shared by the Engine tests (test_engine, test_engine_api,
+// Test setup shared by the Engine tests (test_engine, test_engine_api,
 // test_recording_independence). Header-only; every function is inline.
 
 #include "config.hpp"
@@ -69,7 +69,7 @@ using asio::ip::tcp;
 using steady = std::chrono::steady_clock;
 
 inline const std::chrono::milliseconds kWait = slow(5s);
-inline const std::string kFixture = std::string(SKYCUE_FIXTURE_DIR) + "/readsb-sample.jsonl";
+inline const std::string kTestData = std::string(SKYCUE_TEST_DATA_DIR) + "/readsb-sample.jsonl";
 
 using skycue_test::TempDir;
 
@@ -395,7 +395,7 @@ inline std::function<std::unique_ptr<ObservationSource>(asio::io_context&)> fake
 inline std::function<std::unique_ptr<ObservationSource>(asio::io_context&)> replay(double speed)
 {
     return [speed](asio::io_context& io) -> std::unique_ptr<ObservationSource> {
-        return std::make_unique<skycued::ReplayObservationSource>(io, kFixture, speed, false);
+        return std::make_unique<skycued::ReplayObservationSource>(io, kTestData, speed, false);
     };
 }
 

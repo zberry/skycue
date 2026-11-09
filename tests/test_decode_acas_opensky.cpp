@@ -1,5 +1,5 @@
 // ACAS resolution advisories and the rollcall replies against OpenSky's own decoding of the
-// same frames (tests/fixtures/opensky, fetched by scripts/fixtures/fetch-test-captures.sh).
+// same frames (tests/data/opensky, fetched by scripts/test-data/fetch-test-captures.sh).
 //
 //   *_acas_data4.csv             DF0 / DF16 (rawmsg 14 / 28 hex digits); for a long frame
 //                                 activeresolutionadvisories (ARA, 14-bit integer),
@@ -42,7 +42,7 @@ using namespace skycued::decode;
 namespace {
 
 namespace fs = std::filesystem;
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
 
 constexpr double kMToFt = 3.28084;
 constexpr double kAcasMin = 0.995;
@@ -128,12 +128,12 @@ std::string yn(bool v) { return v ? "True" : "False"; }
 std::vector<fs::path> dirsOrSkip()
 {
     std::vector<fs::path> dirs;
-    if (fs::is_directory(kFixtures + "/opensky"))
-        for (const auto& e : fs::directory_iterator(kFixtures + "/opensky"))
+    if (fs::is_directory(kTestData + "/opensky"))
+        for (const auto& e : fs::directory_iterator(kTestData + "/opensky"))
             if (e.is_directory()) dirs.push_back(e.path());
     std::sort(dirs.begin(), dirs.end());
     if (dirs.empty()) {
-        std::cout << "SKIP: opensky/ is missing (scripts/fixtures/fetch-test-captures.sh fetches and unpacks it)\n";
+        std::cout << "SKIP: opensky/ is missing (scripts/test-data/fetch-test-captures.sh fetches and unpacks it)\n";
         std::exit(77);  // ctest SKIP_RETURN_CODE
     }
     return dirs;

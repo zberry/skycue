@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 # skycue-rawplay and skycue-rawrec against python3 socket peers, on the
-# committed real-data fixtures; then (when readsb is built) rawplay into a
+# committed real-data test data; then (when readsb is built) rawplay into a
 # real readsb and read its JSON position output.
-# usage: test_rawtools.sh RAWREC RAWPLAY FIXTURE_DIR [READSB]
+# usage: test_rawtools.sh RAWREC RAWPLAY DATA_DIR [READSB]
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-rawrec=$1 rawplay=$2 fixtures=$3 readsb=${4:-}
-csv="$fixtures/raw/modes-120s.csv.gz"
-uat="$fixtures/raw/uat-sample.txt.gz"
-stratux="$fixtures/raw/stratux-uat-2015.log.gz"
+rawrec=$1 rawplay=$2 data_dir=$3 readsb=${4:-}
+csv="$data_dir/raw/modes-120s.csv.gz"
+uat="$data_dir/raw/uat-sample.txt.gz"
+stratux="$data_dir/raw/stratux-uat-2015.log.gz"
 test_init rawtools
-# fixtures/raw/ is fetched by scripts/fixtures/fetch-test-captures.sh (fixtures/README.md):
+# data/raw/ is fetched by scripts/test-data/fetch-test-captures.sh (data/README.md):
 # without it the sections that replay those captures, (a)-(c2) and the full
 # stack, are skipped and the rest still runs.
 have_raw=1
 for f in "$csv" "$uat" "$stratux"; do
-  [ -e "$f" ] || { have_raw=0; echo "SKIP (a)-(c2) and full stack: $f not fetched: run scripts/fixtures/fetch-test-captures.sh"; break; }
+  [ -e "$f" ] || { have_raw=0; echo "SKIP (a)-(c2) and full stack: $f not fetched: run scripts/test-data/fetch-test-captures.sh"; break; }
 done
 for f in "$rawrec" "$rawplay"; do [ -e "$f" ] || fail "$f missing"; done
 
@@ -66,7 +66,7 @@ play_to_sink() {
   awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.3f\n", b - a }'
 }
 
-if [ "$have_raw" = 1 ]; then  # (a)-(c2) replay fixtures/raw/
+if [ "$have_raw" = 1 ]; then  # (a)-(c2) replay data/raw/
 # ---- (a) CSV at speed 0: every capture line becomes an "@" AVR line ---------
 play_to_sink "$tmp/a.out" --raw-in --speed 0 "$csv" >/dev/null
 total=$(wc -l < "$tmp/a.out")
@@ -132,10 +132,10 @@ awk -v w="$wall" 'BEGIN { exit !(w >= 0.96 && w <= 3.0) }' || fail "(c) 1.2 s of
 echo "ok (c) pacing: untimestamped and timestamped"
 
 # ---- (c2) stratux "<ns>," lines: prefix stripped, paced by the offsets ----------
-# The fixture's first 7 lines with their offsets replaced by 0, 200 ms, ..., 1.2 s,
+# The sample's first 7 lines with their offsets replaced by 0, 200 ms, ..., 1.2 s,
 # after its "START,..." header and the blank lines between records.
 zcat "$stratux" | grep -E '^[0-9]+,[-+]' | head -n 7 > "$tmp/stx7.src"
-[ "$(wc -l < "$tmp/stx7.src")" -eq 7 ] || fail "(c2) fixture has fewer than 7 stratux lines"
+[ "$(wc -l < "$tmp/stx7.src")" -eq 7 ] || fail "(c2) sample has fewer than 7 stratux lines"
 { echo "START,Wed Sep 2 04:23:37 +0000 UTC 2015"
   awk -F, '{ printf "%d,%s\n\n", (NR - 1) * 200000000, substr($0, index($0, ",") + 1) }' "$tmp/stx7.src"
 } > "$tmp/stx7.log"
@@ -356,7 +356,7 @@ grep -q 'done: 110 frames sent, 9 bytes skipped' "$tmp/play.err" || { cat "$tmp/
 echo "ok (h) rawplay resyncs after a truncated frame: 110 frames, 9 bytes skipped"
 
 # ---- (i) rawplay serves several clients --------------------------------------------
-# These use generated files, not fixtures/raw/. fetch.py (above) takes the port and
+# These use generated files, not data/raw/. fetch.py (above) takes the port and
 # the output file; delay.py is the same after a pause; mute.py connects and never reads.
 cat > "$tmp/mute.py" <<'PY'
 import socket, sys, time
@@ -433,7 +433,7 @@ echo "ok (i) rawplay_two_clients_same_frames: UAT lines, .bin frames, .csv as Be
 # (i2) The .csv -> Beast bytes are pinned to what rawplay wrote before the encoder
 # moved into raw_formats (beast::encodeFrame): a short and a long message, a
 # 4-digit Mode A/C line and 0x1a bytes in payload and timestamp, then the whole
-# 120 s fixture (one frame per line, size and SHA-256 of the stream).
+# 120 s sample (one frame per line, size and SHA-256 of the stream).
 beast_sha() { # beast_sha CSV: sha256 of the Beast stream rawplay serves for it
   local p out="$tmp/pin.out"
   p=$(free_port)
@@ -449,8 +449,8 @@ got=$(beast_sha "$tmp/pin.csv")
 if [ "$have_raw" = 1 ]; then
   zcat "$csv" > "$tmp/full.csv"
   got=$(beast_sha "$tmp/full.csv")
-  [ "$got" = "3243746 10d06a99941d59dd4df2e6a9e4f625b80caf02727a59a6dc7b43a45cd6e36aaa" ] || fail "(i2) fixture stream changed: $got"
-  [ "$(wc -l < "$tmp/full.csv")" = 176612 ] || fail "(i2) fixture line count"
+  [ "$got" = "3243746 10d06a99941d59dd4df2e6a9e4f625b80caf02727a59a6dc7b43a45cd6e36aaa" ] || fail "(i2) test data stream changed: $got"
+  [ "$(wc -l < "$tmp/full.csv")" = 176612 ] || fail "(i2) test data line count"
 fi
 echo "ok (i2) rawplay csv -> Beast stream byte-identical to the pinned values"
 
@@ -494,7 +494,7 @@ echo "ok (i) rawplay_wait_clients_holds_playback"
 
 # ---- full stack: the capture through a real readsb -----------------------------
 if [ "$have_raw" = 0 ]; then
-  echo "PASS (fixture sections skipped)"
+  echo "PASS (test data sections skipped)"
   exit 0
 fi
 if [ -z "$readsb" ] || [ ! -x "$readsb" ]; then

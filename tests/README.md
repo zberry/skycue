@@ -14,7 +14,7 @@
   `ui/README.md`.
 - `fuzz/`, `soak/`, `sanitizer/`: opt-in tiers, see
   [docs/hardening.md](../docs/hardening.md).
-- `fixtures/`: test inputs and goldens, see `fixtures/README.md`.
+- `data/`: test inputs and goldens, see `data/README.md`.
 
 ## Running one test
 
@@ -51,7 +51,7 @@ A skip is ctest's "Skipped" (exit status 77). It is not a pass.
 |---|---|
 | `parent_project` | the cmake it is given is not found |
 | `package_conf`, `slow_factor`, `icao_tables_current`, `icao_tables_generator` | python3 is not found |
-| `hub`, `fisb_cli` | the fetched captures are missing (`scripts/fixtures/fetch-test-captures.sh`); `hub` also needs python3 and curl |
+| `hub`, `fisb_cli` | the fetched captures are missing (`scripts/test-data/fetch-test-captures.sh`); `hub` also needs python3 and curl |
 | `geom_eval`, `decode_acas_opensky` | the fetched captures (`geom_eval`) or the OpenSky data (both) are missing |
 | `decode_differential` | the captures, python3 or curl are missing; its fresh-run half also needs `SKYCUE_READSB` and is skipped without it |
 | `decode_differential_uat` | python3 or curl is missing, or every sample is absent; its fresh-run half also needs `SKYCUE_DUMP978` |
@@ -64,8 +64,8 @@ Two tests do not skip as a whole: `rawtools` and `iqgen_cli` print `SKIP` for th
 that read the fetched captures, run the rest and report a pass. `web_ui` runs
 its node checks only when node is installed and passes without them.
 
-Unit tests that need a fetched fixture for only some cases, such as `beast_raw` and `uat_raw_decode`, skip those
+Unit tests that need a fetched sample for only some cases, such as `beast_raw` and `uat_raw_decode`, skip those
 cases (Boost.Test reports them as skipped) and run the rest.
 
-Any CI setup should include one job with the fetched fixtures and the external decoders set,
-or the differential tests never run. The workflow in `.github/workflows/ci.yml` runs `ctest -LE 'needs-fixtures|needs-node|slow'` and has no such job.
+Any CI setup should include one job with the fetched test data and the external decoders set,
+or the differential tests never run. The workflow in `.github/workflows/ci.yml` runs `ctest -LE 'needs-test-data|needs-node|slow'` and has no such job.

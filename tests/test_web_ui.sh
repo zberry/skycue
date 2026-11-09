@@ -4,18 +4,18 @@
 # and stats_view.js, the Feeds tab's resource_panel.js, the alert strip's alerts_pure.js and alerts_view.js, /style.css and (when Leaflet was staged)
 # /vendor/leaflet/leaflet.js and (when ECharts was staged)
 # /vendor/echarts/echarts.min.js with their content types, /api/state with the
-# fixture's 12 tracks, /api/stats/summary with its since, a path escaping
+# sample's 12 tracks, /api/stats/summary with its since, a path escaping
 # the www directory rejected, the
 # page's scripts free of post-ES2017 syntax; then, when
 # node is installed, `node --check` on the page's scripts and the pure-function
 # tests (tests/js/app_pure.test.js, tests/js/stats_pure.test.js,
 # tests/js/alerts_pure.test.js, resource_panel.test.js, panel_markup.test.js). Prints
 # SKIP for the parts it cannot run.
-# usage: test_web_ui.sh SKYCUED FIXTURE_DIR WWW_STAGE JS_TEST_DIR
+# usage: test_web_ui.sh SKYCUED DATA_DIR WWW_STAGE JS_TEST_DIR
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 fixtures=$2 www=$3 jsdir=$4
-replay="$fixtures/readsb-sample.jsonl"
+skycued=$1 data_dir=$2 www=$3 jsdir=$4
+replay="$data_dir/readsb-sample.jsonl"
 test_init web_ui
 fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }
@@ -78,7 +78,7 @@ for bad in '/../etc/passwd' '/%2e%2e/etc/passwd' '/vendor/../../etc/passwd'; do
   [ "$code" = 400 ] || [ "$code" = 404 ] || fail "GET $bad: status $code, want 400 or 404"
 done
 
-# All 12 fixture aircraft are in the table within a few seconds.
+# All 12 sample aircraft are in the table within a few seconds.
 n=0
 for (( i=0; i<100*slowf; i++ )); do
   n=$(curl -fs "$base/api/state" | python3 -I -c 'import json,sys; print(len(json.load(sys.stdin)["tracks"]))')

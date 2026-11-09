@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# skycue-dump against a real skycued replaying the readsb JSON fixture (text
+# skycue-dump against a real skycued replaying the readsb JSON sample (text
 # and --json over TCP, text over UDP), exit 3 when nothing arrives before
 # --timeout, and against a python peer that sends hand-made frames: heartbeats,
 # a malformed TrackUpdate (BAD), a drop for an unknown track, then a hang-up
 # (CONN down, LOCAL-DROP), with only frame lines counting towards --count;
 # and --tcp-listen with a second skycued that has no listener (cues.tcp_port = 0)
 # and connects out to the dump (CUE_TCP_CONNECT).
-# usage: test_dump.sh SKYCUED SKYCUE_DUMP FIXTURE_DIR
+# usage: test_dump.sh SKYCUED SKYCUE_DUMP DATA_DIR
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 dump=$2 fixtures=$3
-replay="$fixtures/readsb-sample.jsonl"
+skycued=$1 dump=$2 data_dir=$3
+replay="$data_dir/readsb-sample.jsonl"
 test_init dump
 fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }

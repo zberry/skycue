@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # skycue-pingsim end to end, against one skycued with only pingStation inputs:
-#  (a) the readsb fixture synthesised as CAT021 into a UDP input with capture
+#  (a) the readsb sample synthesised as CAT021 into a UDP input with capture
 #      on: all 12 aircraft tracked, >= 95% of the sent datagrams counted,
 #      nothing rejected; skycue-dump --capture decodes the capture file;
-#  (b) the fixture as pingStation JSON with a status message every 2 s into a
+#  (b) the sample as pingStation JSON with a status message every 2 s into a
 #      pingstation_json input: >= 95% counted, nothing rejected, and the
 #      status shows as device_status on /api/inputs/sim-json/status;
 #  (c) that capture file replayed with --capture into a fresh input: the same
@@ -12,11 +12,11 @@
 #      over the API: every block counted;
 #  (e) usage: --help exits 0, a bad --as exits 2, --loop over a file with
 #      nothing to play exits 1.
-# usage: test_pingsim.sh SKYCUED SKYCUE_PINGSIM SKYCUE_DUMP FIXTURE_DIR
+# usage: test_pingsim.sh SKYCUED SKYCUE_PINGSIM SKYCUE_DUMP DATA_DIR
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 pingsim=$2 dump=$3 fixtures=$4
-sample="$fixtures/readsb-sample.jsonl"
+skycued=$1 pingsim=$2 dump=$3 data_dir=$4
+sample="$data_dir/readsb-sample.jsonl"
 test_init pingsim
 fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }
@@ -84,7 +84,7 @@ wait_messages() {
 at_least_95() { [ $(( $1 * 100 )) -ge $(( $2 * 95 )) ]; }
 
 # ---- (a) CAT021 over UDP, capture on -------------------------------------------
-# The fixture (about 122 s) at 20x.
+# The sample (about 122 s) at 20x.
 timeout $((60*slowf)) "$pingsim" --udp "127.0.0.1:$cat_port" --as cat021 --speed 20 "$sample" >"$tmp/a.log" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$tmp/a.log"; fail "(a) pingsim exit $rc"; }

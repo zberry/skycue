@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
-# Usage: scripts/fixtures/fetch-test-captures.sh [--cache DIR] [--fixtures DIR] [--offline]
+# Usage: scripts/test-data/fetch-test-captures.sh [--cache DIR] [--test-data DIR] [--offline]
 #
 # Downloads the third-party test captures the tests and the replay tools
 # use from their upstream repositories, at pinned commits, checks them against
-# pinned SHA-256 values and installs them in the (git-ignored) fixture paths:
+# pinned SHA-256 values and installs them in the (git-ignored) test data paths:
 #
-#   tests/fixtures/raw/modes-120s.csv.gz           junzis/pyModeS (GPL-3.0)
-#   tests/fixtures/raw/uat-sample.txt.gz           flightaware/dump978 (BSD-2-Clause)
-#   tests/fixtures/raw/stratux-uat-2015.log.gz     cyoung/stratux (BSD-3-Clause),
+#   tests/data/raw/modes-120s.csv.gz           junzis/pyModeS (GPL-3.0)
+#   tests/data/raw/uat-sample.txt.gz           flightaware/dump978 (BSD-2-Clause)
+#   tests/data/raw/stratux-uat-2015.log.gz     cyoung/stratux (BSD-3-Clause),
 #                                                  the upstream log, gzip -9n
-#   tests/fixtures/raw/stratux-uat-2015b.log.gz    stratux/stratux (BSD-3-Clause),
+#   tests/data/raw/stratux-uat-2015b.log.gz    stratux/stratux (BSD-3-Clause),
 #                                                  test-data/gms5002-09072015-problem-stratux-uat.log, gzip -9n
-#   tests/fixtures/fisb/tg30.978                   rand-projects/fisb-decode
+#   tests/data/fisb/tg30.978                   rand-projects/fisb-decode
 #                                                  (BSD-2-Clause Plus Patent)
-#   tests/fixtures/raw/pymodes-adsb.csv            junzis/pyModeS tests/data (GPL-3.0,
-#   tests/fixtures/raw/pymodes-commb-df20.csv      fetch-only, never redistributed):
-#   tests/fixtures/raw/pymodes-commb-df21.csv      DF17, DF20 and DF21 frames
-#   tests/fixtures/raw/dump1090-modes1.bin         MalcolmRobb/dump1090 (BSD-3-Clause),
+#   tests/data/raw/pymodes-adsb.csv            junzis/pyModeS tests/data (GPL-3.0,
+#   tests/data/raw/pymodes-commb-df20.csv      fetch-only, never redistributed):
+#   tests/data/raw/pymodes-commb-df21.csv      DF17, DF20 and DF21 frames
+#   tests/data/raw/dump1090-modes1.bin         MalcolmRobb/dump1090 (BSD-3-Clause),
 #                                                  8-bit I/Q at 2 MS/s (not Beast)
-#   tests/fixtures/opensky/<name>/                 the five OpenSky incident-data
+#   tests/data/opensky/<name>/                 the five OpenSky incident-data
 #                                                  tarballs (CC BY 4.0), unpacked to the
 #                                                  position, velocity, identification, ACAS and
 #                                                  rollcall-replies CSVs and the README, for
 #                                                  test_decode_opensky and test_decode_acas_opensky
-#   tests/fixtures/iq/porto-awec2026/              Zenodo 23342598 (CC BY 4.0), a 73 MB
+#   tests/data/iq/porto-awec2026/              Zenodo 23342598 (CC BY 4.0), a 73 MB
 #                                                  RTL-SDR recording with its decoded CSVs;
 #                                                  only when SKYCUE_FETCH_IQ=1 (the zip is 20 MB)
 #
-# It then regenerates tests/fixtures/fisb/received-with-uplinks.jsonl and
+# It then regenerates tests/data/fisb/received-with-uplinks.jsonl and
 # received-tg30.jsonl from them (gen_received_*.py, python3 -I) and checks
-# those against pinned SHA-256 values too. Provenance: tests/fixtures/README.md.
+# those against pinned SHA-256 values too. Provenance: tests/data/README.md.
 #
 # --cache DIR     where the downloads are kept (default <repo>/build/test-captures)
-# --fixtures DIR  the fixtures directory to fill (default <repo>/tests/fixtures);
+# --test-data DIR  the test data directory to fill (default <repo>/tests/data);
 #                 it must hold readsb-sample.jsonl, as the repository's does
 # --offline       never download: use what is in the cache, and list the missing
 #                 files with their URLs and SHA-256 values (to fetch by hand on
@@ -49,7 +49,7 @@
 # SKYCUE_FETCH_IQ=1 also downloads and unpacks the Porto IQ recording (the one
 # pin whose name starts with zenodo-); without it that pin is ignored and the
 # default fetch stays small. The Madrid recording (Zenodo 23360412, 640 MB) is
-# not pinned: see tests/fixtures/README.md.
+# not pinned: see tests/data/README.md.
 #
 # Tests may set SKYCUE_CAPTURE_URL_BASE (replaces the https://raw.githubusercontent.com,
 # https://s3.opensky-network.org or https://zenodo.org prefix of every URL) and
@@ -63,7 +63,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 # One line per file.
 #   pin CACHEFILE SHA256 URL      an upstream file (strict)
 #   gzip RELPATH SHA256           the installed gzip of the stratux log (warns)
-#   derived RELPATH SHA256        a generated file under the fixtures directory
+#   derived RELPATH SHA256        a generated file under the test data directory
 builtin_pins() {
   cat <<'PINS'
 # --- pins ---
@@ -99,12 +99,12 @@ PINS
 }
 
 usage() {
-  echo "usage: $0 [--cache DIR] [--fixtures DIR] [--offline]" >&2
+  echo "usage: $0 [--cache DIR] [--test-data DIR] [--offline]" >&2
   exit 2
 }
 
 cache=$here/build/test-captures
-fixtures=$here/tests/fixtures
+data_dir=$here/tests/data
 offline=0
 while [ $# -gt 0 ]; do
   case $1 in
@@ -113,9 +113,9 @@ while [ $# -gt 0 ]; do
       cache=$2
       shift 2
       ;;
-    --fixtures)
+    --test-data)
       [ $# -ge 2 ] && [ -n "$2" ] || usage
-      fixtures=$2
+      data_dir=$2
       shift 2
       ;;
     --offline)
@@ -159,7 +159,7 @@ pin_sha() {
   die "no '$1 $2' line in the pins"
 }
 
-# install_path CACHEFILE: where a cache file goes under the fixtures directory.
+# install_path CACHEFILE: where a cache file goes under the test data directory.
 install_path() {
   case $1 in
     pyModeS-airsquitter_*) echo raw/modes-120s.csv.gz ;;
@@ -248,16 +248,16 @@ fi
 [ "$failed" -eq 0 ] || die "nothing was installed"
 
 # --- 2. install the verified files ---
-command -v python3 >/dev/null || die "python3 is needed to regenerate the derived fixtures"
+command -v python3 >/dev/null || die "python3 is needed to regenerate the derived test data"
 command -v gzip >/dev/null || die "gzip is needed for the stratux log"
 command -v tar >/dev/null || die "tar is needed for the OpenSky tarballs"
-mkdir -p "$fixtures/raw" "$fixtures/fisb"
+mkdir -p "$data_dir/raw" "$data_dir/fisb"
 
 while read -r kind name sha url; do
   [ "$kind" = pin ] || continue
   skipped "$name" && continue
   rel=$(install_path "$name")
-  dest=$fixtures/$rel
+  dest=$data_dir/$rel
   src=$cache/$name
   if [ "$rel" != "${rel#opensky/}" ] || [ "$rel" != "${rel#iq/}" ]; then
     # An unpacked directory: stamped with the archive's SHA-256, redone when it differs.
@@ -324,12 +324,12 @@ PY
 done <<<"$pins"
 
 # --- 3. the derived files ---
-gen() { # gen SCRIPT: run a generator against the fixtures directory
-  python3 -I "$here/tests/fixtures/fisb/$1" --fixtures "$fixtures" >/dev/null || die "$1 failed"
+gen() { # gen SCRIPT: run a generator against the test data directory
+  python3 -I "$here/tests/data/fisb/$1" --test-data "$data_dir" >/dev/null || die "$1 failed"
 }
 while read -r kind rel sha _; do
   [ "$kind" = derived ] || continue
-  dest=$fixtures/$rel
+  dest=$data_dir/$rel
   if verify "$dest" "$sha"; then
     echo "sha256 ok: $dest"
     continue
@@ -337,7 +337,7 @@ while read -r kind rel sha _; do
   rm -f "$dest"
   case $rel in
     fisb/received-with-uplinks.jsonl)
-      [ -f "$fixtures/readsb-sample.jsonl" ] || die "$fixtures/readsb-sample.jsonl is needed to generate $rel (copy it from the repository's tests/fixtures)"
+      [ -f "$data_dir/readsb-sample.jsonl" ] || die "$data_dir/readsb-sample.jsonl is needed to generate $rel (copy it from the repository's tests/data)"
       gen gen_received_with_uplinks.py
       ;;
     fisb/received-tg30.jsonl) gen gen_received_tg30.py ;;

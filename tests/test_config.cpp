@@ -152,7 +152,7 @@ BOOST_AUTO_TEST_CASE(config_copy_text_parses)
 {
     // What the web Config tab's "Copy as text" writes (tests/js/app_pure.test.js
     // checks the text against this file).
-    const Config c = parseConfigText(slurp(std::string(SKYCUE_FIXTURE_DIR) + "/config-copy.toml"), "config-copy.toml");
+    const Config c = parseConfigText(slurp(std::string(SKYCUE_TEST_DATA_DIR) + "/config-copy.toml"), "config-copy.toml");
     BOOST_TEST(c.receiver_lat == 38.9);
     BOOST_TEST(c.receiver_lon == -77.0);
     BOOST_TEST(c.sdr_1090_serial == "");

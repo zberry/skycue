@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Generate the fuzz seeds that are cut from third-party captures.
 
-    python3 -I scripts/fixtures/gen-capture-seeds.py FIXTURES_DIR OUT_DIR
+    python3 -I scripts/test-data/gen-capture-seeds.py TEST_DATA_DIR OUT_DIR
 
-FIXTURES_DIR is the tests/fixtures tree (raw/*.gz, fisb/tg30.978,
+TEST_DATA_DIR is the tests/data tree (raw/*.gz, fisb/tg30.978,
 fisb/received-with-uplinks.jsonl). Seeds are written under OUT_DIR/<target>/
 with the names and bytes listed in docs/hardening.md ("Seeds"):
 
     raw_formats/seed-1..18       iqgen_coding/seed-1,2
     fisb_decoder/seed-1..12      recording/seed-1..6
 
-A target whose source fixture is missing gets nothing written; the script
+A target whose source sample is missing gets nothing written; the script
 says so on stderr and exits 3 (other targets are still generated). Output is
 deterministic.
 """
@@ -101,7 +101,7 @@ def recording(fx, out):
 
 def main(argv):
     if len(argv) != 3:
-        sys.stderr.write("usage: gen-capture-seeds.py FIXTURES_DIR OUT_DIR\n")
+        sys.stderr.write("usage: gen-capture-seeds.py TEST_DATA_DIR OUT_DIR\n")
         return 2
     fx, out = argv[1], argv[2]
     missing = []

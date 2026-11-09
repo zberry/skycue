@@ -3,10 +3,10 @@
 
 Deterministic; run from anywhere:
 
-    python3 tests/fixtures/fisb/gen_received_tg30.py [--fixtures DIR]
+    python3 tests/data/fisb/gen_received_tg30.py [--test-data DIR]
 
---fixtures DIR reads DIR/fisb/tg30.978 and writes DIR/fisb/received-tg30.jsonl;
-the default is the fixtures directory this script is in.
+--test-data DIR reads DIR/fisb/tg30.978 and writes DIR/fisb/received-tg30.jsonl;
+the default is the test data directory this script is in.
 
 Input (committed): tg30.978, dump978-fa raw lines
 `+<hex>;rs=<n>;rssi=<dBFS>;t=<unix seconds>.<ms>;` (the `#` comment lines are
@@ -36,11 +36,11 @@ def iso_ms(ms):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--fixtures", default=os.path.join(HERE, ".."),
-                    help="fixtures directory (default: the one containing this script)")
-    fixtures = os.path.abspath(ap.parse_args().fixtures)
-    SRC = os.path.join(fixtures, "fisb", "tg30.978")
-    OUT = os.path.join(fixtures, "fisb", "received-tg30.jsonl")
+    ap.add_argument("--test-data", default=os.path.join(HERE, ".."),
+                    help="test data directory (default: the one containing this script)")
+    data_dir = os.path.abspath(ap.parse_args().test_data)
+    SRC = os.path.join(data_dir, "fisb", "tg30.978")
+    OUT = os.path.join(data_dir, "fisb", "received-tg30.jsonl")
     lines = []
     with open(SRC) as f:
         for line in f:

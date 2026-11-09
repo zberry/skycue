@@ -12,7 +12,7 @@
 // observations in loop mode); one without "uplink_hex" is skipped silently.
 //
 // A line that is a readsb JSON-port aircraft object (a numeric "now" and no
-// "time", as in tests/fixtures/readsb-sample.jsonl) is read with
+// "time", as in tests/data/readsb-sample.jsonl) is read with
 // parseReadsbLine instead, so a capture of readsb's output replays too.
 //
 // Threading: lives on the caller's io_context; call everything from its

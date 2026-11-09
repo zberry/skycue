@@ -6,12 +6,12 @@
 //    AltitudeFit of all the other aircraft (window ending at its last sample)
 //    at its own median barometric altitude, and compared with its own median
 //    difference. The plain median of the others is printed for contrast.
-// 2. geom_eval_own_diff_hold_opensky: for each OpenSky fixture the difference
+// 2. geom_eval_own_diff_hold_opensky: for each OpenSky sample the difference
 //    reported `lag` seconds earlier is held and corrected for the barometric
 //    altitude change with the default slope of resolveGeomAltitude (0.027).
 //
 // Both print one line per window / lag: n, median absolute error, p90, max in
-// ft and m. Capture and fixtures are fetched by scripts/fixtures/fetch-test-captures.sh;
+// ft and m. Capture and test data are fetched by scripts/test-data/fetch-test-captures.sh;
 // the test skips (exit 77) when they are absent.
 #define BOOST_TEST_MODULE geom_eval
 #include <boost/test/unit_test.hpp>
@@ -36,7 +36,7 @@
 #include "decode/uat_decoder.hpp"
 #include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 #include "test_slow.hpp"
 
 using skycued::AltitudeFit;
@@ -49,7 +49,7 @@ namespace {
 
 namespace fs = std::filesystem;
 using Clock = std::chrono::system_clock;
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
 constexpr double kFtToM = 0.3048;
 constexpr double kSlope = 0.027;  // the default of resolveGeomAltitude
 
@@ -118,9 +118,9 @@ void print(const std::string& label, const Stats& s)
 
 BOOST_AUTO_TEST_CASE(geom_eval_leave_one_out_120s)
 {
-    const std::string csv = kFixtures + "/raw/modes-120s.csv.gz";
+    const std::string csv = kTestData + "/raw/modes-120s.csv.gz";
     if (!std::ifstream(csv).good()) {
-        std::cout << "SKIP: raw/modes-120s.csv.gz is missing (scripts/fixtures/fetch-test-captures.sh fetches the capture)\n";
+        std::cout << "SKIP: raw/modes-120s.csv.gz is missing (scripts/test-data/fetch-test-captures.sh fetches the capture)\n";
         std::exit(77);  // ctest SKIP_RETURN_CODE
     }
     ModesDecoder dec(DecoderConfig{}, "geom-eval");
@@ -182,12 +182,12 @@ BOOST_AUTO_TEST_CASE(geom_eval_leave_one_out_120s)
 BOOST_AUTO_TEST_CASE(geom_eval_own_diff_hold_opensky)
 {
     std::vector<fs::path> dirs;
-    if (fs::is_directory(kFixtures + "/opensky"))
-        for (const auto& e : fs::directory_iterator(kFixtures + "/opensky"))
+    if (fs::is_directory(kTestData + "/opensky"))
+        for (const auto& e : fs::directory_iterator(kTestData + "/opensky"))
             if (e.is_directory()) dirs.push_back(e.path());
     std::sort(dirs.begin(), dirs.end());
     if (dirs.empty()) {
-        std::cout << "SKIP: opensky/ is missing (scripts/fixtures/fetch-test-captures.sh fetches and unpacks it)\n";
+        std::cout << "SKIP: opensky/ is missing (scripts/test-data/fetch-test-captures.sh fetches and unpacks it)\n";
         std::exit(77);  // ctest SKIP_RETURN_CODE
     }
 
@@ -266,7 +266,7 @@ BOOST_AUTO_TEST_CASE(geom_eval_own_diff_hold_opensky)
                 err.push_back(held->diff_ft + kSlope * (cur.baro_ft - held->baro_ft) - cur.diff_ft);
             }
         }
-        if (lag == 60) std::cout << "geom_eval: " << files.size() << " fixture aircraft, " << samples << " samples\n";
+        if (lag == 60) std::cout << "geom_eval: " << files.size() << " sample aircraft, " << samples << " samples\n";
         const Stats s = absStats(err);
         print("own-difference hold, lag " + std::to_string(lag) + " s", s);
         BOOST_CHECK_GE(s.n, 20u);
@@ -276,9 +276,9 @@ BOOST_AUTO_TEST_CASE(geom_eval_own_diff_hold_opensky)
 
 // UAT long frames carry the AUX altitude (about 0.5 Hz); the spread of the difference they
 // report is logged for the record. No pass threshold: it only has to be non-empty.
-BOOST_AUTO_TEST_CASE(geom_eval_uat_difference_spread, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(geom_eval_uat_difference_spread, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const std::string path = kFixtures + "/raw/uat-sample.txt.gz";
+    const std::string path = kTestData + "/raw/uat-sample.txt.gz";
     skycued::decode::UatDecoder dec(DecoderConfig{}, "geom-eval-uat");
     std::vector<double> diffs;
     std::map<uint32_t, int> aircraft;
@@ -297,7 +297,7 @@ BOOST_AUTO_TEST_CASE(geom_eval_uat_difference_spread, *skycue_test::needs_fixtur
             dec.feed(*f, at(1.7e9 + static_cast<double>(n++)), std::nullopt);  // the capture has no timestamps
         }
     }
-    BOOST_CHECK(!diffs.empty());  // a fixture without both altitudes must fail, not pass silently
+    BOOST_CHECK(!diffs.empty());  // a sample without both altitudes must fail, not pass silently
     if (diffs.empty()) {
         std::cout << "geom_eval: the UAT capture has no frame carrying both altitudes\n";
         return;

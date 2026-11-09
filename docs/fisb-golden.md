@@ -1,18 +1,18 @@
-# The tg30 golden output (`tests/fixtures/fisb/tg30.golden.sha256`)
+# The tg30 golden output (`tests/data/fisb/tg30.golden.sha256`)
 
 ## What it is
 
 The golden is the output of
 
-    skycue-fisb --json --ref-date 2020-10-30 tests/fixtures/fisb/tg30.978
+    skycue-fisb --json --ref-date 2020-10-30 tests/data/fisb/tg30.978
 
 (1772 lines, 1,729,462 bytes): every FIS-B store event, in the order the store
 emits it. It holds 1088 `fisb_text`, 562 `fisb_twgo`, 5 `fisb_radar`,
 28 `fisb_raster` and 89 `fisb_expired` records. The repository keeps only its
-SHA-256, the single hex string in `tests/fixtures/fisb/tg30.golden.sha256`.
+SHA-256, the single hex string in `tests/data/fisb/tg30.golden.sha256`.
 The test `fisb_cli` (`tests/test_fisb_cli.sh`) hashes a fresh run and compares
 the hash, so the comparison is still byte for byte. It needs `tg30.978`, which
-`scripts/fixtures/fetch-test-captures.sh` installs, and skips without it. The file
+`scripts/test-data/fetch-test-captures.sh` installs, and skips without it. The file
 itself is regenerated into a scratch directory when it is needed for the check
 below (see "Regenerating"). Wherever this document says "the golden" it means
 that regenerated file.
@@ -48,7 +48,7 @@ cp -r "$FD/fisb" "$W/"                    # work on a copy of the package
 sed -i 's/^CALCULATE_RSR = True/CALCULATE_RSR = False/' "$W/fisb/level0/level0Config.py"
 cd "$W"                                   # the levels write LEVELn.ERR into the current directory
 export PYTHONPATH="$W"
-python3 fisb/level0/level0.py < tests/fixtures/fisb/tg30.978 > l0.jsonl   # path to this repo's fixture
+python3 fisb/level0/level0.py < tests/data/fisb/tg30.978 > l0.jsonl   # path to this repo's sample
 python3 fisb/level1/level1.py < l0.jsonl > l1.jsonl
 python3 fisb/level2/level2.py < l1.jsonl > l2.jsonl
 ```
@@ -193,7 +193,7 @@ These records were checked by hand against fisb-decode's output and source:
 After an intended change to the decoder, store or JSON writers:
 
 ```sh
-skycue-fisb --json --ref-date 2020-10-30 tests/fixtures/fisb/tg30.978 \
+skycue-fisb --json --ref-date 2020-10-30 tests/data/fisb/tg30.978 \
   > "$W/golden.jsonl"
 python3 -I scripts/dev/fisb-golden-check.py "$W/l2.jsonl" "$W/golden.jsonl"
 ```
@@ -203,7 +203,7 @@ the last regeneration, or against a run of the previous build) and adjudicate
 every new difference here. Then refresh the hash:
 
 ```sh
-sha256sum "$W/golden.jsonl" | cut -d' ' -f1 > tests/fixtures/fisb/tg30.golden.sha256
+sha256sum "$W/golden.jsonl" | cut -d' ' -f1 > tests/data/fisb/tg30.golden.sha256
 ```
 
 Without a previous output to compare, the old hash only tells that something

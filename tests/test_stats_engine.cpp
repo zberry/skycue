@@ -9,7 +9,7 @@
 #include "engine_test_support.hpp"
 #include "filters.hpp"
 #include "inputs/uat_raw_input.hpp"
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 #include "stats_store.hpp"
 #include "time_util.hpp"
 
@@ -264,13 +264,13 @@ BOOST_AUTO_TEST_CASE(reset_empties_and_saves)
     BOOST_TEST(aircraftInFile(path) == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(fisb_products_counted, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
+BOOST_AUTO_TEST_CASE(fisb_products_counted, *skycue_test::needs_test_data("fisb/received-with-uplinks.jsonl"))
 {
-    // The uplinks of the FIS-B fixture, fed through one input after an
+    // The uplinks of the FIS-B sample, fed through one input after an
     // observation started the data clock and a tick ran.
     std::vector<std::string> hexes;
     {
-        std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/fisb/received-with-uplinks.jsonl");
+        std::ifstream in(std::string(SKYCUE_TEST_DATA_DIR) + "/fisb/received-with-uplinks.jsonl");
         const std::string key = "\"uplink_hex\":\"";
         for (std::string line; std::getline(in, line) && hexes.size() < 200;) {
             const auto p = line.find(key);
@@ -304,7 +304,7 @@ BOOST_AUTO_TEST_CASE(fisb_products_counted, *skycue_test::needs_fixture("fisb/re
 }
 
 BOOST_AUTO_TEST_CASE(fisb_products_of_unpaced_replay_counted,
-                     *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
+                     *skycue_test::needs_test_data("fisb/received-with-uplinks.jsonl"))
 {
     // A replay of uplinks alone at speed 0 (as the UI suite's FIS-B daemons
     // run): every uplink is decoded before the engine's first tick, which
@@ -313,7 +313,7 @@ BOOST_AUTO_TEST_CASE(fisb_products_of_unpaced_replay_counted,
     TempDir dir;
     const std::string rec = dir.path + "/uplinks.jsonl";
     {
-        std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/fisb/received-with-uplinks.jsonl");
+        std::ifstream in(std::string(SKYCUE_TEST_DATA_DIR) + "/fisb/received-with-uplinks.jsonl");
         std::ofstream out(rec);
         int n = 0;
         for (std::string line; std::getline(in, line) && n < 200;)

@@ -3,13 +3,13 @@
 # --set against the overrides file and the environment, --convert-conf of the
 # old skycue.conf (the shipped example, an old overrides file, the comment
 # count), and the legacy flags applying last.
-# usage: test_config_cli.sh SKYCUED EXAMPLE_TOML OLD_EXAMPLE_CONF FIXTURE_DIR
+# usage: test_config_cli.sh SKYCUED EXAMPLE_TOML OLD_EXAMPLE_CONF DATA_DIR
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 example=$2 old_example=$3 fixtures=$4
+skycued=$1 example=$2 old_example=$3 data_dir=$4
 test_init config_cli
 current=setup
-for f in "$skycued" "$example" "$old_example" "$fixtures/readsb-sample.jsonl"; do [ -e "$f" ] || fail "$f missing"; done
+for f in "$skycued" "$example" "$old_example" "$data_dir/readsb-sample.jsonl"; do [ -e "$f" ] || fail "$f missing"; done
 
 # The tests start from no SKYCUE_* variables of the caller's.
 for v in $(compgen -e | grep '^SKYCUE_'); do unset "$v"; done
@@ -90,7 +90,7 @@ no_uat_flag_wins_over_set() {
   NAME=SKYCUE_INPUTS_DUMP978_HOST
   [ "$(v --set inputs.dump978.host=10.0.0.2 --dump978-host 10.0.0.4)" = 10.0.0.4 ] || fail "--dump978-host under --set"
   # The startup lines name the source of each such key.
-  bg "$skycued" --config "$tmp/f.toml" --replay "$fixtures/readsb-sample.jsonl" --replay-speed 0 \
+  bg "$skycued" --config "$tmp/f.toml" --replay "$data_dir/readsb-sample.jsonl" --replay-speed 0 \
     --set web.port=0 --set cues.tcp_port=0 --set inputs.dump978.enable=true --no-uat >"$tmp/start.log" 2>&1
   wait_file "$tmp/start.log" 10 && wait_for 10 grep -q ' forwarding' "$tmp/start.log" || { cat "$tmp/start.log"; fail "no startup"; }
   grep -q 'config: inputs.dump978.enable = false (flag)' "$tmp/start.log" || { cat "$tmp/start.log"; fail "no flag line"; }

@@ -32,7 +32,7 @@ TrackObservation obsAt(Clock::time_point t)
 }
 
 // A track as the table would hold it: merged, with the learned history.
-struct Fixture {
+struct Harness {
     TrackTable table;
     skycue::TrackId id{0xABC123, skycue::AddressType::icao};
     std::optional<int32_t> feed(const TrackObservation& o)
@@ -72,7 +72,7 @@ TrackObservation baroObs(Clock::time_point t, int32_t baro)
 
 BOOST_AUTO_TEST_CASE(learn_from_tc19_diff)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_baro_ft = 30000;
     o.geom_minus_baro_ft = 500;
@@ -86,7 +86,7 @@ BOOST_AUTO_TEST_CASE(learn_from_tc19_diff)
 
 BOOST_AUTO_TEST_CASE(learn_from_tc2022_with_baro_within_2s)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_geom_ft = 31000;
     o.alt_baro_ft = 30525;
@@ -99,7 +99,7 @@ BOOST_AUTO_TEST_CASE(learn_from_tc2022_with_baro_within_2s)
 
 BOOST_AUTO_TEST_CASE(no_learning_with_baro_3s_apart)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_geom_ft = 31000;
     o.alt_baro_ft = 30525;
@@ -110,7 +110,7 @@ BOOST_AUTO_TEST_CASE(no_learning_with_baro_3s_apart)
 
 BOOST_AUTO_TEST_CASE(diff_without_paired_baro_is_learned_but_not_a_sample)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.geom_minus_baro_ft = 500;  // no baro at all
     BOOST_CHECK(!f.feed(o));
@@ -127,7 +127,7 @@ BOOST_AUTO_TEST_CASE(diff_without_paired_baro_is_learned_but_not_a_sample)
 
 BOOST_AUTO_TEST_CASE(reported_while_no_newer_baro)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_geom_ft = 31000;
     f.feed(o);
@@ -147,7 +147,7 @@ BOOST_AUTO_TEST_CASE(reported_while_no_newer_baro)
 
 BOOST_AUTO_TEST_CASE(newer_baro_switches_to_own_diff_estimate)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_baro_ft = 30000;
     o.alt_geom_ft = 30480;
@@ -161,7 +161,7 @@ BOOST_AUTO_TEST_CASE(newer_baro_switches_to_own_diff_estimate)
 
 BOOST_AUTO_TEST_CASE(own_diff_after_60s)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_baro_ft = 30000;
     o.geom_minus_baro_ft = 500;
@@ -189,7 +189,7 @@ BOOST_AUTO_TEST_CASE(own_diff_after_60s)
 
 BOOST_AUTO_TEST_CASE(own_diff_uncertainty_ramps_125_to_325)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_baro_ft = 30000;
     o.geom_minus_baro_ft = 500;
@@ -202,7 +202,7 @@ BOOST_AUTO_TEST_CASE(own_diff_uncertainty_ramps_125_to_325)
 
 BOOST_AUTO_TEST_CASE(own_diff_expires_at_300s_then_fit)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_baro_ft = 30000;
     o.geom_minus_baro_ft = 500;
@@ -220,13 +220,13 @@ BOOST_AUTO_TEST_CASE(own_diff_expires_at_300s_then_fit)
 
 BOOST_AUTO_TEST_CASE(fit_estimate_formula)
 {
-    Fixture f;
+    Harness f;
     f.feed(baroObs(kT0, 20000));
     auto r = f.at(kT0, makeFit(100, 0.027, 130));
     BOOST_CHECK(r.source == GeomSource::estimated);
     BOOST_CHECK_EQUAL(*r.alt_geom_ft, std::lround(20000 + 100 + 0.027 * 20000));
     BOOST_CHECK_EQUAL(*r.uncertainty_ft, 150);  // ceil(130/25)*25
-    BOOST_CHECK_CLOSE(*r.age_s, -100.0, 1e-9);  // fit.newest is 100 s after kT0 in this fixture
+    BOOST_CHECK_CLOSE(*r.age_s, -100.0, 1e-9);  // fit.newest is 100 s after kT0 in this sample
     BOOST_CHECK(!r.geom_minus_baro_ft);
     // Floor of 100 ft.
     BOOST_CHECK_EQUAL(*f.at(kT0, makeFit(100, 0.027, 30)).uncertainty_ft, 100);
@@ -236,7 +236,7 @@ BOOST_AUTO_TEST_CASE(fit_estimate_formula)
 
 BOOST_AUTO_TEST_CASE(fit_with_median_fallback)
 {
-    Fixture f;
+    Harness f;
     f.feed(baroObs(kT0, 20000));
     const auto r = f.at(kT0, makeFit(420, 0, 90, false));
     BOOST_CHECK_EQUAL(*r.alt_geom_ft, 20420);
@@ -245,7 +245,7 @@ BOOST_AUTO_TEST_CASE(fit_with_median_fallback)
 
 BOOST_AUTO_TEST_CASE(median_fallback_uncertainty_floor_600)
 {
-    Fixture f;
+    Harness f;
     f.feed(baroObs(kT0, 20000));
     BOOST_CHECK_EQUAL(*f.at(kT0, makeFit(420, 0, 30, false)).uncertainty_ft, 600);
     BOOST_CHECK_EQUAL(*f.at(kT0, makeFit(420, 0, 600, false)).uncertainty_ft, 600);
@@ -255,7 +255,7 @@ BOOST_AUTO_TEST_CASE(median_fallback_uncertainty_floor_600)
 BOOST_AUTO_TEST_CASE(reported_kept_when_nothing_better)
 {
     // A newer baro, no difference of its own, no fit: a reported value <= 60 s old stays.
-    Fixture f;
+    Harness f;
     TrackObservation g = obsAt(kT0);
     g.alt_geom_ft = 30500;
     f.feed(g);
@@ -272,7 +272,7 @@ BOOST_AUTO_TEST_CASE(carried_diff_is_one_fit_sample)
 {
     // 12 observations carrying one difference (its own time, a baro paired with it at first):
     // only the first yields a fit sample; the repeats are not new samples (same time, no new pair).
-    Fixture f;
+    Harness f;
     int samples = 0;
     for (int i = 0; i < 12; ++i) {
         TrackObservation o = obsAt(kT0 + seconds(20 + i));
@@ -287,7 +287,7 @@ BOOST_AUTO_TEST_CASE(carried_diff_is_one_fit_sample)
     TrackObservation first = obsAt(kT0);
     first.alt_baro_ft = 30000;
     first.geom_minus_baro_ft = 500;
-    Fixture g;
+    Harness g;
     BOOST_CHECK(g.feed(first).has_value());
     for (int i = 1; i < 12; ++i) {
         TrackObservation o = obsAt(kT0 + milliseconds(100 * i));
@@ -306,7 +306,7 @@ BOOST_AUTO_TEST_CASE(carried_diff_is_one_fit_sample)
 
 BOOST_AUTO_TEST_CASE(same_diff_unpaired_keeps_earlier_baro_at_diff)
 {
-    Fixture f;
+    Harness f;
     TrackObservation first = obsAt(kT0);
     first.alt_baro_ft = 30000;
     first.geom_minus_baro_ft = 500;
@@ -323,7 +323,7 @@ BOOST_AUTO_TEST_CASE(same_diff_unpaired_keeps_earlier_baro_at_diff)
 
 BOOST_AUTO_TEST_CASE(no_fit_no_estimate)
 {
-    Fixture f;
+    Harness f;
     f.feed(baroObs(kT0, 20000));
     const auto r = f.at(kT0);
     BOOST_CHECK(r.source == GeomSource::none);
@@ -334,7 +334,7 @@ BOOST_AUTO_TEST_CASE(no_fit_no_estimate)
 
 BOOST_AUTO_TEST_CASE(stale_baro_gives_no_estimate)
 {
-    Fixture f;
+    Harness f;
     f.feed(baroObs(kT0, 20000));
     const auto fit = makeFit(100, 0.027);
     BOOST_CHECK(f.at(kT0 + seconds(10), fit).source == GeomSource::estimated);
@@ -350,7 +350,7 @@ BOOST_AUTO_TEST_CASE(stale_baro_gives_no_estimate)
 
 BOOST_AUTO_TEST_CASE(ground_gives_none)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = baroObs(kT0, 0);
     o.on_ground = true;
     f.feed(o);
@@ -364,7 +364,7 @@ BOOST_AUTO_TEST_CASE(ground_gives_none)
 
 BOOST_AUTO_TEST_CASE(no_baro_gives_none)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.lat = 38.9;
     o.lon = -77.0;
@@ -379,7 +379,7 @@ BOOST_AUTO_TEST_CASE(no_jump_at_report_expiry)
 {
     // Baro constant and refreshed each second across 60 s: the value never moves by more
     // than 25 ft and the source flips exactly once (reported -> estimated).
-    Fixture f;
+    Harness f;
     TrackObservation o = obsAt(kT0);
     o.alt_baro_ft = 30000;
     o.alt_geom_ft = 30480;
@@ -408,7 +408,7 @@ BOOST_AUTO_TEST_CASE(alternating_source_is_continuous)
 {
     // A report every 90 s for 10 minutes, baro ramping 10 ft/s, sampled every second:
     // every step, flips included, stays within the baro change plus 25 ft.
-    Fixture f;
+    Harness f;
     const auto fit = makeFit(100, 0.027);
     std::optional<int32_t> prev_geom;
     for (int t = 0; t <= 600; ++t) {
@@ -427,7 +427,7 @@ BOOST_AUTO_TEST_CASE(alternating_source_is_continuous)
 
 BOOST_AUTO_TEST_CASE(source_flips_once_per_report)
 {
-    Fixture f;
+    Harness f;
     const auto fit = makeFit(100, 0.027);
     int flips = 0, reports = 0;
     GeomSource prev = GeomSource::none;
@@ -449,7 +449,7 @@ BOOST_AUTO_TEST_CASE(source_flips_once_per_report)
 
 BOOST_AUTO_TEST_CASE(tisb_target_gets_fit_estimate)
 {
-    Fixture f;
+    Harness f;
     TrackObservation o = baroObs(kT0, 12000);
     o.source = skycue::Source::tisb;
     f.feed(o);

@@ -520,10 +520,10 @@ ctest --test-dir build
 `curl` is for one of the tests. The headless-browser test skips itself
 without node and Playwright, and the tests that need the third-party
 captures the source tarball leaves out skip themselves too. Run
-`scripts/fixtures/fetch-test-captures.sh` from the source directory to
+`scripts/test-data/fetch-test-captures.sh` from the source directory to
 download the four pinned upstream capture files (about 10 MB) into
-`tests/fixtures`, so those tests run; see
-[tests/fixtures/README.md](../tests/fixtures/README.md) for details. For the
+`tests/data`, so those tests run; see
+[tests/data/README.md](../tests/data/README.md) for details. For the
 headless-browser test, follow the one-time Playwright setup in
 [tests/ui/README.md](../tests/ui/README.md) (`npm install` in `tests/ui`, then
 `npx playwright install chromium`), and configure with
@@ -591,7 +591,7 @@ build/skycued/skycued --config ./skycue.toml --www-dir www
 
 Open <http://127.0.0.1:8080/>. Stop it with Ctrl-C. To see the page
 before any decoder is set up, replay the sample capture the tests use by
-adding `--replay tests/fixtures/readsb-sample.jsonl --replay-loop` to the
+adding `--replay tests/data/readsb-sample.jsonl --replay-loop` to the
 second command. If port 8080 or the cue port (30500) is taken, add
 `--web-port 8081` or `--cue-tcp-port 0` (or set `web.port` / `cues.tcp_port`
 in the config, or pass `--set web.port=8081`).

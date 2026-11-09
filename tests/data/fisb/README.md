@@ -1,14 +1,14 @@
-# FIS-B fixtures
+# FIS-B test data
 
 Files marked "fetched" or "regenerated" below are not in the repository;
-`scripts/fixtures/fetch-test-captures.sh` installs them (the derived files by running
+`scripts/test-data/fetch-test-captures.sh` installs them (the derived files by running
 the generators in this directory).
 
 ## tg30.978 (fetched)
 
 - **Origin:** fisb-decode, https://github.com/rand-projects/fisb-decode,
   file `tg/tg-source/generated/tg30.978`. Fetched by
-  `scripts/fixtures/fetch-test-captures.sh` at commit
+  `scripts/test-data/fetch-test-captures.sh` at commit
   `c3d3b0473429336b1a98672b2e8b276c24d49765` (the file's content equals the
   2026-11-01 snapshot first used). SHA-256
   `6df9e5671b501e4317bc7f7b661e3931bf461d47f3666e853457e7f6abd45583`, MD5
@@ -25,7 +25,7 @@ the generators in this directory).
   from October 2020. 85 lines start with `#` (generator comments such as
   `#  RECENTER 15 -> 1767 i:1167`), which a reader must skip. The other 963
   lines are uplinks.
-- **Contents** (checked by `test_fisb_frame/fixture_tg30_parses`; see
+- **Contents** (checked by `test_fisb_frame/sample_tg30_parses`; see
   `docs/fisb-reference.md` §1.2, §2, §3 and §9):
   - Information frames: 6169 FIS-B APDUs (type 0), 17 Current Report Lists
     (type 14) and 46 service status frames (type 15).
@@ -57,7 +57,7 @@ from one ground station) is `../raw/uat-sample.txt.gz`. See
   first 30 s of `../readsb-sample.jsonl` (361 readsb JSON-port lines,
   unchanged except their `"now"`, moved onto the same 2015 clock), in time
   order.
-- **How it is made:** `python3 gen_received_with_uplinks.py [--fixtures DIR]` (deterministic; rerun it after changing either input). Derived from the
+- **How it is made:** `python3 gen_received_with_uplinks.py [--test-data DIR]` (deterministic; rerun it after changing either input). Derived from the
   BSD-2-Clause dump978 sample and the repository's own synthetic readsb data.
 
 ## received-tg30.jsonl (regenerated)
@@ -70,7 +70,7 @@ from one ground station) is `../raw/uat-sample.txt.gz`. See
   level 0), its NEXRAD regional mosaic (861 blocks, 36.7-43.3 N,
   90.4-81.6 W) and CONUS mosaic (1413 blocks, 20-53 N, 132-60 W) carry
   echoes, and it has the raster layers and AIRMETs.
-- **How it is made:** `python3 gen_received_tg30.py [--fixtures DIR]` (deterministic). Derived from `tg30.978` (BSD-2-Clause Plus Patent,
+- **How it is made:** `python3 gen_received_tg30.py [--test-data DIR]` (deterministic). Derived from `tg30.978` (BSD-2-Clause Plus Patent,
   `../README.md`).
 
 ## tg30.golden.sha256 (committed)
@@ -92,6 +92,6 @@ from one ground station) is `../raw/uat-sample.txt.gz`. See
 - **Line format:** two `#` header lines, then 19 reports, one per line, in the
   form skycue-fisb prints with decoder newlines replaced by spaces
   (`PIREP <station> <ddhhmmZ> ... UA /OV ... /TM ...`).
-- **Used by:** `pirep_ov_forms_from_fixture` in `tests/js/app_pure.test.js`.
+- **Used by:** `pirep_ov_forms_from_sample` in `tests/js/app_pure.test.js`.
   It covers the `/OV` forms: id, id + `rrrddd`, `id rrrddd`, a 4-character id,
   a route (`SJX-GRB`) and free text (`4 W CVG`).

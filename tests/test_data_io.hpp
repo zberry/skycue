@@ -1,6 +1,6 @@
 #pragma once
 
-// Reading line-oriented fixtures (plain or gzip). Users link ZLIB::ZLIB.
+// Reading line-oriented test data (plain or gzip). Users link ZLIB::ZLIB.
 
 #include <string>
 #include <type_traits>

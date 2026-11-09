@@ -2,7 +2,7 @@
 # verify-package-inner.sh [systemd]: runs inside a skycue-verify:<target>
 # image (packaging/verify-package.sh starts it, with no network) where the
 # skycue packages are installed. The source tarball is mounted at
-# /src.tar.gz (for the readsb fixture and the parent project).
+# /src.tar.gz (for the readsb sample and the parent project).
 # Environment: VERIFY_TARGET, VERIFY_VERSION, VERIFY_KIND (deb|rpm),
 # VERIFY_DEV (1: a dev package is installed).
 # Without an argument: the checks of the packaging spec (section 8.2), in
@@ -93,8 +93,8 @@ if [ ! -f /work/CMakeLists.txt ]; then
   tar -C /work --strip-components=1 -xzf /src.tar.gz || fail "unpacking /src.tar.gz"
   chmod -R a+rX /work
 fi
-fixture=/work/tests/fixtures/readsb-sample.jsonl
-[ -s "$fixture" ] || fail "no readsb fixture in the tarball"
+sample=/work/tests/data/readsb-sample.jsonl
+[ -s "$sample" ] || fail "no readsb sample in the tarball"
 
 checks() {
   local out rc work copy closed marker stray f d log
@@ -140,7 +140,7 @@ checks() {
   say "4 $out"
 
   # 5. The daemon as the skycue user: packaged config plus a receiver
-  # position, the readsb fixture replayed. The copy's directory belongs to
+  # position, the readsb sample replayed. The copy's directory belongs to
   # skycue, so a file written next to the config would show.
   work=$(mktemp -d /work/run.XXXXXX)
   chown skycue:skycue "$work"
@@ -153,7 +153,7 @@ checks() {
   marker=/work/run.marker
   touch "$marker"
   sleep 1
-  (cd "$work" && exec runuser -u skycue -- skycued --config "$copy" --replay "$fixture" \
+  (cd "$work" && exec runuser -u skycue -- skycued --config "$copy" --replay "$sample" \
      --replay-speed 50 --replay-loop) > "$log" 2>&1 &
   bg_pids+=($!)
   wait_port 8080 || { cat "$log" >&2; fail "5 skycued did not serve on 8080"; }
@@ -271,7 +271,7 @@ systemd_checks() {
   [ -n "$exec" ] || fail "systemd: no ExecStart in $unit"
   dropin=/etc/systemd/system/skycued.service.d
   mkdir -p "$dropin"
-  printf '[Service]\nExecStart=\nExecStart=%s --replay %s --replay-loop\n' "$exec" "$fixture" > "$dropin/verify-replay.conf"
+  printf '[Service]\nExecStart=\nExecStart=%s --replay %s --replay-loop\n' "$exec" "$sample" > "$dropin/verify-replay.conf"
   systemctl daemon-reload || fail "systemd: daemon-reload"
   systemctl start skycued || unit_fail "systemctl start skycued"
   sleep 5

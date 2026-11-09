@@ -16,7 +16,7 @@ BOOST_AUTO_TEST_CASE(received_stream_unaffected_by_filters)
     size_t parseable = 0;
     std::set<std::string> hexes;
     {
-        std::ifstream in(kFixture);
+        std::ifstream in(kTestData);
         std::string line;
         while (std::getline(in, line)) {
             if (const auto obs = skycued::parseReadsbLine(line)) {

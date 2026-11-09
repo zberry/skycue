@@ -24,19 +24,19 @@ skycue.runtime.json.rejected
 /tests/fuzz/findings/*
 !/tests/fuzz/findings/.gitkeep
 !/tests/fuzz/findings/README.md
-# Third-party test captures: fetched by scripts/fixtures/fetch-test-captures.sh (pinned
+# Third-party test captures: fetched by scripts/test-data/fetch-test-captures.sh (pinned
 # upstream commits and SHA-256 values), never committed once removed.
-/tests/fixtures/raw/*
-!/tests/fixtures/raw/modes-120s.golden.jsonl.gz
-!/tests/fixtures/raw/uat-sample.golden.jsonl.gz
-!/tests/fixtures/raw/uat-stratux.golden.jsonl.gz
-!/tests/fixtures/raw/uat-stratux-b.golden.jsonl.gz
-!/tests/fixtures/raw/uat-synthetic.golden.jsonl.gz
-!/tests/fixtures/raw/uat-synthetic.expect.jsonl.gz
-/tests/fixtures/fisb/tg30.978
-/tests/fixtures/fisb/received-with-uplinks.jsonl
-/tests/fixtures/fisb/received-tg30.jsonl
-/tests/fixtures/opensky/
-/tests/fixtures/iq/
+/tests/data/raw/*
+!/tests/data/raw/modes-120s.golden.jsonl.gz
+!/tests/data/raw/uat-sample.golden.jsonl.gz
+!/tests/data/raw/uat-stratux.golden.jsonl.gz
+!/tests/data/raw/uat-stratux-b.golden.jsonl.gz
+!/tests/data/raw/uat-synthetic.golden.jsonl.gz
+!/tests/data/raw/uat-synthetic.expect.jsonl.gz
+/tests/data/fisb/tg30.978
+/tests/data/fisb/received-with-uplinks.jsonl
+/tests/data/fisb/received-tg30.jsonl
+/tests/data/opensky/
+/tests/data/iq/
 
 tests/ui/build/

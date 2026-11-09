@@ -1,5 +1,5 @@
 // The UAT frame decoders against dump978-fa on the sample's 439 downlinks
-// (tests/fixtures/gen_uat_golden.sh). The golden holds, per downlink, the hex
+// (tests/data/gen_uat_golden.sh). The golden holds, per downlink, the hex
 // frame and what dump978-fa printed for it; every field both sides can have
 // must agree, and a field only we produce is a failure. A decoder with a
 // deliberately wrong altitude or latitude scale must fail the same comparison.
@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "fixture_io.hpp"
+#include "test_data_io.hpp"
 #include "test_util.hpp"
 #include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
@@ -31,9 +31,9 @@ using namespace skycued::decode::uat;
 namespace {
 
 // dump978's own sample (all airborne) and the 2015 Stratux capture (551 surface frames, TIS-B).
-const std::string kGolden = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-sample.golden.jsonl.gz";
-const std::string kStratux = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux.golden.jsonl.gz";
-const std::string kStratuxB = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-stratux-b.golden.jsonl.gz";  // the 2015 "problem" log
+const std::string kGolden = std::string(SKYCUE_TEST_DATA_DIR) + "/raw/uat-sample.golden.jsonl.gz";
+const std::string kStratux = std::string(SKYCUE_TEST_DATA_DIR) + "/raw/uat-stratux.golden.jsonl.gz";
+const std::string kStratuxB = std::string(SKYCUE_TEST_DATA_DIR) + "/raw/uat-stratux-b.golden.jsonl.gz";  // the 2015 "problem" log
 
 // A decoder variant: the faithful one, or one with a deliberate fault.
 struct Variant {

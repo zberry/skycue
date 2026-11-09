@@ -12,9 +12,9 @@ their own file inputs (`readsb --device-type ifile --ifile FILE --iformat UC8`,
 There are two sources of IQ files:
 
 - **`skycue-iqgen`** synthesises CU8 files from the recordings already in
-  `tests/fixtures/raw/`. You get exact ground truth and any length you
+  `tests/data/raw/`. You get exact ground truth and any length you
   want.
-- **`scripts/fixtures/fetch-iq-samples.sh`** fetches one public off-air 1090 MHz
+- **`scripts/test-data/fetch-iq-samples.sh`** fetches one public off-air 1090 MHz
   capture (Porto, Zenodo 23342598, CC BY 4.0) and resamples it for readsb.
   It gives an independent check on real signals.
 
@@ -149,13 +149,13 @@ Installed, `skycue-iqgen` is on the PATH; in a build tree it is
 
 ```sh
 # 1090: 5 s of the bundled Mode S capture, starting 1 s in
-skycue-iqgen modes tests/fixtures/raw/modes-120s.csv.gz \
+skycue-iqgen modes tests/data/raw/modes-120s.csv.gz \
   --skip-seconds 1 --duration 5 -o /data/iq/sample.1090.cu8
 
 # 978: 5 s of the bundled UAT sample, and the longer stratux log
-skycue-iqgen uat tests/fixtures/raw/uat-sample.txt.gz \
+skycue-iqgen uat tests/data/raw/uat-sample.txt.gz \
   --duration 5 -o /data/iq/sample.978.cu8
-skycue-iqgen uat tests/fixtures/raw/stratux-uat-2015.log.gz \
+skycue-iqgen uat tests/data/raw/stratux-uat-2015.log.gz \
   --duration 60 -o /data/iq/stratux.978.cu8
 ```
 
@@ -258,8 +258,8 @@ According to its own readme:
 On a machine with network access:
 
 ```sh
-scripts/fixtures/fetch-iq-samples.sh                 # cache: build/iq-samples
-scripts/fixtures/fetch-iq-samples.sh --cache DIR
+scripts/test-data/fetch-iq-samples.sh                 # cache: build/iq-samples
+scripts/test-data/fetch-iq-samples.sh --cache DIR
 ```
 
 The script works in this order:

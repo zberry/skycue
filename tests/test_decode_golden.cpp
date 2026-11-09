@@ -1,6 +1,6 @@
 // The 1090 decoder against readsb on the 120 s capture (frame decoder design,
 // section 10, "Golden"). The golden file holds what readsb made of the same
-// frames, one object per address (tests/fixtures/gen_raw_golden.sh). The
+// frames, one object per address (tests/data/gen_raw_golden.sh). The
 // capture is fed with arrival = the file's epoch, no reference position and no
 // signal, so positions come from global CPR decoding only.
 #define BOOST_TEST_MODULE decode_golden
@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-#include "fixture_io.hpp"
+#include "test_data_io.hpp"
 #include "test_util.hpp"
 #include "coding/bits.hpp"
 #include "decode/modes_decoder.hpp"
@@ -37,7 +37,7 @@ using skycued::decode::ModesDecoder;
 
 namespace {
 
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
 
 struct Snap {  // one position observation of ours with the fields it carried
     double lat = 0, lon = 0;
@@ -98,10 +98,10 @@ std::optional<double> asD(const std::optional<T>& v)
 
 BOOST_AUTO_TEST_CASE(golden_matches_readsb)
 {
-    const std::string csv = kFixtures + "/raw/modes-120s.csv.gz", golden = kFixtures + "/raw/modes-120s.golden.jsonl.gz";
+    const std::string csv = kTestData + "/raw/modes-120s.csv.gz", golden = kTestData + "/raw/modes-120s.golden.jsonl.gz";
     if (!fileReadable(csv) || !fileReadable(golden)) {
         std::cout << "SKIP: raw/modes-120s.csv.gz or raw/modes-120s.golden.jsonl.gz is missing "
-                     "(scripts/fixtures/fetch-test-captures.sh fetches the capture)\n";
+                     "(scripts/test-data/fetch-test-captures.sh fetches the capture)\n";
         return;
     }
 

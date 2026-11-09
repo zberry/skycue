@@ -54,10 +54,10 @@ template <class F> bool eventually(F pred)
 
 bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
 
-std::string fixture(const std::string& name)
+std::string loadSample(const std::string& name)
 {
-    const std::string text = readAll(std::string(SKYCUE_FIXTURE_DIR) + "/pingstation/" + name);
-    BOOST_REQUIRE_MESSAGE(!text.empty(), "cannot open fixture " << name);
+    const std::string text = readAll(std::string(SKYCUE_TEST_DATA_DIR) + "/pingstation/" + name);
+    BOOST_REQUIRE_MESSAGE(!text.empty(), "cannot open sample " << name);
     return text;
 }
 
@@ -348,7 +348,7 @@ BOOST_AUTO_TEST_CASE(capture_input_writes_datagrams)
     const uint16_t jport = freeUdpPort();
     Probe j(t, std::make_unique<PingJsonInput>(t.io, psJson("pj", jport, R"(,"capture":true)"), rec));
     BOOST_REQUIRE(eventually([&] { return j.state().connected; }));
-    const std::string text = fixture("traffic-1090.json");
+    const std::string text = loadSample("traffic-1090.json");
     tx.send(jport, text);
     BOOST_REQUIRE(eventually([&] { return j.state().counters.messages == 1; }));
     j.tick();
@@ -396,7 +396,7 @@ BOOST_AUTO_TEST_CASE(raw_frames_written_in_rawplay_formats)
     {
         // The generated traffic example with an arrival inside the clock check: the GPS counter time is used.
         const auto arrival = std::chrono::system_clock::time_point(std::chrono::seconds(1793620800));
-        const auto r = skycued::parsePingDatagram(fixture("traffic-1090.json"),
+        const auto r = skycued::parsePingDatagram(loadSample("traffic-1090.json"),
                                                   skycued::PingContext{arrival, skycued::TimeMode::utc});
         BOOST_REQUIRE_EQUAL(r.raw_frames.size(), 1u);
         RawFrameWriter w(tmp.path, "ps-north", 0);
@@ -422,7 +422,7 @@ BOOST_AUTO_TEST_CASE(raw_frames_written_in_rawplay_formats)
     BOOST_REQUIRE(eventually([&] { return p.state().connected; }));
     UdpSender tx;
     const auto before = std::chrono::system_clock::now();
-    tx.send(port, fixture("uat-detail.json"));
+    tx.send(port, loadSample("uat-detail.json"));
     // rawData of 31 bytes (a UAT length): counted, not written.
     tx.send(port, R"({"icaoAddress":"A1B2C4","detail":{"rawData":"00a1b2c31a2b3c4d5e6f708192a3b4c5d6e7a1b2c3d4e5f6a7b8c9d0e1f2a3"}})");
     BOOST_REQUIRE(eventually([&] { return p.state().counters.messages == 2; }));
@@ -469,8 +469,8 @@ BOOST_AUTO_TEST_CASE(record_raw_without_record_dir_warns_once)
             return t.call([&] { return m->find("ps-a")->state.connected && m->find("ps-b")->state.connected; });
         }));
         UdpSender tx;
-        tx.send(p1, fixture("uat-detail.json"));
-        tx.send(p2, fixture("uat-detail.json"));
+        tx.send(p1, loadSample("uat-detail.json"));
+        tx.send(p2, loadSample("uat-detail.json"));
         BOOST_REQUIRE(eventually([&] { return obs == 2; }));
         std::this_thread::sleep_for(150ms);  // a few ticks
         t.call([&] { m.reset(); });
@@ -503,7 +503,7 @@ BOOST_AUTO_TEST_CASE(capture_write_failures_counted)
         BOOST_REQUIRE(eventually([&] { return c.state().connected && j.state().connected; }));
         tx.send(cport, block(0xABC001));
         tx.send(cport, block(0xABC002));
-        tx.send(jport, fixture("uat-detail.json"));  // one capture line and one raw frame
+        tx.send(jport, loadSample("uat-detail.json"));  // one capture line and one raw frame
         BOOST_REQUIRE(eventually([&] { return c.state().counters.messages == 2 && j.state().counters.messages == 1; }));
         BOOST_TEST(c.state().counters.capture_dropped == 2u);
         BOOST_TEST(j.state().counters.capture_dropped == 2u);

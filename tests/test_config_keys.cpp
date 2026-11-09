@@ -144,7 +144,7 @@ BOOST_AUTO_TEST_CASE(every_restart_class_key_has_a_restart_table_entry)
 
 BOOST_AUTO_TEST_CASE(legacy_conversion_covers_every_key_except_the_new_ones)
 {
-    const std::string text = convertOldConf(slurp(SKYCUE_FIXTURE_DIR "/skycue_example_old.conf"), "old");
+    const std::string text = convertOldConf(slurp(SKYCUE_TEST_DATA_DIR "/skycue_example_old.conf"), "old");
     const Config c = parseConfigText(text, "converted", false);
     std::set<std::string> got = c.file_keys;
     got.insert(kNewKeys.begin(), kNewKeys.end());
@@ -167,10 +167,10 @@ BOOST_AUTO_TEST_CASE(docs_name_every_key)
     }
 }
 
-BOOST_AUTO_TEST_CASE(page_config_copy_fixture_uses_only_known_keys)
+BOOST_AUTO_TEST_CASE(page_config_copy_sample_uses_only_known_keys)
 {
-    // The fixture is a sample of what the page's configText writes, not the whole key list.
-    const auto doc = toml_lite::parse(slurp(SKYCUE_FIXTURE_DIR "/config-copy.toml"), "config-copy.toml");
+    // This is a sample of what the page's configText writes, not the whole key list.
+    const auto doc = toml_lite::parse(slurp(SKYCUE_TEST_DATA_DIR "/config-copy.toml"), "config-copy.toml");
     const auto& known = knownConfigKeys();
     const std::set<std::string> known_set(known.begin(), known.end());
     for (const auto& e : doc.entries)

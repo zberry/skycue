@@ -32,9 +32,9 @@ struct MilitaryBlock {
 };
 #include "icao_tables.inc"
 
-JsonObject loadFixture()
+JsonObject loadSample()
 {
-    const std::string path = SKYCUE_FIXTURE_DIR "/icao_class_cases.json";
+    const std::string path = SKYCUE_TEST_DATA_DIR "/icao_class_cases.json";
     std::ifstream in(path, std::ios::binary);
     BOOST_TEST_REQUIRE(in.good(), "cannot open " << path);
     std::ostringstream ss;
@@ -54,7 +54,7 @@ std::vector<JsonObject> group(const JsonObject& fx, const char* name)
 
 std::string field(const JsonObject& c, const char* key) { return c.getString(key).value_or(""); }
 
-// The fixture's addr_type, as the API spells it; absent is icao, as in the JS.
+// The sample's addr_type, as the API spells it; absent is icao, as in the JS.
 skycue::AddressType addrType(const JsonObject& c)
 {
     const std::string t = field(c, "addr_type");
@@ -93,9 +93,9 @@ const char* kindName(CallsignKind k)
 
 }  // namespace
 
-BOOST_AUTO_TEST_CASE(fixture_cases_match_js)
+BOOST_AUTO_TEST_CASE(sample_cases_match_js)
 {
-    const JsonObject fx = loadFixture();
+    const JsonObject fx = loadSample();
 
     for (const auto& c : group(fx, "country"))
         BOOST_TEST(text(icaoCountry(field(c, "hex"))) == text(c.getString("want")), describe(c));

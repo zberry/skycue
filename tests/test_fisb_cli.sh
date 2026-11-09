@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# skycue-fisb on the FIS-B fixtures: --summary of the 2015 dump978 sample,
+# skycue-fisb on the FIS-B test data: --summary of the 2015 dump978 sample,
 # --json of tg30.978 against the golden's SHA-256, --ref-date, .gz, the three
 # input kinds (dump978 lines, rawrec captures, received JSONL), byte-identical
 # reruns and the exit codes.
-# usage: test_fisb_cli.sh SKYCUE_FISB FIXTURE_DIR
+# usage: test_fisb_cli.sh SKYCUE_FISB DATA_DIR
 set -u
-fisb=$1 fixtures=$2
-sample="$fixtures/raw/uat-sample.txt.gz"
-tg30="$fixtures/fisb/tg30.978"
-golden_sha="$fixtures/fisb/tg30.golden.sha256"
-received="$fixtures/fisb/received-with-uplinks.jsonl"
+fisb=$1 data_dir=$2
+sample="$data_dir/raw/uat-sample.txt.gz"
+tg30="$data_dir/fisb/tg30.978"
+golden_sha="$data_dir/fisb/tg30.golden.sha256"
+received="$data_dir/fisb/received-with-uplinks.jsonl"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-# The captures are fetched by scripts/fixtures/fetch-test-captures.sh (fixtures/README.md).
+# The captures are fetched by scripts/test-data/fetch-test-captures.sh (data/README.md).
 for f in "$sample" "$tg30" "$received"; do
-  [ -e "$f" ] || { echo "SKIP: $f not fetched: run scripts/fixtures/fetch-test-captures.sh"; exit 77; }
+  [ -e "$f" ] || { echo "SKIP: $f not fetched: run scripts/test-data/fetch-test-captures.sh"; exit 77; }
 done
 for f in "$fisb" "$golden_sha"; do [ -e "$f" ] || fail "$f missing"; done
 
@@ -84,7 +84,7 @@ grep -q 'WARN.*--ref-date' "$tmp/d3.err" || { cat "$tmp/d3.err"; fail "(d) no wa
 gzip -c "$tg30" >"$tmp/tg30.978.gz"
 "$fisb" --json "$tmp/tg30.978.gz" >"$tmp/e1.jsonl" 2>/dev/null || fail "(e) exit (.gz)"
 cmp -s "$tmp/c1.jsonl" "$tmp/e1.jsonl" || fail "(e) .gz output differs from plain"
-# The received fixture holds the sample's uplinks at 1 Hz from 2015-01-24T04:12:00Z;
+# The received sample holds the sample's uplinks at 1 Hz from 2015-01-24T04:12:00Z;
 # the same uplinks as a rawrec capture on the same clock must decode identically.
 gzip -dc "$sample" | grep '^+' | awk '{ printf "%d %s\n", 1422072720000 + (NR - 1) * 1000, $0 }' >"$tmp/uat-x.txt"
 "$fisb" --json "$received" >"$tmp/e2.jsonl" 2>"$tmp/e2.err" || { cat "$tmp/e2.err"; fail "(e) exit (received)"; }

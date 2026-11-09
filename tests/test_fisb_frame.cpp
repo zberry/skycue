@@ -1,7 +1,7 @@
 #define BOOST_TEST_MODULE skycued_fisb_frame
 #include <boost/test/unit_test.hpp>
 
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 
 #include "gz_line_reader.hpp"
 #include "fisb/apdu.hpp"
@@ -28,7 +28,7 @@ using namespace skycued::fisb;
 
 namespace {
 
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
 
 // Every line of a plain or gzip text file (gzopen reads both).
 std::vector<std::string> readLines(const std::string& path)
@@ -207,9 +207,9 @@ BOOST_AUTO_TEST_CASE(bit_reader_reads_msb_first_and_flags_overrun)
     BOOST_TEST(!z.u(1).has_value());
 }
 
-BOOST_AUTO_TEST_CASE(uplink_header_from_sample, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(uplink_header_from_sample, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    auto lines = readLines(kFixtures + "/raw/uat-sample.txt.gz");
+    auto lines = readLines(kTestData + "/raw/uat-sample.txt.gz");
     std::string first;
     for (const auto& l : lines)
         if (isUplinkLine(l)) {
@@ -566,11 +566,11 @@ BOOST_AUTO_TEST_CASE(fuzz_random_payloads_no_throw)
     BOOST_TEST(p.c.unsupported_products > 0u);
 }
 
-BOOST_AUTO_TEST_CASE(fixture_sample_parses, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(sample_parses, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
     Probe p;
     std::size_t downlinks = 0;
-    for (const auto& l : readLines(kFixtures + "/raw/uat-sample.txt.gz")) {
+    for (const auto& l : readLines(kTestData + "/raw/uat-sample.txt.gz")) {
         if (!l.empty() && l[0] == '-')
             ++downlinks;
         BOOST_TEST(p.line(l), l.substr(0, 40));
@@ -612,11 +612,11 @@ BOOST_AUTO_TEST_CASE(fixture_sample_parses, *skycue_test::needs_fixture("raw/uat
     BOOST_TEST((kinds == want_kinds));
 }
 
-BOOST_AUTO_TEST_CASE(fixture_tg30_parses, *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(sample_tg30_parses, *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     Probe p;
     std::size_t comments = 0;
-    for (const auto& l : readLines(kFixtures + "/fisb/tg30.978")) {
+    for (const auto& l : readLines(kTestData + "/fisb/tg30.978")) {
         if (!l.empty() && l[0] == '#') {
             ++comments;
             continue;

@@ -8,22 +8,22 @@
 # compared (compare_tracks.py) with the fresh golden when there is one and always
 # with the committed modes-120s.golden.jsonl.gz. Two deliberately wrong copies of
 # ours must fail the comparison.
-# usage: test_decode_differential.sh SKYCUED RAWPLAY FIXTURE_DIR
+# usage: test_decode_differential.sh SKYCUED RAWPLAY DATA_DIR
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 rawplay=$2 fixtures=$3
-csv="$fixtures/raw/modes-120s.csv.gz"
-golden="$fixtures/raw/modes-120s.golden.jsonl.gz"
+skycued=$1 rawplay=$2 data_dir=$3
+csv="$data_dir/raw/modes-120s.csv.gz"
+golden="$data_dir/raw/modes-120s.golden.jsonl.gz"
 test_init decode_differential
 fail_context() {
   for f in skycued.log play.log gen.log reduce.log; do
     [ -s "$tmp/$f" ] && { echo "--- $f:"; tail -n 15 "$tmp/$f"; }
   done
 }
-[ -e "$csv" ] || { echo "SKIP: $csv not fetched: run scripts/fixtures/fetch-test-captures.sh"; exit 77; }
+[ -e "$csv" ] || { echo "SKIP: $csv not fetched: run scripts/test-data/fetch-test-captures.sh"; exit 77; }
 command -v python3 >/dev/null || { echo "SKIP: python3 missing"; exit 77; }
 command -v curl >/dev/null || { echo "SKIP: curl missing"; exit 77; }
-for f in "$skycued" "$rawplay" "$golden" "$fixtures/reduce_received.py" "$fixtures/compare_tracks.py"; do
+for f in "$skycued" "$rawplay" "$golden" "$data_dir/reduce_received.py" "$data_dir/compare_tracks.py"; do
   [ -e "$f" ] || fail "$f missing"
 done
 
@@ -31,7 +31,7 @@ done
 fresh=
 if [ -n "${SKYCUE_READSB:-}" ] && [ -x "$SKYCUE_READSB" ]; then
   fresh="$tmp/golden-fresh.jsonl.gz"
-  bash "$fixtures/gen_raw_golden.sh" "$SKYCUE_READSB" "$rawplay" "$csv" "$fresh" >"$tmp/gen.log" 2>&1 &
+  bash "$data_dir/gen_raw_golden.sh" "$SKYCUE_READSB" "$rawplay" "$csv" "$fresh" >"$tmp/gen.log" 2>&1 &
   gen_pid=$!; bg_pids+=("$gen_pid")
 else
   echo "run (b) skipped: SKYCUE_READSB is not set to an executable; the committed golden stands for readsb"
@@ -91,7 +91,7 @@ keep=()
 for p in "${bg_pids[@]}"; do [ "$p" != "$sk" ] && keep+=("$p"); done
 bg_pids=("${keep[@]}")
 [ -n "$(rcv)" ] || fail "no received-*.jsonl under recording.dir"
-python3 -I "$fixtures/reduce_received.py" "$(rcv)" "$tmp/ours.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
+python3 -I "$data_dir/reduce_received.py" "$(rcv)" "$tmp/ours.jsonl.gz" >"$tmp/reduce.log" 2>&1 \
   || fail "reduce_received.py failed"
 echo "ours: $(cat "$tmp/reduce.log") (received lines $(wc -l < "$(rcv)"))"
 
@@ -106,17 +106,17 @@ fi
 status=0
 if [ -n "$fresh" ]; then
   echo "== ours against the fresh readsb golden"
-  python3 -I "$fixtures/compare_tracks.py" "$tmp/ours.jsonl.gz" "$fresh" || { echo "FAIL: differs from fresh readsb"; status=1; }
+  python3 -I "$data_dir/compare_tracks.py" "$tmp/ours.jsonl.gz" "$fresh" || { echo "FAIL: differs from fresh readsb"; status=1; }
 fi
 echo "== ours against the committed golden"
-python3 -I "$fixtures/compare_tracks.py" "$tmp/ours.jsonl.gz" "$golden" || { echo "FAIL: differs from committed golden"; status=1; }
+python3 -I "$data_dir/compare_tracks.py" "$tmp/ours.jsonl.gz" "$golden" || { echo "FAIL: differs from committed golden"; status=1; }
 
 # ---- negative self-tests: a wrong copy of ours must fail the comparison ---------
 ref=${fresh:-$golden}
 for kind in pos dyn; do
-  python3 -I "$fixtures/compare_tracks.py" --shift "$kind" "$tmp/ours.jsonl.gz" "$tmp/shifted-$kind.jsonl.gz" \
+  python3 -I "$data_dir/compare_tracks.py" --shift "$kind" "$tmp/ours.jsonl.gz" "$tmp/shifted-$kind.jsonl.gz" \
     || fail "could not make the shifted copy ($kind)"
-  if python3 -I "$fixtures/compare_tracks.py" "$tmp/shifted-$kind.jsonl.gz" "$ref" >"$tmp/neg-$kind.out" 2>&1; then
+  if python3 -I "$data_dir/compare_tracks.py" "$tmp/shifted-$kind.jsonl.gz" "$ref" >"$tmp/neg-$kind.out" 2>&1; then
     echo "FAIL: negative self-test ($kind): the shifted copy PASSED the comparison"
     status=1
   else

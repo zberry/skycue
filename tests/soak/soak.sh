@@ -4,7 +4,7 @@
 # "Soak" has the procedure and the recorded runs.
 #
 # usage: soak.sh (--stage DIR | --skycued BIN --pingsim BIN --dump BIN --www DIR)
-#                [--minutes N] [--interval S] [--out DIR] [--fixtures DIR]
+#                [--minutes N] [--interval S] [--out DIR] [--test-data DIR]
 #                [--growth F] [--fd-tolerance N]
 #
 #   --stage DIR     an installed prefix (DIR/bin/skycued, DIR/bin/skycue-pingsim,
@@ -14,11 +14,11 @@
 #   --interval S    seconds between samples (default 60)
 #   --out DIR       where A.pid, B.pid, A.log, B.log, soak.csv and verdict.txt
 #                   go (default ./soak-<UTC timestamp>)
-#   --fixtures DIR  tests/fixtures (default: next to this script)
+#   --test-data DIR  tests/data (default: next to this script)
 #   --growth F      largest RSS growth over the window (default 0.05)
 #   --fd-tolerance N  largest fd count change over the window (default 2)
 #
-# Instance A replays fixtures/fisb/received-tg30.jsonl in a loop (FIS-B
+# Instance A replays data/fisb/received-tg30.jsonl in a loop (FIS-B
 # uplinks only: its observations and tracks stay 0); instance B has no
 # readsb/dump978 and one pingstation_json input fed by skycue-pingsim (the
 # tracks). Each has a WebSocket client (ws_client.mjs) and a cue TCP
@@ -41,7 +41,7 @@ usage() {
 }
 
 stage="" skycued="" pingsim="" dump="" www=""
-minutes=240 interval=60 out="" fixtures="$here/../fixtures"
+minutes=240 interval=60 out="" data_dir="$here/../data"
 growth=0.05 fd_tolerance=2
 while [ $# -gt 0 ]; do
   case $1 in
@@ -53,7 +53,7 @@ while [ $# -gt 0 ]; do
     --minutes) minutes=${2-}; shift 2 || usage ;;
     --interval) interval=${2-}; shift 2 || usage ;;
     --out) out=${2-}; shift 2 || usage ;;
-    --fixtures) fixtures=${2-}; shift 2 || usage ;;
+    --test-data) data_dir=${2-}; shift 2 || usage ;;
     --growth) growth=${2-}; shift 2 || usage ;;
     --fd-tolerance) fd_tolerance=${2-}; shift 2 || usage ;;
     -h|--help) usage ;;
@@ -76,12 +76,12 @@ done
 case $minutes in ''|*[!0-9]*) echo "soak.sh: --minutes must be a whole number" >&2; exit 2 ;; esac
 case $interval in ''|*[!0-9]*|0) echo "soak.sh: --interval must be a whole number of seconds, at least 1" >&2; exit 2 ;; esac
 [ "$minutes" -ge 1 ] || { echo "soak.sh: --minutes must be at least 1" >&2; exit 2; }
-fixtures=$(cd "$fixtures" 2>/dev/null && pwd) || { echo "soak.sh: fixtures dir not found" >&2; exit 2; }
-fisb_rec="$fixtures/fisb/received-tg30.jsonl"
-readsb_rec="$fixtures/readsb-sample.jsonl"
+data_dir=$(cd "$data_dir" 2>/dev/null && pwd) || { echo "soak.sh: test data directory not found" >&2; exit 2; }
+fisb_rec="$data_dir/fisb/received-tg30.jsonl"
+readsb_rec="$data_dir/readsb-sample.jsonl"
 [ -r "$fisb_rec" ] || {
-  echo "SKIP: fixture $fisb_rec not fetched: run scripts/fixtures/fetch-test-captures.sh"; exit 77; }
-[ -r "$readsb_rec" ] || { echo "soak.sh: fixture $readsb_rec not found" >&2; exit 2; }
+  echo "SKIP: sample $fisb_rec not fetched: run scripts/test-data/fetch-test-captures.sh"; exit 77; }
+[ -r "$readsb_rec" ] || { echo "soak.sh: sample $readsb_rec not found" >&2; exit 2; }
 python3 -I -c 'import sys; float(sys.argv[1]); int(sys.argv[2])' "$growth" "$fd_tolerance" 2>/dev/null || {
   echo "soak.sh: --growth must be a number and --fd-tolerance a whole number" >&2; exit 2; }
 

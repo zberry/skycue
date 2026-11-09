@@ -1,4 +1,4 @@
-// Test-only generator of the synthetic UAT coverage matrix (tests/fixtures/gen_uat_synthetic.sh).
+// Test-only generator of the synthetic UAT coverage matrix (tests/data/gen_uat_synthetic.sh).
 //
 //   uat_synth [--expect FILE]
 //

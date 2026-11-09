@@ -11,7 +11,7 @@
 #include "inputs/uat_raw_input.hpp"
 #include "json_lite.hpp"
 #include "raw_formats.hpp"
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 #include "retention.hpp"
 #include "test_util.hpp"
 #include "web_inputs.hpp"
@@ -576,9 +576,9 @@ struct DecRig : Rig {
 
 // Beast type-3 frames for the ADS-B rows of the committed pyModeS-style CSV (hex in the second column);
 // raw/dump1090-modes1.bin holds IQ samples, not frames.
-std::string fixtureBytes()
+std::string sampleBytes()
 {
-    std::istringstream in(readAll(std::string(SKYCUE_FIXTURE_DIR) + "/raw/pymodes-adsb.csv"));
+    std::istringstream in(readAll(std::string(SKYCUE_TEST_DATA_DIR) + "/raw/pymodes-adsb.csv"));
     std::string out, line;
     std::size_t n = 0;
     while (n < 400 && std::getline(in, line)) {
@@ -615,9 +615,9 @@ BOOST_AUTO_TEST_CASE(decoder_off_publishes_only)
     BOOST_TEST(s.counters.observations == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(decoder_on_emits_observations_and_still_publishes, *skycue_test::needs_fixture("raw/pymodes-adsb.csv"))
+BOOST_AUTO_TEST_CASE(decoder_on_emits_observations_and_still_publishes, *skycue_test::needs_test_data("raw/pymodes-adsb.csv"))
 {
-    const std::string bin = fixtureBytes();
+    const std::string bin = sampleBytes();
     BOOST_REQUIRE(!bin.empty());
     std::vector<skycued::beast::Frame> all;
     skycued::beast::FrameSplitter().feed(reinterpret_cast<const uint8_t*>(bin.data()), bin.size(), all);
@@ -675,9 +675,9 @@ BOOST_AUTO_TEST_CASE(avr_lines_with_decoder_emit_observations)
     BOOST_TEST(rig.state().counters.rejected == 0u);
 }
 
-BOOST_AUTO_TEST_CASE(counters_in_state_json, *skycue_test::needs_fixture("raw/pymodes-adsb.csv"))
+BOOST_AUTO_TEST_CASE(counters_in_state_json, *skycue_test::needs_test_data("raw/pymodes-adsb.csv"))
 {
-    const std::string bin = fixtureBytes();
+    const std::string bin = sampleBytes();
     std::vector<skycued::beast::Frame> all;
     skycued::beast::FrameSplitter().feed(reinterpret_cast<const uint8_t*>(bin.data()), bin.size(), all);
     DecRig rig;

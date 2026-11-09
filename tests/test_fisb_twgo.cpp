@@ -1,7 +1,7 @@
 #define BOOST_TEST_MODULE skycued_fisb_twgo
 #include <boost/test/unit_test.hpp>
 
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 
 #include "gz_line_reader.hpp"
 #include "fisb/apdu.hpp"
@@ -30,9 +30,9 @@ using std::chrono::minutes;
 
 namespace {
 
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
-const std::string kSample = kFixtures + "/raw/uat-sample.txt.gz";
-const std::string kTg30 = kFixtures + "/fisb/tg30.978";
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
+const std::string kSample = kTestData + "/raw/uat-sample.txt.gz";
+const std::string kTg30 = kTestData + "/fisb/tg30.978";
 
 TimePoint iso(const std::string& s)
 {
@@ -63,8 +63,8 @@ struct Apdu {
     std::vector<uint8_t> payload;
 };
 
-// Every FIS-B APDU in a fixture, in order.
-std::vector<Apdu> fixtureApdus(const std::string& path)
+// Every FIS-B APDU in a sample, in order.
+std::vector<Apdu> sampleApdus(const std::string& path)
 {
     std::vector<Apdu> out;
     for (const auto& l : readLines(path)) {
@@ -94,12 +94,12 @@ struct TwgoItem {
     std::optional<TwgoParsed> parsed;
 };
 
-// Every TWGO product in a fixture after reassembly, parsed.
-std::vector<TwgoItem> fixtureTwgo(const std::string& path, TimePoint ref, SegmentAssembler* sa_out = nullptr)
+// Every TWGO product in a sample after reassembly, parsed.
+std::vector<TwgoItem> sampleTwgo(const std::string& path, TimePoint ref, SegmentAssembler* sa_out = nullptr)
 {
     SegmentAssembler sa;
     std::vector<TwgoItem> out;
-    for (const auto& a : fixtureApdus(path)) {
+    for (const auto& a : sampleApdus(path)) {
         if (productFamily(a.h.product_id) != ProductFamily::twgo)
             continue;
         auto done = sa.add(a.h, a.payload.data(), a.payload.size(), ref);
@@ -281,7 +281,7 @@ bool near(double a, double b, double eps = 1e-4) { return std::fabs(a - b) < eps
 std::vector<Apdu> sampleNotamSegments()
 {
     std::vector<Apdu> segs;
-    for (auto& a : fixtureApdus(kSample))
+    for (auto& a : sampleApdus(kSample))
         if (a.h.segmented)
             segs.push_back(std::move(a));
     return segs;
@@ -306,7 +306,7 @@ BOOST_AUTO_TEST_CASE(utc_resolution_picks_the_closest_candidate)
                "2015-01-10T00:00:00.000Z");
 }
 
-BOOST_AUTO_TEST_CASE(segmented_notam_from_sample_reassembles, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(segmented_notam_from_sample_reassembles, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
     auto segs = sampleNotamSegments();
     BOOST_REQUIRE_EQUAL(segs.size(), 3u);
@@ -364,7 +364,7 @@ BOOST_AUTO_TEST_CASE(segmented_notam_from_sample_reassembles, *skycue_test::need
 
     // Walking the whole sample completes exactly this one set.
     SegmentAssembler sa;
-    auto items = fixtureTwgo(kSample, t0, &sa);
+    auto items = sampleTwgo(kSample, t0, &sa);
     BOOST_TEST(sa.open() == 0u);
     int tfr = 0;
     for (const auto& it : items)
@@ -375,7 +375,7 @@ BOOST_AUTO_TEST_CASE(segmented_notam_from_sample_reassembles, *skycue_test::need
     BOOST_TEST(tfr == 1);
 }
 
-BOOST_AUTO_TEST_CASE(segments_complete_on_later_cycle, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(segments_complete_on_later_cycle, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
     auto segs = sampleNotamSegments();
     BOOST_REQUIRE_EQUAL(segs.size(), 3u);
@@ -459,9 +459,9 @@ BOOST_AUTO_TEST_CASE(segment_cap_512_and_rejects)
     BOOST_TEST((u->payload == pl));
 }
 
-BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_fixtures_consumes_exact_length,
-                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
-                     *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_samples_consumes_exact_length,
+                     *skycue_test::needs_test_data("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     struct Want {
         std::string path;
@@ -480,7 +480,7 @@ BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_fixtures_consumes_exact_length,
          {{3, 253}, {4, 38}, {9, 190}, {11, 77}, {12, 14}}},
     };
     for (const auto& w : wants) {
-        auto items = fixtureTwgo(w.path, w.ref);
+        auto items = sampleTwgo(w.path, w.ref);
         std::map<std::pair<uint16_t, int>, int> by_product;
         std::map<int, int> by_geometry;
         std::size_t records = 0;
@@ -518,11 +518,11 @@ BOOST_AUTO_TEST_CASE(twgo_every_record_in_both_fixtures_consumes_exact_length,
 }
 
 BOOST_AUTO_TEST_CASE(twgo_polygon_circle_prism_geometry,
-                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
-                     *skycue_test::needs_fixture("fisb/tg30.978"))
+                     *skycue_test::needs_test_data("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     const auto ref = sampleRef();
-    auto items = fixtureTwgo(kSample, ref);
+    auto items = sampleTwgo(kSample, ref);
     const TwgoParsed *sigmet = nullptr, *airmet = nullptr, *ksck = nullptr, *tfr = nullptr;
     for (const auto& it : items) {
         const auto& t = *it.parsed;
@@ -633,7 +633,7 @@ BOOST_AUTO_TEST_CASE(twgo_polygon_circle_prism_geometry,
 
     // tg30: G-AIRMET polylines longer than 64 vertices span two records and merge.
     int merged = 0;
-    for (const auto& it : fixtureTwgo(kTg30, tg30Ref())) {
+    for (const auto& it : sampleTwgo(kTg30, tg30Ref())) {
         const auto& t = *it.parsed;
         if (t.records.size() != 2)
             continue;
@@ -646,9 +646,9 @@ BOOST_AUTO_TEST_CASE(twgo_polygon_circle_prism_geometry,
     BOOST_TEST(merged == 6);
 }
 
-BOOST_AUTO_TEST_CASE(twgo_key_fields, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(twgo_key_fields, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    auto items = fixtureTwgo(kSample, sampleRef());
+    auto items = sampleTwgo(kSample, sampleRef());
     std::map<TwgoKey, int> text_keys;
     const TwgoParsed* ksck = nullptr;
     const TwgoParsed* sua = nullptr;
@@ -775,8 +775,8 @@ BOOST_AUTO_TEST_CASE(twgo_cancel_and_status13)
 }
 
 BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds,
-                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
-                     *skycue_test::needs_fixture("fisb/tg30.978"))
+                     *skycue_test::needs_test_data("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     struct Want {
         std::string path;
@@ -796,12 +796,12 @@ BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds,
         std::map<TextRecord::Kind, int> kinds;
         std::size_t apdus = 0, no_station = 0;
         bool kcey = false;
-        for (const auto& a : fixtureApdus(w.path)) {
+        for (const auto& a : sampleApdus(w.path)) {
             if (a.h.product_id != 413)
                 continue;
             ++apdus;
             auto recs = parseTextProduct(a.h, a.payload.data(), a.payload.size(), w.ref);
-            BOOST_TEST(recs.size() == 1u);  // one report per APDU in both fixtures
+            BOOST_TEST(recs.size() == 1u);  // one report per APDU in both samples
             for (const auto& r : recs) {
                 ++kinds[r.kind];
                 if (r.station.empty())
@@ -850,8 +850,8 @@ BOOST_AUTO_TEST_CASE(text_413_splits_metar_taf_pirep_winds,
 }
 
 BOOST_AUTO_TEST_CASE(winds_period_parsed,
-                     *skycue_test::needs_fixture("raw/uat-sample.txt.gz")
-                     *skycue_test::needs_fixture("fisb/tg30.978"))
+                     *skycue_test::needs_test_data("raw/uat-sample.txt.gz")
+                     *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     BOOST_TEST(*windsPeriod(2, 600) == 6u);
     BOOST_TEST(*windsPeriod(1, 1200) == 12u);
@@ -874,7 +874,7 @@ BOOST_AUTO_TEST_CASE(winds_period_parsed,
     std::map<std::string, int> seen;
     for (const auto& w : {Want{kSample, sampleRef(), {}}, Want{kTg30, tg30Ref(), {}}}) {
         std::map<int, int> periods;
-        for (const auto& a : fixtureApdus(w.path)) {
+        for (const auto& a : sampleApdus(w.path)) {
             if (a.h.product_id != 413)
                 continue;
             for (const auto& r : parseTextProduct(a.h, a.payload.data(), a.payload.size(), w.ref)) {
@@ -914,7 +914,7 @@ BOOST_AUTO_TEST_CASE(winds_period_parsed,
     BOOST_TEST(seen["CSG"] >= 1);
 }
 
-BOOST_AUTO_TEST_CASE(fuzz_twgo_no_throw, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(fuzz_twgo_no_throw, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
     std::mt19937 rng(20261102);
     std::uniform_int_distribution<int> byte(0, 255);
@@ -958,7 +958,7 @@ BOOST_AUTO_TEST_CASE(fuzz_twgo_no_throw, *skycue_test::needs_fixture("raw/uat-sa
         check(hdr(pids[i % 10]), b);
     }
     // Real TWGO payloads with random bit flips and truncations.
-    auto items = fixtureTwgo(kSample, sampleRef());
+    auto items = sampleTwgo(kSample, sampleRef());
     for (int i = 0; i < 20000; ++i) {
         const auto& it = items[static_cast<std::size_t>(i) % items.size()];
         auto b = it.payload;

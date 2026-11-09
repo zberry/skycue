@@ -4,7 +4,7 @@
 #define BOOST_TEST_MODULE fisb_decoder
 #include <boost/test/unit_test.hpp>
 
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 
 #include "gz_line_reader.hpp"
 #include "fisb/fisb_decoder.hpp"
@@ -37,10 +37,10 @@ using skycued::EventKind;
 
 namespace {
 
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
-const std::string kSample = kFixtures + "/raw/uat-sample.txt.gz";
-const std::string kTg30 = kFixtures + "/fisb/tg30.978";
-const std::string kReceivedWithUplinks = kFixtures + "/fisb/received-with-uplinks.jsonl";
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
+const std::string kSample = kTestData + "/raw/uat-sample.txt.gz";
+const std::string kTg30 = kTestData + "/fisb/tg30.978";
+const std::string kReceivedWithUplinks = kTestData + "/fisb/received-with-uplinks.jsonl";
 
 TimePoint iso(const std::string& s)
 {
@@ -163,7 +163,7 @@ BOOST_AUTO_TEST_CASE(segment_key_includes_ground_station)
 
 // Every uplink of the 2015 sample on a 1 Hz clock from 04:12 (its products
 // are from 03:53-04:10 that day).
-BOOST_AUTO_TEST_CASE(sample_products_stored, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(sample_products_stored, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
     Pipeline p;
     const TimePoint t0 = iso("2015-01-24T04:12:00Z");
@@ -204,7 +204,7 @@ BOOST_AUTO_TEST_CASE(sample_products_stored, *skycue_test::needs_fixture("raw/ua
 
 // Design §5.5: decode tg30.978 end to end in under 2 s; spec §4.12: one
 // uplink decodes in <= 1 ms typically.
-BOOST_AUTO_TEST_CASE(tg30_end_to_end_under_2s, *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(tg30_end_to_end_under_2s, *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     const auto lines = readLines(kTg30);
     Pipeline p;
@@ -268,7 +268,7 @@ BOOST_AUTO_TEST_CASE(tg30_end_to_end_under_2s, *skycue_test::needs_fixture("fisb
 }
 
 // Bit-flipped tg30 uplinks: never a throw, never a shape out of range.
-BOOST_AUTO_TEST_CASE(fuzz_products_stay_in_range, *skycue_test::needs_fixture("fisb/tg30.978"))
+BOOST_AUTO_TEST_CASE(fuzz_products_stay_in_range, *skycue_test::needs_test_data("fisb/tg30.978"))
 {
     std::vector<std::vector<uint8_t>> payloads;
     for (const auto& l : readLines(kTg30)) {
@@ -400,7 +400,7 @@ struct ReplayFx {
 // products are decoded and kept while the data clock reads 2015, and nothing
 // expires before its time on that clock.
 BOOST_AUTO_TEST_CASE(replay_decodes_uplinks_on_recording_clock,
-                     *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
+                     *skycue_test::needs_test_data("fisb/received-with-uplinks.jsonl"))
 {
     // What the store holds when every record is applied at its own time.
     Pipeline ref;
@@ -466,7 +466,7 @@ BOOST_AUTO_TEST_CASE(replay_decodes_uplinks_on_recording_clock,
     BOOST_TEST(fx.countEvents(EventKind::fisb_shape) >= 1u);
 }
 
-BOOST_AUTO_TEST_CASE(recording_fisb_stream_written, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
+BOOST_AUTO_TEST_CASE(recording_fisb_stream_written, *skycue_test::needs_test_data("fisb/received-with-uplinks.jsonl"))
 {
     TempDir tmp;
     {
@@ -505,7 +505,7 @@ BOOST_AUTO_TEST_CASE(recording_fisb_stream_written, *skycue_test::needs_fixture(
     BOOST_TEST(countOf(streamText(tmp.path, "received"), "\"type\":\"uat_uplink\"") == 704u);
 }
 
-BOOST_AUTO_TEST_CASE(fisb_disabled_decodes_nothing, *skycue_test::needs_fixture("fisb/received-with-uplinks.jsonl"))
+BOOST_AUTO_TEST_CASE(fisb_disabled_decodes_nothing, *skycue_test::needs_test_data("fisb/received-with-uplinks.jsonl"))
 {
     Config cfg = baseConfig();
     cfg.fisb_enable = false;

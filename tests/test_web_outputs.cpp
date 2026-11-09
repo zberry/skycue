@@ -136,7 +136,7 @@ struct Consumer {
     }
 };
 
-// ---- the fixture: an Engine over an InputManager with an inputs file, the
+// ---- the test setup: an Engine over an InputManager with an inputs file, the
 // cue Forwarder, a Hub fed the way main.cpp feeds it, a RuntimeConfig and a WebServer ----
 
 struct Fx {

@@ -2,7 +2,7 @@
 # Builds the libFuzzer harnesses in fuzz and runs them.
 #
 #   scripts/dev/run-fuzz.sh [TARGET|all] [--seconds N] [--build-dir DIR] [--bin-dir DIR]
-#                       [--work DIR] [--findings DIR] [--seeds DIR] [--fixtures DIR]
+#                       [--work DIR] [--findings DIR] [--seeds DIR] [--test-data DIR]
 #                       [--canary] [--clean]
 #
 # TARGET is a harness name (readsb_line, ...; fuzz_<name> in the tree) or all
@@ -10,7 +10,7 @@
 # --work <build>/fuzz-work, --findings <repo>/tests/fuzz/findings.
 #
 # Capture-derived seeds are not committed. When the fetched captures are in
-# --fixtures (default <repo>/tests/fixtures), scripts/fixtures/gen-capture-seeds.py
+# --test-data (default <repo>/tests/data), scripts/test-data/gen-capture-seeds.py
 # writes them to <work>/capture-seeds/<target>/ and they are copied into the
 # target's fresh corpus beside the committed seeds; without the captures a
 # "SKIP: generated seeds for <target>" line says so and the run goes on with
@@ -68,7 +68,7 @@ bin_dir=""
 work=""
 findings=""
 seeds_root=""
-fixtures=""
+data_dir=""
 canary=0
 clean=0
 
@@ -80,7 +80,7 @@ while [ $# -gt 0 ]; do
     --work) shift; [ $# -gt 0 ] || usage; work=$(abs "$1") ;;
     --findings) shift; [ $# -gt 0 ] || usage; findings=$(abs "$1") ;;
     --seeds) shift; [ $# -gt 0 ] || usage; seeds_root=$(abs "$1") ;;
-    --fixtures) shift; [ $# -gt 0 ] || usage; fixtures=$(abs "$1") ;;
+    --test-data) shift; [ $# -gt 0 ] || usage; data_dir=$(abs "$1") ;;
     --canary) canary=1 ;;
     --clean) clean=1 ;;
     -h|--help) usage ;;
@@ -97,7 +97,7 @@ esac
 [ -n "$work" ] || work="$build_dir/fuzz-work"
 [ -n "$findings" ] || findings="$repo/tests/fuzz/findings"
 [ -n "$seeds_root" ] || seeds_root="$repo/tests/fuzz/seeds"
-[ -n "$fixtures" ] || fixtures="$repo/tests/fixtures"
+[ -n "$data_dir" ] || data_dir="$repo/tests/data"
 
 # Refuse --clean on a build dir that is not a CMake tree before doing anything,
 # so a mistyped --build-dir is never deleted.
@@ -217,22 +217,22 @@ else
   unset SKYCUE_FUZZ_CANARY
 fi
 
-# Seeds cut from the fetched captures (scripts/fixtures/gen-capture-seeds.py); exit 3
+# Seeds cut from the fetched captures (scripts/test-data/gen-capture-seeds.py); exit 3
 # means some capture is missing and that target gets none; any other exit
 # status is a generator failure.
 capture_targets=" raw_formats fisb_decoder iqgen_coding recording "
 gen_dir="$work/capture-seeds"
 rm -rf "$gen_dir"
 gen_failed=0
-if [ -d "$fixtures" ]; then
-  python3 -I "$repo/scripts/fixtures/gen-capture-seeds.py" "$fixtures" "$gen_dir"
+if [ -d "$data_dir" ]; then
+  python3 -I "$repo/scripts/test-data/gen-capture-seeds.py" "$data_dir" "$gen_dir"
   gen_rc=$?
   case "$gen_rc" in
     0 | 3) ;;
     *) echo "run-fuzz: gen-capture-seeds.py failed with exit $gen_rc" >&2; gen_failed=1 ;;
   esac
 else
-  echo "run-fuzz: no fixtures dir $fixtures" >&2
+  echo "run-fuzz: no test data directory $data_dir" >&2
 fi
 
 summary="$work/summary.tsv"

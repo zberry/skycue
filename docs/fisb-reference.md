@@ -305,9 +305,9 @@ byte 3. They therefore never read the last bitmap byte (`data[3+L]`), and **emit
 L=0**, which is the most common case (415 of 1025). They also step by 1 at every scale. Follow
 FD. **[V]** structurally, from payload lengths.
 
-The 1025 and 415 are **lists** (APDUs), and combined across both fixtures: the 2015 sample
+The 1025 and 415 are **lists** (APDUs), and combined across both samples: the 2015 sample
 alone has 200 lists holding 1342 empty blocks, 56 of the lists with L=0; tg30 has 825 lists
-(359 with L=0). `test_fisb_blocks` pins both the per-fixture and the combined figures **[V]**.
+(359 with L=0). `test_fisb_blocks` pins both the per-sample and the combined figures **[V]**.
 
 What value an empty block gets:
 - MUT empirically uses 0 for regional and **1** for CONUS ("valid data, but no precipitation",
@@ -322,7 +322,7 @@ What value an empty block gets:
   - Special case: `0xF8` means 32 bins, and is seen as `F8F8F8F8` for an empty block (:304-313,365-372).
   - Value 8 maps to 0.
   - FD treats any total other than 128 as an error.
-  - **[U]** Neither fixture carries a lightning run-length block (tg30 has none; the sample has
+  - **[U]** Neither sample carries a lightning run-length block (tg30 has none; the sample has
     no product 103), so the 128-bin sum rule for lightning is FD's, unverified on real data.
     skycue's decoder applies it, as for every global block, and covers it with hand vectors only.
 - **Icing 70/71** (`icingRL` :402-479): 2 bytes per run, `count = b0+1`, then the value byte
@@ -557,7 +557,7 @@ Examples decoded from the captures **[V]**:
 ---
 
 ## 9. Validation data
-- **The fixture `tests/fixtures/raw/uat-sample.txt.gz` is byte-identical to dump978's
+- **The sample `tests/data/raw/uat-sample.txt.gz` is byte-identical to dump978's
   `sample-data.txt.gz`**, in both MUT and FA: same gzip MD5 `28d6b169…`, and 1143 lines
   (704 `+` uplinks, 439 `-` downlinks) **[V]**.
   - Content: one ground station; dates in January 2015, i.e. pre-DO-358B, yet the TWGO

@@ -85,7 +85,7 @@ constexpr double kSampleLat = 37.887976;
 constexpr double kSampleLon = -76.261396;
 
 // A record as `skycue-pingsim --as cat021` emits it for the first aircraft of
-// tests/fixtures/readsb-sample.jsonl, rebuilt from the decoded values (the
+// tests/data/readsb-sample.jsonl, rebuilt from the decoded values (the
 // generator stamps the send time into I021/073; the value below is from the
 // run that produced kSampleBlock).
 Cat021Record sampleRecord() {

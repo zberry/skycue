@@ -23,7 +23,7 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
-        run: ctest --test-dir build --output-on-failure -LE 'needs-fixtures|needs-node|slow'
+        run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|needs-node|slow'
 
   sanitizers:
     runs-on: ubuntu-latest

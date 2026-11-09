@@ -53,7 +53,7 @@ test('elevationDeg: a higher antenna sees the same target lower', () => {
     prev = e;
   }
 });
-test('elevationDeg: the fixture C172 at 40 nm, 3000 ft is about 0.4 deg', () => {
+test('elevationDeg: the sample C172 at 40 nm, 3000 ft is about 0.4 deg', () => {
   between(P.elevationDeg(38.9, -77.0, 0, 38.9 - 40 / nmPerDegLat, -77.0, 3000 * FT), 0.2, 0.6, 'elevation');
 });
 
@@ -906,7 +906,7 @@ const FIX = {
 };
 
 const M = (k) => P.parseMetar(FIX[k]);
-test('metar_categories_from_fixture_text', () => {
+test('metar_categories_from_sample_text', () => {
   const want = { 'metar:K2G4': 'LIFR', 'metar:K0A9': 'IFR', 'metar:KMER': 'LIFR', 'metar:KTVK': 'VFR', 'metar:KPVE': 'MVFR',
     'metar:KFKL': 'IFR', 'metar:K6L4': 'IFR', 'metar:KCVG': 'MVFR', 'metar:KDAY': 'MVFR' };
   for (const k of Object.keys(want)) assert.strictEqual(M(k).category, want[k], k);
@@ -996,8 +996,8 @@ test('nearest_winds_period', () => {
   assert.strictEqual(P.nearestWindsPeriod(recs, Date.parse('2020-10-30T16:00:00Z')), 12);
   assert.strictEqual(P.nearestWindsPeriod([], 0), null);
 });
-test('pirep_ov_forms_from_fixture', () => {
-  const lines = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'fisb', 'pireps-synthetic.txt'), 'utf8')
+test('pirep_ov_forms_from_sample', () => {
+  const lines = fs.readFileSync(path.join(__dirname, '..', 'data', 'fisb', 'pireps-synthetic.txt'), 'utf8')
     .split('\n').filter((l) => l && l[0] !== '#');
   assert.strictEqual(lines.length, 19);
   const parsed = lines.map(P.parsePirep);
@@ -1321,8 +1321,8 @@ const CFG_COPY = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:0
   { key: 'paths.locations_file', value: "o'hare locations.csv", source: 'conf', restart: true }] };
 test('config_text_round_trips_through_toml', () => {
   const t = P.configText(CFG_COPY);
-  // test_config.cpp parses this same fixture with parseConfigText.
-  assert.strictEqual(t, fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'config-copy.toml'), 'utf8'));
+  // test_config.cpp parses this same sample with parseConfigText.
+  assert.strictEqual(t, fs.readFileSync(path.join(__dirname, '..', 'data', 'config-copy.toml'), 'utf8'));
   const want = {};
   CFG_COPY.keys.forEach((k) => { want[k.key] = Array.isArray(k.value) ? k.value.join(' ') : String(k.value); });
   assert.deepStrictEqual(tomlLines(t), want);
@@ -1735,8 +1735,8 @@ test('viewMatches country: a non-ICAO address has no country', () => {
 
 // The same cases tests/test_icao_class.cpp runs through the daemon's copy of
 // these rules (skycued/src/icao_class.cpp): an absent want is null.
-test('class cases fixture', () => {
-  const C = require(path.join(__dirname, '..', 'fixtures', 'icao_class_cases.json'));
+test('class cases sample', () => {
+  const C = require(path.join(__dirname, '..', 'data', 'icao_class_cases.json'));
   const want = (c) => (c.want === undefined ? null : c.want);
   const name = (c) => JSON.stringify(c);
   ['country', 'track_country', 'military', 'callsign_kind', 'track_class'].forEach((g) => {

@@ -39,10 +39,10 @@ template <class F> bool eventuallyWithin(std::chrono::milliseconds limit, F pred
 }
 template <class F> bool eventually(F pred) { return eventuallyWithin(kWait, pred); }
 
-std::string statusFixture()
+std::string statusSample()
 {
-    const std::string text = readAll(std::string(SKYCUE_FIXTURE_DIR) + "/pingstation/status.json");
-    BOOST_REQUIRE_MESSAGE(!text.empty(), "cannot open fixture status.json");
+    const std::string text = readAll(std::string(SKYCUE_TEST_DATA_DIR) + "/pingstation/status.json");
+    BOOST_REQUIRE_MESSAGE(!text.empty(), "cannot open sample status.json");
     return text;
 }
 
@@ -239,7 +239,7 @@ struct InputProbe {
 
 BOOST_AUTO_TEST_CASE(status_200_parsed)
 {
-    HttpServer server({{response("200 OK", statusFixture())}});
+    HttpServer server({{response("200 OK", statusSample())}});
     IoThread t;
     InputProbe p(t, std::make_unique<PingJsonInput>(
                         t.io, defOf(R"({"id":"ps","type":"pingstation_json","bind":"127.0.0.1","port":)" +
@@ -264,7 +264,7 @@ BOOST_AUTO_TEST_CASE(status_200_parsed)
 
 BOOST_AUTO_TEST_CASE(cat021_input_polls_status)
 {
-    HttpServer server({{response("200 OK", statusFixture())}});
+    HttpServer server({{response("200 OK", statusSample())}});
     IoThread t;
     InputProbe p(t, std::make_unique<PingCat021Input>(
                         t.io, defOf(R"({"id":"cat","type":"pingstation_cat021","transport":"udp",)"
@@ -289,7 +289,7 @@ BOOST_AUTO_TEST_CASE(status_500_fails)
 BOOST_AUTO_TEST_CASE(status_redirect_not_followed)
 {
     HttpServer server({{response("302 Found", "", "Location: http://127.0.0.1:1/api/v1/status\r\n")},
-                       {response("200 OK", statusFixture())}});
+                       {response("200 OK", statusSample())}});
     IoThread t;
     PollerProbe p(t, server.url());
     BOOST_REQUIRE(eventually([&] { return p.count() == 1u; }));
@@ -345,7 +345,7 @@ BOOST_AUTO_TEST_CASE(status_connection_refused)
 
 BOOST_AUTO_TEST_CASE(poller_repeats_every_interval)
 {
-    HttpServer server({{response("200 OK", statusFixture())}});
+    HttpServer server({{response("200 OK", statusSample())}});
     IoThread t;
     PollerProbe p(t, server.url(), 1s);
     BOOST_REQUIRE(eventuallyWithin(3s, [&] { return p.count() >= 2u; }));
@@ -359,7 +359,7 @@ BOOST_AUTO_TEST_CASE(status_streak_resets_on_success)
 {
     HttpServer server({{response("200 OK", R"({"aircraft":[]})")},
                        {response("500 Internal Server Error", "")},
-                       {response("200 OK", statusFixture())}});
+                       {response("200 OK", statusSample())}});
     IoThread t;
     InputProbe p(t, std::make_unique<PingJsonInput>(
                         t.io, defOf(R"({"id":"ps","type":"pingstation_json","bind":"127.0.0.1","port":)" +
@@ -389,7 +389,7 @@ BOOST_AUTO_TEST_CASE(status_streak_resets_on_success)
 
 BOOST_AUTO_TEST_CASE(poller_stop_cancels_inflight)
 {
-    HttpServer server({{response("200 OK", statusFixture()), 600ms}});
+    HttpServer server({{response("200 OK", statusSample()), 600ms}});
     IoThread t;
     PollerProbe p(t, server.url());
     BOOST_REQUIRE(eventually([&] { return server.requestCount() == 1u; }));
@@ -430,7 +430,7 @@ BOOST_AUTO_TEST_CASE(non_200_ends_after_the_header)
 // starts no sooner than min(interval, 1 s) after the previous finished.
 BOOST_AUTO_TEST_CASE(slow_server_one_poll_in_flight)
 {
-    HttpServer server({{response("200 OK", statusFixture()), 1200ms}});
+    HttpServer server({{response("200 OK", statusSample()), 1200ms}});
     IoThread t;
     PollerProbe p(t, server.url(), 1s);
     BOOST_REQUIRE(eventuallyWithin(6s, [&] { return p.count() >= 2u && server.requestCount() >= 3u; }));
@@ -440,7 +440,7 @@ BOOST_AUTO_TEST_CASE(slow_server_one_poll_in_flight)
 
 BOOST_AUTO_TEST_CASE(no_status_url_no_request)
 {
-    HttpServer server({{response("200 OK", statusFixture())}});
+    HttpServer server({{response("200 OK", statusSample())}});
     IoThread t;
     InputProbe p(t, std::make_unique<PingJsonInput>(
                         t.io, defOf(R"({"id":"ps","type":"pingstation_json","bind":"127.0.0.1","port":)" +

@@ -2,7 +2,7 @@
 # "Fuzzing"). Never part of a default build. Each harness calls a pure parser
 # entry point, never a socket, except fuzz_ws (below); a harness that needs
 # files makes them under $SKYCUE_FUZZ_WORK/<name>/. Seeds are in seeds/<name>/; the ones cut from
-# third-party captures are not committed: scripts/fixtures/gen-capture-seeds.py generates
+# third-party captures are not committed: scripts/test-data/gen-capture-seeds.py generates
 # them at fuzz time (scripts/dev/run-fuzz.sh).
 
 skycue_add_fuzzer(readsb_line SOURCES fuzz_readsb_line.cpp)

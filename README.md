@@ -193,7 +193,7 @@ For contributors:
 | `docs/` | the documentation |
 | `packaging/` | the `skycue.toml` example, systemd unit, RPM spec, container build and verify scripts, source tarball script |
 | `debian/` | Debian packaging |
-| `scripts/` | `maps/` (map tiles and overlays), `dev/` (sanitizers, fuzzing, static analysis), `fixtures/` (test captures and generated tables), `lib/` |
+| `scripts/` | `maps/` (map tiles and overlays), `dev/` (sanitizers, fuzzing, static analysis), `test-data/` (test captures and generated tables), `lib/` |
 | `tests/` | unit and script tests; `tests/fuzz/` holds the libFuzzer harnesses, seeds and findings; see [tests/README.md](tests/README.md) |
 
 ## Status

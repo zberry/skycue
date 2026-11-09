@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# skycue-stats on the readsb JSON fixture (text, --json, .gz, --config, no
+# skycue-stats on the readsb JSON sample (text, --json, .gz, --config, no
 # receiver, byte-identical reruns), and on the received and sent recordings a
-# real skycued writes while replaying that fixture.
-# usage: test_stats_cli.sh SKYCUED SKYCUE_STATS FIXTURE_DIR
+# real skycued writes while replaying that sample.
+# usage: test_stats_cli.sh SKYCUED SKYCUE_STATS DATA_DIR
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
-skycued=$1 stats=$2 fixtures=$3
-sample="$fixtures/readsb-sample.jsonl"
+skycued=$1 stats=$2 data_dir=$3
+sample="$data_dir/readsb-sample.jsonl"
 test_init stats_cli
 fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }
@@ -16,7 +16,7 @@ for f in "$skycued" "$stats" "$sample"; do [ -e "$f" ] || fail "$f missing"; don
 # section FILE TITLE: the lines of one "== TITLE..." section, header excluded.
 section() { awk -v t="== $2" 'index($0, t) == 1 { on = 1; next } /^== / { on = 0 } on' "$1"; }
 
-# ---- (a) text on the fixture -------------------------------------------------
+# ---- (a) text on the sample -------------------------------------------------
 "$stats" --lat 38.9 --lon -77.0 "$sample" >"$tmp/a.out" 2>"$tmp/a.err" || { cat "$tmp/a.err"; fail "(a) exit $?"; }
 grep -qx 'Aircraft: 12' "$tmp/a.out" || { cat "$tmp/a.out"; fail "(a) no 'Aircraft: 12'"; }
 grep -qE '^  [^ ]*readsb-sample\.jsonl +readsb-raw +1394 records$' "$tmp/a.out" ||
@@ -140,8 +140,8 @@ assert s["compression"] >= 1.0, s' || fail "(h) --json sent section"
 grep -q '^== FIS-B' "$tmp/a.out" && fail "(i) FIS-B section on a recording without uplinks"
 "$stats" --json "$sample" | python3 -I -c 'import json,sys; assert json.load(sys.stdin)["fisb"] is None' ||
   fail "(i) --json fisb not null without uplinks"
-uplinks="$fixtures/fisb/received-with-uplinks.jsonl"
-# The capture-derived recording is fetched by scripts/fixtures/fetch-test-captures.sh.
+uplinks="$data_dir/fisb/received-with-uplinks.jsonl"
+# The capture-derived recording is fetched by scripts/test-data/fetch-test-captures.sh.
 if [ -e "$uplinks" ]; then
 "$stats" "$uplinks" >"$tmp/i.out" 2>"$tmp/i.err" || { cat "$tmp/i.err"; fail "(i) exit"; }
 fs=$(section "$tmp/i.out" "FIS-B products by ID")
@@ -167,7 +167,7 @@ m = f["mosaics"][0]
 assert (m["key"], m["blocks"], m["published"]) == ("63", 671, 1), m
 assert f["counters"]["store.applied"] == 561, f["counters"]' || fail "(i) --json fisb section"
 else
-  echo "SKIP (i): $uplinks not fetched: run scripts/fixtures/fetch-test-captures.sh"
+  echo "SKIP (i): $uplinks not fetched: run scripts/test-data/fetch-test-captures.sh"
 fi
 
 echo "PASS"

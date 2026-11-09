@@ -22,7 +22,7 @@ version throughout.
    `skycue maintainers <skycue@users.noreply.github.com>`) and one at the top
    of `%changelog` in `packaging/rpm/skycue.spec`
    (`* <date> skycue maintainers <skycue@users.noreply.github.com> - 0.2.0-1`),
-   saying the same thing. Run `scripts/fixtures/fetch-test-captures.sh` first so the
+   saying the same thing. Run `scripts/test-data/fetch-test-captures.sh` first so the
    suite runs the capture tests, then the full suite. The metadata test checks that both agree with the
    `project()` version:
 

@@ -356,9 +356,9 @@ BOOST_AUTO_TEST_CASE(fuzz_readsb_line_now_overflow)
     BOOST_TEST(!parseReadsbLine(R"({"now":9000000001,"hex":"a4f2c1"})").has_value());
 }
 
-BOOST_AUTO_TEST_CASE(sample_fixture_parses_fully)
+BOOST_AUTO_TEST_CASE(sample_parses_fully)
 {
-    const std::string path = SKYCUE_FIXTURE_DIR "/readsb-sample.jsonl";
+    const std::string path = SKYCUE_TEST_DATA_DIR "/readsb-sample.jsonl";
     std::ifstream in(path, std::ios::binary);
     BOOST_REQUIRE_MESSAGE(in, "cannot open " << path);
     std::string line;

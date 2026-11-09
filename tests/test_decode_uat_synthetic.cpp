@@ -1,6 +1,6 @@
 // The synthetic UAT matrix (tests/uat_synth.cpp, about 110 frames built with encodeUat from stated
 // values, one per matrix row) three ways: the values built into each frame (the expect sidecar),
-// what dump978-fa made of the frame (the golden; tests/fixtures/gen_uat_synthetic.sh), and our
+// what dump978-fa made of the frame (the golden; tests/data/gen_uat_synthetic.sh), and our
 // decoder. Real captures never exercise emitter categories 24..39, emergency codes other than
 // none, ground track types 2/3, frames without a position and most squawk/AUX variants; these do.
 //
@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-#include "fixture_io.hpp"
+#include "test_data_io.hpp"
 #include "test_util.hpp"
 #include "decode/uat_frame.hpp"
 #include "gz_line_reader.hpp"
@@ -37,8 +37,8 @@ using namespace skycued::decode::uat;
 
 namespace {
 
-const std::string kGolden = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-synthetic.golden.jsonl.gz";
-const std::string kExpect = std::string(SKYCUE_FIXTURE_DIR) + "/raw/uat-synthetic.expect.jsonl.gz";
+const std::string kGolden = std::string(SKYCUE_TEST_DATA_DIR) + "/raw/uat-synthetic.golden.jsonl.gz";
+const std::string kExpect = std::string(SKYCUE_TEST_DATA_DIR) + "/raw/uat-synthetic.expect.jsonl.gz";
 
 struct RequireGoldens {
     RequireGoldens()

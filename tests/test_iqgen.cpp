@@ -1,7 +1,7 @@
 #define BOOST_TEST_MODULE iqgen
 #include <boost/test/unit_test.hpp>
 
-#include "restricted_fixtures.hpp"
+#include "restricted_test_data.hpp"
 #include "temp_dir.hpp"
 
 #include "gz_line_reader.hpp"
@@ -38,7 +38,7 @@ namespace tt = boost::test_tools;
 
 namespace {
 
-const std::string kFixtures = SKYCUE_FIXTURE_DIR;
+const std::string kTestData = SKYCUE_TEST_DATA_DIR;
 
 std::vector<uint8_t> hex(const std::string& s)
 {
@@ -72,10 +72,10 @@ bool allZero(const std::vector<uint8_t>& v)
 
 // The payloads of raw/uat-sample.txt.gz: the hex between the leading
 // '+'/'-' and the first ';'.
-std::vector<std::vector<uint8_t>> fixturePayloads()
+std::vector<std::vector<uint8_t>> samplePayloads()
 {
     std::vector<std::vector<uint8_t>> out;
-    skycued::GzLineReader in(kFixtures + "/raw/uat-sample.txt.gz");
+    skycued::GzLineReader in(kTestData + "/raw/uat-sample.txt.gz");
     for (std::string line; in.getline(line);) {
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
@@ -93,7 +93,7 @@ const std::vector<uint8_t>& firstOfKind(const std::vector<std::vector<uint8_t>>&
     for (const auto& p : all)
         if (uatKindForPayload(p.size()) == kind)
             return p;
-    BOOST_FAIL("fixture has no payload of the wanted kind");
+    BOOST_FAIL("sample has no payload of the wanted kind");
     return all.front();  // not reached
 }
 
@@ -128,8 +128,8 @@ BOOST_AUTO_TEST_CASE(hex_round_trip)
 BOOST_AUTO_TEST_CASE(modes_crc_vectors)
 {
     BOOST_TEST(modesCrcResidual(hex("8D4840D6202CC371C32CE0576098")) == 0u);
-    BOOST_TEST(modesCrcResidual(hex("5D486258DD7987")) == 0u);         // DF11, IID 0 (fixture)
-    BOOST_TEST(modesCrcResidual(hex("5F406A936F50F0")) == 0x000007u);  // DF11, IID 7 (fixture line 1)
+    BOOST_TEST(modesCrcResidual(hex("5D486258DD7987")) == 0u);         // DF11, IID 0 (sample)
+    BOOST_TEST(modesCrcResidual(hex("5F406A936F50F0")) == 0x000007u);  // DF11, IID 7 (sample line 1)
     BOOST_TEST(modesCrcResidual(hex("A00007318DB436F0A80000A7959E")) == 0x4B8E45u);  // DF20 AP
     auto f = hex("8D4840D6202CC371C32CE0576098");
     f[3] ^= 0x10;
@@ -188,9 +188,9 @@ BOOST_AUTO_TEST_CASE(rs_known_answer_parity)
 // Every line of raw/uat-sample.txt.gz:
 // downlink: codeword = payload + parity, all syndromes 0, first k bytes == payload;
 // uplink: each block j (bytes 72j..72j+71 + its 20 parity bytes) has all 20 syndromes 0.
-BOOST_AUTO_TEST_CASE(rs_every_fixture_codeword_has_zero_syndromes, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(rs_every_sample_codeword_has_zero_syndromes, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto all = fixturePayloads();
+    const auto all = samplePayloads();
     std::size_t n_short = 0, n_long = 0, n_up = 0;
     for (const auto& p : all) {
         const auto kind = uatKindForPayload(p.size());
@@ -228,9 +228,9 @@ BOOST_AUTO_TEST_CASE(rs_every_fixture_codeword_has_zero_syndromes, *skycue_test:
 
 // One codeword of each kind: every single-byte corruption at every position
 // leaves a non-zero syndrome, and the parity is no longer the data's parity.
-BOOST_AUTO_TEST_CASE(rs_corrupted_codeword_has_nonzero_syndrome, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(rs_corrupted_codeword_has_nonzero_syndrome, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto all = fixturePayloads();
+    const auto all = samplePayloads();
     for (UatKind kind : {UatKind::downlink_short, UatKind::downlink_long, UatKind::uplink}) {
         const auto& p = firstOfKind(all, kind);
         const ReedSolomon& rs = uatCode(kind);
@@ -309,9 +309,9 @@ BOOST_AUTO_TEST_CASE(uat_lengths)
 }
 
 // The first 36 bits are the sync word MSB first, then each transmitted byte MSB first.
-BOOST_AUTO_TEST_CASE(uat_sync_word_first, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(uat_sync_word_first, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto all = fixturePayloads();
+    const auto all = samplePayloads();
     for (UatKind kind : {UatKind::downlink_short, UatKind::downlink_long, UatKind::uplink}) {
         const auto& p = firstOfKind(all, kind);
         const auto bits = uatFrameBits(p);
@@ -326,9 +326,9 @@ BOOST_AUTO_TEST_CASE(uat_sync_word_first, *skycue_test::needs_fixture("raw/uat-s
     }
 }
 
-BOOST_AUTO_TEST_CASE(uplink_interleave, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(uplink_interleave, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto all = fixturePayloads();
+    const auto all = samplePayloads();
     const auto& p = firstOfKind(all, UatKind::uplink);
     const auto enc = uatEncode(p);
     BOOST_REQUIRE(enc.size() == 552u);
@@ -513,9 +513,9 @@ BOOST_AUTO_TEST_CASE(synth_ring_bounds)
     BOOST_CHECK_NO_THROW(u.addFrame(10, bits));
 }
 
-BOOST_AUTO_TEST_CASE(uat_cpfsk_phase_steps, *skycue_test::needs_fixture("raw/uat-sample.txt.gz"))
+BOOST_AUTO_TEST_CASE(uat_cpfsk_phase_steps, *skycue_test::needs_test_data("raw/uat-sample.txt.gz"))
 {
-    const auto all = fixturePayloads();
+    const auto all = samplePayloads();
     const std::vector<uint8_t>* payload = nullptr;
     for (const auto& p : all)
         if (uatKindForPayload(p.size()) && *uatKindForPayload(p.size()) != UatKind::uplink) {

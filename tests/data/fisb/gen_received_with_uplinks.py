@@ -3,10 +3,10 @@
 
 Deterministic; run from anywhere:
 
-    python3 tests/fixtures/fisb/gen_received_with_uplinks.py [--fixtures DIR]
+    python3 tests/data/fisb/gen_received_with_uplinks.py [--test-data DIR]
 
---fixtures DIR reads the inputs under DIR (raw/, readsb-sample.jsonl) and writes
-the output to DIR/fisb; the default is the fixtures directory this script is in.
+--test-data DIR reads the inputs under DIR (raw/, readsb-sample.jsonl) and writes
+the output to DIR/fisb; the default is the test data directory this script is in.
 
 Inputs (both committed):
   raw/uat-sample.txt.gz      the 2015 dump978 sample; its 704 uplink ('+') lines
@@ -45,12 +45,12 @@ def iso_ms(t):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--fixtures", default=os.path.join(HERE, ".."),
-                    help="fixtures directory (default: the one containing this script)")
-    fixtures = os.path.abspath(ap.parse_args().fixtures)
-    SAMPLE = os.path.join(fixtures, "raw", "uat-sample.txt.gz")
-    READSB = os.path.join(fixtures, "readsb-sample.jsonl")
-    OUT = os.path.join(fixtures, "fisb", "received-with-uplinks.jsonl")
+    ap.add_argument("--test-data", default=os.path.join(HERE, ".."),
+                    help="test data directory (default: the one containing this script)")
+    data_dir = os.path.abspath(ap.parse_args().test_data)
+    SAMPLE = os.path.join(data_dir, "raw", "uat-sample.txt.gz")
+    READSB = os.path.join(data_dir, "readsb-sample.jsonl")
+    OUT = os.path.join(data_dir, "fisb", "received-with-uplinks.jsonl")
     records = []  # (epoch_ms, seq, line)
     t0_ms = int(T0.timestamp() * 1000)
 

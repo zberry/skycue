@@ -55,8 +55,8 @@ Msg fromHex(const std::string& hex) {
     return Msg{c->lat17, c->lon17, c->odd};
 }
 
-std::vector<double> readFixture() {
-    std::ifstream in(std::string(SKYCUE_FIXTURE_DIR) + "/cpr_nl_transitions.json");
+std::vector<double> readSample() {
+    std::ifstream in(std::string(SKYCUE_TEST_DATA_DIR) + "/cpr_nl_transitions.json");
     BOOST_REQUIRE(in.good());
     std::stringstream ss;
     ss << in.rdbuf();
@@ -76,7 +76,7 @@ std::vector<double> readFixture() {
 }  // namespace
 
 BOOST_AUTO_TEST_CASE(nl_transitions_match_published_table) {
-    auto fx = readFixture();
+    auto fx = readSample();
     BOOST_REQUIRE_EQUAL(fx.size(), 59u);
     // fx[i] is the transition for n = 60 - i.
     for (int n = 60; n >= 2; --n)

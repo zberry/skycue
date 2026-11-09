@@ -494,7 +494,7 @@ frames built to carry all 40 emitter categories, all 8 emergency codes, the
 four ground track types, all NIC and NACp values and representative rows for
 the rest (qualifiers, velocity, vertical rate, altitude and position limits,
 squawk and call sign, AUX). All are payload type 1 long frames. The
-golden files are in `tests/fixtures/raw/` and the tests run without any
+golden files are in `tests/data/raw/` and the tests run without any
 other decoder installed. A live differential plays the captures into skycued
 as a `uat_raw` input and compares the tracks it builds with dump978-fa's
 output per aircraft: every compared field agreed on the 22, 43 and 7
@@ -672,7 +672,7 @@ To track the UAT lines in skycued instead, serve them to a `uat_raw` input
 `skycue-rawplay --uat-listen 30978 uat-20261101-120000.txt`.
 The receiver position given to readsb (and in `skycue.toml`) must match the
 capture's region, or readsb cannot decode positions and the range filter
-drops everything: the sample capture in `tests/fixtures/raw/` is European,
+drops everything: the sample capture in `tests/data/raw/` is European,
 so use `52.0` / `4.5` for it.
 
 `--1090-listen PORT` serves the Beast frames on 127.0.0.1 instead of dialing
@@ -945,7 +945,7 @@ It reads one of two kinds of file:
   record's `t`.
 - `--as json FILE` or `--as cat021 FILE`: a received-stream recording
   (`received-*.jsonl`) or a capture of readsb's JSON port, such as
-  `tests/fixtures/readsb-sample.jsonl`. Each observation is
+  `tests/data/readsb-sample.jsonl`. Each observation is
   synthesised as a pingStation JSON aircraft object, or as a one-record
   CAT021 edition 2.5 block, stamped with the time it is sent and paced by the
   observation times. Sent-stream records and uplinks are skipped.
@@ -993,13 +993,13 @@ skycued --no-readsb --no-uat --inputs-file sim.inputs.json --config skycue.toml 
 # (GPS 3D fix, receiver normal, firmware 1.0.0) and a device marker there.
 skycue-pingsim --udp 127.0.0.1:4000 --as json --loop \
     --status-interval 10 --status-lat 38.9 --status-lon -77.0 \
-    tests/fixtures/readsb-sample.jsonl &
+    tests/data/readsb-sample.jsonl &
 # CAT021 from the same recording, five times faster.
 skycue-pingsim --udp 127.0.0.1:4001 --as cat021 --speed 5 --loop \
-    tests/fixtures/readsb-sample.jsonl
+    tests/data/readsb-sample.jsonl
 ```
 
-The fixture's aircraft are around 38.9 N, 77.0 W, so `receiver.lat` and
+The sample's aircraft are around 38.9 N, 77.0 W, so `receiver.lat` and
 `receiver.lon` must be near there or the range filter drops them. The status
 message carries guid `0000000000000001`, version 1.0.0, `gpsStatus` 3,
 `receiverStatus` 0, the send time and the given position; `--status-interval`
@@ -2082,7 +2082,7 @@ but wall-clock times in the sent stream, so the overview and gaps of such a
 pair span both periods. Hex addresses of non-ICAO address types carry
 readsb's leading `~`. Bars are scaled so that the longest is 40 characters.
 
-Sample (the test fixture, abridged):
+Sample (the test sample, abridged):
 
 ```
 $ skycue-stats --lat 38.9 --lon -77.0 readsb-sample.jsonl
@@ -2152,7 +2152,7 @@ Received aircraft never sent: 1
   a7d3e6
 ```
 
-On a recording with FIS-B uplinks (the 2015 test fixture,
+On a recording with FIS-B uplinks (the 2015 test sample,
 `received-with-uplinks.jsonl`, abridged):
 
 ```

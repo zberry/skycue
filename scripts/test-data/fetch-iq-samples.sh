@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: scripts/fixtures/fetch-iq-samples.sh [--cache DIR] [--offline]
+# Usage: scripts/test-data/fetch-iq-samples.sh [--cache DIR] [--offline]
 #
 # Fetches the one public off-air 1090 MHz IQ capture we use (Porto, Zenodo
 # record 23342598, CC BY 4.0, see NOTICE), checks it against pinned SHA-256

@@ -323,7 +323,7 @@ time,event,hex,addr_type,source,pos_time,lat,lon,on_ground,alt_is_geom,alt_baro_
 `ReplaySource` reads a received-stream JSONL file and rebuilds each `obs` record from the
 fields above (`raw` is carried along but never parsed, so hand-edited recordings work).
 A line that is instead a readsb JSON-port aircraft object (a numeric `"now"` and no
-`"time"`, as in `tests/fixtures/readsb-sample.jsonl`) is parsed as readsb output,
+`"time"`, as in `tests/data/readsb-sample.jsonl`) is parsed as readsb output,
 so a plain capture of readsb's JSON port replays as well.
 `"time"` becomes the observation's receive time. A record needs a valid `"time"` and
 `hex`; any other key may be left out, but a key that is present must have the right type

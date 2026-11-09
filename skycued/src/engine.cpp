@@ -468,7 +468,7 @@ GeomResult Engine::resolveGeom(const TrackState& state) const
 
 skycue::Track Engine::makeTrack(const GeomView& view, bool keyframe, bool alt_is_geom) const
 {
-    skycue::Track t = toTrack(view.state(), keyframe, alt_is_geom);
+    skycue::Track t = toTrack(view.state(), keyframe, alt_is_geom, dataNow());
     const GeomResult& g = view.geom();
     if (g.source == GeomSource::estimated && g.uncertainty_ft)
         t.alt_geom_uncertainty_ft = static_cast<uint16_t>(std::clamp<int32_t>(*g.uncertainty_ft, 0, 65535));
@@ -942,6 +942,8 @@ TrackSnapshot Engine::trackSnapshot(const GeomView& view, const FilterResult& re
     t.rssi = state.latest.rssi.value_or(std::numeric_limits<double>::quiet_NaN());
     t.input = state.last_input;
     t.commb = state.latest;  // slices to the CommBFields part
+    if (t.commb.acas_ra && dataNow() - t.commb.acas_ra->at > kAcasRaLife)
+        t.commb.acas_ra.reset();  // expires with no message to carry the news
     return t;
 }
 

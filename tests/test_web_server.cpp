@@ -2562,9 +2562,13 @@ BOOST_AUTO_TEST_CASE(api_track_phase6_fields)
         o.acas_sl = 4;
         skycued::AcasRaState ra;
         ra.active = true;
+        ra.rac = 3;
+        ra.rat = true;
+        ra.mte = true;
         ra.tti = 2;
         ra.threat_alt_ft = 12300;
         ra.threat_range_nm = 3.5f;
+        ra.threat_bearing_deg = 72.0f;
         ra.text = "climb";
         ra.at = o.received_time;
         o.acas_ra = ra;
@@ -2581,6 +2585,69 @@ BOOST_AUTO_TEST_CASE(api_track_phase6_fields)
     BOOST_TEST(t.get<bool>("acas_ra.active") == true);
     BOOST_TEST(t.get<std::string>("acas_ra.threat.type") == "position");
     BOOST_TEST(t.get<int>("acas_ra.threat.alt_ft") == 12300);
+    BOOST_TEST(t.get<int>("acas_ra.rac") == 3);
+    BOOST_TEST(t.get<bool>("acas_ra.rat") == true);
+    BOOST_TEST(t.get<bool>("acas_ra.mte") == true);
+    BOOST_TEST(t.get<double>("acas_ra.threat.range_nm") == 3.5);
+    BOOST_TEST(t.get<double>("acas_ra.threat.bearing_deg") == 72.0);
+}
+
+BOOST_AUTO_TEST_CASE(api_track_acas_ra_address_threat)
+{
+    WebFx f;
+    f.fx->t.call([&] {
+        f.src->connection(true);
+        auto o = nearbyObservation(0xa1b2c3, 0);
+        skycued::AcasRaState ra;
+        ra.active = true;
+        ra.tti = 1;
+        ra.threat_address = 0x4ca002;
+        ra.text = "climb";
+        ra.at = o.received_time;
+        o.acas_ra = ra;
+        f.src->emit(o);
+    });
+    const pt::ptree s = parseJson(get(f.port, "/api/state").body);
+    const auto& t = s.get_child("tracks").front().second;
+    BOOST_TEST(t.get<std::string>("acas_ra.threat.type") == "address");
+    BOOST_TEST(t.get<std::string>("acas_ra.threat.address") == "4ca002");
+}
+
+BOOST_AUTO_TEST_CASE(api_track_acas_ra_expires_without_a_message)
+{
+    WebFx f;
+    std::chrono::system_clock::time_point t0;
+    f.fx->t.call([&] {
+        f.src->connection(true);
+        auto o = nearbyObservation(0xa1b2c3, 0);
+        t0 = o.received_time;
+        skycued::AcasRaState ra;
+        ra.active = true;
+        ra.text = "climb";
+        ra.at = o.received_time;
+        o.acas_ra = ra;
+        f.src->emit(o);
+    });
+    {
+        const pt::ptree s = parseJson(get(f.port, "/api/state").body);
+        BOOST_TEST(s.get_child("tracks").front().second.get_child_optional("acas_ra").has_value());
+    }
+    // Another aircraft 40 s later moves the data clock; the silent one loses its advisory.
+    f.fx->t.call([&] {
+        auto o = nearbyObservation(0xd4e5f6, 0.01);
+        o.received_time = t0 + 40s;
+        o.position_time = o.received_time;
+        f.src->emit(o);
+    });
+    const pt::ptree s = parseJson(get(f.port, "/api/state").body);
+    bool found = false;
+    for (const auto& kv : s.get_child("tracks")) {
+        if (kv.second.get<std::string>("hex") != "a1b2c3")
+            continue;
+        found = true;
+        BOOST_TEST(!kv.second.get_child_optional("acas_ra").has_value());
+    }
+    BOOST_TEST(found);
 }
 
 BOOST_AUTO_TEST_CASE(track_json_phase6_absent_has_no_keys)

@@ -311,3 +311,56 @@ BOOST_AUTO_TEST_CASE(track_table_merges_phase6_fields)
     BOOST_TEST(!s.latest.acas_ra->active);
     BOOST_TEST(s.latest.acas_ra->text == "clear of conflict");
 }
+
+BOOST_AUTO_TEST_CASE(acas_ra_ages_out_without_a_new_advisory)
+{
+    TrackTable table;
+    auto a = obs(0x000002, kT0, true);
+    skycued::AcasRaState ra;
+    ra.active = true;
+    ra.text = "climb";
+    ra.at = kT0;
+    a.acas_ra = ra;
+    table.apply(a);
+
+    // 29 s later it is still held; 40 s later an observation without one finds it gone.
+    BOOST_TEST(table.apply(obs(0x000002, kT0 + 29s, true)).latest.acas_ra.has_value());
+    BOOST_TEST(!table.apply(obs(0x000002, kT0 + 40s, true)).latest.acas_ra.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(acas_ra_replaced_whole_after_expiry)
+{
+    TrackTable table;
+    auto a = obs(0x000003, kT0, true);
+    skycued::AcasRaState ra;
+    ra.active = true;
+    ra.text = "climb";
+    ra.at = kT0;
+    a.acas_ra = ra;
+    table.apply(a);
+
+    auto b = obs(0x000003, kT0 + 40s, true);
+    skycued::AcasRaState ra2;
+    ra2.active = true;
+    ra2.text = "descend";
+    ra2.at = kT0 + 40s;
+    b.acas_ra = ra2;
+    auto& s = table.apply(b);
+    BOOST_REQUIRE(s.latest.acas_ra);
+    BOOST_TEST(s.latest.acas_ra->text == "descend");
+}
+
+BOOST_AUTO_TEST_CASE(acas_ra_ends_30s_after_rat)
+{
+    TrackTable table;
+    auto a = obs(0x000004, kT0, true);
+    skycued::AcasRaState ra;
+    ra.active = false;  // a RAT
+    ra.rat = true;
+    ra.text = "clear of conflict";
+    ra.at = kT0;
+    a.acas_ra = ra;
+    table.apply(a);
+    BOOST_TEST(table.apply(obs(0x000004, kT0 + 20s, true)).latest.acas_ra.has_value());
+    BOOST_TEST(!table.apply(obs(0x000004, kT0 + 31s, true)).latest.acas_ra.has_value());
+}

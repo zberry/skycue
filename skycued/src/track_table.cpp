@@ -96,6 +96,10 @@ TrackState& TrackTable::apply(const TrackObservation& obs)
     mergeField(l.acas_sl, obs.acas_sl);
     mergeField(l.acas_ri, obs.acas_ri);
     mergeField(l.acas_ra, obs.acas_ra);  // replaced whole
+    // An advisory is shown for 30 s after it was received (or after a RAT set it inactive), whether or
+    // not further messages arrive.
+    if (l.acas_ra && obs.received_time - l.acas_ra->at > kAcasRaLife)
+        l.acas_ra.reset();
 
     s.last_seen = obs.received_time;
     return s;

@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <ostream>
 
 using skycue::AddressType;
@@ -153,6 +154,49 @@ BOOST_AUTO_TEST_CASE(ra_change_is_immediate)
         s.latest.acas_ra->active = false; // RAT: the advisory ended
         BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::identity);
     }
+}
+
+BOOST_AUTO_TEST_CASE(ra_expiry_is_immediate)
+{
+    const std::chrono::system_clock::time_point at{std::chrono::seconds{1700000000}};
+    skycued::AcasRaState ra;
+    ra.active = true;
+    ra.ara = 0x2000;
+    ra.at = at;
+    TrackState s = positioned();
+    s.latest.acas_ra = ra;
+    // On the data clock the advisory is shown for 30 s and not after, whether or not a message arrives.
+    BOOST_TEST(skycued::toTrack(s, true, false, at + 30s).acas_ra.has_value());
+    BOOST_TEST(!skycued::toTrack(s, true, false, at + 40s).acas_ra.has_value());
+    skycued::markSent(s, skycued::toTrack(s, true, false, at), kS0);
+    BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::none);
+    s.latest.acas_ra.reset();  // the table dropped it with the next observation
+    BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::identity);
+}
+
+BOOST_AUTO_TEST_CASE(ra_flag_changes_are_immediate)
+{
+    skycued::AcasRaState ra;
+    ra.active = true;
+    ra.ara = 0x2000;
+    for (int which = 0; which < 2; ++which) {
+        TrackState s = positioned();
+        s.latest.acas_ra = ra;
+        skycued::markSent(s, skycued::toTrack(s, true, false), kS0);
+        BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::none);
+        if (which == 0)
+            s.latest.acas_ra->rac = 2;
+        else
+            s.latest.acas_ra->mte = true;
+        BOOST_TEST(shouldSend(s, kS0 + 100ms, kDefaults) == SendReason::identity);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(non_finite_tas_is_left_out)
+{
+    TrackState s = positioned();
+    s.latest.tas_kt = std::numeric_limits<float>::quiet_NaN();
+    BOOST_TEST(!skycued::toTrack(s, false, false).tas_kt.has_value());
 }
 
 BOOST_AUTO_TEST_CASE(emergency_compared_through_track)

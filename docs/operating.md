@@ -398,7 +398,7 @@ decoder also reads the replies and messages that carry air data and intent.
   indicated airspeed, Mach, barometric and inertial vertical rate) and accepts
   a register only when exactly one passes its range and reserved-bit checks.
   When two pass, the track's known state (track, ground speed and barometric
-  rate) decides; when that does not settle it the reply is counted
+  rate, which may itself come from Comm-B when no ADS-B exists for the track) decides; when that does not settle it the reply is counted
   `commb_ambiguous` and nothing is set. Like altitude and squawk, a Comm-B
   reply is used only for an address confirmed in the last 60 s.
 - **Precedence.** ADS-B wins over Comm-B for a field both supply: track,
@@ -406,8 +406,8 @@ decoder also reads the replies and messages that carry air data and intent.
   when no ADS-B value for that field is under 60 s old, and a later ADS-B
   value replaces the Comm-B one at once. The same holds for the intent fields:
   the ADS-B target-state message (TC 29) outranks BDS 4,0 for the selected
-  altitude (MCP and FMS), pressure setting and selected heading for 60 s, and
-  the autopilot modes are replaced as a whole, not merged. The target-state
+  altitude (MCP and FMS) and pressure setting for 60 s (the selected heading
+  comes from TC 29 only; BDS 4,0 has no such field), and the autopilot modes are replaced as a whole, not merged. The target-state
   message's NACp is decoded but not applied to `nac_p`. The values are kept
   for 60 s with the other dynamic fields, and a change of the selected
   altitude, pressure setting, selected heading or autopilot modes is reported
@@ -416,7 +416,7 @@ decoder also reads the replies and messages that carry air data and intent.
 - **ACAS resolution advisories** come from DF 16 and from the ADS-B status
   message (TC 28 subtype 2). The advisory is reported as active for 30 s after
   its last message; a message that ends it reports "clear of conflict" for
-  30 s, and then the field is dropped. DF 0 and DF 16 also give the
+  30 s, and then the field is dropped, even if no message arrives. DF 0 and DF 16 also give the
   sensitivity level and reply information (`acas_sl`, `acas_ri`).
 - **Counters.** Per decoding input: `commb_bds40`, `commb_bds50` and
   `commb_bds60` (accepted replies), `commb_ambiguous`, `commb_other` (another

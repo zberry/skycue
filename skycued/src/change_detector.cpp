@@ -28,6 +28,13 @@ std::optional<uint8_t> emergencyOf(const std::optional<std::string>& name)
 
 constexpr uint8_t kRaActive = 0x40;
 
+// The wire flags byte of an advisory: RAC in bits 0-3, RAT, MTE, active.
+uint8_t raFlags(const AcasRaState& ra)
+{
+    return static_cast<uint8_t>((ra.rac & 0x0F) | (ra.rat ? 0x10 : 0) | (ra.mte ? 0x20 : 0) |
+                                (ra.active ? kRaActive : 0));
+}
+
 // Whether the advisory the consumer holds differs from the observation's: appearing, ending
 // (active clearing) or a different ARA.
 bool raChanged(const std::optional<AcasRaState>& now, const std::optional<skycue::AcasRaWire>& prev)
@@ -36,7 +43,7 @@ bool raChanged(const std::optional<AcasRaState>& now, const std::optional<skycue
         return true;
     if (!now)
         return false;
-    return now->active != ((prev->flags & kRaActive) != 0) || now->ara != prev->ara;
+    return raFlags(*now) != prev->flags || now->ara != prev->ara;
 }
 
 double angleDiffDeg(double a, double b)
@@ -83,7 +90,8 @@ SendReason shouldSend(const TrackState& s, std::chrono::steady_clock::time_point
     return SendReason::none;
 }
 
-skycue::Track toTrack(const TrackState& s, bool keyframe, bool alt_is_geom)
+skycue::Track toTrack(const TrackState& s, bool keyframe, bool alt_is_geom,
+                      std::optional<std::chrono::system_clock::time_point> data_now)
 {
     const TrackObservation& l = s.latest;
     skycue::Track t;
@@ -105,15 +113,14 @@ skycue::Track toTrack(const TrackState& s, bool keyframe, bool alt_is_geom)
     t.registration = l.registration;
     t.nic = l.nic;
     t.nac_p = l.nac_p;
-    if (l.acas_ra) {
+    if (l.acas_ra && !(data_now && *data_now - l.acas_ra->at > kAcasRaLife)) {
         const AcasRaState& ra = *l.acas_ra;
-        t.acas_ra = skycue::AcasRaWire{ra.ara, static_cast<uint8_t>((ra.rac & 0x0F) | (ra.rat ? 0x10 : 0) |
-                                                                    (ra.mte ? 0x20 : 0) | (ra.active ? kRaActive : 0))};
+        t.acas_ra = skycue::AcasRaWire{ra.ara, raFlags(ra)};
     }
     t.heading_mag_deg = l.heading_mag_deg;
     t.heading_true_deg = l.heading_true_deg;
     t.ias_kt = l.ias_kt;
-    if (l.tas_kt)
+    if (l.tas_kt && std::isfinite(*l.tas_kt))
         t.tas_kt = static_cast<uint16_t>(std::clamp<long>(std::lround(*l.tas_kt), 0, 65535));
     t.mach = l.mach;
     t.roll_deg = l.roll_deg;

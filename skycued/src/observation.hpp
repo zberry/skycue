@@ -12,6 +12,9 @@
 namespace skycued {
 
 // An ACAS resolution advisory as a decoded DF16 or TC28 reported it.
+// How long an advisory is shown after `at`, even when nothing more is received.
+inline constexpr std::chrono::seconds kAcasRaLife{30};
+
 struct AcasRaState {
     bool active = false;
     uint16_t ara = 0;  // 14 bits, 0x2000 is bit 1 of the field
@@ -34,6 +37,7 @@ enum NavModeBit : uint8_t {
     kNavLnav = 1u << 4,
     kNavTcas = 1u << 5,
 };
+static_assert(kNavTcas == (1u << (skycue::kNavModeCount - 1)), "NavModeBit and skycue::navModeName differ in count");
 
 // Comm-B (BDS 4,0 / 5,0 / 6,0), target-state and ACAS fields of an observation. A
 // separate struct so the Engine can pass them to a snapshot without the raw line.

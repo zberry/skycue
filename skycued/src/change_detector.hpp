@@ -36,7 +36,9 @@ SendReason shouldSend(const TrackState& state, std::chrono::steady_clock::time_p
 
 // Builds the wire Track from the state. vertical_rate_fpm is the baro rate if
 // known, else the geometric rate.
-skycue::Track toTrack(const TrackState& state, bool keyframe, bool alt_is_geom);
+// With `data_now` the advisory is left out once it is older than kAcasRaLife at that time.
+skycue::Track toTrack(const TrackState& state, bool keyframe, bool alt_is_geom,
+                      std::optional<std::chrono::system_clock::time_point> data_now = std::nullopt);
 
 // Records that `sent` went to the consumer at `now` (sets last_sent and
 // last_sent_at).

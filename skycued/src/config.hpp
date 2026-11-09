@@ -142,7 +142,9 @@ struct KeySpec {
 //      the web schema); keep tests/fixtures/skycue_example.toml byte-identical.
 //   6. docs/operating.md.
 //   7. The round-trip table in tests/test_config.cpp.
-// tests/test_config_keys.cpp fails when one of these places is missed.
+// tests/test_config_keys.cpp checks items 1, 3, 4 (conversion), 5 and 6, and only that
+// configValueText does not throw (item 2); it does not check the test_config.cpp table
+// (item 7). A key with an unusual value shape also needs a sampleLiterals entry there.
 // Every key, in packaging/skycue.toml.example order: the one source of a key's
 // class, range and enum values.
 const std::vector<KeySpec>& keySpecs();

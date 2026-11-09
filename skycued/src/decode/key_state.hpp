@@ -15,22 +15,10 @@
 #include <skycue/types.hpp>
 
 #include "decode/cpr.hpp"
+#include "decode/decoder_types.hpp"
 #include "observation.hpp"
 
 namespace skycued::decode {
-
-using TimePoint = std::chrono::system_clock::time_point;
-
-// Reasonableness and emission limits shared by the 1090 and 978 decoders (decoder spec 5.5 step 4, 7.2).
-namespace limits {
-constexpr double kRangeNm = 300.0;            // our choice: reasonableness range from the reference/first position
-constexpr double kSpeedBaseNm = 0.5;          // our choice: speed check 0.5 NM + elapsed x max(1.5 gs, 150 kt)
-constexpr double kSpeedMinKt = 150.0;         // our choice
-constexpr double kSpeedCapAirKt = 1200.0;     // our choice
-constexpr double kSpeedCapSurfaceKt = 100.0;  // our choice
-constexpr std::chrono::seconds kNoPositionFor{10};  // design 7.2: change emissions only without a position this recent
-constexpr std::chrono::seconds kChangeInterval{1};  // design 7.2: at most one change emission per second
-}  // namespace limits
 
 struct StateKey {
     uint32_t address = 0;

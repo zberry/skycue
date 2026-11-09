@@ -21,8 +21,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "decode/decoder_types.hpp"
 #include "decode/key_state.hpp"
-#include "decode/modes_decoder.hpp"  // DecoderConfig, DecodeCounters
 #include "decode/uat_frame.hpp"
 #include "observation.hpp"
 

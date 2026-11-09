@@ -16,26 +16,12 @@
 #include "decode/acas.hpp"
 #include "decode/commb.hpp"
 #include "decode/cpr.hpp"
+#include "decode/decoder_types.hpp"
 #include "decode/frame.hpp"
 #include "decode/key_state.hpp"
 #include "observation.hpp"
 
 namespace skycued::decode {
-
-struct DecoderConfig {
-    std::optional<cpr::Position> reference;  // the input's reference position (spec section 8.1), may be absent
-    std::size_t max_keys = 20000;            // our choice (design section 3)
-    std::chrono::seconds idle_evict{300};    // our choice (design section 3)
-};
-
-struct DecodeCounters {
-    uint64_t frames = 0, crc_fail = 0, crc_fixed = 0, ap_unconfirmed = 0, no_position = 0, cpr_pending = 0,
-             cpr_rejected = 0, decoded = 0, unmapped = 0, unknown_type = 0, evicted = 0, observations = 0;
-    // Comm-B register inference (DF20/21) and ACAS RAs (spec section 14 item 8).
-    uint64_t commb_bds40 = 0, commb_bds50 = 0, commb_bds60 = 0, commb_ambiguous = 0, commb_other = 0,
-             commb_empty = 0, commb_unknown = 0, acas_ra = 0, acas_ra_tc28 = 0;
-    uint64_t rs_errors = 0;  // UAT only: Reed-Solomon symbol errors corrected, summed over the frames (the "rs=" values)
-};
 
 class ModesDecoder {
 public:

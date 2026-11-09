@@ -5,7 +5,7 @@
 #include <skycue/protocol.hpp>
 #include <skycue/types.hpp>
 
-#include "net_test_support.hpp"
+#include "libskycue_test_support.hpp"
 #include "test_slow.hpp"
 
 #include <boost/asio.hpp>
@@ -194,7 +194,7 @@ private:
     std::thread thread_;
 };
 
-using skycue::net::test::freeUdpPort;
+using skycue::testing::freeUdpPort;
 
 class UdpSender {
 public:

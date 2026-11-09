@@ -2,7 +2,7 @@ skycue_add_unit_test(smoke LIBS)
 
 skycue_add_unit_test(protocol LIBS skycue::skycue DEFS SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
 
-skycue_add_unit_test(client LIBS skycue::skycue NET_SUPPORT TIMEOUT 60)
+skycue_add_unit_test(client LIBS skycue::skycue TIMEOUT 60)
 
 get_filename_component(_skycue_example_conf
   "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/skycue.toml.example" ABSOLUTE)

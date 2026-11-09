@@ -73,6 +73,8 @@ skycue_add_unit_test(recorder DEFS SKYCUE_DOCS_DIR="${_skycue_docs_dir}" FIXTURE
 
 skycue_add_unit_test(retention)
 
+skycue_add_unit_test(track_names)
+
 # Builds a tiny consumer against libskycue through add_subdirectory(),
 # through find_package() on an install of it, and linked into a shared
 # library with SKYCUE_INSTALL=OFF.

@@ -18,8 +18,15 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../cmake/BoostSystem.cmake")
   include("${CMAKE_CURRENT_LIST_DIR}/../cmake/BoostSystem.cmake")
   skycue_require_boost_system(1.66)
 elseif(NOT TARGET Boost::system)
-  find_package(Boost 1.66 REQUIRED)
-  find_package(Boost 1.66 QUIET COMPONENTS system)
+  # BoostConfig first (CMake 3.30 warns about FindBoost, CMP0167); Boost before 1.70 has none.
+  find_package(Boost 1.66 CONFIG QUIET)
+  if(NOT Boost_FOUND)
+    find_package(Boost 1.66 REQUIRED)
+  endif()
+  find_package(Boost 1.66 CONFIG QUIET COMPONENTS system)
+  if(NOT TARGET Boost::system)
+    find_package(Boost 1.66 QUIET COMPONENTS system)
+  endif()
   if(NOT TARGET Boost::system)
     # Header-only since Boost 1.69; some distributions ship no boost_system package.
     # Keep this in step with ../cmake/BoostSystem.cmake.

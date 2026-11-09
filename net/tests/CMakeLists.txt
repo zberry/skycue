@@ -1,6 +1,9 @@
 # Boost.Test targets for skycue_net.
 if(NOT TARGET Boost::unit_test_framework)
-  find_package(Boost 1.66 REQUIRED COMPONENTS unit_test_framework)
+  find_package(Boost 1.66 CONFIG QUIET COMPONENTS unit_test_framework)
+  if(NOT TARGET Boost::unit_test_framework)
+    find_package(Boost 1.66 REQUIRED COMPONENTS unit_test_framework)
+  endif()
 endif()
 
 # Local to net/ so that it builds alone (it does not include the project's

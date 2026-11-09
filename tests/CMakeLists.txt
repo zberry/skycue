@@ -203,7 +203,7 @@ target_compile_definitions(test_web_server PRIVATE BOOST_TEST_DYN_LINK
   SKYCUED_EXE="$<TARGET_FILE:skycued>"
   SKYCUE_CMAKE_VERSION="${PROJECT_VERSION}")
 add_dependencies(test_web_server skycued)
-skycue_set_warnings(test_web_server)
+skycue_test_warnings(test_web_server)
 target_include_directories(test_web_server PRIVATE ${PROJECT_SOURCE_DIR}/net/tests) # net_test_support.hpp
 add_test(NAME web_server COMMAND test_web_server)
 set_tests_properties(web_server PROPERTIES TIMEOUT 120)

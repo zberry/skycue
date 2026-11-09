@@ -27,6 +27,16 @@
 
 include_guard(GLOBAL)
 
+# The project's warnings for a Boost.Test executable.
+function(skycue_test_warnings target)
+  skycue_set_warnings(${target})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # Boost.Test 1.90's assertion_result conversion trips -Wconversion under
+    # GCC 15 at every BOOST_TEST with a message; product code keeps it.
+    target_compile_options(${target} PRIVATE -Wno-conversion)
+  endif()
+endfunction()
+
 function(skycue_add_unit_test name)
   cmake_parse_arguments(PARSE_ARGV 1 A "FIXTURE_DIR;NET_SUPPORT;SKIPPABLE"
     "SOURCE;TIMEOUT" "EXTRA_SOURCES;LIBS;DEFS;LABELS")
@@ -50,12 +60,7 @@ function(skycue_add_unit_test name)
   if(A_NET_SUPPORT)
     target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/net/tests)
   endif()
-  skycue_set_warnings(${target})
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    # Boost.Test 1.90's assertion_result conversion trips -Wconversion under
-    # GCC 15 at every BOOST_TEST with a message; product code keeps it.
-    target_compile_options(${target} PRIVATE -Wno-conversion)
-  endif()
+  skycue_test_warnings(${target})
   add_test(NAME ${name} COMMAND ${target})
 
   set(props)

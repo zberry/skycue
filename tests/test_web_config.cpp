@@ -292,6 +292,72 @@ BOOST_AUTO_TEST_CASE(api_filters_pinned_key_409)
     BOOST_TEST(r.body == "{\"max_range_nm\":88,\"min_elevation_deg\":2,\"overlay_active\":false}", r.body);
 }
 
+// The `apply` ladder of /api/filters and /api/lists.
+BOOST_AUTO_TEST_CASE(filters_lists_error_ladder_exact_bodies)
+{
+    {
+        ConfigFx f(nullptr, {"filters.max_range_nm=88"});
+        const auto r = request(f.port, http::verb::put, "/api/filters", "{\"max_range_nm\":20}");
+        BOOST_TEST(r.status == 409u);
+        BOOST_TEST(r.body == R"({"error":"filters.max_range_nm is set by --set and cannot be changed here","key":"filters.max_range_nm","source":"set"})");
+    }
+    {
+        ConfigFx g(nullptr, {}, {{"SKYCUE_FILTERS_MIN_ELEVATION_DEG", "2"}});
+        const auto r = request(g.port, http::verb::put, "/api/filters", "{\"min_elevation_deg\":5}");
+        BOOST_TEST(r.status == 409u);
+        BOOST_TEST(r.body == R"({"error":"filters.min_elevation_deg is set by the environment and cannot be changed here","key":"filters.min_elevation_deg","source":"env"})");
+    }
+    ConfigFx h;
+    auto r = request(h.port, http::verb::put, "/api/filters", "{\"max_range_nm\":0}");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"max_range_nm must be greater than 0"})");
+    r = request(h.port, http::verb::put, "/api/filters", "{\"nope\":1}");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"unknown key 'nope'"})");
+    r = request(h.port, http::verb::post, "/api/lists/allow", "not json");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+}
+
+// putConfigRoute. Its 500 and its key-naming invalid_argument are pinned elsewhere.
+BOOST_AUTO_TEST_CASE(put_config_error_ladder_exact_bodies)
+{
+    ConfigFx f;
+    auto r = request(f.port, http::verb::put, "/api/config", R"({"set":{"nope.key":1}})");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"unknown key 'nope.key'","key":"nope.key"})");
+    r = request(f.port, http::verb::put, "/api/config", R"({"set":{"web.bind":"0.0.0.0"}})");
+    BOOST_TEST(r.status == 403u);
+    BOOST_TEST(r.body == R"({"error":"web.bind is a bootstrap setting and cannot be changed here","key":"web.bind"})");
+    r = request(f.port, http::verb::put, "/api/config", R"({"set":{"web.trail_seconds":"300"}})");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"web.trail_seconds: expected int","key":"web.trail_seconds"})");
+    r = request(f.port, http::verb::put, "/api/config", "[]");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+
+    ConfigFx p(nullptr, {"filters.min_elevation_deg=2"});
+    r = request(p.port, http::verb::put, "/api/config", R"({"set":{"filters.min_elevation_deg":3}})");
+    BOOST_TEST(r.status == 409u);
+    BOOST_TEST(r.body == R"({"error":"filters.min_elevation_deg is set by --set and cannot be changed here","key":"filters.min_elevation_deg","source":"set"})");
+}
+
+BOOST_AUTO_TEST_CASE(filters_and_lists_empty_array_body_today)
+{
+    ConfigFx f;
+    const auto before = request(f.port, http::verb::get, "/api/filters").body;
+    auto r = request(f.port, http::verb::put, "/api/filters", "[]");
+    BOOST_TEST(r.status == 200u, r.body);
+    BOOST_TEST(r.body == before);
+    const auto lists = request(f.port, http::verb::get, "/api/lists").body;
+    r = request(f.port, http::verb::post, "/api/lists/allow", "[]");
+    BOOST_TEST(r.status == 200u, r.body);
+    BOOST_TEST(r.body == lists);
+    r = request(f.port, http::verb::post, "/api/lists/block", "[]");
+    BOOST_TEST(r.status == 200u, r.body);
+    BOOST_TEST(r.body == lists);
+}
+
 BOOST_AUTO_TEST_CASE(api_config_dotted_keys_and_sources)
 {
     // One key from each source: conf, overrides, env, --set, flag, runtime, and a default.

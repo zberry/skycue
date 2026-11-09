@@ -16,6 +16,7 @@
 #include <boost/beast/websocket.hpp>
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 
 using namespace enginetest;
@@ -546,6 +547,44 @@ BOOST_AUTO_TEST_CASE(delete_output_with_backlogged_consumer_204_others_flow)
     // The freed port can be bound again at once.
     BOOST_TEST(f.call("POST", "/api/outputs", beastOut("slow", slow_port)).status == 201u);
     BOOST_TEST(eventually([&] { return stateText(f.get("/api/outputs").body, "slow", "up") == "true"; }));
+}
+
+BOOST_AUTO_TEST_CASE(outputs_error_ladder_status_and_exact_body)
+{
+    Fx f;
+    auto r = f.call("POST", "/api/outputs", "not json");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+    r = f.call("DELETE", "/api/outputs/cue-tcp");
+    BOOST_TEST(r.status == 403u);
+    BOOST_TEST(r.body == R"({"error":"output 'cue-tcp' is built in: it can only be enabled or disabled"})");
+    r = f.call("DELETE", "/api/outputs/nope");
+    BOOST_TEST(r.status == 404u);
+    BOOST_TEST(r.body == R"({"error":"no output 'nope'"})");
+    BOOST_TEST(f.call("POST", "/api/outputs", beastOut("bo", freeTcpPort())).status == 201u);
+    r = f.call("POST", "/api/outputs", beastOut("bo", freeTcpPort()));
+    BOOST_TEST(r.status == 409u);
+    BOOST_TEST(r.body == R"({"error":"output 'bo' already exists"})");
+
+    if (::geteuid() == 0)
+        return;  // root writes through a read-only directory
+    ::chmod(f.tmp.path.c_str(), 0500);
+    const auto w = f.call("POST", "/api/outputs", beastOut("bp", freeTcpPort()));
+    ::chmod(f.tmp.path.c_str(), 0700);
+    BOOST_TEST(w.status == 500u, w.body);
+    BOOST_TEST(w.body.rfind("{\"error\":\"", 0) == 0u, w.body);
+    BOOST_TEST(w.body.find(f.inputs_file) != std::string::npos, w.body);
+    BOOST_TEST(w.body.find("Permission denied") != std::string::npos, w.body);
+}
+
+BOOST_AUTO_TEST_CASE(outputs_empty_array_body_today)
+{
+    Fx f;
+    BOOST_TEST(f.call("POST", "/api/outputs", beastOut("bo", freeTcpPort())).status == 201u);
+    BOOST_TEST(f.call("POST", "/api/outputs/bo/disable", "[]").status == 200u);
+    const auto r = f.call("PUT", "/api/outputs/bo", "[]");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
 }
 
 BOOST_AUTO_TEST_CASE(cues_clients_json_has_output_field)

@@ -15,6 +15,9 @@
 #include <map>
 #include <tuple>
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 using namespace enginetest;
 using skycued::Decision;
 using skycued::EngineEvent;
@@ -690,6 +693,70 @@ BOOST_AUTO_TEST_CASE(inputs_post_duplicate_409)
     BOOST_TEST(r.status == 409u, r.body);
     // A built-in's id is reserved: a user input cannot take it.
     BOOST_TEST(a.call("POST", "/api/inputs", psJson("readsb", freeUdpPort())).status == 400u);
+}
+
+// 400, 403, 404, 409 and 500 of handleInputsApi, each with its whole body.
+BOOST_AUTO_TEST_CASE(inputs_error_ladder_status_and_exact_body)
+{
+    ApiFx a;
+    auto r = a.call("POST", "/api/inputs", "not json");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+    r = a.call("DELETE", "/api/inputs/readsb", "");
+    BOOST_TEST(r.status == 403u);
+    BOOST_TEST(r.body == R"({"error":"input 'readsb' is built in: it can only be enabled or disabled"})");
+    r = a.call("DELETE", "/api/inputs/nope", "");
+    BOOST_TEST(r.status == 404u);
+    BOOST_TEST(r.body == R"({"error":"no input 'nope'"})");
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    r = a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort()));
+    BOOST_TEST(r.status == 409u);
+    BOOST_TEST(r.body == R"({"error":"input 'ps-a' already exists"})");
+
+    if (::geteuid() == 0)
+        return;  // root writes through a read-only directory
+    ::chmod(a.tmp.path.c_str(), 0500);
+    const auto w = a.call("POST", "/api/inputs", psJson("ps-b", freeUdpPort()));
+    ::chmod(a.tmp.path.c_str(), 0700);
+    BOOST_TEST(w.status == 500u, w.body);
+    BOOST_TEST(w.body.rfind("{\"error\":\"", 0) == 0u, w.body);
+    BOOST_TEST(w.body.find(a.inputs_file) != std::string::npos, w.body);
+    BOOST_TEST(w.body.find("Permission denied") != std::string::npos, w.body);
+}
+
+// An empty array reads as an empty object on the action routes, but not on PUT.
+BOOST_AUTO_TEST_CASE(inputs_empty_array_body_today)
+{
+    ApiFx a;
+    BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
+    BOOST_TEST(a.call("POST", "/api/inputs/ps-a/disable", "[]").status == 200u);
+    const auto r = a.call("PUT", "/api/inputs/ps-a", "[]");
+    BOOST_TEST(r.status == 400u);
+    BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+}
+
+// The Allow text of each 405 the web_*.cpp routes produce.
+BOOST_AUTO_TEST_CASE(method_not_allowed_allow_texts)
+{
+    ApiFx a;
+    const std::vector<std::pair<std::string, std::string>> cases{
+        {"/api/filters", "GET, PUT"},
+        {"/api/config", "GET, PUT"},
+        {"/api/state", "GET"},
+        {"/api/stats", "GET"},
+        {"/api/lists", "GET"},
+        {"/api/restart", "POST"},
+        {"/api/lists/allow", "POST"},
+        {"/api/filters/save-baseline", "POST"},
+        {"/api/stats/reset", "POST"},
+        {"/api/inputs", "GET, POST"},
+        {"/api/outputs", "GET, POST"},
+    };
+    for (const auto& c : cases) {
+        const auto r = a.call("PATCH", c.first, "");
+        BOOST_TEST(r.status == 405u, c.first);
+        BOOST_TEST(r.allow == c.second, c.first);
+    }
 }
 
 BOOST_AUTO_TEST_CASE(inputs_post_port_clash_400)

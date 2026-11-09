@@ -2160,6 +2160,16 @@ testAsync('latest applies only the newest response', async () => {
   assert.deepStrictEqual(applied, ['second']);
 });
 
+test('formDefinition reads checkboxes, trims, converts numeric fields and leaves empty ones out', () => {
+  const elements = { type: { value: 'readsb' }, name: { value: ' Kitchen ' }, port: { value: ' 30005 ' },
+    host: { value: '' }, enabled: { type: 'checkbox', checked: true } };
+  assert.deepStrictEqual(P.formDefinition(elements, ['name', 'port', 'host', 'enabled'], { port: true }),
+    { name: ' Kitchen ', port: 30005, enabled: true });
+});
+test('formDefinition on an empty field list is {}', () => {
+  assert.deepStrictEqual(P.formDefinition({ a: { value: 'x' } }, [], {}), {});
+});
+
 testAsync('quietly swallows a rejection and resolves', async () => {
   assert.strictEqual(await P.quietly(Promise.reject(new Error('x'))), undefined);
   assert.strictEqual(await P.quietly(Promise.resolve(5)), 5);

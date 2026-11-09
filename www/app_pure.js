@@ -2236,6 +2236,23 @@
 
   // The policy for a background poll: a failure is ignored.
   function quietly(promise) { return promise.catch(function () {}); }
+  // The definition a form holds: elements maps a field name to {type, value,
+  // checked}, fields names the ones to read, numericFields {name: true} the
+  // ones sent as numbers. A checkbox is a boolean; any other field is its
+  // trimmed value ('name' as typed) and is left out when empty.
+  function formDefinition(elements, fields, numericFields) {
+    var def = {};
+    fields.forEach(function (f) {
+      var e = elements[f];
+      if (e.type === 'checkbox') {
+        def[f] = e.checked;
+        return;
+      }
+      var v = f === 'name' ? e.value : e.value.trim();
+      if (v !== '') def[f] = numericFields[f] ? Number(v) : v;
+    });
+    return def;
+  }
 
   // The done/failed pair of a button action: report the outcome, refresh on success.
   function act(report, refresh) {
@@ -2314,7 +2331,7 @@
     altitudeLegend: altitudeLegend, altitudeRuns: altitudeRuns,
     TRAIL_MAX_KT: TRAIL_MAX_KT, TRAIL_BACKSTEP_S: TRAIL_BACKSTEP_S, trailStep: trailStep,
     rulerMeasure: rulerMeasure, rulerLabel: rulerLabel,
-    isoClock: isoClock, latest: latest, quietly: quietly, act: act
+    isoClock: isoClock, latest: latest, quietly: quietly, act: act, formDefinition: formDefinition
   };
   root.skycuePure = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

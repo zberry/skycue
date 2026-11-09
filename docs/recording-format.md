@@ -195,6 +195,22 @@ lines above).
 | `alt_baro_age_s` | number | seconds from the barometric altitude's measurement to `time`, one decimal (JSONL only; omitted when absent or 0: measured on arrival). A carried 1090 value is older than the frame that carries it |
 | `alt_geom_age_s` | number | the same for `alt_geom_ft` (JSONL only; omitted when absent or 0) |
 | `geom_minus_baro_age_s` | number | the same for `geom_minus_baro_ft` (JSONL only; omitted when absent or 0). A replay restores the three times from these ages, so the altitude estimates come out as they did live |
+| `heading_mag_deg` | number | magnetic heading, degrees (Comm-B BDS 6,0) (JSONL only) |
+| `heading_true_deg` | number | true heading, degrees (TC 19 subtype 3 or 4, Comm-B) (JSONL only) |
+| `ias_kt` | integer | indicated airspeed, knots (JSONL only) |
+| `tas_kt` | number | true airspeed, knots (JSONL only) |
+| `mach` | number | Mach number (JSONL only) |
+| `roll_deg` | number | roll angle, degrees, positive right wing down (BDS 5,0) (JSONL only) |
+| `track_rate_dps` | number | rate of change of track, degrees per second (BDS 5,0) (JSONL only) |
+| `sel_alt_ft` | integer | selected altitude, feet, from the MCP/FCU (BDS 4,0 or TC 29) (JSONL only) |
+| `sel_alt_fms_ft` | integer | selected altitude from the FMS, feet (BDS 4,0) (JSONL only) |
+| `qnh_mb` | number | barometric pressure setting, millibars (JSONL only) |
+| `sel_heading_deg` | number | selected heading, degrees (JSONL only) |
+| `nav_modes` | array of strings | active autopilot modes, any of `autopilot`, `vnav`, `althold`, `approach`, `lnav`, `tcas` (JSONL only) |
+| `acas_sl` | integer | ACAS sensitivity level reported by the aircraft (DF 0 and DF 16) (JSONL only) |
+| `acas_ri` | integer | ACAS reply information (DF 0 and DF 16) (JSONL only) |
+| `acas_ra` | object | ACAS resolution advisory: `active`, `ara` (14-bit field), `rac` (4 bits), `rat`, `mte`, `text`, and `threat` (`type` `address` with `address`, or `position` with `alt_ft`, `range_nm`, `bearing_deg`; absent when no threat identity) (JSONL only) |
+| `acas_ra_age_s` | number | seconds from the advisory's receipt to `time`, one decimal (omitted when 0), so a replay reproduces its 30 s lifecycle (JSONL only) |
 | `raw` | string | the original input line (JSONL only): the readsb JSON line; for a pingStation JSON input the datagram text, on the first observation of a datagram only (a `{"aircraft":[...]}` datagram with several aircraft is recorded once, the other observations have no `raw`); for a CAT021 input `cat021:` and the record's bytes as hex |
 | `rebroadcast` | boolean | a rebroadcast copy (TIS-B, ADS-R); present only when true (JSONL only) |
 | `input` | string | id of the input that produced the observation; absent when not known |

@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "engine.hpp"
 #include "json_lite.hpp"
+#include "observation_json.hpp"
 #include "recorder.hpp"
 #include "runtime_config.hpp"
 #include "time_util.hpp"
@@ -200,6 +201,27 @@ void putGeom(JsonWriter& w, const GeomResult& g)
     }
 }
 
+void putCommB(JsonWriter& w, const CommBFields& c)
+{
+    addOpt(w, "heading_mag_deg", c.heading_mag_deg);
+    addOpt(w, "heading_true_deg", c.heading_true_deg);
+    addOpt(w, "ias_kt", c.ias_kt);
+    addOpt(w, "tas_kt", c.tas_kt);
+    addOpt(w, "mach", c.mach);
+    addOpt(w, "roll_deg", c.roll_deg);
+    addOpt(w, "track_rate_dps", c.track_rate_dps);
+    addOpt(w, "sel_alt_ft", c.sel_alt_ft);
+    addOpt(w, "sel_alt_fms_ft", c.sel_alt_fms_ft);
+    addOpt(w, "qnh_mb", c.qnh_mb);
+    addOpt(w, "sel_heading_deg", c.sel_heading_deg);
+    if (c.nav_modes)
+        w.addRaw("nav_modes", navModesJson(*c.nav_modes));
+    addOpt(w, "acas_sl", c.acas_sl);
+    addOpt(w, "acas_ri", c.acas_ri);
+    if (c.acas_ra)
+        w.addRaw("acas_ra", acasRaJson(*c.acas_ra));
+}
+
 void putTrack(JsonWriter& w, const TrackSnapshot& ts)
 {
     const skycue::Track& t = ts.track;
@@ -231,6 +253,7 @@ void putTrack(JsonWriter& w, const TrackSnapshot& ts)
     addOpt(w, "emergency", ts.emergency);
     addOpt(w, "category", ts.category);
     addFinite(w, "rssi", ts.rssi);
+    putCommB(w, ts.commb);
     if (!ts.input.empty())
         w.add("input", ts.input);
 }

@@ -36,7 +36,7 @@ struct FisbEvent;
 namespace recording {
 // One present value of a record (absent optionals produce no Field).
 struct Field {
-    enum class Kind { text, integer, real, real_float, boolean };
+    enum class Kind { text, integer, real, real_float, boolean, raw_json };  // raw_json: text is a JSON value
     const char* key = "";
     Kind kind = Kind::text;
     std::string text;

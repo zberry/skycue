@@ -941,6 +941,7 @@ TrackSnapshot Engine::trackSnapshot(const GeomView& view, const FilterResult& re
     t.category = state.latest.category;
     t.rssi = state.latest.rssi.value_or(std::numeric_limits<double>::quiet_NaN());
     t.input = state.last_input;
+    t.commb = state.latest;  // slices to the CommBFields part
     return t;
 }
 

@@ -11,9 +11,45 @@
 
 namespace skycued {
 
+// An ACAS resolution advisory as a decoded DF16 or TC28 reported it.
+struct AcasRaState {
+    bool active = false;
+    uint16_t ara = 0;  // 14 bits, 0x2000 is bit 1 of the field
+    uint8_t rac = 0;
+    bool rat = false, mte = false;
+    uint8_t tti = 0;  // 0 none, 1 threat by address, 2 threat by altitude, range and bearing
+    std::optional<uint32_t> threat_address;
+    std::optional<int32_t> threat_alt_ft;
+    std::optional<float> threat_range_nm, threat_bearing_deg;
+    std::string text;
+    std::chrono::system_clock::time_point at{};  // when the advisory was received
+};
+
+// Nav mode bits of `nav_modes`.
+enum NavModeBit : uint8_t {
+    kNavAutopilot = 1u << 0,
+    kNavVnav = 1u << 1,
+    kNavAltHold = 1u << 2,
+    kNavApproach = 1u << 3,
+    kNavLnav = 1u << 4,
+    kNavTcas = 1u << 5,
+};
+
+// Comm-B (BDS 4,0 / 5,0 / 6,0), target-state and ACAS fields of an observation. A
+// separate struct so the Engine can pass them to a snapshot without the raw line.
+struct CommBFields {
+    std::optional<float> heading_mag_deg, heading_true_deg, tas_kt, mach, roll_deg, track_rate_dps, qnh_mb,
+        sel_heading_deg;
+    std::optional<uint16_t> ias_kt;
+    std::optional<int32_t> sel_alt_ft, sel_alt_fms_ft;
+    std::optional<uint8_t> nav_modes;  // NavModeBit mask
+    std::optional<AcasRaState> acas_ra;
+    std::optional<uint8_t> acas_sl, acas_ri;  // DF0/DF16 sensitivity level, reply information
+};
+
 // One report about one aircraft from a source (a readsb or dump978 line),
 // before filtering and rate limiting turn it into a skycue::Track.
-struct TrackObservation {
+struct TrackObservation : CommBFields {
     skycue::TrackId id;
     skycue::Source source{skycue::Source::other};
     std::chrono::system_clock::time_point received_time{};               // readsb "now"

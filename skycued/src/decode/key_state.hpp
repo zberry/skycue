@@ -15,6 +15,7 @@
 #include <skycue/types.hpp>
 
 #include "decode/cpr.hpp"
+#include "observation.hpp"
 
 namespace skycued::decode {
 
@@ -98,6 +99,12 @@ struct KeyState {
     Timed<float> gs, track, baro_rate, geom_rate;
     Timed<uint8_t> nic, nac_p;
     Timed<bool> on_ground;
+    // Comm-B, target-state and ACAS fields (see CommBFields).
+    Timed<float> heading_mag, heading_true, tas, mach, roll, track_rate, qnh, sel_heading;
+    Timed<uint16_t> ias;
+    Timed<int32_t> sel_alt, sel_alt_fms;
+    Timed<uint8_t> nav_modes, acas_sl, acas_ri;
+    Timed<AcasRaState> acas_ra;
 
     // TC31 (kept for the key's life, applied to later position messages).
     struct Tc31 {

@@ -81,6 +81,21 @@ TrackState& TrackTable::apply(const TrackObservation& obs)
     mergeField(l.nic, obs.nic);
     mergeField(l.nac_p, obs.nac_p);
     mergeField(l.rssi, obs.rssi);
+    mergeField(l.heading_mag_deg, obs.heading_mag_deg);
+    mergeField(l.heading_true_deg, obs.heading_true_deg);
+    mergeField(l.ias_kt, obs.ias_kt);
+    mergeField(l.tas_kt, obs.tas_kt);
+    mergeField(l.mach, obs.mach);
+    mergeField(l.roll_deg, obs.roll_deg);
+    mergeField(l.track_rate_dps, obs.track_rate_dps);
+    mergeField(l.sel_alt_ft, obs.sel_alt_ft);
+    mergeField(l.sel_alt_fms_ft, obs.sel_alt_fms_ft);
+    mergeField(l.qnh_mb, obs.qnh_mb);
+    mergeField(l.sel_heading_deg, obs.sel_heading_deg);
+    mergeField(l.nav_modes, obs.nav_modes);
+    mergeField(l.acas_sl, obs.acas_sl);
+    mergeField(l.acas_ri, obs.acas_ri);
+    mergeField(l.acas_ra, obs.acas_ra);  // replaced whole
 
     s.last_seen = obs.received_time;
     return s;

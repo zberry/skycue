@@ -1214,3 +1214,127 @@ BOOST_AUTO_TEST_CASE(replay_loop_shift_uses_full_time_range)
     BOOST_TEST((got[5].received_time == t0 + 11s));
     BOOST_TEST((got[5].received_time > got[3].received_time));
 }
+
+namespace {
+TrackObservation phase6Observation()
+{
+    auto o = minimalObservation(sys_clock::now());
+    o.heading_mag_deg = 91.5f;
+    o.heading_true_deg = 93.25f;
+    o.ias_kt = 250;
+    o.tas_kt = 310.5f;
+    o.mach = 0.78f;
+    o.roll_deg = -12.5f;
+    o.track_rate_dps = 1.5f;
+    o.sel_alt_ft = 35000;
+    o.sel_alt_fms_ft = 34000;
+    o.qnh_mb = 1013.6f;
+    o.sel_heading_deg = 270.0f;
+    o.nav_modes = 0x15;  // autopilot, althold, lnav
+    o.acas_sl = 4;
+    o.acas_ri = 3;
+    skycued::AcasRaState ra;
+    ra.active = true;
+    ra.ara = 0x2000;
+    ra.rac = 0x5;
+    ra.rat = true;
+    ra.mte = false;
+    ra.tti = 1;
+    ra.threat_address = 0xa1b2c3;
+    ra.text = "climb";
+    ra.at = o.received_time - 4500ms;
+    o.acas_ra = ra;
+    return o;
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(recorder_jsonl_phase6_keys)
+{
+    TempDir tmp;
+    const auto obs = phase6Observation();
+    const auto lines = readLines(recordObservations(tmp.path, {obs}));
+    BOOST_REQUIRE(lines.size() == 1u);
+    auto j = skycued::JsonObject::parse(lines[0]);
+    BOOST_REQUIRE(j);
+    BOOST_TEST(*j->getDouble("heading_mag_deg") == 91.5);
+    BOOST_TEST(*j->getDouble("heading_true_deg") == 93.25);
+    BOOST_TEST(*j->getInt("ias_kt") == 250);
+    BOOST_TEST(*j->getDouble("tas_kt") == 310.5);
+    BOOST_TEST(*j->getDouble("mach") > 0.77);
+    BOOST_TEST(*j->getDouble("roll_deg") == -12.5);
+    BOOST_TEST(*j->getDouble("track_rate_dps") == 1.5);
+    BOOST_TEST(*j->getInt("sel_alt_ft") == 35000);
+    BOOST_TEST(*j->getInt("sel_alt_fms_ft") == 34000);
+    BOOST_TEST(*j->getDouble("sel_heading_deg") == 270.0);
+    BOOST_TEST(*j->getInt("acas_sl") == 4);
+    BOOST_TEST(*j->getInt("acas_ri") == 3);
+    auto modes = j->getStringArray("nav_modes");
+    BOOST_REQUIRE(modes);
+    BOOST_TEST((*modes == std::vector<std::string>{"autopilot", "althold", "lnav"}), "modes");
+    auto ra = j->getObject("acas_ra");
+    BOOST_REQUIRE(ra);
+    BOOST_TEST(*ra->getBool("active") == true);
+    BOOST_TEST(*ra->getInt("ara") == 0x2000);
+    BOOST_TEST(*ra->getBool("rat") == true);
+    BOOST_TEST(*ra->getString("text") == "climb");
+    auto th = ra->getObject("threat");
+    BOOST_REQUIRE(th);
+    BOOST_TEST(*th->getString("type") == "address");
+    BOOST_TEST(*th->getString("address") == "a1b2c3");
+    BOOST_TEST(*j->getDouble("acas_ra_age_s") == 4.5);
+}
+
+BOOST_AUTO_TEST_CASE(received_jsonl_round_trips_new_fields)
+{
+    TempDir tmp;
+    const auto obs = phase6Observation();
+    const auto lines = readLines(recordObservations(tmp.path, {obs}));
+    BOOST_REQUIRE(lines.size() == 1u);
+    auto j = skycued::JsonObject::parse(lines[0]);
+    BOOST_REQUIRE(j);
+    auto back = skycued::recording::observationFromRecord(*j);
+    BOOST_REQUIRE(back);
+    BOOST_TEST(*back->heading_mag_deg == 91.5f);
+    BOOST_TEST(*back->heading_true_deg == 93.25f);
+    BOOST_TEST(*back->ias_kt == 250);
+    BOOST_TEST(*back->tas_kt == 310.5f);
+    BOOST_TEST(*back->mach == 0.78f);
+    BOOST_TEST(*back->roll_deg == -12.5f);
+    BOOST_TEST(*back->track_rate_dps == 1.5f);
+    BOOST_TEST(*back->sel_alt_ft == 35000);
+    BOOST_TEST(*back->sel_alt_fms_ft == 34000);
+    BOOST_TEST(*back->qnh_mb == 1013.6f);
+    BOOST_TEST(*back->sel_heading_deg == 270.0f);
+    BOOST_TEST(*back->nav_modes == 0x15);
+    BOOST_TEST(*back->acas_sl == 4);
+    BOOST_TEST(*back->acas_ri == 3);
+    BOOST_REQUIRE(back->acas_ra);
+    BOOST_TEST(back->acas_ra->active);
+    BOOST_TEST(back->acas_ra->ara == 0x2000);
+    BOOST_TEST(back->acas_ra->rac == 0x5);
+    BOOST_TEST(back->acas_ra->rat);
+    BOOST_TEST(!back->acas_ra->mte);
+    BOOST_TEST(back->acas_ra->tti == 1);
+    BOOST_TEST(*back->acas_ra->threat_address == 0xa1b2c3u);
+    BOOST_TEST(back->acas_ra->text == "climb");
+    BOOST_TEST(std::chrono::duration<double>(obs.received_time - back->acas_ra->at).count() == 4.5, boost::test_tools::tolerance(0.01));
+
+    // Position-type threat.
+    auto o2 = phase6Observation();
+    o2.acas_ra->tti = 2;
+    o2.acas_ra->threat_address.reset();
+    o2.acas_ra->threat_alt_ft = 12300;
+    o2.acas_ra->threat_range_nm = 3.5f;
+    o2.acas_ra->threat_bearing_deg = 45.0f;
+    TempDir tmp2;
+    auto l2 = readLines(recordObservations(tmp2.path, {o2}));
+    auto j2 = skycued::JsonObject::parse(l2.at(0));
+    BOOST_REQUIRE(j2);
+    BOOST_TEST(*j2->getObject("acas_ra")->getObject("threat")->getString("type") == "position");
+    auto b2 = skycued::recording::observationFromRecord(*j2);
+    BOOST_REQUIRE(b2 && b2->acas_ra);
+    BOOST_TEST(b2->acas_ra->tti == 2);
+    BOOST_TEST(*b2->acas_ra->threat_alt_ft == 12300);
+    BOOST_TEST(*b2->acas_ra->threat_range_nm == 3.5f);
+    BOOST_TEST(*b2->acas_ra->threat_bearing_deg == 45.0f);
+}

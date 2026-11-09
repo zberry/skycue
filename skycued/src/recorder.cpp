@@ -4,6 +4,7 @@
 #include "fisb/fisb_store.hpp"
 
 #include "log.hpp"
+#include "observation_json.hpp"
 #include "retention.hpp"
 #include "rotating_file.hpp"
 #include "time_util.hpp"
@@ -144,6 +145,15 @@ Field floatField(const char* key, float value)
     return f;
 }
 
+Field rawJsonField(const char* key, std::string json)
+{
+    Field f;
+    f.key = key;
+    f.kind = Kind::raw_json;
+    f.text = std::move(json);
+    return f;
+}
+
 Field boolField(const char* key, bool value)
 {
     Field f;
@@ -178,13 +188,13 @@ bool getText(const JsonObject& j, const char* k, Obs& o)
     return true;
 }
 
-template <class Int, std::optional<Int> Obs::*M>
+template <class Int, auto M>  // M: a member pointer to an optional<Int> of Obs or CommBFields
 void putInt(const Obs& o, Record& r, const char* k)
 {
     if (o.*M)
         r.push_back(intField(k, static_cast<int64_t>(*(o.*M))));
 }
-template <class Int, std::optional<Int> Obs::*M>
+template <class Int, auto M>  // M: a member pointer to an optional<Int> of Obs or CommBFields
 bool getInt(const JsonObject& j, const char* k, Obs& o)
 {
     if (!j.has(k))
@@ -197,13 +207,13 @@ bool getInt(const JsonObject& j, const char* k, Obs& o)
     return true;
 }
 
-template <std::optional<float> Obs::*M>
+template <auto M>  // M: a member pointer to an optional<float>
 void putFloat(const Obs& o, Record& r, const char* k)
 {
     if (o.*M)
         r.push_back(floatField(k, *(o.*M)));
 }
-template <std::optional<float> Obs::*M>
+template <auto M>  // M: a member pointer to an optional<float>
 bool getFloat(const JsonObject& j, const char* k, Obs& o)
 {
     if (!j.has(k))
@@ -231,6 +241,63 @@ bool getReal(const JsonObject& j, const char* k, Obs& o)
     if (!v)
         return false;
     o.*M = v;
+    return true;
+}
+
+template <auto M>  // M: a member pointer to an optional<uint8_t>
+void putNavModes(const Obs& o, Record& r, const char* k)
+{
+    if (o.*M)
+        r.push_back(rawJsonField(k, navModesJson(*(o.*M))));
+}
+template <auto M>  // M: a member pointer to an optional<uint8_t>
+bool getNavModes(const JsonObject& j, const char* k, Obs& o)
+{
+    if (!j.has(k))
+        return true;
+    auto v = parseNavModes(j, k);
+    if (!v)
+        return false;
+    o.*M = *v;
+    return true;
+}
+
+void putAcasRa(const Obs& o, Record& r, const char* k)
+{
+    if (o.acas_ra)
+        r.push_back(rawJsonField(k, acasRaJson(*o.acas_ra)));
+}
+bool getAcasRa(const JsonObject& j, const char* k, Obs& o)
+{
+    if (!j.has(k))
+        return true;
+    auto sub = j.getObject(k);
+    auto ra = sub ? parseAcasRa(*sub) : std::nullopt;
+    if (!ra)
+        return false;
+    ra->at = o.received_time;  // acas_ra_age_s, read after this key, moves it back
+    o.acas_ra = std::move(*ra);
+    return true;
+}
+// The advisory's age at arrival (acas_ra_age_s); needs acas_ra read first.
+void putAcasAge(const Obs& o, Record& r, const char* k)
+{
+    if (!o.acas_ra)
+        return;
+    const double s = std::round(std::chrono::duration<double>(o.received_time - o.acas_ra->at).count() * 10.0) / 10.0;
+    if (s != 0.0)
+        r.push_back(realField(k, s));
+}
+bool getAcasAge(const JsonObject& j, const char* k, Obs& o)
+{
+    if (!j.has(k))
+        return true;
+    auto v = j.getDouble(k);
+    if (!v || !std::isfinite(*v) || std::fabs(*v) > 1e7)
+        return false;
+    if (o.acas_ra)
+        o.acas_ra->at = o.received_time - std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                                              std::chrono::duration<double>(*v));
     return true;
 }
 
@@ -413,6 +480,23 @@ const ObsKey kObsKeys[] = {
     {"alt_baro_age_s", false, putAge<&Obs::alt_baro_time>, getAge<&Obs::alt_baro_time>},
     {"alt_geom_age_s", false, putAge<&Obs::alt_geom_time>, getAge<&Obs::alt_geom_time>},
     {"geom_minus_baro_age_s", false, putAge<&Obs::geom_minus_baro_time>, getAge<&Obs::geom_minus_baro_time>},
+    // Comm-B, target-state and ACAS fields (JSONL only; nav_modes and acas_ra are JSON values).
+    {"heading_mag_deg", false, putFloat<&Obs::heading_mag_deg>, getFloat<&Obs::heading_mag_deg>},
+    {"heading_true_deg", false, putFloat<&Obs::heading_true_deg>, getFloat<&Obs::heading_true_deg>},
+    {"ias_kt", false, putInt<uint16_t, &Obs::ias_kt>, getInt<uint16_t, &Obs::ias_kt>},
+    {"tas_kt", false, putFloat<&Obs::tas_kt>, getFloat<&Obs::tas_kt>},
+    {"mach", false, putFloat<&Obs::mach>, getFloat<&Obs::mach>},
+    {"roll_deg", false, putFloat<&Obs::roll_deg>, getFloat<&Obs::roll_deg>},
+    {"track_rate_dps", false, putFloat<&Obs::track_rate_dps>, getFloat<&Obs::track_rate_dps>},
+    {"sel_alt_ft", false, putInt<int32_t, &Obs::sel_alt_ft>, getInt<int32_t, &Obs::sel_alt_ft>},
+    {"sel_alt_fms_ft", false, putInt<int32_t, &Obs::sel_alt_fms_ft>, getInt<int32_t, &Obs::sel_alt_fms_ft>},
+    {"qnh_mb", false, putFloat<&Obs::qnh_mb>, getFloat<&Obs::qnh_mb>},
+    {"sel_heading_deg", false, putFloat<&Obs::sel_heading_deg>, getFloat<&Obs::sel_heading_deg>},
+    {"nav_modes", false, putNavModes<&Obs::nav_modes>, getNavModes<&Obs::nav_modes>},
+    {"acas_sl", false, putInt<uint8_t, &Obs::acas_sl>, getInt<uint8_t, &Obs::acas_sl>},
+    {"acas_ri", false, putInt<uint8_t, &Obs::acas_ri>, getInt<uint8_t, &Obs::acas_ri>},
+    {"acas_ra", false, putAcasRa, getAcasRa},
+    {"acas_ra_age_s", false, putAcasAge, getAcasAge},  // after acas_ra
     {"raw", false, putRaw, getRaw},
     {"rebroadcast", false, putRebroadcast, getRebroadcast},  // JSONL only; absent means false
     {"input", false, putInput, getInput},  // the received CSV's last column (receivedColumns)
@@ -534,7 +618,8 @@ std::string csvEscape(const std::string& s)
 std::string csvValue(const Field& f)
 {
     switch (f.kind) {
-    case Kind::text: return csvEscape(f.text);
+    case Kind::text:
+    case Kind::raw_json: return csvEscape(f.text);
     case Kind::integer: return std::to_string(f.integer);
     case Kind::real: return formatRoundTrip(f.real);
     case Kind::real_float: return formatRoundTrip(f.real_float);
@@ -547,6 +632,7 @@ void addJson(JsonWriter& w, const Field& f)
 {
     switch (f.kind) {
     case Kind::text: w.add(f.key, f.text); break;
+    case Kind::raw_json: w.addRaw(f.key, f.text); break;
     case Kind::integer: w.add(f.key, f.integer); break;
     case Kind::real: w.addExact(f.key, f.real); break;
     case Kind::real_float: w.addExact(f.key, f.real_float); break;

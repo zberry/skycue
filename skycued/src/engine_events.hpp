@@ -7,6 +7,7 @@
 #include "geom_altitude.hpp"
 #include "fisb/fisb_store.hpp"
 #include "inputs/input_types.hpp"
+#include "observation.hpp"
 
 #include <skycue/types.hpp>
 
@@ -106,6 +107,7 @@ struct TrackSnapshot {
     std::optional<std::string> emergency, category;
     double rssi = 0;  // dBFS; NaN when never reported
     std::string input;  // the newest observation's input id; empty when not known
+    CommBFields commb;  // Comm-B, target-state and ACAS fields, as last known
     GeomResult geom;    // reported or estimated geometric altitude; track.alt_geom_ft is its value
 };
 

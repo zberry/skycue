@@ -275,3 +275,39 @@ BOOST_AUTO_TEST_CASE(altitude_times_follow_the_carried_value)
     BOOST_CHECK(s->alt_baro_at == kT0 + 10s);
     BOOST_CHECK(s->alt_geom_at == kT0);
 }
+
+BOOST_AUTO_TEST_CASE(track_table_merges_phase6_fields)
+{
+    TrackTable table;
+    auto a = obs(0x000001, kT0, true);
+    a.heading_mag_deg = 90.0f;
+    a.ias_kt = 250;
+    a.nav_modes = 0x05;
+    a.sel_alt_ft = 35000;
+    skycued::AcasRaState ra1;
+    ra1.active = true;
+    ra1.ara = 0x2000;
+    ra1.text = "climb";
+    ra1.at = kT0;
+    a.acas_ra = ra1;
+    table.apply(a);
+
+    auto b = obs(0x000001, kT0 + 2s, true);
+    b.mach = 0.78f;
+    skycued::AcasRaState ra2;
+    ra2.active = false;
+    ra2.text = "clear of conflict";
+    ra2.at = kT0 + 2s;
+    b.acas_ra = ra2;
+    auto& s = table.apply(b);
+
+    BOOST_REQUIRE(s.latest.heading_mag_deg);
+    BOOST_TEST(*s.latest.heading_mag_deg == 90.0f);
+    BOOST_TEST(*s.latest.ias_kt == 250);
+    BOOST_TEST(*s.latest.nav_modes == 0x05);
+    BOOST_TEST(*s.latest.sel_alt_ft == 35000);
+    BOOST_TEST(*s.latest.mach == 0.78f);
+    BOOST_REQUIRE(s.latest.acas_ra);
+    BOOST_TEST(!s.latest.acas_ra->active);
+    BOOST_TEST(s.latest.acas_ra->text == "clear of conflict");
+}

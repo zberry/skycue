@@ -2549,3 +2549,44 @@ BOOST_AUTO_TEST_CASE(check_inputs_with_replay_is_usage_error)
     const pid_t pid = spawnSkycued({"--config", conf, "--check-inputs", "--replay", kFixture}, log);
     BOOST_TEST(waitExit(pid, 10s) == 2);
 }
+
+BOOST_AUTO_TEST_CASE(api_track_phase6_fields)
+{
+    WebFx f;
+    f.fx->t.call([&] {
+        f.src->connection(true);
+        auto o = nearbyObservation(0xa1b2c3, 0);
+        o.ias_kt = 250;
+        o.heading_mag_deg = 91.5f;
+        o.nav_modes = 0x03;
+        o.acas_sl = 4;
+        skycued::AcasRaState ra;
+        ra.active = true;
+        ra.tti = 2;
+        ra.threat_alt_ft = 12300;
+        ra.threat_range_nm = 3.5f;
+        ra.text = "climb";
+        ra.at = o.received_time;
+        o.acas_ra = ra;
+        f.src->emit(o);
+    });
+    const pt::ptree s = parseJson(get(f.port, "/api/state").body);
+    const auto& t = s.get_child("tracks").front().second;
+    BOOST_TEST(t.get<int>("ias_kt") == 250);
+    BOOST_TEST(t.get<double>("heading_mag_deg") == 91.5);
+    BOOST_TEST(t.get<int>("acas_sl") == 4);
+    BOOST_TEST(t.get_child("nav_modes").size() == 2u);
+    BOOST_TEST(t.get_child("nav_modes").front().second.data() == "autopilot");
+    BOOST_TEST(t.get<std::string>("acas_ra.text") == "climb");
+    BOOST_TEST(t.get<bool>("acas_ra.active") == true);
+    BOOST_TEST(t.get<std::string>("acas_ra.threat.type") == "position");
+    BOOST_TEST(t.get<int>("acas_ra.threat.alt_ft") == 12300);
+}
+
+BOOST_AUTO_TEST_CASE(track_json_phase6_absent_has_no_keys)
+{
+    auto ts = geomSnapshot();
+    const std::string body = skycued::webapi::trackJson(ts);
+    for (const char* k : {"ias_kt", "nav_modes", "acas_ra", "mach", "qnh_mb"})
+        BOOST_TEST(body.find(std::string("\"") + k + "\"") == std::string::npos, k);
+}

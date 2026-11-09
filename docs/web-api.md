@@ -484,6 +484,9 @@ A track object:
 | `alt_geom_age_s` | age of the data the geometric altitude rests on, seconds, one decimal, never negative |
 | `geom_minus_baro_ft` | geometric minus barometric altitude, feet, signed; present with `alt_geom_source`, also on a reported track, when the difference is known |
 | `callsign`, `squawk`, `registration`, `nic`, `nac_p` | when known |
+| `heading_mag_deg`, `heading_true_deg`, `ias_kt`, `tas_kt`, `mach`, `roll_deg`, `track_rate_dps`, `sel_alt_ft`, `sel_alt_fms_ft`, `qnh_mb`, `sel_heading_deg`, `acas_sl`, `acas_ri` | Comm-B, target-state and ACAS values from 1090 decoding, when known (numbers; feet, knots, degrees, millibars) |
+| `nav_modes` | array of the active autopilot modes: `autopilot`, `vnav`, `althold`, `approach`, `lnav`, `tcas` |
+| `acas_ra` | the last ACAS resolution advisory: `{"active","ara","rac","rat","mte","text","threat"}`; `threat` is `{"type":"address","address"}` or `{"type":"position","alt_ft","range_nm","bearing_deg"}` and is left out when the advisory names no threat |
 | `on_ground`, `alt_is_geom` | booleans |
 | `range_nm`, `elevation_deg` | from the receiver; left out when they cannot be computed |
 | `decision` | `send`, `allow_listed`, `blocked`, `out_of_range`, `below_elevation`, `no_position`: what the filters decide now |

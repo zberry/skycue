@@ -608,6 +608,7 @@
   // A ring of counter snapshots {t (ms), stats, inputs, clients, files[, outputs]}
   // -> per-second rates -> Sankey nodes, links and tags.
   var FLOW_KEEP = 12;
+  var FLOW_PERIOD_MS = 5000;  // the view's refresh period; a longer gap starts a new window
   var FLOW_COUNTERS = ['observations', 'sent_updates', 'sent_drops', 'drops_blocked', 'drops_out_of_range',
     'drops_below_elevation', 'drops_no_position'];
   var FLOW_GAP = 30;          // nodeGap, px
@@ -620,9 +621,11 @@
   function flowWindow() { return { samples: [] }; }
 
   // Append a snapshot, keep the last 12. A counter below the previous sample's
-  // (skycued restarted) replaces the window with the snapshot alone.
+  // (skycued restarted), or a gap of over two refresh periods since it (the
+  // page was paused), replaces the window with the snapshot alone.
   function flowPush(win, snap) {
     var prev = win.samples.length ? win.samples[win.samples.length - 1] : null;
+    if (prev && snap.t - prev.t > 2 * FLOW_PERIOD_MS) { win.samples = []; prev = null; }
     if (prev) {
       for (var i = 0; i < FLOW_COUNTERS.length; i++) {
         var k = FLOW_COUNTERS[i];
@@ -636,7 +639,7 @@
 
   function inputCounters(row) {
     var frames = num(row.frames), msgs = num(row.messages);
-    return { msg: Math.max(frames, msgs), rejected: num(row.rejected) + num(row.crc_fail), uplinks: num(row.uplinks) };
+    return { msg: Math.max(frames, msgs), rejected: num(row.rejected) + num(row.crc_fail) + num(row.raw_duplicates), uplinks: num(row.uplinks) };
   }
   function byId(list) {
     var m = {};
@@ -659,39 +662,62 @@
     if (!(span > 0)) return null;
     var d = function (x, y) { return Math.max(0, num(x) - num(y)) / span; };
     var sa = a.stats || {}, sb = b.stats || {};
-    var oldIn = byId(sa.inputs);
-    var r = { span_s: span, inputs: {}, decoder: { in_s: 0, rejected_s: 0 }, tracks_s: 0, decisions: {}, cues_s: 0, clients: [], files: [] };
+    // Each key's delta runs from the oldest sample that holds that key, so a
+    // newcomer shows its own rate, not a lifetime over the window; a key only
+    // the newest sample holds has no rate yet.
+    var dk = function (x, y, base) {
+      var sp = (b.t - base.t) / 1000;
+      return sp > 0 ? Math.max(0, num(x) - num(y)) / sp : 0;
+    };
+    var firstIn = function (find) {
+      for (var k = 0; k < s.length - 1; k++) { var f = find(s[k]); if (f) return { t: s[k].t, row: f }; }
+      return null;
+    };
+    var r = { span_s: span, inputs: {}, decoder: { in_s: 0, rejected_s: 0 }, tracks_s: 0, decisions: {}, decisionTracks: {},
+      decisionDropsPerMin: {}, cues_s: 0, clients: [], files: [] };
     (sb.inputs || []).forEach(function (row) {
-      var nc = inputCounters(row), oc = oldIn[row.id] ? inputCounters(oldIn[row.id]) : nc;
-      var o = { msg_s: d(nc.msg, oc.msg), rejected_s: d(nc.rejected, oc.rejected), uplinks_s: d(nc.uplinks, oc.uplinks) };
+      var base = firstIn(function (x) { return byId(x.stats && x.stats.inputs)[row.id]; });
+      var nc = inputCounters(row), oc = base ? inputCounters(base.row) : nc, bt = base || { t: b.t };
+      var o = { msg_s: dk(nc.msg, oc.msg, bt), rejected_s: dk(nc.rejected, oc.rejected, bt), uplinks_s: dk(nc.uplinks, oc.uplinks, bt) };
       r.inputs[row.id] = o;
       r.decoder.in_s += o.msg_s;
       r.decoder.rejected_s += o.rejected_s;
     });
     r.tracks_s = Math.max(0, r.decoder.in_s - r.decoder.rejected_s);
-    var dec = {
-      range: d(sb.drops_out_of_range, sa.drops_out_of_range), elev: d(sb.drops_below_elevation, sa.drops_below_elevation),
-      blocked: d(sb.drops_blocked, sa.drops_blocked), nopos: d(sb.drops_no_position, sa.drops_no_position)
+    // Drops are per-track events, not per-message: the decision bands are
+    // an estimate, tracks_s split by the tracks now under each decision.
+    var bd = (b.summary && b.summary.counts && b.summary.counts.by_decision) || {};
+    var tr = { sent: num(bd.send) + num(bd.allow_listed), range: num(bd.out_of_range), elev: num(bd.below_elevation),
+      blocked: num(bd.blocked), nopos: num(bd.no_position) };
+    var tot = tr.sent + tr.range + tr.elev + tr.blocked + tr.nopos;
+    ['sent', 'range', 'elev', 'blocked', 'nopos'].forEach(function (k) {
+      r.decisionTracks[k] = tr[k];
+      r.decisions[k] = tot > 0 ? (r.tracks_s * tr[k]) / tot : 0;
+    });
+    r.decisionDropsPerMin = {
+      range: d(sb.drops_out_of_range, sa.drops_out_of_range) * 60, elev: d(sb.drops_below_elevation, sa.drops_below_elevation) * 60,
+      blocked: d(sb.drops_blocked, sa.drops_blocked) * 60, nopos: d(sb.drops_no_position, sa.drops_no_position) * 60
     };
-    dec.sent = Math.max(0, r.tracks_s - (dec.range + dec.elev + dec.blocked + dec.nopos));
-    r.decisions = { sent: dec.sent, range: dec.range, elev: dec.elev, blocked: dec.blocked, nopos: dec.nopos };
     r.cues_s = d(num(sb.sent_updates) + num(sb.sent_drops), num(sa.sent_updates) + num(sa.sent_drops));
-    var old = {};
-    clientList(a.clients).forEach(function (c) { old[c.key] = c.row; });
     clientList(b.clients).forEach(function (c) {
-      var o = old[c.key] || {}, e = { key: c.key, kind: c.kind, endpoint: c.row.endpoint };
+      var base = firstIn(function (x) {
+        var l = clientList(x.clients).filter(function (y) { return y.key === c.key; })[0];
+        return l ? l.row : null;
+      });
+      var o = base ? base.row : {}, bt = base || { t: b.t };
+      var e = { key: c.key, kind: c.kind, endpoint: c.row.endpoint };
       if (c.kind === 'tcp') {
         e.direction = c.row.direction;
-        e.per_min_bytes = d(c.row.bytes_sent, o.bytes_sent) * 60;
+        e.per_min_bytes = dk(c.row.bytes_sent, o.bytes_sent, bt) * 60;
       } else {
-        e.per_s_datagrams = d(c.row.datagrams_sent, o.datagrams_sent);
+        e.per_s_datagrams = dk(c.row.datagrams_sent, o.datagrams_sent, bt);
       }
       r.clients.push(e);
     });
-    var oldF = {};
-    (a.files || []).forEach(function (f) { oldF[f.name] = f; });
     (b.files || []).forEach(function (f) {
-      r.files.push({ name: f.name, stream: f.stream, bytes: num(f.bytes), bytes_per_s: oldF[f.name] ? d(f.bytes, oldF[f.name].bytes) : 0 });
+      var base = firstIn(function (x) { return (x.files || []).filter(function (y) { return y.name === f.name; })[0]; });
+      r.files.push({ name: f.name, stream: f.stream, bytes: num(f.bytes),
+        bytes_per_s: base ? dk(f.bytes, base.row.bytes, base) : 0 });
     });
     return r;
   }
@@ -722,7 +748,7 @@
   }
   function rateText(v, unit) {
     var t = v >= 10 ? String(Math.round(v)).replace(/\B(?=(\d{3})+$)/g, ',') : String(Math.round(v * 10) / 10);
-    return t + ' ' + unit;
+    return t + (unit.charAt(0) === '/' ? '' : ' ') + unit;
   }
   function isUat(inp) { return /uat|978/i.test(String(inp.type || '') + ' ' + String(inp.id || '')); }
 
@@ -775,9 +801,9 @@
     addNode('decode', 1, tk.accent, 'decoder', rt.decoder.in_s, 'messages in', newest, '/s');
     addNode('rejected', 2, tk.muted, 'rejected', rt.decoder.rejected_s, 'CRC or parse failed', newest, '/s');
     addNode('tracks', 2, tk.accent, 'track updates', rt.tracks_s, 'after decoding', newest, '/s');
-    var D = [['sent', 'sent to cues', dc.sent], ['range', 'out of range', dc.range], ['elev', 'below elevation', dc.elev],
+    var D = [['sent', 'passed filters', dc.sent], ['range', 'out of range', dc.range], ['elev', 'below elevation', dc.elev],
       ['blocked', 'blocked', dc.blocked], ['nopos', 'no position', dc.unknown]];
-    D.forEach(function (x) { addNode(x[0], 3, x[2], x[1], rt.decisions[x[0]] || 0, '', newest, '/s'); });
+    D.forEach(function (x) { addNode(x[0], 3, x[2], x[1], rt.decisions[x[0]] || 0, '', newest, '/s').tracks = (rt.decisionTracks || {})[x[0]] || 0; });
     addNode('sched', 4, tk.accent, 'cue scheduler', rt.cues_s, 'cues out', newest, '/s');
     rt.clients.forEach(function (c) {
       var detail = c.kind === 'tcp' ? (c.direction || 'tcp') + ' · ' + formatBytes(c.per_min_bytes || 0) + '/min'
@@ -815,18 +841,7 @@
       cols[k].forEach(function (n) { n.bandPx = Math.max(1, n.band * scale); });
     });
 
-    // Labels: name, then the rate (or "no data <age>"), a third line on a tall node.
-    nodes.forEach(function (n) {
-      var lines = [n._title];
-      n.idle = !(n.value > 0);
-      if (n.idle && n.own) lines.push('no data' + (ageText(n._age) ? ' ' + ageText(n._age) : ''));
-      else if (n.idle) lines.push('0/s');
-      else lines.push(rateText(n.value, n._unit));
-      if (n.bandPx >= 3 * FLOW_LINE_PX && n._detail) lines.splice(1, 0, n._detail);
-      n.label = lines.slice(0, n.bandPx >= 3 * FLOW_LINE_PX ? 3 : 2)
-        .map(function (l) { return flowTruncate(l, colPx, charPx); }).join('\n');
-      n.tall = n.bandPx >= 3 * FLOW_LINE_PX;
-    });
+    nodes.forEach(function (n) { n.tall = n.bandPx >= 3 * FLOW_LINE_PX; });
 
     // Tags: recorders and raw outputs.
     var tags = [];
@@ -847,7 +862,7 @@
       var fl = perNode[node], bytes = 0;
       fl.forEach(function (f) { bytes += f.bytes; });
       tags.push({
-        node: node, text: byName[node].tall ? '● recording · ' + formatBytes(bytes) : '●',
+        node: node, text: byName[node].tall ? '● recording ' + formatBytes(bytes) : '●',
         hover: fl.map(function (f) { return f.name + ': ' + formatBytes(f.bytes) + ', ' + formatBytes(f.bytes_per_s) + '/s'; }).join('\n')
       });
     });
@@ -871,13 +886,48 @@
     });
     outOrder.forEach(function (node) {
       var p = peersBy[node];
-      tags.push({ node: node, text: '↗ raw output · ' + p + (p === 1 ? ' peer' : ' peers'), hover: 'raw output, ' + p + (p === 1 ? ' peer' : ' peers') });
+      tags.push({ node: node, text: '↗ raw · ' + p + (p === 1 ? ' peer' : ' peers'), hover: 'raw output, ' + p + (p === 1 ? ' peer' : ' peers') });
+    });
+
+    // Labels: name, then the rate (or "no data <age>"), a detail line on a
+    // tall node; a tall node's tag takes the third line instead of the
+    // detail, a thin node gets the tag's bare mark after its name.
+    var tagsBy = {};
+    tags.forEach(function (t) { (tagsBy[t.node] = tagsBy[t.node] || []).push(t); });
+    var cfg = {};
+    var cfgKeys = (latest && latest.config && latest.config.keys) || [];
+    cfgKeys.forEach(function (k) { if (k && k.key) cfg[k.key] = k.value; });
+    nodes.forEach(function (n) {
+      var lines = [n._title];
+      n.idle = !(n.value > 0);
+      if (n.idle && n.own) lines.push('no data' + (ageText(n._age) ? ' ' + ageText(n._age) : ''));
+      else {
+        var rate = n.idle ? '0/s' : rateText(n.value, n._unit);
+        lines.push(n.tracks !== undefined ? rate + ' · ' + n.tracks + (n.tracks === 1 ? ' track' : ' tracks') : rate);
+      }
+      var tg = tagsBy[n.name] || [];
+      if (n.tall && tg.length) lines.push(tg.map(function (t) { return t.text; }).join(' · '));
+      else if (n.tall && n._detail) lines.splice(1, 0, n._detail);
+      else if (tg.length) lines[0] += ' ' + tg.map(function (t) { return t.text.charAt(0); }).join(' ');
+      n.label = lines.slice(0, 3).map(function (l) { return flowTruncate(l, colPx, charPx); }).join('\n');
+      // The hover: what the numbers mean.
+      var h = [];
+      var q = { range: cfg['filters.max_range_nm'] !== undefined ? '> ' + cfg['filters.max_range_nm'] + ' nm' : '',
+        elev: cfg['filters.min_elevation_deg'] !== undefined ? '< ' + cfg['filters.min_elevation_deg'] + '°' : '',
+        sched: cfg['cues.min_interval_s'] !== undefined ? 'min ' + cfg['cues.min_interval_s'] + ' s per aircraft' : '' }[n.name];
+      if (q) h.push(q);
+      if (n.tracks !== undefined) {
+        var dp = (rt.decisionDropsPerMin || {})[n.name];
+        h.push('estimated from the ' + n.tracks + ' tracks currently under this decision' +
+          (dp !== undefined ? '; ' + Math.round(dp) + ' drops/min' : ''));
+      }
+      n.hover = h.join('\n');
     });
 
     var span = Math.round(rt.span_s || 0);
-    var caption = 'messages per second, last ' + (!rt.span_s ? 0 : rt.span_s < 55 ? span : 60) + ' s · after the scheduler every output receives every cue, so those bands are copies · ● marks a recorder; hover for the file · a thin band carries nothing';
+    var caption = 'messages per second, last ' + (!rt.span_s ? 0 : rt.span_s < 55 ? span : 60) + ' s · after the scheduler every output receives every cue, so those bands are copies · ● marks a recorder; hover for the file · filter bands are estimated from the tracks under each decision · a thin band carries nothing';
     return {
-      nodes: nodes.map(function (n) { return { name: n.name, label: n.label, color: n.color, depth: n.depth, bandPx: n.bandPx, tall: n.tall, idle: n.idle }; }),
+      nodes: nodes.map(function (n) { return { name: n.name, label: n.label, color: n.color, depth: n.depth, bandPx: n.bandPx, tall: n.tall, idle: n.idle, hover: n.hover }; }),
       links: links, tags: tags, height: height, top: top, bottom: top, caption: caption
     };
   }

@@ -1516,8 +1516,8 @@
   // ---- selection panel ---------------------------------------------------------
   // The side panel: a Track tab (the selected aircraft), a Weather tab
   // (FIS-B text reports and the clicked airspace shape), a Feeds tab
-  // (inputs, ground stations, decoder health) and a Cues tab (what was sent
-  // and dropped, filter changes, cue clients). The tabs are the panel's
+  // (inputs, outputs, cue clients, ground stations, decoder health) and a Cues
+  // tab (what was sent and dropped, filter changes). The tabs are the panel's
   // [role=tab] buttons, tab-<name> showing pane-<name>; a header button with
   // data-opens-tab="<name>" toggles the panel on that tab. TAB_SHOWN[name]
   // draws a tab when it is shown. A new tab: its markup and one entry here.
@@ -3212,9 +3212,9 @@
   // docs/operating.md, Cues tab. The counters follow every stats item; every
   // update and drop item goes into a ring of the last DECISIONS_RING whether
   // the tab is shown or not; the filter changes (GET /api/filters/history)
-  // and the cue clients (GET /api/cues/clients) are fetched when the tab is
-  // shown and every CUES_POLL_MS while it is, the history also on every
-  // `filters` item. Server strings go in through textContent.
+  // are fetched when the tab is shown and every CUES_POLL_MS while it is, also
+  // on every `filters` item. The cue clients (GET /api/cues/clients) belong to
+  // the Feeds tab and are fetched the same way. Server strings go in through textContent.
   var CUES_POLL_MS = 5000;
   var FILTER_TEXT = { max_range_nm: ['max range', ' nm'], min_elevation_deg: ['min elevation', '°'] };
   // ring: the last updates and drops; dropRing: the last drops alone, so
@@ -3343,7 +3343,7 @@
   // key's value, source and restart badge. "Copy as text" puts configText()
   // on the clipboard, or, where the clipboard refuses, in a selected
   // textarea to copy by hand. Server strings go in through textContent.
-  var config = { data: null, seq: 0 };
+  var config = { data: null, seq: 0, ensuring: false };
 
   function renderConfigDaemon(d) {
     var body = $('config-daemon').tBodies[0], started = Date.parse(d.started);

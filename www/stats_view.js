@@ -491,7 +491,8 @@
         if (gen !== flow.gen) return;
         var cfg = r[3] || {};
         S.flowPush(flow.win, { t: host.dataNow(), stats: r[0], inputs: (r[1] && r[1].inputs) || [], clients: r[2],
-          files: (cfg.daemon && cfg.daemon.recording_files) || [], outputs: (r[4] && r[4].outputs) || [] });
+          files: (cfg.daemon && cfg.daemon.recording_files) || [], outputs: (r[4] && r[4].outputs) || [],
+          summary: data.summary, config: { keys: cfg.keys || [] } });
         flow.failed = false;
       }, function () { if (gen === flow.gen) flow.failed = true; }).then(function () {
         if (gen !== flow.gen) return;
@@ -513,14 +514,9 @@
       card.setCaption(g.caption + (flow.failed ? ' · last fetch failed' : ''));
       var hover = {};
       g.tags.forEach(function (t) { hover[t.node] = t.hover; });
-      var tagText = {};
-      g.tags.forEach(function (t) { tagText[t.node] = t.text; });
       var muted = tk.muted || '#8b949e', text = tk.text || '#c9d1d9';
       var data = g.nodes.map(function (n) {
         var lines = n.label.split('\n');
-        var tag = tagText[n.name];
-        if (tag && n.tall) lines.push(tag);
-        else if (tag) lines[0] += ' ' + tag;
         var rich = function (t) { return String(t).replace(/[{}|]/g, ' '); };
         var first = '{n|' + rich(lines[0]) + '}';
         var rest = lines.slice(1).map(function (l) { return '{s|' + rich(l) + '}'; });
@@ -544,13 +540,14 @@
         tooltip: { trigger: 'item', confine: true, formatter: function (p) {
           var esc = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
           if (p.dataType === 'edge') {
-            var lab = {}; g.nodes.forEach(function (n) { lab[n.name] = n.label.split('\n')[0]; });
+            var lab = {}; g.nodes.forEach(function (n) { lab[n.name] = n.label.split('\n')[0].replace(/( [●↗])+$/, ''); });
             var v = p.data.value;
             return esc(lab[p.data.source] || p.data.source) + ' &rarr; ' + esc(lab[p.data.target] || p.data.target) +
               '<br>' + (v > 0.05 ? v.toFixed(1) : '0') + '/s';
           }
           var nd = g.nodes.filter(function (n) { return n.name === p.name; })[0];
           var h = esc(nd ? nd.label : p.name).replace(/\n/g, '<br>');
+          if (nd && nd.hover) h += '<br>' + esc(nd.hover).replace(/\n/g, '<br>');
           if (hover[p.name]) h += '<br>' + esc(hover[p.name]).replace(/\n/g, '<br>');
           return h;
         } } }, { notMerge: false });

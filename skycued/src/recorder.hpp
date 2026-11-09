@@ -108,8 +108,9 @@ public:
     // is accepted); "" when that format is disabled.
     std::string currentPath(const char* ext) const;
     // Bytes written to the current "jsonl" or "csv" file; 0 for a format this
-    // recorder does not write. Safe to call from another thread (the web
-    // server reads it); the value may lag a write in progress.
+    // recorder does not write. Safe to read from another thread should the
+    // web server ever run on one; today everything runs on the one
+    // io_context thread. The value may lag a write in progress.
     uint64_t bytesWritten(const char* ext) const;
 
     // Records not written because the files could not be created or written

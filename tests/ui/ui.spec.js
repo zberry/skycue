@@ -577,13 +577,13 @@ test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
   for (const d of r.offsets) expect(d).toBeLessThan(4);
 });
 
-// One header button per side-panel tab (Weather, Receiver, Cues, Config): each
+// One header button per side-panel tab (Weather, Feeds, Cues, Config): each
 // opens the panel on its tab and is the only one pressed; pressed again it
 // closes the panel; Escape closes it and clears all four.
 test('header_buttons_open_each_panel_tab', async ({ page }) => {
   await openPage(page);
   const buttons = { weather: '#wx-toggle', receiver: '#rx-toggle', cues: '#cues-toggle', config: '#cfg-toggle' };
-  await expect(page.locator('#panel-buttons > button')).toHaveText(['Weather', 'Receiver', 'Cues', 'Config']);
+  await expect(page.locator('#panel-buttons > button')).toHaveText(['Weather', 'Feeds', 'Cues', 'Config']);
   const panel = page.locator('#details');
   const pressed = () => page.locator('#panel-buttons > button').evaluateAll((bs) =>
     bs.map((b) => b.id + '=' + b.getAttribute('aria-pressed')));
@@ -600,7 +600,7 @@ test('header_buttons_open_each_panel_tab', async ({ page }) => {
   await page.locator('#cfg-toggle').click();
   await expect(panel).toBeHidden();
   await expectPressed(null);
-  // Open on Receiver, then Escape closes it and clears all four.
+  // Open on Feeds, then Escape closes it and clears all four.
   await page.locator('#rx-toggle').click();
   await expect(panel).toBeVisible();
   await expectPressed('#rx-toggle');

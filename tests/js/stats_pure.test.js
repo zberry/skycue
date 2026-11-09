@@ -737,7 +737,10 @@ function flowSnap(i, o) {
   ];
   const outputs = [{ id: 'beast-out', kind: 'beast', input: 'readsb', state: { up: true, peers: 2, bytes: 5, messages: 5 } },
                    { id: 'cue-tcp', kind: 'cue', builtin: true, state: { up: true, peers: 2 } }];
-  return Object.assign({ t: FLOW_T0 + 5000 * i, stats, inputs, clients, files, outputs }, o);
+  const summary = { counts: { by_decision: { send: 600, allow_listed: 190, out_of_range: 240, below_elevation: 100, blocked: 50, no_position: 10 } } };
+  const config = { keys: [{ key: 'filters.max_range_nm', value: '150' }, { key: 'filters.min_elevation_deg', value: '2' },
+    { key: 'cues.min_interval_s', value: '5' }] };
+  return Object.assign({ t: FLOW_T0 + 5000 * i, stats, inputs, clients, files, outputs, summary, config }, o);
 }
 function flowWin(n) {
   const w = S.flowWindow();
@@ -832,7 +835,7 @@ test('flowGraph tags: received on tracks, sent on sched, fisb on the uplink inpu
   const tag = n => g.tags.filter(t => t.node === n);
   assert.strictEqual(tag('tracks').length, 1);
   assert.ok(g.nodes.find(n => n.name === 'tracks').tall);
-  assert.strictEqual(tag('tracks')[0].text, '● recording · 1.8 MB');
+  assert.strictEqual(tag('tracks')[0].text, '● recording 1.8 MB');
   assert.strictEqual(tag('sched').length, 1);
   // a thin tracks band (nearly everything rejected) gets the bare mark
   const thin = S.flowWindow();
@@ -844,7 +847,7 @@ test('flowGraph tags: received on tracks, sent on sched, fisb on the uplink inpu
   assert.ok(tag('tracks')[0].hover.indexOf('180 kB/s') >= 0);
   assert.strictEqual(tag('sched').length, 1);
   assert.strictEqual(tag('readsb').length, 1);
-  assert.strictEqual(tag('readsb')[0].text.indexOf('↗ raw output · 2 peers') >= 0, true);
+  assert.strictEqual(tag('readsb')[0].text.indexOf('↗ raw · 2 peers') >= 0, true);
   const snap = flowSnap(2);
   snap.files.push({ name: 'skycue-fisb-2026-11-08.jsonl', stream: 'fisb', bytes: 500 });
   const w = flowWin(2); S.flowPush(w, snap);
@@ -860,9 +863,9 @@ test('flowGraph at zero traffic keeps every node', () => {
   g.links.forEach(l => assert.strictEqual(l.value, 0.01));
   g.nodes.forEach(n => assert.strictEqual(n.idle, true));
   g.nodes.forEach(n => {
-    const second = n.label.split('\n').slice(-1)[0];
-    if (n.name === 'readsb' || n.name === 'dump978') assert.ok(/^no data \d+ (s|min)$/.test(second), n.label);
-    else assert.strictEqual(second, '0/s', n.name);
+    const ls = n.label.split('\n');
+    if (n.name === 'readsb' || n.name === 'dump978') assert.ok(ls.some(l => /^no data \d+ (s|min)$/.test(l)), n.label);
+    else assert.ok(ls.some(l => /^0\/s( · \d+ tracks)?$/.test(l)), n.name + ': ' + n.label);
   });
   assert.ok(/no data 2 s$/.test(g.nodes.find(n => n.name === 'dump978').label));
   assert.ok(flowGraphOf().nodes.every(n => n.idle === false));
@@ -876,6 +879,105 @@ test('flowGraph forgets an input that left', () => {
   const g = flowGraphOf(latest, w);
   assert.ok(!g.nodes.some(n => n.name === 'dump978'));
   assert.ok(g.links.every(l => l.source !== 'dump978' && l.target !== 'dump978'));
+});
+
+test('flowGraph tall node with a tag has exactly three lines, the tag on the third', () => {
+  const g = flowGraphOf();
+  const n = g.nodes.find(x => x.name === 'tracks');
+  assert.ok(n.tall);
+  const lines = n.label.split('\n');
+  assert.strictEqual(lines.length, 3);
+  assert.strictEqual(lines[2], '● recording 1.8 MB');
+  g.nodes.forEach(x => assert.ok(x.label.split('\n').length <= 3, x.name));
+});
+
+test('flowGraph thin node gets the bare mark on line 0 and two lines', () => {
+  const w = S.flowWindow();
+  for (let i = 0; i < 3; i++) {
+    const s = flowSnap(i);
+    s.stats.inputs[0].messages = 7100;      // readsb idle: a thin band
+    s.stats.inputs[0].rejected = 0;
+    S.flowPush(w, s);
+  }
+  const g = flowGraphOf(null, w);
+  const n = g.nodes.find(x => x.name === 'readsb');
+  assert.ok(!n.tall);
+  const lines = n.label.split('\n');
+  assert.strictEqual(lines.length, 2);
+  assert.ok(/ ↗$/.test(lines[0]), lines[0]);
+});
+
+test('flowGraph decision bands are estimated from the tracks under each decision', () => {
+  const r = S.flowRates(flowWin(3));
+  assert.deepStrictEqual(r.decisions, { sent: 790, range: 240, elev: 100, blocked: 50, nopos: 10 });
+  assert.deepStrictEqual(r.decisionTracks, { sent: 790, range: 240, elev: 100, blocked: 50, nopos: 10 });
+  const g = flowGraphOf();
+  const n = g.nodes.find(x => x.name === 'sent');
+  assert.ok(/^passed filters/.test(n.label));
+  assert.ok(/790\/s · 790 tracks$/.test(n.label), n.label);
+  const range = g.nodes.find(x => x.name === 'range');
+  assert.ok(/^out of range/.test(range.label));
+  assert.ok(range.hover.indexOf('estimated from the 240 tracks currently under this decision; 14400 drops/min') >= 0, range.hover);
+  assert.ok(range.hover.indexOf('> 150 nm') >= 0);
+  assert.ok(g.nodes.find(x => x.name === 'elev').hover.indexOf('< 2°') >= 0);
+  assert.ok(g.nodes.find(x => x.name === 'sched').hover.indexOf('min 5 s per aircraft') >= 0);
+  assert.ok(/filter bands are estimated from the tracks under each decision · a thin band/.test(g.caption));
+  // a different split: the shares follow the summary, not the drop counters
+  const w = S.flowWindow();
+  for (let i = 0; i < 3; i++) { const sn = flowSnap(i); sn.summary = { counts: { by_decision: { send: 300, out_of_range: 100 } } }; S.flowPush(w, sn); }
+  const r2 = S.flowRates(w);
+  assert.strictEqual(r2.decisions.sent, 892.5);
+  assert.strictEqual(r2.decisions.range, 297.5);
+  // no summary or an empty one: every decision band is thin
+  const w0 = S.flowWindow();
+  for (let i = 0; i < 3; i++) { const sn = flowSnap(i); sn.summary = null; S.flowPush(w0, sn); }
+  const g0 = flowGraphOf(null, w0);
+  ['sent', 'range', 'elev', 'blocked', 'nopos'].forEach(k => assert.strictEqual(g0.links.find(l => l.target === k).value, 0.01));
+});
+
+test('flowRates: a new input or client uses its own oldest sample', () => {
+  const w = S.flowWindow();
+  for (let i = 0; i < 4; i++) {
+    const s = flowSnap(i);
+    if (i >= 2) {
+      s.stats.inputs.push({ id: 'late', messages: 1000000 + 100 * (i - 2), rejected: 0 });
+      s.inputs.push({ id: 'late', name: 'Late', type: 'readsb', state: { last_data_age_s: 1 } });
+      s.clients.tcp.push({ endpoint: 'new:1', direction: 'accepted', bytes_sent: 500000 + 600 * (i - 2) });
+    }
+    if (i === 2) s.stats.inputs[2].messages = 1000000;
+    S.flowPush(w, s);
+  }
+  const r = S.flowRates(w);
+  assert.strictEqual(r.inputs.late.msg_s, 20);                       // 100 msgs over 5 s, not over 15 s
+  assert.strictEqual(r.clients.find(c => c.key === 'tcp:new:1').per_min_bytes, 7200);
+  // present in the newest sample only: no rate yet, "no data"
+  const w1 = S.flowWindow();
+  S.flowPush(w1, flowSnap(0));
+  const s1 = flowSnap(1);
+  s1.stats.inputs.push({ id: 'late', messages: 5e6, rejected: 0 });
+  s1.inputs.push({ id: 'late', name: 'Late', type: 'readsb', state: { last_data_age_s: 3 } });
+  S.flowPush(w1, s1);
+  const r1 = S.flowRates(w1);
+  assert.strictEqual(r1.inputs.late.msg_s, 0);
+  assert.ok(/no data 3 s$/.test(S.flowGraph(r1, s1, { width: 1000, theme: FLOW_THEME }).nodes.find(n => n.name === 'late').label));
+});
+
+test('flowPush starts a fresh window after a gap over two refresh periods', () => {
+  const w = flowWin(3);
+  const late = flowSnap(3); late.t = w.samples[2].t + 10001;
+  S.flowPush(w, late);
+  assert.strictEqual(w.samples.length, 1);
+  const ok = flowSnap(3); ok.t = late.t + 10000;
+  S.flowPush(w, ok);
+  assert.strictEqual(w.samples.length, 2);
+  assert.ok(/^messages per second, last 10 s/.test(flowGraphOf(null, w).caption));
+});
+
+test('flowRates rejected includes raw_duplicates; rate text has no space before the slash', () => {
+  const w = S.flowWindow();
+  for (let i = 0; i < 3; i++) { const s = flowSnap(i); s.stats.inputs[0].raw_duplicates = 10 * i; S.flowPush(w, s); }
+  assert.strictEqual(S.flowRates(w).inputs.readsb.rejected_s, 262);
+  assert.ok(/\n1,420\/s/.test(flowGraphOf(null, w).nodes.find(n => n.name === 'readsb').label));
 });
 
 function flowWinClients(k, mult) {
@@ -895,7 +997,7 @@ function flowWinClients(k, mult) {
 test('flowGraph drawing height is capped for few nodes', () => {
   const z = flowGraphOf(null, flowZero());
   assert.strictEqual(z.height, 360);
-  assert.strictEqual(z.top, 20); assert.strictEqual(z.bottom, z.top);   // five decisions: drawH 344
+  assert.strictEqual(z.top, 20); assert.strictEqual(z.bottom, z.top);   // five decisions: drawH 320
   const g12 = flowGraphOf(null, flowWinClients(12, 1));
   assert.strictEqual(g12.height, 504); assert.strictEqual(g12.top, 20);
 });
@@ -915,13 +1017,13 @@ test('flowGraph raw output tags every input of the kind, else the decoder', () =
   snap.outputs = [{ id: 'j', kind: 'json', state: { up: true, peers: 3 } }];
   const w = flowWin(2); S.flowPush(w, snap);
   const g = flowGraphOf(snap, w);
-  const raw = g.tags.filter(t => t.text.indexOf('raw output') >= 0).map(t => t.node).sort();
+  const raw = g.tags.filter(t => t.text.indexOf('↗') === 0).map(t => t.node).sort();
   assert.deepStrictEqual(raw, ['readsb', 'readsb2']);
   snap.outputs = [{ id: 'c', kind: 'cat021', state: { up: true, peers: 1 } }];
   const g2 = flowGraphOf(snap, w);
-  const t = g2.tags.filter(x => x.text.indexOf('raw output') >= 0);
+  const t = g2.tags.filter(x => x.text.indexOf('↗') === 0);
   assert.deepStrictEqual(t.map(x => x.node), ['decode']);
-  assert.strictEqual(t[0].text, '\u2197 raw output \u00b7 1 peer');
+  assert.strictEqual(t[0].text, '\u2197 raw \u00b7 1 peer');
 });
 
 test('flowGraph caption names the span when short', () => {

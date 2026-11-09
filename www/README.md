@@ -171,7 +171,7 @@ location, a toggle, the filter, a pan or zoom, the age tick).
 The side panel's tabs are its `[role=tab]` buttons: `tab-<name>` shows
 `pane-<name>`, a header button with `data-opens-tab="<name>"` opens and
 closes the panel on that tab (`#panel-buttons` has one for each tab but
-Track, and `#stat-inputs` is a second one for Receiver; `syncTabToggles`
+Track, and `#stat-inputs` is a second one for Feeds; `syncTabToggles`
 presses the ones whose tab is showing), and `TAB_SHOWN[<name>]` in `app.js` draws the
 tab when it is shown. A new tab is its markup in `index.html` and one entry
 in `TAB_SHOWN`.

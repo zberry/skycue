@@ -1415,11 +1415,17 @@ The toolbar along the top:
 
 The first Traffic card, **Flow**, is a live diagram of the pipeline: one band
 per input flows into the decoder, then to rejected messages and track
-updates, which split by decision (sent to cues, out of range, below
-elevation, blocked, no position); the sent band goes through the cue
+updates, which split by decision (passed filters, out of range, below
+elevation, blocked, no position); the passed band goes through the cue
 scheduler to one node per cue connection. Band widths are messages per
 second over the last minute, and the cue connections show the copies after
-the scheduler (one per connection). A thin band carries nothing. A ● marks a
+the scheduler (one per connection). Drops are counted per track, not per
+message, so the decision bands are an estimate: the track-update rate split
+by the tracks now under each decision (each node says how many, and
+hovering shows the drops per minute and the filter that applies, such as
+`> 150 nm`). A thin band carries nothing. A new input, cue connection or
+recording file shows its rate from its own first sample, "no data" for the
+first 5 s; after a pause (the page hidden) the window starts again. A ● marks a
 node a recording file is written from (hover for the file, its size and
 write rate) and ↗ one a raw output serves. Click an input or a cue
 connection to open its card in the [Feeds tab](#feeds-tab). It

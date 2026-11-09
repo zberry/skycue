@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <list>
 #include <unordered_map>
 
@@ -22,6 +23,11 @@ public:
     // evicted_counter is the owner's DecodeCounters::evicted; every eviction adds one.
     KeyTable(std::size_t max_keys, std::chrono::seconds idle_evict, uint64_t& evicted_counter)
         : max_keys_(max_keys), idle_evict_(idle_evict), evicted_(evicted_counter) {}
+
+    // The table holds a reference to the owner's counter and the states hold list iterators into
+    // it, so a copy or move would leave them pointing at the original.
+    KeyTable(const KeyTable&) = delete;
+    KeyTable& operator=(const KeyTable&) = delete;
 
     // nullptr when absent. Does not touch the LRU.
     State* find(const StateKey& k) {

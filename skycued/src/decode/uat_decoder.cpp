@@ -19,7 +19,6 @@ using std::chrono::seconds;
 using skycue::AddressType;
 using skycue::Source;
 
-
 // Sets a timed field; flags a change when it is new, expired or replaced a different value.
 template <typename T>
 void setField(UatKeyState& ks, Timed<T>& f, const T& v, TimePoint now) {

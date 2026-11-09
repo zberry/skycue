@@ -27,20 +27,30 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_skycue_toml_e
 file(READ "${_skycue_toml_example}" SKYCUE_TOML_EXAMPLE_TEXT)
 configure_file(src/skycue_example_toml.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/skycue_example_toml.hpp" @ONLY)
 
-add_library(skycued_core STATIC
-  src/altitude_fit.cpp
-  src/change_detector.cpp
-  src/coding/bits.cpp
-  src/coding/modes_crc.cpp
+# Bit helpers and the Mode S CRC: pure code.
+add_library(skycued_coding STATIC src/coding/bits.cpp src/coding/modes_crc.cpp)
+target_include_directories(skycued_coding PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+skycue_set_warnings(skycued_coding)
+
+# The decoders: frames in, observations out. No I/O, no sockets, no files; the
+# link line is what keeps it so (libskycue only for skycue/types.hpp).
+add_library(skycued_decode STATIC
   src/decode/acas.cpp
   src/decode/altitude.cpp
   src/decode/commb.cpp
   src/decode/cpr.cpp
   src/decode/frame.cpp
-  src/decode/uat_decoder.cpp
-  src/decode/uat_frame.cpp
-  src/decode/frame_source.cpp
   src/decode/modes_decoder.cpp
+  src/decode/uat_decoder.cpp
+  src/decode/uat_frame.cpp)
+target_include_directories(skycued_decode PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(skycued_decode PUBLIC skycued_coding skycue::skycue)
+skycue_set_warnings(skycued_decode)
+
+add_library(skycued_core STATIC
+  src/altitude_fit.cpp
+  src/change_detector.cpp
+  src/decode/frame_source.cpp
   src/check_inputs.cpp
   src/config.cpp
   src/conf_convert.cpp
@@ -114,7 +124,7 @@ add_library(skycued_core STATIC
   src/web_stats.cpp
   src/web_server.cpp)
 target_include_directories(skycued_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
-target_link_libraries(skycued_core PUBLIC skycued_asterix skycued_names skycue::skycue skycue::net Boost::boost Boost::program_options)
+target_link_libraries(skycued_core PUBLIC skycued_decode skycued_coding skycued_asterix skycued_names skycue::skycue skycue::net Boost::boost Boost::program_options)
 skycue_set_warnings(skycued_core)
 
 add_executable(skycued src/main.cpp)

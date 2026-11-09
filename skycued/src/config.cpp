@@ -942,5 +942,4 @@ std::map<std::string, std::string> exampleComments(const std::string& example_te
     return out;
 }
 
-
 }  // namespace skycued

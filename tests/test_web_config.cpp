@@ -19,6 +19,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <optional>
 #include <thread>
 
 using namespace enginetest;
@@ -387,7 +388,12 @@ BOOST_AUTO_TEST_CASE(schema_lists_every_key_with_type_and_class)
     BOOST_TEST(keys.by_key.at("paths.map_dir").getString("type").value_or("") == "path");
     BOOST_TEST(keys.by_key.at("filters.max_range_nm").getString("class").value_or("") == "live");
     BOOST_TEST(keys.by_key.at("sdr.gain_1090").getString("class").value_or("") == "external");
-    BOOST_TEST(!keys.by_key.at("receiver.lat").has("min") == false);
+    BOOST_TEST(keys.by_key.at("receiver.lat").has("min"));
+    BOOST_TEST(keys.by_key.at("receiver.lat").getString("doc").value_or("") == "decimal degrees");
+    BOOST_TEST(keys.by_key.at("stats.aircraft_max").getString("doc").value_or("").rfind("past it", 0) == 0);
+    BOOST_TEST(keys.by_key.at("web.allow_restart").getString("doc").value_or("") ==
+               "let the web UI restart skycued; only under a supervisor that starts it again");
+    BOOST_TEST(keys.by_key.at("web.trail_seconds").getString("default").value_or("") == "120");
     for (const auto& [name, entry] : keys.by_key) {
         BOOST_TEST(!entry.getString("doc").value_or("").empty(), name);
         BOOST_TEST(entry.has("default"), name);
@@ -413,6 +419,36 @@ BOOST_AUTO_TEST_CASE(config_entries_carry_class_editable_file_value_default)
     const auto& m = keys.by_key.at("filters.max_range_nm");
     BOOST_TEST(m.getString("source").value_or("") == "set");
     BOOST_TEST(!m.getBool("editable").value_or(true));
+    ConfigFx h(nullptr, {}, {{"SKYCUE_FILTERS_MAX_RANGE_NM", "77"}});
+    const auto ek = keysOf(parsed(request(h.port, http::verb::get, "/api/config").body));
+    BOOST_TEST(ek.by_key.at("filters.max_range_nm").getString("source").value_or("") == "env");
+    BOOST_TEST(!ek.by_key.at("filters.max_range_nm").getBool("editable").value_or(true));
+}
+
+BOOST_AUTO_TEST_CASE(file_value_follows_hand_edits)
+{
+    ConfigFx f([](const std::string&) { return ConfigFx::ConfMap{{"web.trail_seconds", "300"}}; });
+    f.fx->t.call([&] { f.rc->startWatching(); });
+    const auto write = [&](ConfigFx::ConfMap extra) {
+        ConfigFx::ConfMap kv{{"receiver.lat", "38.9"}, {"receiver.lon", "-77.0"}, {"filters.max_range_nm", "120"}};
+        for (const auto& e : extra)
+            kv[e.first] = e.second;
+        std::ofstream(f.conf) << skycue_test::tomlConf(kv);
+    };
+    const auto fileValue = [&](const char* key) {
+        const auto keys = keysOf(parsed(request(f.port, http::verb::get, "/api/config").body));
+        return keys.by_key.at(key).getString("file_value");
+    };
+    const auto waitFor = [&](const char* key, std::optional<std::string> want) {
+        for (int i = 0; i < 100 && fileValue(key) != want; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        return fileValue(key);
+    };
+    write({{"web.trail_seconds", "400"}, {"cues.min_interval_s", "2"}});
+    BOOST_TEST(waitFor("web.trail_seconds", "400").value_or("?") == "400");
+    BOOST_TEST(waitFor("cues.min_interval_s", "2").value_or("?") == "2");
+    write({{"web.trail_seconds", "400"}});
+    BOOST_TEST(!waitFor("cues.min_interval_s", std::nullopt).has_value());
 }
 
 namespace {

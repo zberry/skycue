@@ -62,17 +62,20 @@ const char* schemaType(const KeySpec& spec)
     return spec.values.empty() ? "string" : "enum";
 }
 
-// Drops a trailing numeric range remark (", -90..90", "; > 0", "; >= 0.1").
+// Drops a trailing numeric range remark (", -90..90", "; > 0", "; >= 0.1")
+// or a leading one ("100..100000; ").
 std::string stripRange(const std::string& doc)
 {
     static const std::regex remark(R"(\s*[,;]\s*(-?[0-9.]+\.\.-?[0-9.]+|[<>]=?\s*-?[0-9.]+)\s*$)");
-    return std::regex_replace(doc, remark, "");
+    static const std::regex lead(R"(^-?[0-9.]+\.\.-?[0-9.]+\s*;\s*)");
+    return std::regex_replace(std::regex_replace(doc, remark, ""), lead, "");
 }
 
 }  // namespace
 
 std::string configSchemaJson()
 {
+    static const std::string cached = [] {
     const auto comments = exampleComments(kExampleToml);
     std::vector<std::string> keys;
     for (const auto& spec : keySpecs()) {
@@ -96,6 +99,8 @@ std::string configSchemaJson()
         keys.push_back(entry.str());
     }
     return JsonWriter().addRaw("keys", jsonArray(keys)).str();
+    }();
+    return cached;
 }
 
 std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, const LocationFacts& locations,
@@ -185,8 +190,8 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
             .add("restart", std::find(restart.begin(), restart.end(), key) != restart.end())
             .add("class", keyClassName(cls))
             .add("editable", editable);
-        const auto file = effective.file_values.find(key);
-        if (file != effective.file_values.end())
+        const auto file = runtime.configured().file_values.find(key);
+        if (file != runtime.configured().file_values.end())
             entry.add("file_value", file->second);
         entry.add("default", defaultText(key));
         keys.push_back(entry.str());

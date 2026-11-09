@@ -15,6 +15,7 @@
 #include <boost/beast/http.hpp>
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <fstream>
 #include <functional>
@@ -540,6 +541,18 @@ BOOST_AUTO_TEST_CASE(put_live_key_applies_at_once)
     BOOST_TEST(names(j, "applied") == std::vector<std::string>{"filters.max_range_nm"}, boost::test_tools::per_element());
     BOOST_TEST(j.getObjectArray("pending_restart")->empty());
     BOOST_TEST(f.fx->t.call([&] { return f.fx->engine->snapshot().filters.max_range_nm; }) == 150.0);
+    const auto h = parsed(request(f.port, http::verb::get, "/api/filters/history").body).getObjectArray("changes");
+    BOOST_TEST_REQUIRE((h && !h->empty()));
+    BOOST_TEST(h->back().getString("origin").value_or("") == "ui");
+}
+
+BOOST_AUTO_TEST_CASE(put_empty_leaves_a_missing_overrides_file_missing)
+{
+    ConfigFx f;
+    const auto r = put(f, R"({"set":{},"clear":[]})");
+    BOOST_TEST_REQUIRE(r.status == 200u, r.body);
+    BOOST_TEST(parsed(r.body).getStringArray("applied")->empty());
+    BOOST_TEST(::access((f.tmp.path + "/skycue.overrides.toml").c_str(), F_OK) != 0);
 }
 
 BOOST_AUTO_TEST_CASE(put_filter_key_clears_overlay_value)

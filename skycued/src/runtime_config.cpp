@@ -597,8 +597,10 @@ void RuntimeConfig::writeOverrides(const std::map<std::string, toml_lite::Value>
         values.erase(key);
     for (const auto& [key, value] : set)
         values[key] = value;
-    std::string out = "# written by skycued " + isoUtcNow() +
+    const std::string header = "# written by skycued ";
+    std::string out = header + isoUtcNow() +
                       "; settings saved from the web UI; filter keys apply live, the rest on restart\n";
+    const size_t body_at = out.size();
     // By table, in keySpecs() order.
     std::string table;
     for (const auto& spec : keySpecs()) {
@@ -616,6 +618,19 @@ void RuntimeConfig::writeOverrides(const std::map<std::string, toml_lite::Value>
     }
     // Never write a file skycued would refuse.
     parseConfigLayers(readFile(conf_path_), conf_path_, out, path, set_args_, env_);
+    // Nothing changes: leave the file (or its absence) alone.
+    std::string body = out.substr(body_at);
+    if (FileStamp::of(path).exists) {
+        std::string now = readFile(path);
+        if (now.compare(0, header.size(), header) == 0) {
+            const auto nl = now.find('\n');
+            now = nl == std::string::npos ? std::string() : now.substr(nl + 1);
+        }
+        if (now == body)
+            return;
+    } else if (body.empty()) {
+        return;
+    }
     writeFile(overrides_watch_, out);
 }
 

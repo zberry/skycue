@@ -684,6 +684,68 @@ std::optional<int> buildEngine(Stack& st, const Options& o, const po::variables_
     return std::nullopt;
 }
 
+// What the restart request and the signal handler share: the exit status, whether shutdown has begun, the
+// delay before a requested restart, and the shutdown function (set by runLoop, once the exit machinery exists).
+struct RunState {
+    explicit RunState(boost::asio::io_context& io) : restart_timer(io)
+    {
+    }
+
+    int exit_code = 0;
+    bool shutting_down = false;
+    boost::asio::steady_timer restart_timer;
+    std::function<void(const std::string&)> shutdown;
+};
+
+// The web UI; an exit status when it cannot start, else nullopt.
+std::optional<int> startWeb(Stack& st, const Options& o, const Config& config, RunState& rs)
+{
+    auto& io = st.io;
+    auto& engine = st.engine;
+    auto& runtime = st.runtime;
+    auto& daemon = st.daemon;
+    const auto& www_dir = o.www_dir;
+    auto& exit_code = rs.exit_code;
+    auto& shutting_down = rs.shutting_down;
+    auto& restart_timer = rs.restart_timer;
+    auto& shutdown = rs.shutdown;
+    // The web UI (web.bind:web.port); web.port=0: none.
+    auto& web = st.web;
+    if (config.web_port == 0) {
+        LOG_INFO("web UI disabled (web.port=0)");
+    } else {
+        WebConfig wc;
+        wc.bind = config.web_bind;
+        wc.port = config.web_port;
+        wc.www_dir = www_dir;
+        wc.map_dir = config.map_dir;
+        wc.daemon = &daemon;
+        wc.on_restart = [&] {
+            // Deferred so the 202 reply is written before the web server stops
+            // (250 ms is a heuristic: a local reply is written within a few ms,
+            // and the web server drops its connections as it stops). A signal
+            // that arrives first makes this a no-op (exit 0, shutting_down is
+            // set); once the timer has fired the restart wins (exit 75), and
+            // a later signal finds shutting_down set and does nothing.
+            restart_timer.expires_after(std::chrono::milliseconds(250));
+            restart_timer.async_wait([&](const boost::system::error_code& ec) {
+                if (ec || shutting_down)
+                    return;
+                exit_code = 75;
+                shutdown("restart requested from the web UI");
+            });
+        };
+        web = std::make_unique<WebServer>(io, *engine, *runtime, wc);
+        try {
+            web->start();
+        } catch (const std::exception& e) {
+            LOG_ERROR("cannot start: " << e.what());
+            return 1;
+        }
+    }
+    return std::nullopt;
+}
+
 int run(int argc, char** argv)
 {
     const auto started = std::chrono::system_clock::now();
@@ -727,45 +789,13 @@ int run(int argc, char** argv)
     auto& fisb = st.fisb;
     auto& engine = st.engine;
     auto& runtime = st.runtime;
-    auto& daemon = st.daemon;
-    // The web UI (web.bind:web.port); web.port=0: none.
+    RunState rs(io);
+    if (const auto rc = startWeb(st, o, config, rs))
+        return *rc;
     auto& web = st.web;
-    int exit_code = 0;
-    bool shutting_down = false;
-    boost::asio::steady_timer restart_timer(io);
-    std::function<void(const std::string&)> shutdown;  // set below, once the exit machinery exists
-    if (config.web_port == 0) {
-        LOG_INFO("web UI disabled (web.port=0)");
-    } else {
-        WebConfig wc;
-        wc.bind = config.web_bind;
-        wc.port = config.web_port;
-        wc.www_dir = www_dir;
-        wc.map_dir = config.map_dir;
-        wc.daemon = &daemon;
-        wc.on_restart = [&] {
-            // Deferred so the 202 reply is written before the web server stops
-            // (250 ms is a heuristic: a local reply is written within a few ms,
-            // and the web server drops its connections as it stops). A signal
-            // that arrives first makes this a no-op (exit 0, shutting_down is
-            // set); once the timer has fired the restart wins (exit 75), and
-            // a later signal finds shutting_down set and does nothing.
-            restart_timer.expires_after(std::chrono::milliseconds(250));
-            restart_timer.async_wait([&](const boost::system::error_code& ec) {
-                if (ec || shutting_down)
-                    return;
-                exit_code = 75;
-                shutdown("restart requested from the web UI");
-            });
-        };
-        web = std::make_unique<WebServer>(io, *engine, *runtime, wc);
-        try {
-            web->start();
-        } catch (const std::exception& e) {
-            LOG_ERROR("cannot start: " << e.what());
-            return 1;
-        }
-    }
+    auto& exit_code = rs.exit_code;
+    auto& shutting_down = rs.shutting_down;
+    auto& shutdown = rs.shutdown;
     try {
         engine->start();
     } catch (const std::exception& e) {

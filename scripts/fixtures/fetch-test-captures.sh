@@ -20,8 +20,9 @@
 #                                                  8-bit I/Q at 2 MS/s (not Beast)
 #   tests/fixtures/opensky/<name>/                 the five OpenSky incident-data
 #                                                  tarballs (CC BY 4.0), unpacked to the
-#                                                  position, velocity and identification
-#                                                  CSVs and the README, for test_decode_opensky
+#                                                  position, velocity, identification, ACAS and
+#                                                  rollcall-replies CSVs and the README, for
+#                                                  test_decode_opensky and test_decode_acas_opensky
 #   tests/fixtures/iq/porto-awec2026/              Zenodo 23342598 (CC BY 4.0), a 73 MB
 #                                                  RTL-SDR recording with its decoded CSVs;
 #                                                  only when SKYCUE_FETCH_IQ=1 (the zip is 20 MB)

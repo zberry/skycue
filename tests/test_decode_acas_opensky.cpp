@@ -9,16 +9,20 @@
 //                                 replyinformation (RI), altitude (metres)
 //   *_rollcall_replies_data4.csv DF4 / 5 / 20 / 21: altitude (metres), identity (Mode A code)
 //
-// Compared where both sides have a value: ACAS fields exactly (each field >= 99.5 % over all
-// long DF16 frames; see the note in the test on the MV marker), altitude within 1 ft of metres * 3.28084, the four RAC
-// flags against the RAC bits; rollcall altitude and identity >= 99 %. The per-field counts
-// and the first mismatches (frame, expected, got) are printed.
+// Compared where both sides have a value: ACAS fields exactly (>= 99.5 % per field over the
+// long DF16 frames), altitude within 1 ft of metres * 3.28084, the four RAC flags against the
+// RAC bits; rollcall altitude and identity >= 99 %. Per-field counts and the first mismatches
+// (frame, expected, got) are printed. OpenSky reads the MV field of every long DF16 as an RA,
+// but few frames carry the RA marker 0x30 in its first byte: those are compared as received
+// (no mismatch allowed), and for the field layout all the others are compared with byte 4
+// forced to 0x30 in a copy of the frame.
 #define BOOST_TEST_MODULE decode_acas_opensky
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
@@ -110,6 +114,7 @@ struct Field {
 struct Table {
     std::map<std::string, Field> f;
     std::vector<std::string> order;
+    std::map<std::string, int> count;  // notes: rows skipped, frames forced, ...
     Field& at(const std::string& k)
     {
         if (!f.count(k)) order.push_back(k);
@@ -159,110 +164,138 @@ void report(const char* title, const std::string& where, Table& t, double minRat
     }
 }
 
+void merge(Table& all, Table& t)
+{
+    for (const auto& k : t.order) {
+        Field& a = all.at(k);
+        a.n += t.f[k].n;
+        a.agree += t.f[k].agree;
+        for (const auto& m : t.f[k].misses)
+            if (a.misses.size() < 10) a.misses.push_back(m);
+    }
+    for (const auto& c : t.count) all.count[c.first] += c.second;
+}
+
+// Reads the `suffix` table of every tarball directory, hands its rows to
+// perDir(rows, per-directory Table), reports each directory and returns the sum.
+template <class F>
+Table overTarballs(const char* title, const char* suffix, double minRate, F perDir)
+{
+    Table all;
+    for (const auto& dir : dirsOrSkip()) {
+        const std::string name = dir.filename().string();
+        const std::string path = tableIn(dir, suffix);
+        if (path.empty()) {
+            BOOST_ERROR(name << ": no " << suffix << " table (re-run fetch-test-captures.sh)");
+            continue;
+        }
+        const auto rows = opensky::readRows(path);
+        BOOST_CHECK_MESSAGE(!rows.empty(), path << ": no rows");
+        Table t;
+        perDir(rows, t);
+        std::cout << name << ": " << rows.size() << " rows\n";
+        for (const auto& c : t.count) std::cout << "  " << c.first << ": " << c.second << "\n";
+        report(title, name, t, minRate);
+        merge(all, t);
+    }
+    report(title, "all five", all, minRate);
+    return all;
+}
+
+// Altitude of a DF0/4/16/20 row against OpenSky's metres; a row whose AC field has no altitude is counted.
+void compareAltitude(const Frame& f, const Row& r, const std::string& hex, Table& t)
+{
+    const auto m = real(r, "altitude");
+    if (!m) return;
+    const auto ft = altitudeAc13(f.bits(19, 13));
+    if (!ft) {
+        ++t.count["altitude rows skipped (AC13 gave no altitude)"];
+        return;
+    }
+    const double want = *m * kMToFt;
+    char w[32], g[32];
+    std::snprintf(w, sizeof w, "%.1f ft", want);
+    std::snprintf(g, sizeof g, "%d ft", static_cast<int>(*ft));
+    t.at("altitude").add(std::fabs(want - *ft) <= 1.0, hex, w, g);
+}
+
+// The RA fields of a long DF16 row (decoded from `g`) against OpenSky's columns.
+void compareRa(const Frame& g, const Row& r, const std::string& hex, Table& t)
+{
+    const auto ra = decodeAcasRaMv(g);
+    if (!ra) return;
+    const auto c = decodeAcasCommon(g);
+    if (const auto v = integer(r, "activeresolutionadvisories"))
+        t.at("ARA").add(*v == ra->ara, hex, num(*v), num(ra->ara));
+    if (const auto v = integer(r, "resolutionadvisorycomplement"))
+        t.at("RAC").add(*v == ra->rac, hex, num(*v), num(ra->rac));
+    if (const auto v = flag(r, "hasterminated")) t.at("RAT").add(*v == ra->rat, hex, yn(*v), yn(ra->rat));
+    if (const auto v = flag(r, "hasmultiplethreats")) t.at("MTE").add(*v == ra->mte, hex, yn(*v), yn(ra->mte));
+    if (const auto v = integer(r, "sensitivitylevel")) t.at("SL").add(*v == c.sl, hex, num(*v), num(c.sl));
+    if (const auto v = integer(r, "replyinformation")) t.at("RI").add(*v == c.ri, hex, num(*v), num(c.ri));
+    // The four flags are the RAC bits, first bit on the wire most significant.
+    static const struct { const char* col; const char* name; int bit; } kFlags[] = {
+        {"nopassbelow", "RAC.nopassbelow", 3},
+        {"nopassabove", "RAC.nopassabove", 2},
+        {"noturnleft", "RAC.noturnleft", 1},
+        {"noturnright", "RAC.noturnright", 0},
+    };
+    for (const auto& fl : kFlags)
+        if (const auto v = flag(r, fl.col)) {
+            const bool ours = ((ra->rac >> fl.bit) & 1) != 0;
+            t.at(fl.name).add(*v == ours, hex, yn(*v), yn(ours));
+        }
+}
+
 }  // namespace
 
 BOOST_AUTO_TEST_CASE(acas_rows_match_opensky)
 {
-    const auto dirs = dirsOrSkip();
-    Table all;
-    for (const auto& dir : dirs) {
-        const std::string path = tableIn(dir, "_acas_data4.csv");
-        if (path.empty()) {
-            BOOST_ERROR(dir.filename().string() << ": no acas table (re-run fetch-test-captures.sh)");
-            continue;
-        }
-        const auto rows = opensky::readRows(path);
-        BOOST_CHECK_MESSAGE(!rows.empty(), path << ": no rows");
-        Table t;
-        int long_rows = 0, eligible = 0, native = 0;
+    Table native;  // rows whose received MV marker is 0x30: decoded as received, no override
+    const Table all = overTarballs("ACAS (layout, byte 4 forced to 0x30)", "_acas_data4.csv", kAcasMin,
+                                   [&](const std::vector<Row>& rows, Table& t) {
         for (const auto& r : rows) {
             const std::string& hex = col(r, "rawmsg");
             const auto f = frameOf(hex);
             if (!f) continue;
-            // Altitude: the AC field of every DF0 and DF16 row.
-            if (const auto m = real(r, "altitude"); m && (f->df == 0 || f->df == 16)) {
-                if (const auto ft = altitudeAc13(f->bits(19, 13))) {
-                    const double want = *m * kMToFt;
-                    char w[32], g[32];
-                    std::snprintf(w, sizeof w, "%.1f ft", want);
-                    std::snprintf(g, sizeof g, "%d ft", static_cast<int>(*ft));
-                    t.at("altitude").add(std::fabs(want - *ft) <= 1.0, hex, w, g);
-                }
-            }
+            if (f->df == 0 || f->df == 16) compareAltitude(*f, r, hex, t);
             if (f->df != 16 || flag(r, "islongformat") != true) continue;
-            ++long_rows;
-            // OpenSky slices the MV field of every long DF16 as an RA, whatever its first byte is;
-            // in these five captures only a handful carry the RA marker 0x30 (the decoder's own
-            // gate, counted below). To test the field layout (bit order, polarity) on all of them
-            // the decoder is given a copy of the frame whose first MV byte is set to 0x30.
-            if (decodeAcasRaMv(*f)) ++native;
+            ++t.count["long DF16 frames"];
+            if (decodeAcasRaMv(*f)) {
+                ++t.count["native 0x30 frames compared unmodified"];
+                compareRa(*f, r, hex, native);
+            } else {
+                // Without the override a frame whose marker is not 0x30 is not an RA.
+                ++t.count["non-0x30 frames rejected by the decoder"];
+            }
             Frame g = *f;
             g.bytes[4] = 0x30;
-            const auto ra = decodeAcasRaMv(g);
-            if (!ra) continue;
-            ++eligible;
-            const auto c = decodeAcasCommon(g);
-            if (const auto v = integer(r, "activeresolutionadvisories"))
-                t.at("ARA").add(*v == ra->ara, hex, num(*v), num(ra->ara));
-            if (const auto v = integer(r, "resolutionadvisorycomplement"))
-                t.at("RAC").add(*v == ra->rac, hex, num(*v), num(ra->rac));
-            if (const auto v = flag(r, "hasterminated")) t.at("RAT").add(*v == ra->rat, hex, yn(*v), yn(ra->rat));
-            if (const auto v = flag(r, "hasmultiplethreats")) t.at("MTE").add(*v == ra->mte, hex, yn(*v), yn(ra->mte));
-            if (const auto v = integer(r, "sensitivitylevel")) t.at("SL").add(*v == c.sl, hex, num(*v), num(c.sl));
-            if (const auto v = integer(r, "replyinformation")) t.at("RI").add(*v == c.ri, hex, num(*v), num(c.ri));
-            // The four flags are the RAC bits, first bit on the wire most significant.
-            static const struct { const char* col; const char* name; int bit; } kFlags[] = {
-                {"nopassbelow", "RAC.nopassbelow", 3},
-                {"nopassabove", "RAC.nopassabove", 2},
-                {"noturnleft", "RAC.noturnleft", 1},
-                {"noturnright", "RAC.noturnright", 0},
-            };
-            for (const auto& fl : kFlags)
-                if (const auto v = flag(r, fl.col))
-                    t.at(fl.name).add(*v == (((ra->rac >> fl.bit) & 1) != 0), hex, yn(*v), yn(((ra->rac >> fl.bit) & 1) != 0));
+            ++t.count["frames compared with byte 4 forced to 0x30 in a copy"];
+            compareRa(g, r, hex, t);
         }
-        std::cout << dir.filename().string() << ": " << rows.size() << " rows, " << long_rows
-                  << " long DF16 (" << native << " with the MV marker 0x30 as received), " << eligible
-                  << " compared\n";
-        report("ACAS", dir.filename().string(), t, kAcasMin);
-        for (const auto& k : t.order) {
-            Field& a = all.at(k);
-            a.n += t.f[k].n;
-            a.agree += t.f[k].agree;
-            for (const auto& m : t.f[k].misses)
-                if (a.misses.size() < 10) a.misses.push_back(m);
-        }
-    }
-    report("ACAS", "all five", all, kAcasMin);
+    });
+    std::cout << "SUMMARY: " << all.count.at("frames compared with byte 4 forced to 0x30 in a copy")
+              << " long DF16 frames were compared with byte 4 forced to 0x30 in a copy (layout check); "
+              << all.count.at("native 0x30 frames compared unmodified")
+              << " native 0x30 frames were compared unmodified; "
+              << all.count.at("non-0x30 frames rejected by the decoder") << " non-0x30 frames gave no RA\n";
+    BOOST_CHECK_GE(all.count.at("native 0x30 frames compared unmodified"), 1);
+    BOOST_CHECK_GE(all.count.at("non-0x30 frames rejected by the decoder"), 1);
+    // Unmodified rows: any mismatch fails.
+    report("ACAS (native 0x30, as received)", "all five", native, 1.0);
+    BOOST_CHECK(native.f.count("ARA") && native.f["ARA"].n >= 1);
 }
 
 BOOST_AUTO_TEST_CASE(rollcall_rows_match_opensky)
 {
-    const auto dirs = dirsOrSkip();
-    Table all;
-    for (const auto& dir : dirs) {
-        const std::string path = tableIn(dir, "_rollcall_replies_data4.csv");
-        if (path.empty()) {
-            BOOST_ERROR(dir.filename().string() << ": no rollcall table (re-run fetch-test-captures.sh)");
-            continue;
-        }
-        const auto rows = opensky::readRows(path);
-        BOOST_CHECK_MESSAGE(!rows.empty(), path << ": no rows");
-        Table t;
+    overTarballs("rollcall", "_rollcall_replies_data4.csv", kRollcallMin,
+                                   [&](const std::vector<Row>& rows, Table& t) {
         for (const auto& r : rows) {
             const std::string& hex = col(r, "rawmsg");
             const auto f = frameOf(hex);
             if (!f) continue;
             if (f->df == 4 || f->df == 20) {
-                const auto m = real(r, "altitude");
-                if (!m) continue;
-                const auto ft = altitudeAc13(f->bits(19, 13));
-                if (!ft) continue;
-                const double want = *m * kMToFt;
-                char w[32], g[32];
-                std::snprintf(w, sizeof w, "%.1f ft", want);
-                std::snprintf(g, sizeof g, "%d ft", static_cast<int>(*ft));
-                t.at("altitude").add(std::fabs(want - *ft) <= 1.0, hex, w, g);
+                compareAltitude(*f, r, hex, t);
             } else if (f->df == 5 || f->df == 21) {
                 const std::string& id = col(r, "identity");
                 if (id.empty()) continue;
@@ -270,14 +303,5 @@ BOOST_AUTO_TEST_CASE(rollcall_rows_match_opensky)
                 t.at("identity").add(sq && *sq == id, hex, id, sq ? *sq : "none");
             }
         }
-        report("rollcall", dir.filename().string(), t, kRollcallMin);
-        for (const auto& k : t.order) {
-            Field& a = all.at(k);
-            a.n += t.f[k].n;
-            a.agree += t.f[k].agree;
-            for (const auto& m : t.f[k].misses)
-                if (a.misses.size() < 10) a.misses.push_back(m);
-        }
-    }
-    report("rollcall", "all five", all, kRollcallMin);
+    });
 }

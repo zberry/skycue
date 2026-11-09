@@ -6,9 +6,10 @@
 // no CPR: every state vector carries a whole position.
 // Counters: each frame counts exactly one of unknown_type, no_position, unmapped
 // (types 7..10) or decoded. A position dropped by the range check counts in both
-// cpr_rejected and no_position; the frame's other fields still merge. rs_errors sums the
-// frames' ";rs=" counts. The gate in decoder_types.hpp (shared with the 1090 decoder): a change without a position emits only after
-// 10 s without an accepted one and at most once per second (spec 7.2). Callsign,
+// cpr_rejected and no_position; the frame's other fields still merge. rs_errors
+// sums the frames' ";rs=" counts. The gate in decoder_types.hpp (shared with the
+// 1090 decoder): a change without a position emits only after 10 s without an
+// accepted one and at most once per second (spec 7.2). Callsign,
 // category, squawk and emergency live with the key; all other fields expire at 60 s.
 
 #include <array>

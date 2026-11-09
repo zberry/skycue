@@ -30,32 +30,13 @@ constexpr seconds kLocalLastPos{60};    // design 5.5 step 2: last position usab
 constexpr seconds kSurfaceRefAge{300};  // design 5.5 step 1: last position usable as surface reference
 constexpr double kLocalRefNm = 180.0;   // our choice: reference-based local decode range (airborne)
 constexpr seconds kDerivedBaroAge{10};  // design 5.4: baro/GNSS altitude ages for the TC19 difference
-constexpr std::size_t kRssiFrames = 8;  // our choice: rssi is the mean over the last 8 frames
 
 double secs(TimePoint a, TimePoint b) { return std::chrono::duration<double>(a - b).count(); }
-
-void pushRssi(KeyState& ks, uint8_t s) {
-    ks.rssi_ring[ks.rssi_next] = s;
-    ks.rssi_next = (ks.rssi_next + 1) % kRssiFrames;
-    if (ks.rssi_count < kRssiFrames) ++ks.rssi_count;
-}
-
-std::optional<double> rssiOf(const KeyState& ks) {
-    if (ks.rssi_count == 0) return std::nullopt;
-    double sum = 0.0;
-    for (std::size_t i = 0; i < ks.rssi_count; ++i) {
-        const double a = ks.rssi_ring[i] / 255.0;
-        sum += a * a;
-    }
-    const double mean = sum / static_cast<double>(ks.rssi_count);
-    if (mean <= 0.0) return std::nullopt;  // no level at all
-    return std::round(10.0 * std::log10(mean) * 10.0) / 10.0;
-}
 
 // Sets a timed field; flags a change when it replaced a different value.
 template <typename T>
 void setField(KeyState& ks, Timed<T>& f, const T& v, TimePoint now, bool track) {
-    if (track && f.has && !(f.value == v)) ks.dirty = true;
+    if (track && f.has && !(f.value == v)) ks.gate.dirty = true;
     f.set(v, now);
 }
 
@@ -203,7 +184,7 @@ void ModesDecoder::onDf11(const Frame& f, uint32_t residual, std::optional<uint8
         return;
     }
     ks->confirmed.set(true, now_);
-    if (signal) pushRssi(*ks, *signal);
+    if (signal) ks->rssi.pushPower(RssiRing::fromBeastByte(*signal));
     if (capability(f) == 4) ks->on_ground.set(true, now_);
     ++counters_.decoded;  // no observation from a DF11 (design 5.2)
 }
@@ -228,7 +209,7 @@ void ModesDecoder::applyAcasRa(KeyState& ks, const AcasRa& ra) {
     if (ra.rat && !prev) return;  // a RAT with no advisory to end: nothing to report
     if (!prev || prev->active != st.active || prev->ara != st.ara || prev->rac != st.rac ||
         prev->mte != st.mte)
-        ks.dirty = true;
+        ks.gate.dirty = true;
     ks.acas_ra.set(st, now_);
 }
 
@@ -309,7 +290,7 @@ void ModesDecoder::onAp(const Frame& f, Clock::time_point arrival, std::optional
         return;
     }
     ks = &obtain(key, ks->source);
-    if (signal) pushRssi(*ks, *signal);
+    if (signal) ks->rssi.pushPower(RssiRing::fromBeastByte(*signal));
 
     switch (f.df) {
     case 0:
@@ -354,7 +335,7 @@ void ModesDecoder::onEs(const Frame& f, const StateKey& key, Source src, Clock::
     // Confirmation: clean/fixed DF17 and DF18 CF 0 only; DF18 CF 1 is the non-ICAO key and
     // the rebroadcast classes have their own keys, which no AP reply ever looks up.
     if (f.df == 17 || (f.df == 18 && f.bits(5, 3) == 0)) ks.confirmed.set(true, now_);
-    if (signal) pushRssi(ks, *signal);
+    if (signal) ks.rssi.pushPower(RssiRing::fromBeastByte(*signal));
     if (f.df == 17 && capability(f) == 4) setGround(ks, true);
 
     const int tc = typeCode(f);
@@ -572,7 +553,7 @@ bool ModesDecoder::positionStep(KeyState& ks, const CprFields& c, cpr::Position&
     bool ok = std::isfinite(cand->lat) && std::isfinite(cand->lon) && std::fabs(cand->lat) <= 90.0;
     if (ok) {
         const std::optional<cpr::Position> anchor = cfg_.reference ? cfg_.reference : ks.first_pos;
-        if (anchor && cpr::distanceNm(*cand, *anchor) > kRangeNm) ok = false;
+        if (!withinRange(*cand, anchor)) ok = false;
     }
     if (ok && ks.last_pos) {
         const double elapsed = std::max(0.0, secs(now_, ks.last_pos_at));
@@ -587,7 +568,7 @@ bool ModesDecoder::positionStep(KeyState& ks, const CprFields& c, cpr::Position&
     ks.last_pos = cand;
     ks.last_pos_at = now_;
     if (!ks.first_pos) ks.first_pos = cand;
-    ks.last_accept_at = now_;
+    ks.gate.last_accept_at = now_;
     if (global) ks.need_global = false;
     out = *cand;
     return true;
@@ -595,18 +576,15 @@ bool ModesDecoder::positionStep(KeyState& ks, const CprFields& c, cpr::Position&
 
 void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival, const cpr::Position* pos) {
     if (!handler_) {
-        if (pos) ks.dirty = false;
+        if (pos) ks.gate.dirty = false;
         return;
     }
     if (!pos) {
         // Design 7.2: without a position in the last 10 s, a change of identity, squawk or
         // altitude emits, at most once per second; a change held back waits for the next frame.
-        if (!ks.dirty) return;
-        if (ks.last_accept_at && now_ - *ks.last_accept_at <= kNoPositionFor) return;
-        if (ks.last_change_emit && now_ - *ks.last_change_emit < kChangeInterval) return;
-        ks.last_change_emit = now_;
+        if (!shouldEmitWithoutPosition(ks.gate, now_)) return;
     }
-    ks.dirty = false;
+    ks.gate.dirty = false;
 
     TrackObservation o;
     o.id.address = ks.key.address;
@@ -667,7 +645,7 @@ void ModesDecoder::emit(KeyState& ks, const Frame& f, Clock::time_point arrival,
     o.category = ks.category.has ? std::optional(ks.category.value) : std::nullopt;  // identity: lives with the key
     o.nic = ks.nic.fresh(now_, kFieldFresh);
     o.nac_p = ks.nac_p.fresh(now_, kFieldFresh);
-    o.rssi = rssiOf(ks);
+    o.rssi = ks.rssi.meanDb();
     o.raw_line = "*" + coding::toHex(f.bytes, true) + ";";
     o.input_id = input_id_;
     o.rebroadcast = ks.key.rebroadcast;

@@ -76,7 +76,6 @@ struct KeyState {
     std::optional<cpr::Position> last_pos;
     TimePoint last_pos_at{};
     std::optional<cpr::Position> first_pos;
-    std::optional<TimePoint> last_accept_at;  // survives the clearing of last_pos
     bool need_global = false;                 // set by a rejection, cleared by a global decode
     std::optional<float> last_gs_kt;
 
@@ -107,14 +106,10 @@ struct KeyState {
         bool seen = false;
     } tc31;
 
-    // Level of the last 8 frames that carried a signal byte (our choice).
-    std::array<uint8_t, 8> rssi_ring{};
-    std::size_t rssi_count = 0;  // frames pushed so far, capped at 8
-    std::size_t rssi_next = 0;
+    RssiRing rssi;  // level of the last frames that carried a signal byte
 
     // Change detection (design section 7.2).
-    bool dirty = false;
-    std::optional<TimePoint> last_change_emit;
+    EmitGate gate;
 };
 
 }  // namespace skycued::decode

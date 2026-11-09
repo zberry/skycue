@@ -1139,3 +1139,68 @@ BOOST_AUTO_TEST_CASE(no_ra_record_is_inactive) {
     BOOST_CHECK(!r.obs.back().acas_ra->active);
     BOOST_CHECK_EQUAL(r.obs.back().acas_ra->text, "no RA");
 }
+
+BOOST_AUTO_TEST_CASE(rssi_ring_matches_both_sample_mappings)
+{
+    using skycued::decode::RssiRing;
+    RssiRing r;
+    BOOST_CHECK(!r.meanDb());
+    for (int i = 0; i < 8; ++i) r.pushPower(RssiRing::fromBeastByte(128));
+    BOOST_REQUIRE(r.meanDb());
+    BOOST_CHECK_EQUAL(*r.meanDb(), -6.0);
+
+    RssiRing u;
+    u.pushPower(RssiRing::fromDbfs(-10));
+    u.pushPower(RssiRing::fromDbfs(-20));
+    u.pushPower(RssiRing::fromDbfs(-30));
+    BOOST_REQUIRE(u.meanDb());
+    BOOST_CHECK_EQUAL(*u.meanDb(), -14.3);
+
+    RssiRing z;
+    z.pushPower(0.0);
+    BOOST_CHECK(!z.meanDb());
+    RssiRing n;
+    n.pushPower(NAN);
+    BOOST_CHECK(!n.meanDb());
+}
+
+BOOST_AUTO_TEST_CASE(emit_gate_rule_7_2)
+{
+    using skycued::decode::EmitGate;
+    using skycued::decode::TimePoint;
+    using skycued::decode::shouldEmitWithoutPosition;
+    const TimePoint t0 = std::chrono::time_point_cast<TimePoint::duration>(at(0.0));
+    const auto plus = [&](double s) {
+        return t0 + std::chrono::duration_cast<TimePoint::duration>(std::chrono::duration<double>(s));
+    };
+    EmitGate clean;
+    BOOST_CHECK(!shouldEmitWithoutPosition(clean, t0));
+
+    EmitGate fresh;
+    fresh.dirty = true;
+    BOOST_CHECK(shouldEmitWithoutPosition(fresh, t0));
+    BOOST_CHECK(fresh.last_change_emit && *fresh.last_change_emit == t0);
+
+    EmitGate g;
+    g.dirty = true;
+    g.last_accept_at = t0;
+    BOOST_CHECK(!shouldEmitWithoutPosition(g, plus(10.0)));
+    BOOST_CHECK(shouldEmitWithoutPosition(g, plus(10.001)));
+    BOOST_CHECK(!shouldEmitWithoutPosition(g, plus(10.501)));
+    BOOST_CHECK(shouldEmitWithoutPosition(g, plus(11.001)));
+}
+
+BOOST_AUTO_TEST_CASE(within_range_boundary)
+{
+    using skycued::decode::withinRange;
+    const cpr::Position origin{0.0, 0.0};
+    BOOST_CHECK(withinRange({0.0, 10.0}, std::nullopt));
+    // Near the equator one degree of longitude is about 60 NM.
+    double lo = 0.0, hi = 20.0;
+    for (int i = 0; i < 60; ++i) {
+        const double mid = 0.5 * (lo + hi);
+        (cpr::distanceNm({0.0, mid}, origin) <= skycued::decode::limits::kRangeNm ? lo : hi) = mid;
+    }
+    BOOST_CHECK(withinRange({0.0, lo}, origin));
+    BOOST_CHECK(!withinRange({0.0, hi + 1e-6}, origin));
+}

@@ -15,6 +15,7 @@
 #include "web_api.hpp"
 #include "web_server.hpp"
 #include "web_stats.hpp"
+#include "web_test_support.hpp"
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -37,7 +38,14 @@
 #include <map>
 #include <regex>
 
+using skycue_test::exchange;
 using skycue_test::fileExists;
+using skycue_test::get;
+using skycue_test::Reply;
+using skycue_test::request;
+using skycue_test::requestWith;
+using skycue_test::setRecvTimeout;
+using skycue_test::WsClient;
 
 extern char** environ;
 
@@ -81,181 +89,6 @@ template <class Pred> bool pollUntil(Pred p, std::chrono::milliseconds timeout =
 }
 
 const char* const kIndex = "<!doctype html><title>skycue test</title>\n";
-
-// ---- a minimal synchronous HTTP client ----
-
-struct Reply {
-    unsigned status = 0;
-    std::string body, content_type, cache_control, allow;
-};
-
-void setRecvTimeout(tcp::socket& s, int seconds)
-{
-    timeval tv{};
-    tv.tv_sec = seconds;
-    ::setsockopt(s.native_handle(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-}
-
-Reply exchange(tcp::socket& s, http::verb verb, const std::string& target, const std::string& body = "",
-               bool keep_alive = false)
-{
-    http::request<http::string_body> req{verb, target, 11};
-    req.set(http::field::host, "127.0.0.1");
-    if (verb == http::verb::put || verb == http::verb::post) {
-        req.set(http::field::content_type, "application/json");
-        req.body() = body;
-    }
-    req.keep_alive(keep_alive);
-    req.prepare_payload();
-    http::write(s, req);
-    beast::flat_buffer buf;
-    http::response_parser<http::string_body> parser;
-    parser.body_limit(64u << 20);
-    http::read(s, buf, parser);
-    const auto& res = parser.get();
-    Reply r;
-    r.status = res.result_int();
-    r.body = res.body();
-    r.content_type = std::string(res[http::field::content_type]);
-    r.cache_control = std::string(res[http::field::cache_control]);
-    r.allow = std::string(res[http::field::allow]);
-    return r;
-}
-
-Reply request(uint16_t port, http::verb verb, const std::string& target, const std::string& body = "")
-{
-    asio::io_context io;
-    tcp::socket s(io);
-    s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
-    setRecvTimeout(s, 10);
-    return exchange(s, verb, target, body);
-}
-
-Reply get(uint16_t port, const std::string& target) { return request(port, http::verb::get, target); }
-
-// A request with exactly these headers (besides Host, unless given, and
-// Content-Length).
-Reply requestWith(uint16_t port, http::verb verb, const std::string& target, const std::string& body,
-                  const std::vector<std::pair<std::string, std::string>>& headers)
-{
-    asio::io_context io;
-    tcp::socket s(io);
-    s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
-    setRecvTimeout(s, 10);
-    http::request<http::string_body> req{verb, target, 11};
-    bool host = false;
-    for (const auto& h : headers) {
-        req.set(h.first, h.second);
-        host = host || h.first == "Host";
-    }
-    if (!host)
-        req.set(http::field::host, "127.0.0.1:" + std::to_string(port));
-    req.body() = body;
-    req.keep_alive(false);
-    req.prepare_payload();
-    http::write(s, req);
-    beast::flat_buffer buf;
-    http::response<http::string_body> res;
-    http::read(s, buf, res);
-    Reply r;
-    r.status = res.result_int();
-    r.body = res.body();
-    r.content_type = std::string(res[http::field::content_type]);
-    return r;
-}
-
-// ---- a minimal WebSocket client: a thread collects every text message ----
-
-struct WsClient {
-    asio::io_context io;
-    websocket::stream<tcp::socket> ws{io};
-    std::thread reader;
-    std::mutex m;
-    std::condition_variable cv;
-    std::vector<std::string> msgs;
-    bool closed = false;
-
-    // `read` false: never reads after the handshake (a stalled client), with
-    // `rcvbuf` bytes of socket receive buffer when not 0.
-    explicit WsClient(uint16_t port, bool read = true, int rcvbuf = 0)
-    {
-        auto& s = ws.next_layer();
-        s.open(tcp::v4());
-        if (rcvbuf)
-            s.set_option(asio::socket_base::receive_buffer_size(rcvbuf));
-        s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
-        ws.handshake("127.0.0.1", "/ws");
-        if (read)
-            reader = std::thread([this] { loop(); });
-    }
-    ~WsClient() { close(); }
-
-    void close()
-    {
-        ::shutdown(ws.next_layer().native_handle(), SHUT_RDWR);
-        if (reader.joinable())
-            reader.join();
-        boost::system::error_code ec;
-        ws.next_layer().close(ec);
-    }
-
-    void loop()
-    {
-        for (;;) {
-            beast::flat_buffer b;
-            boost::system::error_code ec;
-            ws.read(b, ec);
-            std::lock_guard<std::mutex> lk(m);
-            if (ec) {
-                closed = true;
-                cv.notify_all();
-                return;
-            }
-            msgs.emplace_back(asio::buffers_begin(b.data()), asio::buffers_end(b.data()));
-            cv.notify_all();
-        }
-    }
-
-    // Sends one short masked text frame by writing it to the socket itself.
-    // The websocket stream is not safe for a write on this thread while the
-    // reader thread is inside ws.read() (TSan saw them race on its state);
-    // the socket is.
-    void sendText(const std::string& text)
-    {
-        BOOST_REQUIRE(text.size() < 126);
-        const uint8_t mask[4] = {0x12, 0x34, 0x56, 0x78};
-        std::string frame;
-        frame += static_cast<char>(0x81);  // FIN, text
-        frame += static_cast<char>(0x80 | text.size());
-        frame.append(reinterpret_cast<const char*>(mask), 4);
-        for (std::size_t i = 0; i < text.size(); ++i)
-            frame += static_cast<char>(static_cast<uint8_t>(text[i]) ^ mask[i % 4]);
-        asio::write(ws.next_layer(), asio::buffer(frame));
-    }
-
-    template <class Pred> bool waitFor(Pred p, std::chrono::milliseconds timeout = kWait)
-    {
-        std::unique_lock<std::mutex> lk(m);
-        return cv.wait_for(lk, timeout, p);
-    }
-    // Waits for a message containing every needle; returns it ("" on timeout).
-    std::string waitForMessage(const std::vector<std::string>& needles, std::chrono::milliseconds timeout = kWait)
-    {
-        std::string found;
-        waitFor(
-            [&] {
-                for (const auto& msg : msgs) {
-                    if (std::all_of(needles.begin(), needles.end(), [&](const std::string& n) { return has(msg, n); })) {
-                        found = msg;
-                        return true;
-                    }
-                }
-                return false;
-            },
-            timeout);
-        return found;
-    }
-};
 
 // ---- the fixture: conf + www in a temp dir, Engine, RuntimeConfig, WebServer ----
 

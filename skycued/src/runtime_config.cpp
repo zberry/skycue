@@ -1,8 +1,10 @@
 #include "runtime_config.hpp"
 
 #include "engine.hpp"
+#include "file_util.hpp"
 #include "json_lite.hpp"
 #include "log.hpp"
+#include "time_util.hpp"
 #include "toml_lite.hpp"
 
 #include <unistd.h>
@@ -11,6 +13,7 @@
 #include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -118,14 +121,14 @@ void checkFilters(std::optional<double> range, std::optional<double> elevation)
 
 std::string readFile(const std::string& path)
 {
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
-        throw std::runtime_error(path + ": cannot open: " + std::strerror(errno));
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    if (in.bad())
-        throw std::runtime_error(path + ": read error");
-    return ss.str();
+    std::string text;
+    switch (readRegularFile(path, SIZE_MAX, text)) {
+    case ReadStatus::ok: return text;
+    case ReadStatus::too_large:  // not reachable without a size limit
+    case ReadStatus::missing:
+    case ReadStatus::error: break;
+    }
+    throw std::runtime_error(path + ": cannot open: " + std::strerror(errno));
 }
 
 IdList loadList(const std::string& path) { return path.empty() ? IdList() : IdList::loadFile(path); }
@@ -480,12 +483,13 @@ void RuntimeConfig::load()
         } catch (const std::exception& e) {
             // Moved aside, so the next change from the UI does not overwrite it.
             const std::string rejected = overlay_path_ + ".rejected";
-            if (::rename(overlay_path_.c_str(), rejected.c_str()) == 0)
+            std::string rename_why;
+            if (setAside(overlay_path_, ".rejected", rename_why))
                 LOG_ERROR(overlay_path_ << ": " << e.what() << "; ignoring it (the baseline applies), moved to "
                                         << rejected);
             else
                 LOG_ERROR(overlay_path_ << ": " << e.what() << "; ignoring it (the baseline applies); cannot move it to "
-                                        << rejected << ": " << std::strerror(errno));
+                                        << rejected << ": " << rename_why);
             overlay_watch_.accept();
         }
     }
@@ -576,14 +580,7 @@ struct OverridesFileError : std::runtime_error {
 };
 
 // "2026-11-08T12:00:00Z"
-std::string isoUtcNow()
-{
-    const std::time_t t = std::time(nullptr);
-    std::tm tm{};
-    ::gmtime_r(&t, &tm);
-    char buf[32];
-    return std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm) == 0 ? std::string() : std::string(buf);
-}
+std::string isoUtcNow() { return formatUtc(std::chrono::system_clock::now(), "%Y-%m-%dT%H:%M:%SZ"); }
 
 }  // namespace
 

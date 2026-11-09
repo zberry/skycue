@@ -21,6 +21,10 @@ if(NOT TARGET Threads::Threads)
   find_package(Threads REQUIRED)
 endif()
 
+# libskycue is deliberately standalone: it links only Boost.System and Threads,
+# so a consumer ships nothing else. Its socket code (connect with resolve,
+# listen, UDP bind, keep-alive, reconnect timer) therefore duplicates part of
+# net/, the daemon's skycue::net library; the duplication is accepted.
 add_library(skycue STATIC
   src/protocol.cpp
   src/client.cpp

@@ -53,6 +53,14 @@ target_link_libraries(cueing PRIVATE skycue::skycue)
 Both modes, and linking into a shared library, are exercised by
 `tests/consumer-smoke/` on every test run.
 
+libskycue is deliberately standalone. It links Boost.System (header-only
+since Boost 1.69) and Threads, so a consumer links one small library and
+ships nothing else. `net/` is the daemon's socket library (`skycue::net`);
+libskycue does not use it, and its own socket code (connect with resolve,
+listen, UDP bind, keep-alive, reconnect timer) duplicates part of it. The
+duplication is accepted: it keeps the reconnect behaviour and the error
+texts documented here independent of the daemon.
+
 ## Using skycue from your own CMake tree
 
 When your project vendors the whole `skycue/` directory (rather than only

@@ -183,7 +183,7 @@ For contributors:
 |---|---|
 | `libskycue/` | the cue-client library (`skycue::skycue`) |
 | `skycued/` | the daemon: decoders, track table, web server |
-| `net/` | `skycue::net`, the socket library the daemon uses (dialer, listener, framer, fan-out), with its own tests; `libskycue` does not use it: it links only Boost.System and Threads and is kept independent of the daemon's `net/` library |
+| `net/` | `skycue::net`, the socket library the daemon uses (dialer, listener, framer, fan-out), with its own tests; `libskycue` does not use it ([why](docs/libskycue.md#getting-it-into-your-build)) |
 | `tools/` | the command-line tools (`skycue-dump`, `-rawrec`, `-rawplay`, `-pingsim`, `-stats`, `-fisb`; `iqgen/` for `skycue-iqgen`) |
 | `www/` | the web page (Leaflet and ECharts are added from `sources/` at build time) |
 | `cmake/` | CMake modules |

@@ -11,9 +11,9 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cmath>
-#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <limits>

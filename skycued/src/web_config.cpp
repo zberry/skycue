@@ -19,17 +19,6 @@ std::string baseName(const std::string& path)
     return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
-std::string stringArray(const std::vector<std::string>& values)
-{
-    std::vector<std::string> quoted;
-    for (const auto& v : values) {
-        std::string s;
-        appendJsonString(s, v);
-        quoted.push_back(std::move(s));
-    }
-    return jsonArray(quoted);
-}
-
 }  // namespace
 
 std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, const LocationFacts& locations,

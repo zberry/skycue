@@ -225,8 +225,8 @@ when that is set, else beside the config file (see
 `record_dir` is `recording.dir` (`""`:
 not recording) and `recording_files` one object per recording file
 being written now (`name` the base name, `stream` `"received"`, `"sent"` or
-`"fisb"`, `bytes` the bytes written to it so far); `log_level` is `--log-level`. `mode` is `"live"` or
-`"replay"`; a replay adds `"replay": {"file": "<--replay FILE>", "speed":
+`"fisb"`, `bytes` the bytes written to it so far); `log_level` is
+`--log-level`. `mode` is `"live"` or `"replay"`; a replay adds `"replay": {"file": "<--replay FILE>", "speed":
 <--replay-speed, 0 = unpaced>, "loop": <--replay-loop>}`. `readsb` and
 `dump978` say whether the built-in readsb and dump978 inputs are used
 (`false` while replaying, and for `--no-readsb` / `--no-uat`), so their

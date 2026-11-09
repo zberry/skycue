@@ -13,20 +13,11 @@ skycued=$1 rawplay=$2 fixtures=$3
 csv="$fixtures/raw/modes-120s.csv.gz"
 speed1=${SKYCUE_HUB_SPEED1:-20}   # phase 1: 120 s of capture in about 6 s
 speed2=${SKYCUE_HUB_SPEED2:-40}   # phase 2: the 1 MiB cap of a stalled consumer trips in about 3 s
-tmp=$(mktemp -d)
-bg_pids=()
-cleanup() {
-  [ ${#bg_pids[@]} -gt 0 ] && kill "${bg_pids[@]}" 2>/dev/null
-  wait 2>/dev/null
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-fail() {
-  echo "FAIL: $*"
+test_init hub
+fail_context() {
   for f in skycued.log play1.log play2.log; do
     [ -s "$tmp/$f" ] && { echo "--- $f:"; tail -n 15 "$tmp/$f"; }
   done
-  exit 1
 }
 [ -e "$csv" ] || { echo "SKIP: $csv not fetched: run scripts/fixtures/fetch-test-captures.sh"; exit 77; }
 command -v python3 >/dev/null || { echo "SKIP: python3 missing"; exit 77; }
@@ -144,10 +135,10 @@ wait_for 15 outputs_up || fail "outputs b-tcp and u-tcp not up"
 field() { api_up && python3 -I "$tmp/check.py" field "$tmp/outputs.json" "$1" "$2"; }
 
 # ---- phase 1: finite replay, four consumers -----------------------------------
-python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/A.bin" & bg_pids+=($!)
-python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/B.bin" & bg_pids+=($!)
-python3 -I "$tmp/consumer.py" udp "$group" "$mc_port" "$tmp/M.dg" & bg_pids+=($!)
-python3 -I "$tmp/consumer.py" tcp "$uat_port" "$tmp/U.bin" & bg_pids+=($!)
+bg python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/A.bin"
+bg python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/B.bin"
+bg python3 -I "$tmp/consumer.py" udp "$group" "$mc_port" "$tmp/M.dg"
+bg python3 -I "$tmp/consumer.py" tcp "$uat_port" "$tmp/U.bin"
 two_peers() { [ "$(field b-tcp peers)" = 2 ] && [ "$(field u-tcp peers)" = 1 ]; }
 wait_for 10 two_peers || fail "consumers not connected (b-tcp peers $(field b-tcp peers))"
 wait_for 10 test -e "$tmp/M.dg.ready" || fail "multicast consumer not ready"
@@ -203,15 +194,14 @@ echo "ok hub_check_inputs_still_passes"
 kill "${bg_pids[@]:1}" 2>/dev/null; wait "${bg_pids[@]:1}" 2>/dev/null
 bg_pids=("$sk")
 rm -f "$tmp/M.dg.ready"
-python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/A2.bin" & bg_pids+=($!)
-python3 -I "$tmp/consumer.py" udp "$group" "$mc_port" "$tmp/M2.dg" & bg_pids+=($!)
+bg python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/A2.bin"
+bg python3 -I "$tmp/consumer.py" udp "$group" "$mc_port" "$tmp/M2.dg"
 wait_for 10 test -e "$tmp/M2.dg.ready" || fail "phase 2 multicast consumer not ready"
 python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/C.bin" stall & cpid=$!; bg_pids+=("$cpid")
 b_tcp_two_peers() { [ "$(field b-tcp peers)" = 2 ]; }
 wait_for 10 b_tcp_two_peers || fail "phase 2 consumers not connected (peers $(field b-tcp peers))"
 d0=$(field b-tcp dropped)
-"$rawplay" --1090-listen "$raw_port" --wait-clients 1 --speed "$speed2" --loop "$csv" >"$tmp/play2.log" 2>&1 &
-bg_pids+=($!)
+bg "$rawplay" --1090-listen "$raw_port" --wait-clients 1 --speed "$speed2" --loop "$csv" >"$tmp/play2.log" 2>&1
 c0=$(date +%s.%N)
 cut() { [ "$(field b-tcp dropped)" -gt "$d0" ] && [ "$(field b-tcp peers)" = 1 ]; }
 wait_for 60 cut || fail "hub_stalled_consumer_cut_others_continue: not cut (dropped $(field b-tcp dropped), peers $(field b-tcp peers))"
@@ -224,7 +214,7 @@ a2=$(stat -c %s "$tmp/A2.bin"); m2=$(stat -c %s "$tmp/M2.dg")
 echo "ok hub_stalled_consumer_cut_others_continue (cut after ${cut_s} s at speed $speed2, A2 +$((a2 - a1)) bytes in 2 s)"
 
 # a second stalled consumer, backlogged when the output is removed
-python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/C2.bin" stall & bg_pids+=($!)
+bg python3 -I "$tmp/consumer.py" tcp "$tcp_port" "$tmp/C2.bin" stall
 wait_for 10 b_tcp_two_peers || fail "second stalled consumer not connected"
 slow_sleep 2
 code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$base/api/outputs/b-tcp")

@@ -16,23 +16,9 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib/test_common.sh"
 skycued=$1 fixtures=$2 www=$3 jsdir=$4
 replay="$fixtures/readsb-sample.jsonl"
-tmp=$(mktemp -d)
-pid=
-cleanup() {
-  local i
-  if [ -n "$pid" ]; then
-    kill "$pid" 2>/dev/null
-    for (( i=0; i<30*slowf; i++ )); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
-    kill -9 "$pid" 2>/dev/null
-    wait 2>/dev/null
-  fi
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-fail() {
-  echo "FAIL: $*"
+test_init web_ui
+fail_context() {
   [ -s "$tmp/skycued.log" ] && { echo "--- skycued log:"; tail -n 20 "$tmp/skycued.log"; }
-  exit 1
 }
 for f in "$skycued" "$replay" "$www/index.html" "$www/app.js" "$www/app_pure.js" "$www/style.css" \
   "$www/stats_pure.js" "$www/chart_theme.js" "$www/stats_view.js" "$www/alerts_pure.js" "$www/alerts_view.js"; do
@@ -49,9 +35,8 @@ tcp_port = 0
 [web]
 port = $web_port
 EOF
-"$skycued" --replay "$replay" --replay-speed 1 --replay-loop --config "$tmp/skycue.toml" \
-  --www-dir "$www" >"$tmp/skycued.log" 2>&1 &
-pid=$!
+bg "$skycued" --replay "$replay" --replay-speed 1 --replay-loop --config "$tmp/skycue.toml" \
+  --www-dir "$www" >"$tmp/skycued.log" 2>&1
 base="http://127.0.0.1:$web_port"
 for (( i=0; i<100*slowf; i++ )); do curl -fs -o /dev/null "$base/api/stats" && break; sleep 0.1; done
 curl -fs -o /dev/null "$base/api/stats" || fail "web server did not come up"

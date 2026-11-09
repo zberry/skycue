@@ -14,20 +14,11 @@ set -u
 skycued=$1 rawplay=$2 fixtures=$3
 csv="$fixtures/raw/modes-120s.csv.gz"
 golden="$fixtures/raw/modes-120s.golden.jsonl.gz"
-tmp=$(mktemp -d)
-bg_pids=()
-cleanup() {
-  [ ${#bg_pids[@]} -gt 0 ] && kill "${bg_pids[@]}" 2>/dev/null
-  wait 2>/dev/null
-  rm -rf "$tmp"
-}
-trap cleanup EXIT
-fail() {
-  echo "FAIL: $*"
+test_init decode_differential
+fail_context() {
   for f in skycued.log play.log gen.log reduce.log; do
     [ -s "$tmp/$f" ] && { echo "--- $f:"; tail -n 15 "$tmp/$f"; }
   done
-  exit 1
 }
 [ -e "$csv" ] || { echo "SKIP: $csv not fetched: run scripts/fixtures/fetch-test-captures.sh"; exit 77; }
 command -v python3 >/dev/null || { echo "SKIP: python3 missing"; exit 77; }

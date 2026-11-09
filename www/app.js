@@ -3342,7 +3342,7 @@
       ['Overrides file', d.overrides_path],
       ['www directory', d.www_dir],
       ['Recording to', d.record_dir || 'not recording'],
-      ['Recording files', (d.recording_files || []).join(', ') || 'none'],
+      ['Recording files', (d.recording_files || []).map(function (f) { return f.name; }).join(', ') || 'none'],
       ['Log level', d.log_level],
       ['Runs', P.daemonModeText(d)],
       ['Learned locations', P.daemonLocationsText(d)[0]],

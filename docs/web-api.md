@@ -193,7 +193,9 @@ about the daemon. It is read only: nothing in it can be changed here.
             "overrides_path": "/var/lib/skycue/skycue.overrides.toml",
             "www_dir": "/usr/local/share/skycue/www", "map_dir": "/usr/local/share/skycue/www",
             "record_dir": "/var/lib/skycue/rec",
-            "recording_files": ["received-20261102-140306.jsonl", "sent-20261102-140306.jsonl"],
+            "recording_files": [
+              {"name": "received-20261102-140306.jsonl", "stream": "received", "bytes": 1048576},
+              {"name": "sent-20261102-140306.jsonl", "stream": "sent", "bytes": 20480}],
             "log_level": "info", "mode": "live", "readsb": true, "dump978": true,
             "locations": {"learned_path": "/etc/skycue/fisb-locations.json", "learned": 42,
                           "operator_path": "/etc/skycue/locations.csv", "operator": 61234,
@@ -221,8 +223,9 @@ when that is set, else beside the config file (see
 `/overlays/` and `/api/tiles-available` are read from: `paths.map_dir`, or
 `www_dir` when `paths.map_dir` is unset;
 `record_dir` is `recording.dir` (`""`:
-not recording) and `recording_files` the base names of the recording files
-being written now; `log_level` is `--log-level`. `mode` is `"live"` or
+not recording) and `recording_files` one object per recording file
+being written now (`name` the base name, `stream` `"received"`, `"sent"` or
+`"fisb"`, `bytes` the bytes written to it so far); `log_level` is `--log-level`. `mode` is `"live"` or
 `"replay"`; a replay adds `"replay": {"file": "<--replay FILE>", "speed":
 <--replay-speed, 0 = unpaced>, "loop": <--replay-loop>}`. `readsb` and
 `dump978` say whether the built-in readsb and dump978 inputs are used

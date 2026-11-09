@@ -38,14 +38,18 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
     const Config effective = runtime.effective();
     const Overlay overlay = runtime.overlay();
 
-    std::vector<std::string> files;
+    std::vector<std::string> files;  // JSON objects
     for (const auto& r : info.recorders) {
         if (!r.second)
             continue;
         for (const char* ext : {"jsonl", "csv"}) {
             const std::string path = r.second->currentPath(ext);
             if (!path.empty())
-                files.push_back(baseName(path));
+                files.push_back(JsonWriter()
+                                    .add("name", baseName(path))
+                                    .add("stream", r.first)
+                                    .add("bytes", static_cast<int64_t>(r.second->bytesWritten(ext)))
+                                    .str());
         }
     }
     const auto uptime = std::chrono::duration_cast<std::chrono::seconds>(now - info.started).count();
@@ -62,7 +66,7 @@ std::string configJson(const DaemonInfo& info, const RuntimeConfig& runtime, con
                                    .add("www_dir", info.www_dir)
                                    .add("map_dir", info.map_dir)
                                    .add("record_dir", effective.record_dir)
-                                   .addRaw("recording_files", stringArray(files))
+                                   .addRaw("recording_files", jsonArray(files))
                                    .add("log_level", info.log_level)
                                    .add("mode", info.replay_file.empty() ? "live" : "replay");
     if (!info.replay_file.empty())

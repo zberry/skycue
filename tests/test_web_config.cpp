@@ -165,6 +165,14 @@ struct ConfigFx {
 BOOST_AUTO_TEST_CASE(config_json_sources_and_values)
 {
     ConfigFx f;
+    f.fx->t.call([&] {
+        skycued::TrackObservation obs;
+        obs.id = {0xabc123, skycue::AddressType::icao};
+        obs.source = skycue::Source::adsb_1090;
+        obs.received_time = std::chrono::system_clock::now();
+        f.fx->received->writeObservation(obs);
+        f.fx->received->flush();
+    });
     const auto r = request(f.port, http::verb::get, "/api/config");
     BOOST_TEST_REQUIRE(r.status == 200u, r.body);
     const auto config = parsed(r.body);
@@ -189,10 +197,25 @@ BOOST_AUTO_TEST_CASE(config_json_sources_and_values)
     BOOST_TEST(daemon->getString("map_dir").value_or("") == f.tmp.path + "/maps");
     BOOST_TEST(daemon->getString("log_level").value_or("") == "info");
     BOOST_TEST(daemon->getString("record_dir").has_value());
-    const auto files = daemon->getStringArray("recording_files");
+    const auto files = daemon->getObjectArray("recording_files");
     BOOST_REQUIRE(files);
-    for (const auto& name : *files)
+    BOOST_TEST(!files->empty());
+    bool received_jsonl_seen = false;
+    for (const auto& file : *files) {
+        const std::string name = file.getString("name").value_or("");
+        const std::string stream = file.getString("stream").value_or("");
+        BOOST_TEST(!name.empty());
         BOOST_TEST(name.find('/') == std::string::npos, name);
+        BOOST_TEST((stream == "received" || stream == "sent" || stream == "fisb"), stream);
+        const auto bytes = file.getInt("bytes");
+        BOOST_TEST_REQUIRE(bytes.has_value(), name);
+        BOOST_TEST(*bytes >= 0, name);
+        if (stream == "received" && name.size() > 6 && name.compare(name.size() - 6, 6, ".jsonl") == 0) {
+            received_jsonl_seen = true;
+            BOOST_TEST(*bytes > 0, name);
+        }
+    }
+    BOOST_TEST(received_jsonl_seen);
 }
 
 BOOST_AUTO_TEST_CASE(overrides_source_reported)

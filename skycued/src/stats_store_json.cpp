@@ -784,10 +784,11 @@ StatsLoad loadStatsFile(const std::string& path, StatsStore& store)
         }
     }
     const std::string bad = path + ".bad";
-    if (::rename(path.c_str(), bad.c_str()) == 0)
+    std::string rename_why;
+    if (setAside(path, ".bad", rename_why))
         LOG_ERROR(path << ": " << reason << "; renamed to " << bad << "; the statistics start empty");
     else
-        LOG_ERROR(path << ": " << reason << "; could not rename it to " << bad << " (" << std::strerror(errno)
+        LOG_ERROR(path << ": " << reason << "; could not rename it to " << bad << " (" << rename_why
                        << "); the statistics start empty");
     return StatsLoad::rejected;
 }

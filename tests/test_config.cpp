@@ -857,12 +857,20 @@ BOOST_AUTO_TEST_CASE(env_unknown_ignored)
 
 BOOST_AUTO_TEST_CASE(environment_overrides_reports_unknown_names_of_a_table_only)
 {
+    // The caller's environment may hold unknown SKYCUE_* names of its own (a sanitizer job exports
+    // SKYCUE_FISB_SCREENSHOTS): they are expected in the report alongside the two set here.
+    std::vector<std::string> expected;
+    (void)skycued::environmentOverrides(&expected);
+    expected.push_back("SKYCUE_INPUTS_READSB_HSOT");
+    expected.push_back("SKYCUE_WEB_PROT");
+    std::sort(expected.begin(), expected.end());
+    expected.erase(std::unique(expected.begin(), expected.end()), expected.end());
     ScopedEnv a("SKYCUE_WEB_PROT", "1"), b("SKYCUE_INPUTS_READSB_HSOT", "x"), c("SKYCUE_READSB", "/x"),
         d("SKYCUE_TESTS_OFFLINE", "1"), e("SKYCUE_DUMP978", "/y"), f("SKYCUE_WEB_PORT", "9000");
     std::vector<std::string> unknown;
     const auto env = skycued::environmentOverrides(&unknown);
     std::sort(unknown.begin(), unknown.end());
-    BOOST_TEST((unknown == std::vector<std::string>{"SKYCUE_INPUTS_READSB_HSOT", "SKYCUE_WEB_PROT"}));
+    BOOST_TEST((unknown == expected));
     BOOST_TEST(env.count("SKYCUE_WEB_PORT") == 1u);
     BOOST_TEST(env.size() >= 1u);
 }

@@ -41,6 +41,8 @@ ctest --test-dir build -R '^decode_'                   # a family
 
 Never put a path to an external decoder in a file; pass it through these variables.
 
+skycued treats every `SKYCUE_*` variable as a config override and warns about unknown names; tests that spawn it scrub the environment (`scrubbedEnv()` in `tests/test_util.hpp`), and `config` tolerates names the caller exported.
+
 ## Why tests skip
 
 A skip is ctest's "Skipped" (exit status 77). It is not a pass.

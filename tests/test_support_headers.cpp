@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <zlib.h>
 
+#include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -111,4 +113,25 @@ BOOST_AUTO_TEST_CASE(load_jsonl_skips_a_bad_line)
     BOOST_REQUIRE_EQUAL(rows.size(), 2u);
     BOOST_TEST(rows[0].getString("hex").value_or("") == "a");
     BOOST_TEST(rows[1].getString("hex").value_or("") == "b");
+}
+
+BOOST_AUTO_TEST_CASE(scrubbed_env_drops_skycue_variables_except_the_kept_ones)
+{
+    ::setenv("SKYCUE_SCRUB_DROP", "1", 1);
+    ::setenv("SKYCUE_SCRUB_KEEP", "2", 1);
+    ::setenv("SKYCUE_SCRUB_NOT", "3", 1);
+    ::setenv("SCRUB_OTHER", "4", 1);
+    const auto env = skycue_test::scrubbedEnv({"SKYCUE_SCRUB_KEEP"});
+    auto has = [&](const std::string& e) { return std::find(env.begin(), env.end(), e) != env.end(); };
+    BOOST_TEST(!has("SKYCUE_SCRUB_DROP=1"));
+    BOOST_TEST(!has("SKYCUE_SCRUB_NOT=3"));
+    BOOST_TEST(has("SKYCUE_SCRUB_KEEP=2"));
+    BOOST_TEST(has("SCRUB_OTHER=4"));
+    BOOST_TEST(!env.empty());
+    for (const auto& e : env)
+        BOOST_TEST((e.rfind("SKYCUE_", 0) != 0 || e == "SKYCUE_SCRUB_KEEP=2"));
+    ::unsetenv("SKYCUE_SCRUB_DROP");
+    ::unsetenv("SKYCUE_SCRUB_KEEP");
+    ::unsetenv("SKYCUE_SCRUB_NOT");
+    ::unsetenv("SCRUB_OTHER");
 }

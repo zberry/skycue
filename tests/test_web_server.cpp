@@ -236,8 +236,14 @@ pid_t spawnSkycued(const std::vector<std::string>& args, const std::string& log)
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_addopen(&fa, 1, log.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
     posix_spawn_file_actions_addopen(&fa, 2, log.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    // No SKYCUE_* variable from the caller reaches the daemon: it would log a warning for unknown names.
+    std::vector<std::string> env = skycue_test::scrubbedEnv();
+    std::vector<char*> envp;
+    for (auto& e : env)
+        envp.push_back(&e[0]);
+    envp.push_back(nullptr);
     pid_t pid = -1;
-    const int rc = posix_spawn(&pid, argv[0], &fa, nullptr, argv.data(), environ);
+    const int rc = posix_spawn(&pid, argv[0], &fa, nullptr, argv.data(), envp.data());
     posix_spawn_file_actions_destroy(&fa);
     if (rc != 0)
         throw std::runtime_error("posix_spawn failed");

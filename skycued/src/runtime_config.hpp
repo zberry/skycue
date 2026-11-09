@@ -19,7 +19,8 @@
 //
 // promoteToBaseline ("save as baseline") writes the overlay's filter values
 // into skycue.overrides.toml, a file skycued owns and writes whole (a header
-// line, then the filter keys), and clears them from the overlay.
+// line, then the tables of every non-bootstrap key it holds), and clears
+// them from the overlay.
 // skycue.toml is never written.
 //
 // The watcher (startWatching) polls the five files every second (mtime,
@@ -201,8 +202,9 @@ private:
     void changed();  // on_change_, if set
     void writeOverlay(const Overlay& overlay);  // throws std::runtime_error
     void writeFile(SettledFile& file, const std::string& text);  // throws; accepts our write
-    // Writes skycue.overrides.toml whole: its filter keys, `set` over them.
-    void writeOverrides(const std::map<std::string, toml_lite::Value>& set);  // throws
+    // Writes skycue.overrides.toml whole: the keys it holds, minus `clear`, with
+    // `set` over them, grouped by table. Throws.
+    void writeOverrides(const std::map<std::string, toml_lite::Value>& set, const std::set<std::string>& clear);
 
     // Watcher reloads: each logs its errors and keeps the previous values.
     // `edited`: the base name of the file whose change this reads (for the log).

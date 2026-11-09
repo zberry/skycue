@@ -29,65 +29,87 @@ namespace {
 
 namespace tl = toml_lite;
 
-enum class Type { string, integer, number, boolean, strings };
-
-struct KeySpec {
-    const char* key;
-    Type type;
-};
+}  // namespace
 
 // In the order of packaging/skycue.toml.example. A number key takes an integer
 // or a float literal; an integer key only an integer literal.
 const std::vector<KeySpec>& keySpecs()
 {
+    using T = KeyType;
+    using C = KeyClass;
+    const double inf = HUGE_VAL;
     static const std::vector<KeySpec> specs{
-        {"receiver.lat", Type::number},
-        {"receiver.lon", Type::number},
-        {"receiver.alt_m", Type::number},
-        {"receiver.antenna_height_m", Type::number},
-        {"inputs.file", Type::string},
-        {"inputs.decoder", Type::string},
-        {"inputs.readsb.enable", Type::boolean},
-        {"inputs.readsb.host", Type::string},
-        {"inputs.readsb.json_port", Type::integer},
-        {"inputs.readsb.beast_port", Type::integer},
-        {"inputs.dump978.enable", Type::boolean},
-        {"inputs.dump978.host", Type::string},
-        {"inputs.dump978.raw_port", Type::integer},
-        {"inputs.dump978.json_port", Type::integer},
-        {"sdr.serial_1090", Type::string},
-        {"sdr.serial_978", Type::string},
-        {"sdr.gain_1090", Type::string},
-        {"sdr.gain_978", Type::string},
-        {"cues.tcp_port", Type::integer},
-        {"cues.tcp_connect", Type::strings},
-        {"cues.udp_targets", Type::strings},
-        {"cues.min_interval_s", Type::number},
-        {"cues.max_interval_s", Type::number},
-        {"cues.track_timeout_s", Type::number},
-        {"cues.keyframe_interval_s", Type::number},
-        {"filters.max_range_nm", Type::number},
-        {"filters.min_elevation_deg", Type::number},
-        {"filters.allow_list_file", Type::string},
-        {"filters.block_list_file", Type::string},
-        {"web.port", Type::integer},
-        {"web.bind", Type::string},
-        {"web.trail_seconds", Type::integer},
-        {"recording.dir", Type::string},
-        {"recording.formats", Type::strings},
-        {"recording.raw", Type::boolean},
-        {"recording.max_gb", Type::number},
-        {"fisb.enable", Type::boolean},
-        {"fisb.experimental", Type::boolean},
-        {"paths.state_dir", Type::string},
-        {"paths.map_dir", Type::string},
-        {"paths.locations_file", Type::string},
-        {"stats.file", Type::string},
-        {"stats.aircraft_max", Type::integer},
-        {"stats.save_s", Type::integer},
+        {"receiver.lat", T::number, C::restart, -90, 90},
+        {"receiver.lon", T::number, C::restart, -180, 180},
+        {"receiver.alt_m", T::number, C::restart},
+        {"receiver.antenna_height_m", T::number, C::restart},
+        {"inputs.file", T::string, C::restart},
+        {"inputs.decoder", T::string, C::restart, -inf, inf, {"readsb", "skycued"}},
+        {"inputs.readsb.enable", T::boolean, C::restart},
+        {"inputs.readsb.host", T::string, C::restart},
+        {"inputs.readsb.json_port", T::integer, C::restart, 1, 65535},
+        {"inputs.readsb.beast_port", T::integer, C::restart, 1, 65535},
+        {"inputs.dump978.enable", T::boolean, C::restart},
+        {"inputs.dump978.host", T::string, C::restart},
+        {"inputs.dump978.raw_port", T::integer, C::restart, 1, 65535},
+        {"inputs.dump978.json_port", T::integer, C::restart, 1, 65535},
+        {"sdr.serial_1090", T::string, C::external},
+        {"sdr.serial_978", T::string, C::external},
+        {"sdr.gain_1090", T::string, C::external},
+        {"sdr.gain_978", T::string, C::external},
+        {"cues.tcp_port", T::integer, C::restart, 0, 65535},
+        {"cues.tcp_connect", T::strings, C::restart},
+        {"cues.udp_targets", T::strings, C::restart},
+        {"cues.min_interval_s", T::number, C::restart, 0.1, inf},
+        {"cues.max_interval_s", T::number, C::restart, 1, inf},
+        {"cues.track_timeout_s", T::number, C::restart, 1, inf},
+        {"cues.keyframe_interval_s", T::number, C::restart, 1, inf},
+        {"filters.max_range_nm", T::number, C::live, 0, inf},  // and strictly greater than 0
+        {"filters.min_elevation_deg", T::number, C::live, -90, 90},
+        {"filters.allow_list_file", T::string, C::live},
+        {"filters.block_list_file", T::string, C::live},
+        {"web.port", T::integer, C::bootstrap, 0, 65535},
+        {"web.bind", T::string, C::bootstrap},
+        {"web.trail_seconds", T::integer, C::restart, 0, 3600},
+        {"web.allow_restart", T::boolean, C::bootstrap},
+        {"recording.dir", T::string, C::restart},
+        {"recording.formats", T::strings, C::restart, -inf, inf, {"jsonl", "csv"}},
+        {"recording.raw", T::boolean, C::restart},
+        {"recording.max_gb", T::number, C::restart, 0, inf},
+        {"fisb.enable", T::boolean, C::restart},
+        {"fisb.experimental", T::boolean, C::restart},
+        {"paths.state_dir", T::string, C::bootstrap},
+        {"paths.map_dir", T::string, C::restart},
+        {"paths.locations_file", T::string, C::restart},
+        {"stats.file", T::string, C::restart},
+        {"stats.aircraft_max", T::integer, C::restart, 100, 100000},
+        {"stats.save_s", T::integer, C::restart, 10, 86400},
     };
     return specs;
 }
+
+const KeySpec& keySpec(const std::string& key)
+{
+    for (const auto& s : keySpecs())
+        if (key == s.key)
+            return s;
+    throw std::invalid_argument("unknown config key " + key);
+}
+
+KeyClass keyClassOf(const std::string& key) { return keySpec(key).cls; }
+
+const char* keyClassName(KeyClass cls)
+{
+    switch (cls) {
+    case KeyClass::live: return "live";
+    case KeyClass::restart: return "restart";
+    case KeyClass::external: return "external";
+    case KeyClass::bootstrap: return "bootstrap";
+    }
+    return "restart";
+}
+
+namespace {
 
 const KeySpec* findSpec(const std::string& key)
 {
@@ -189,11 +211,8 @@ void collectFile(const std::string& text, const std::string& name, int layer, En
         if (!findSpec(key))
             throw ConfigError(name, entry->line, unknownKeyMessage(key));
         if (allowed && std::find(allowed->begin(), allowed->end(), key) == allowed->end()) {
-            std::string only;
-            for (const auto& k : *allowed)
-                only += (only.empty() ? "" : ", ") + k;
             throw ConfigError(name, entry->line,
-                              key + " cannot be set in " + kOverridesFileName + " (only " + only + ")");
+                              key + " cannot be set in " + kOverridesFileName + " (skycued reads it before that file)");
         }
         entries[key] = Src{entry->value, name, entry->line, layer};
     }
@@ -206,7 +225,7 @@ void collectFile(const std::string& text, const std::string& name, int layer, En
 // bare word, which is a string ("" is the empty string). For a string key an
 // unquoted value is the text itself, even if it reads as a number or a bool
 // (a serial 1234, a gain 49.6).
-tl::Value parseLiteral(const std::string& raw_value, const std::string& source, const std::string& key, Type type)
+tl::Value parseLiteral(const std::string& raw_value, const std::string& source, const std::string& key, KeyType type)
 {
     const auto first = raw_value.find_first_not_of(" \t");
     const auto last = raw_value.find_last_not_of(" \t");
@@ -215,7 +234,7 @@ tl::Value parseLiteral(const std::string& raw_value, const std::string& source, 
         throw ConfigError(source, 0, key + ": the value must be on one line");
     if (raw.empty())
         return std::string();
-    if (type == Type::string && raw.find_first_of("\"'[]#") == std::string::npos)
+    if (type == KeyType::string && raw.find_first_of("\"'[]#") == std::string::npos)
         return tl::Value{std::move(raw)};
     try {
         tl::Document d = tl::parse("v = " + raw + "\n", source);
@@ -286,7 +305,9 @@ public:
         }
     }
 
-    void num(const std::string& key, double& out, double lo = -HUGE_VAL, double hi = HUGE_VAL) const
+    // `ranged`: check the spec's range here; false for the keys whose range
+    // check below words its own error.
+    void num(const std::string& key, double& out, bool ranged = true) const
     {
         auto e = find(key);
         if (!e)
@@ -300,7 +321,8 @@ public:
             fail(key, key + ": expected a number");
         if (!std::isfinite(d))
             fail(key, key + ": expected a finite number");
-        if (d < lo || d > hi) {
+        const double lo = keySpec(key).lo, hi = keySpec(key).hi;
+        if (ranged && (d < lo || d > hi)) {
             std::ostringstream ss;
             ss << key << " must be in [" << lo << "," << hi << "], got '" << show(d) << "'";
             fail(key, ss.str());
@@ -308,9 +330,10 @@ public:
         out = d;
     }
 
-    // An integer in [lo, hi].
-    void whole(const std::string& key, int64_t lo, int64_t hi, int64_t& out) const
+    // An integer in the spec's range.
+    void whole(const std::string& key, int64_t& out) const
     {
+        const int64_t lo = static_cast<int64_t>(keySpec(key).lo), hi = static_cast<int64_t>(keySpec(key).hi);
         auto e = find(key);
         if (!e)
             return;
@@ -323,16 +346,18 @@ public:
         out = v;
     }
 
-    void wholeInt(const std::string& key, int64_t lo, int64_t hi, int& out) const
+    void wholeInt(const std::string& key, int& out) const
     {
         int64_t v = out;
-        whole(key, lo, hi, v);
+        whole(key, v);
         out = static_cast<int>(v);
     }
 
-    // allow_zero: 0 is accepted too (it means "off" for that key).
-    void port(const std::string& key, uint16_t& out, bool allow_zero = false) const
+    // A port in the spec's range; a spec with lo 0 also accepts 0 (it means
+    // "off" for that key).
+    void port(const std::string& key, uint16_t& out) const
     {
+        const bool allow_zero = keySpec(key).lo == 0;
         auto e = find(key);
         if (!e)
             return;
@@ -434,8 +459,8 @@ Config convertEntries(const Entries& entries, const std::string& name, bool posi
 
     Config c;
     c.position_required = position_required;
-    conv.num("receiver.lat", c.receiver_lat, -90, 90);
-    conv.num("receiver.lon", c.receiver_lon, -180, 180);
+    conv.num("receiver.lat", c.receiver_lat);
+    conv.num("receiver.lon", c.receiver_lon);
     if (position_required && c.receiver_lat == 0.0 && c.receiver_lon == 0.0)
         conv.fail("receiver.lat", "receiver.lat and receiver.lon are both 0.0: set the receiver's position");
     c.receiver_position_set = conv.find("receiver.lat") && conv.find("receiver.lon") &&
@@ -447,19 +472,20 @@ Config convertEntries(const Entries& entries, const std::string& name, bool posi
     conv.port("inputs.readsb.json_port", c.readsb_json_port);
     conv.port("inputs.readsb.beast_port", c.readsb_beast_port);
     conv.str("inputs.decoder", c.track_decoder);
-    if (c.track_decoder != "readsb" && c.track_decoder != "skycued")
+    if (std::find(keySpec("inputs.decoder").values.begin(), keySpec("inputs.decoder").values.end(), c.track_decoder) ==
+        keySpec("inputs.decoder").values.end())
         conv.fail("inputs.decoder", "inputs.decoder must be readsb or skycued, got '" + c.track_decoder + "'");
-    conv.port("web.port", c.web_port, true);
-    conv.port("cues.tcp_port", c.cue_tcp_port, true);
+    conv.port("web.port", c.web_port);
+    conv.port("cues.tcp_port", c.cue_tcp_port);
     conv.str("recording.dir", c.record_dir);
-    conv.num("filters.max_range_nm", c.max_range_nm);
-    conv.num("filters.min_elevation_deg", c.min_elevation_deg);
+    conv.num("filters.max_range_nm", c.max_range_nm, false);
+    conv.num("filters.min_elevation_deg", c.min_elevation_deg, false);
     conv.str("filters.allow_list_file", c.allow_list_file);
     conv.str("filters.block_list_file", c.block_list_file);
-    conv.num("cues.min_interval_s", c.min_interval_s);
-    conv.num("cues.max_interval_s", c.max_interval_s);
-    conv.num("cues.track_timeout_s", c.track_timeout_s);
-    conv.num("cues.keyframe_interval_s", c.keyframe_interval_s);
+    conv.num("cues.min_interval_s", c.min_interval_s, false);
+    conv.num("cues.max_interval_s", c.max_interval_s, false);
+    conv.num("cues.track_timeout_s", c.track_timeout_s, false);
+    conv.num("cues.keyframe_interval_s", c.keyframe_interval_s, false);
     conv.str("sdr.serial_1090", c.sdr_1090_serial);
     conv.str("sdr.serial_978", c.sdr_978_serial);
     conv.str("sdr.gain_1090", c.gain_1090);
@@ -495,12 +521,13 @@ Config convertEntries(const Entries& entries, const std::string& name, bool posi
     conv.str("web.bind", c.web_bind);
     if (c.web_bind.empty())
         conv.fail("web.bind", "web.bind must not be empty");
-    conv.num("recording.max_gb", c.record_max_gb, 0);
-    conv.wholeInt("web.trail_seconds", 0, 3600, c.trail_seconds);
+    conv.num("recording.max_gb", c.record_max_gb);
+    conv.wholeInt("web.trail_seconds", c.trail_seconds);
+    conv.boolean("web.allow_restart", c.web_allow_restart);
     // At most 100000: at about 300 bytes an aircraft the stats file stays
     // well under kStatsFileMaxBytes (32 MiB), so it can always be read back.
-    conv.wholeInt("stats.aircraft_max", 100, 100000, c.stats_aircraft_max);
-    conv.wholeInt("stats.save_s", 10, 86400, c.stats_save_s);
+    conv.wholeInt("stats.aircraft_max", c.stats_aircraft_max);
+    conv.wholeInt("stats.save_s", c.stats_save_s);
 
     conv.boolean("recording.raw", c.record_raw);
     conv.boolean("fisb.enable", c.fisb_enable);
@@ -536,7 +563,8 @@ Config convertEntries(const Entries& entries, const std::string& name, bool posi
     if (const auto* formats = conv.array("recording.formats")) {
         c.record_formats.clear();
         for (const auto& w : *formats) {
-            if (w != "jsonl" && w != "csv")
+            if (std::find(keySpec("recording.formats").values.begin(), keySpec("recording.formats").values.end(), w) ==
+                keySpec("recording.formats").values.end())
                 conv.fail("recording.formats", "recording.formats entries must be jsonl or csv, got '" + w + "'");
             c.record_formats.insert(w);
         }
@@ -544,20 +572,22 @@ Config convertEntries(const Entries& entries, const std::string& name, bool posi
 
     // Range checks, applied to defaults and file values alike. Each error
     // names the key (and the line it is on, when it is in the file).
-    auto atLeast = [&](const char* key, double v, double min) {
+    auto atLeast = [&](const char* key, double v) {
+        const double min = keySpec(key).lo;
         if (v < min)
             conv.fail(key, std::string(key) + " must be at least " + Converter::show(min) + ", got " + Converter::show(v));
     };
-    atLeast("cues.keyframe_interval_s", c.keyframe_interval_s, 1);
-    atLeast("cues.min_interval_s", c.min_interval_s, 0.1);
-    atLeast("cues.track_timeout_s", c.track_timeout_s, 1);
+    atLeast("cues.keyframe_interval_s", c.keyframe_interval_s);
+    atLeast("cues.min_interval_s", c.min_interval_s);
+    atLeast("cues.track_timeout_s", c.track_timeout_s);
     if (c.max_interval_s < c.min_interval_s)
         conv.fail(conv.find("cues.max_interval_s") ? "cues.max_interval_s" : "cues.min_interval_s",
                   "cues.max_interval_s (" + Converter::show(c.max_interval_s) + ") must be at least cues.min_interval_s (" +
                       Converter::show(c.min_interval_s) + ")");
+    atLeast("cues.max_interval_s", c.max_interval_s);
     if (!(c.max_range_nm > 0))
         conv.fail("filters.max_range_nm", "filters.max_range_nm must be greater than 0, got " + Converter::show(c.max_range_nm));
-    if (c.min_elevation_deg < -90 || c.min_elevation_deg > 90)
+    if (c.min_elevation_deg < keySpec("filters.min_elevation_deg").lo || c.min_elevation_deg > keySpec("filters.min_elevation_deg").hi)
         conv.fail("filters.min_elevation_deg",
                   "filters.min_elevation_deg must be in [-90,90], got " + Converter::show(c.min_elevation_deg));
     if (!c.record_dir.empty() && c.record_formats.empty())
@@ -660,8 +690,13 @@ std::map<std::string, std::string> environmentOverrides(std::vector<std::string>
 
 const std::vector<std::string>& overridesFileKeys()
 {
-    static const std::vector<std::string> keys{"filters.max_range_nm", "filters.min_elevation_deg",
-                                               "filters.allow_list_file", "filters.block_list_file"};
+    static const std::vector<std::string> keys = [] {
+        std::vector<std::string> k;
+        for (const auto& s : keySpecs())
+            if (s.cls != KeyClass::bootstrap)
+                k.push_back(s.key);
+        return k;
+    }();
     return keys;
 }
 
@@ -757,6 +792,7 @@ std::string configValueText(const Config& c, const std::string& key)
         {"web.port", [](const Config& x) { return std::to_string(x.web_port); }},
         {"web.bind", [](const Config& x) { return x.web_bind; }},
         {"web.trail_seconds", [](const Config& x) { return std::to_string(x.trail_seconds); }},
+        {"web.allow_restart", [](const Config& x) { return flag(x.web_allow_restart); }},
         {"recording.dir", [](const Config& x) { return x.record_dir; }},
         {"recording.formats",
          [](const Config& x) {

@@ -3,6 +3,7 @@
 
 #include "conf_support.hpp"
 #include "config.hpp"
+#include "json_lite.hpp"
 #include "toml_lite.hpp"
 
 #include <unistd.h>
@@ -128,6 +129,7 @@ const RoundTrip kRoundTrips[] = {
     {"web.port", "9090", "9090"},
     {"web.bind", "\"0.0.0.0\"", "0.0.0.0"},
     {"web.trail_seconds", "3600", "3600"},
+    {"web.allow_restart", "true", "true"},
     {"recording.dir", "\"/data/rec\"", "/data/rec"},
     {"recording.formats", "[\"csv\"]", "csv"},
     {"recording.raw", "true", "true"},
@@ -237,7 +239,7 @@ BOOST_AUTO_TEST_CASE(known_keys_are_the_example_keys_in_order)
     for (const auto& p : by_line)
         keys.push_back(p.second);
     BOOST_TEST(keys == skycued::knownConfigKeys(), boost::test_tools::per_element());
-    BOOST_TEST(skycued::knownConfigKeys().size() == 44u);
+    BOOST_TEST(skycued::knownConfigKeys().size() == 45u);
     for (const auto& k : skycued::knownConfigKeys())
         BOOST_CHECK_NO_THROW(skycued::configValueText(Config(), k));
     BOOST_CHECK_THROW(skycued::configValueText(Config(), "web.nope"), std::invalid_argument);
@@ -478,7 +480,125 @@ BOOST_AUTO_TEST_CASE(position_by_set_or_env_satisfies)
         parseConfigLayers("", "t", "", "", {}, {{"SKYCUE_RECEIVER_LAT", "1"}, {"SKYCUE_RECEIVER_LON", "2"}}));
 }
 
+// ---- the key table -----------------------------------------------------------------
+
+BOOST_AUTO_TEST_CASE(key_classes_cover_every_key_once)
+{
+    // every knownConfigKeys() entry has a spec; the live, external and
+    // bootstrap keys are exactly those of the design; the rest are restart
+    std::set<std::string> live, external, bootstrap, seen;
+    for (const auto& s : skycued::keySpecs()) {
+        BOOST_TEST(seen.insert(s.key).second, s.key);
+        switch (s.cls) {
+        case skycued::KeyClass::live: live.insert(s.key); break;
+        case skycued::KeyClass::external: external.insert(s.key); break;
+        case skycued::KeyClass::bootstrap: bootstrap.insert(s.key); break;
+        case skycued::KeyClass::restart: break;
+        }
+    }
+    const auto& known = skycued::knownConfigKeys();
+    BOOST_TEST((seen == std::set<std::string>(known.begin(), known.end())));
+    BOOST_TEST((live == std::set<std::string>{"filters.max_range_nm", "filters.min_elevation_deg",
+                                              "filters.allow_list_file", "filters.block_list_file"}));
+    BOOST_TEST((external == std::set<std::string>{"sdr.serial_1090", "sdr.serial_978", "sdr.gain_1090", "sdr.gain_978"}));
+    BOOST_TEST((bootstrap == std::set<std::string>{"paths.state_dir", "web.port", "web.bind", "web.allow_restart"}));
+    BOOST_TEST((skycued::keyClassOf("receiver.lat") == skycued::KeyClass::restart));
+    BOOST_TEST(std::string(skycued::keyClassName(skycued::KeyClass::external)) == "external");
+    BOOST_CHECK_THROW(skycued::keySpec("nope.nope"), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(spec_ranges_match_the_parser)
+{
+    // A minimal valid file with the key set to `value`.
+    auto parseWith = [](const std::string& key, const std::string& value) {
+        const auto dot = key.rfind('.');
+        std::string text = "[receiver]\nlat = 51.5\nlon = -0.12\n";
+        if (key == "receiver.lat" || key == "receiver.lon")
+            text = "[receiver]\nlat = " + std::string(key == "receiver.lat" ? value : "51.5") + "\nlon = " +
+                   std::string(key == "receiver.lon" ? value : "-0.12") + "\n";
+        else
+            text += "[" + key.substr(0, dot) + "]\n" + key.substr(dot + 1) + " = " + value + "\n";
+        return parseConfigText(text, "t.toml");
+    };
+    auto num = [](double v) { return skycued::formatRoundTrip(v); };
+    auto accepts = [&](const std::string& key, const std::string& value) {
+        try {
+            parseWith(key, value);
+            return true;
+        } catch (const ConfigError& e) {
+            BOOST_TEST_MESSAGE(e.what());
+            return false;
+        }
+    };
+    for (const auto& s : skycued::keySpecs()) {
+        const std::string key = s.key;
+        const bool whole = s.type == skycued::KeyType::integer;
+        if (std::isfinite(s.lo)) {
+            const double below = whole ? s.lo - 1 : s.lo - 0.5;
+            BOOST_CHECK_THROW(parseWith(key, num(below)), ConfigError);
+            if (key != "filters.max_range_nm")  // lo 0 is excluded: checked below
+                BOOST_TEST(accepts(key, num(s.lo)), key + " at lo");
+        }
+        if (std::isfinite(s.hi)) {
+            BOOST_CHECK_THROW(parseWith(key, num(whole ? s.hi + 1 : s.hi + 0.5)), ConfigError);
+            BOOST_TEST(accepts(key, num(s.hi)), key + " at hi");
+        }
+        if (s.type == skycued::KeyType::string && !s.values.empty()) {
+            BOOST_CHECK_THROW(parseWith(key, "\"nope\""), ConfigError);
+            for (const auto& v : s.values)
+                BOOST_CHECK_NO_THROW(parseWith(key, "\"" + v + "\""));
+        }
+    }
+    // recording.formats: any non-empty subset of the allowed set
+    BOOST_CHECK_THROW(parseWith("recording.formats", "[\"json\"]"), ConfigError);
+    BOOST_CHECK_NO_THROW(parseWith("recording.formats", "[\"csv\"]"));
+    BOOST_CHECK_NO_THROW(parseWith("recording.formats", "[\"jsonl\", \"csv\"]"));
+    // filters.max_range_nm: lo is 0 but the value must be above it
+    BOOST_CHECK_THROW(parseWith("filters.max_range_nm", "0"), ConfigError);
+    BOOST_CHECK_NO_THROW(parseWith("filters.max_range_nm", "0.5"));
+}
+
+BOOST_AUTO_TEST_CASE(allow_restart_key_defaults_false_and_parses)
+{
+    BOOST_TEST(skycued::configValueText(Config(), "web.allow_restart") == "false");
+    BOOST_TEST(parseConfigText(std::string(kLatLon) + "[web]\nallow_restart = true\n", "t").web_allow_restart);
+    BOOST_CHECK_THROW(parseConfigText(std::string(kLatLon) + "[web]\nallow_restart = 1\n", "t"), ConfigError);
+}
+
 // ---- the overrides file ------------------------------------------------------------
+
+BOOST_AUTO_TEST_CASE(overrides_keys_are_all_but_bootstrap)
+{
+    const auto& keys = skycued::overridesFileKeys();
+    BOOST_TEST(keys.size() == skycued::knownConfigKeys().size() - 4);
+    for (const char* k : {"paths.state_dir", "web.port", "web.bind", "web.allow_restart"})
+        BOOST_TEST((std::find(keys.begin(), keys.end(), k) == keys.end()), k);
+}
+
+BOOST_AUTO_TEST_CASE(overrides_file_rejects_bootstrap_key)
+{
+    try {
+        parseConfigLayers(kLatLon, "skycue.toml", "[web]\nport = 81\n", "skycue.overrides.toml");
+        BOOST_FAIL("expected ConfigError");
+    } catch (const ConfigError& e) {
+        BOOST_TEST(std::string(e.what()).rfind("skycue.overrides.toml:2:", 0) == 0u, e.what());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(overrides_file_accepts_any_other_table)
+{
+    const Config c = parseConfigLayers(kLatLon, "skycue.toml",
+                                       "[fisb]\nenable = false\n[cues]\nudp_targets = [\"h:1\"]\n",
+                                       "skycue.overrides.toml");
+    BOOST_TEST(!c.fisb_enable);
+    BOOST_TEST(c.cue_udp_targets.size() == 1u);
+    BOOST_TEST(skycued::configValueText(c, "cues.udp_targets") == "h:1");
+    std::set<std::string> overridden;
+    for (const auto& s : c.sources)
+        if (s.source == "overrides")
+            overridden.insert(s.key);
+    BOOST_TEST((overridden == std::set<std::string>{"fisb.enable", "cues.udp_targets"}));
+}
 
 BOOST_AUTO_TEST_CASE(overrides_file_only_allowed_keys)
 {
@@ -486,14 +606,13 @@ BOOST_AUTO_TEST_CASE(overrides_file_only_allowed_keys)
     auto layers = [&](const std::string& overrides) {
         return parseConfigLayers(main, "main", overrides, "/s/skycue.overrides.toml");
     };
-    for (const char* text : {"[web]\nport = 81\n", "[paths]\nstate_dir = \"/t\"\n", "[receiver]\nlat = 3\n"}) {
+    for (const char* text : {"[web]\nport = 81\n", "[paths]\nstate_dir = \"/t\"\n"}) {
         try {
             layers(text);
             BOOST_FAIL(std::string("expected ConfigError for ") + text);
         } catch (const ConfigError& e) {
             BOOST_TEST(contains(e.what(), "/s/skycue.overrides.toml:2: "), e.what());
-            BOOST_TEST(contains(e.what(), "cannot be set in skycue.overrides.toml (only filters.max_range_nm, "
-                                          "filters.min_elevation_deg, filters.allow_list_file, filters.block_list_file)"),
+            BOOST_TEST(contains(e.what(), "cannot be set in skycue.overrides.toml (skycued reads it before that file)"),
                        e.what());
         }
     }
@@ -505,9 +624,6 @@ BOOST_AUTO_TEST_CASE(overrides_file_only_allowed_keys)
     }
     BOOST_CHECK_NO_THROW(layers("# written by skycued\n[filters]\nmax_range_nm = 90\nmin_elevation_deg = 1.5\n"
                                 "allow_list_file = \"a.list\"\nblock_list_file = \"b.list\"\n"));
-    BOOST_TEST((skycued::overridesFileKeys() ==
-                Strings{"filters.max_range_nm", "filters.min_elevation_deg", "filters.allow_list_file",
-                        "filters.block_list_file"}));
 }
 
 BOOST_AUTO_TEST_CASE(overrides_beats_main)

@@ -202,7 +202,10 @@ std::string convertOldConf(const std::string& old_text, const std::string& name,
         *dropped_comment_lines = comments;
 
     // An old overrides file: only the filter keys it may hold.
-    const auto& live = overridesFileKeys();
+    std::vector<std::string> live;  // an old overrides file holds the live keys only
+    for (const auto& key : overridesFileKeys())
+        if (keyClassOf(key) == KeyClass::live)
+            live.push_back(key);
     // An input with no assignments at all is one too: it converts to an empty
     // overrides file, never to the whole example.
     // Judged on the assigned keys, not the non-empty values: an untouched old

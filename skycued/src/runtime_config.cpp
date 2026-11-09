@@ -214,9 +214,8 @@ struct RestartKey {
 
 #define SKYCUED_RESTART_KEY(KEY, field) {KEY, [](const Config& a, const Config& b) { return a.field != b.field; }}
 
-// Every skycue.toml key but the four the Engine applies live
-// (filters.max_range_nm, filters.min_elevation_deg, filters.allow_list_file,
-// filters.block_list_file), in knownConfigKeys() order.
+// How to tell that a key differs between two Configs. Which keys count as
+// restart keys is the class table's (keySpecs()): every key not live.
 constexpr RestartKey kRestartKeys[] = {
     SKYCUED_RESTART_KEY("receiver.lat", receiver_lat),
     SKYCUED_RESTART_KEY("receiver.lon", receiver_lon),
@@ -249,6 +248,7 @@ constexpr RestartKey kRestartKeys[] = {
     SKYCUED_RESTART_KEY("web.bind", web_bind),
     SKYCUED_RESTART_KEY("recording.max_gb", record_max_gb),
     SKYCUED_RESTART_KEY("web.trail_seconds", trail_seconds),
+    SKYCUED_RESTART_KEY("web.allow_restart", web_allow_restart),
     SKYCUED_RESTART_KEY("fisb.enable", fisb_enable),
     SKYCUED_RESTART_KEY("fisb.experimental", fisb_experimental),
     SKYCUED_RESTART_KEY("paths.state_dir", state_dir),
@@ -268,8 +268,9 @@ const std::vector<std::string>& restartConfigKeys()
 {
     static const std::vector<std::string> keys = [] {
         std::vector<std::string> out;
-        for (const auto& k : kRestartKeys)
-            out.emplace_back(k.key);
+        for (const auto& s : keySpecs())
+            if (s.cls != KeyClass::live)
+                out.emplace_back(s.key);
         return out;
     }();
     return keys;
@@ -278,9 +279,12 @@ const std::vector<std::string>& restartConfigKeys()
 std::vector<std::string> restartKeysChanged(const Config& a, const Config& b)
 {
     std::vector<std::string> out;
-    for (const auto& k : kRestartKeys)
-        if (k.differs(a, b))
-            out.emplace_back(k.key);
+    for (const auto& key : restartConfigKeys()) {
+        const auto k = std::find_if(std::begin(kRestartKeys), std::end(kRestartKeys),
+                                    [&](const RestartKey& r) { return key == r.key; });
+        if (k != std::end(kRestartKeys) && k->differs(a, b))
+            out.emplace_back(key);
+    }
     return out;
 }
 
@@ -577,24 +581,38 @@ std::string isoUtcNow()
 
 }  // namespace
 
-void RuntimeConfig::writeOverrides(const std::map<std::string, toml_lite::Value>& set)
+void RuntimeConfig::writeOverrides(const std::map<std::string, toml_lite::Value>& set,
+                                   const std::set<std::string>& clear)
 {
     const std::string& path = overrides_watch_.path();
     std::map<std::string, toml_lite::Value> values;
     if (FileStamp::of(path).exists) {
-        // The filter keys it holds already stay; one that is not valid TOML is
-        // not overwritten blind.
+        // The keys it holds already stay; one that is not valid TOML is not
+        // overwritten blind.
         for (const auto& [key, entry] : toml_lite::parse(readFile(path), path).entries)
             if (std::find(overridesFileKeys().begin(), overridesFileKeys().end(), key) != overridesFileKeys().end())
                 values[key] = entry.value;
     }
+    for (const auto& key : clear)
+        values.erase(key);
     for (const auto& [key, value] : set)
         values[key] = value;
-    std::string out = "# written by skycued " + isoUtcNow() + "; only filter keys; edits are picked up live\n\n[filters]\n";
-    for (const auto& key : overridesFileKeys()) {
-        const auto it = values.find(key);
-        if (it != values.end())
-            out += key.substr(key.find('.') + 1) + " = " + toml_lite::formatValue(it->second) + "\n";
+    std::string out = "# written by skycued " + isoUtcNow() +
+                      "; settings saved from the web UI; filter keys apply live, the rest on restart\n";
+    // By table, in keySpecs() order.
+    std::string table;
+    for (const auto& spec : keySpecs()) {
+        const auto it = values.find(spec.key);
+        if (it == values.end())
+            continue;
+        const std::string key = spec.key;
+        const auto dot = key.rfind('.');
+        const std::string t = key.substr(0, dot);
+        if (t != table) {
+            out += "\n[" + t + "]\n";
+            table = t;
+        }
+        out += key.substr(dot + 1) + " = " + toml_lite::formatValue(it->second) + "\n";
     }
     // Never write a file skycued would refuse.
     parseConfigLayers(readFile(conf_path_), conf_path_, out, path, set_args_, env_);
@@ -693,7 +711,7 @@ std::string RuntimeConfig::promoteToBaseline()
     if (!values.empty()) {
         const std::string& path = overrides_watch_.path();
         try {
-            writeOverrides(values);
+            writeOverrides(values, {});
             conf_written = true;
             next.max_range_nm.reset();
             next.min_elevation_deg.reset();
@@ -848,7 +866,7 @@ void RuntimeConfig::reloadConf(const std::string& edited)
     }
     for (const auto& src : c.sources) {
         if ((src.source != "env" && src.source != "--set") ||
-            std::find(overridesFileKeys().begin(), overridesFileKeys().end(), src.key) == overridesFileKeys().end())
+            keyClassOf(src.key) != KeyClass::live)
             continue;
         if (configValueText(files, src.key) != configValueText(files_only_, src.key))
             LOG_WARN("runtime: " << src.key << " edited in " << edited << " but pinned by "
@@ -860,6 +878,8 @@ void RuntimeConfig::reloadConf(const std::string& edited)
     // either: one line per key, so the edit does not look ignored.
     if (edited == baseName(conf_path_))
         for (const auto& key : overridesFileKeys()) {
+            if (keyClassOf(key) != KeyClass::live)
+                continue;
             const auto now = c.file_values.find(key), before = file_conf_.file_values.find(key);
             const bool same = (now == c.file_values.end()) == (before == file_conf_.file_values.end()) &&
                               (now == c.file_values.end() || now->second == before->second);
@@ -882,6 +902,8 @@ void RuntimeConfig::reloadConf(const std::string& edited)
     // Whether the file sets a live key follows the file, like its value; the
     // overrides file holds live keys only.
     for (const auto& key : overridesFileKeys()) {
+        if (keyClassOf(key) != KeyClass::live)
+            continue;
         if (c.file_keys.count(key))
             running_.file_keys.insert(key);
         else

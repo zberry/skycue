@@ -57,6 +57,7 @@ struct Config {
     std::string web_bind = "127.0.0.1";  // web.bind: address the web UI listens on
     double record_max_gb = 0;            // recording.max_gb: recordings budget in GB; 0: unlimited
     int trail_seconds = 120;             // web.trail_seconds: seconds of track history the map shows, 0-3600
+    bool web_allow_restart = false;      // web.allow_restart: the web UI may restart skycued (a supervisor starts it again)
     bool fisb_enable = true;             // fisb.enable: decode FIS-B weather from the UAT uplinks
     bool fisb_experimental = false;      // fisb.experimental: APDU time options 1/3, radar blocks >= 60 N
     std::string inputs_file;             // inputs.file as written; see resolveInputsFile
@@ -115,6 +116,30 @@ Config parseConfigText(const std::string& text, const std::string& name_for_erro
 // The dotted keys of packaging/skycue.toml.example, in its order.
 const std::vector<std::string>& knownConfigKeys();
 
+// How a change to a key takes effect.
+enum class KeyClass { live, restart, external, bootstrap };
+enum class KeyType { string, integer, number, boolean, strings };
+struct KeySpec {
+    KeySpec(const char* k, KeyType t, KeyClass c, double lo_ = -HUGE_VAL, double hi_ = HUGE_VAL,
+            std::vector<std::string> v = {})
+        : key(k), type(t), cls(c), lo(lo_), hi(hi_), values(std::move(v))
+    {
+    }
+    const char* key;
+    KeyType type;
+    KeyClass cls;
+    double lo, hi;                    // numeric range, inclusive; +-HUGE_VAL = none
+    std::vector<std::string> values;  // enum values (string) or allowed set (strings); empty = any
+};
+// Every key, in packaging/skycue.toml.example order: the one source of a key's
+// class, range and enum values.
+const std::vector<KeySpec>& keySpecs();
+// Throws std::invalid_argument for a key not in knownConfigKeys().
+const KeySpec& keySpec(const std::string& key);
+KeyClass keyClassOf(const std::string& key);
+// "live" | "restart" | "external" | "bootstrap"
+const char* keyClassName(KeyClass cls);
+
 // The SKYCUE_* variables of the process environment that name a key. Pure: a
 // variable whose first segment (SKYCUE_WEB_..., the part before the next
 // underscore) is a config table but which matches no key is a typo; its name
@@ -125,11 +150,12 @@ std::map<std::string, std::string> environmentOverrides(std::vector<std::string>
 // `inputs.readsb.host` -> `SKYCUE_INPUTS_READSB_HOST`.
 std::string envNameOf(const std::string& dotted_key);
 
-// The overrides file: skycued's own writes ("save as baseline") of the live
-// filter keys, so skycue.toml (which may belong to root) is never rewritten.
+// The overrides file: skycued's own writes (the web UI's saved settings) of
+// every non-bootstrap key, so skycue.toml (which may belong to root) is never rewritten.
 // Same grammar as skycue.toml; read after it.
 constexpr const char* kOverridesFileName = "skycue.overrides.toml";
-// The dotted keys the overrides file may assign, in this order.
+// The dotted keys the overrides file may assign (every key but the bootstrap
+// ones), in knownConfigKeys() order.
 const std::vector<std::string>& overridesFileKeys();
 // kOverridesFileName in c.state_dir, else in the directory of c.conf_path.
 std::string overridesPath(const Config& c);

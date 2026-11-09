@@ -297,12 +297,12 @@ BOOST_AUTO_TEST_CASE(apply_ui_remove_of_file_entry_and_readd)
 bool isOverridesText(const std::string& text, const std::string& body)
 {
     const std::string head = "# written by skycued ";
-    const std::string tail = "; only filter keys; edits are picked up live\n\n[filters]\n";
+    const std::string tail = "; settings saved from the web UI; filter keys apply live, the rest on restart\n\n[filters]\n";
     const size_t nl = text.find('\n');
     if (text.compare(0, head.size(), head) != 0 || nl == std::string::npos)
         return false;
     const std::string first = text.substr(0, nl + 1);
-    // "# written by skycued 2026-11-08T12:00:00Z; only filter keys; ..."
+    // "# written by skycued 2026-11-08T12:00:00Z; settings saved from the web UI; ..."
     const size_t stamp_end = head.size() + 20;
     return first.size() > stamp_end && first[head.size() + 19] == 'Z' && text.compare(stamp_end, std::string::npos, tail + body) == 0;
 }
@@ -352,6 +352,37 @@ BOOST_AUTO_TEST_CASE(save_baseline_writes_overrides_toml)
     ::stat(overrides.c_str(), &st3);
     BOOST_TEST(st2.st_ino == st3.st_ino);
     BOOST_TEST(st2.st_mtime == st3.st_mtime);
+}
+
+BOOST_AUTO_TEST_CASE(write_overrides_groups_tables_and_keeps_header)
+{
+    RtFx f("[receiver]\nlat = 38.9\nlon = -77.0\n");
+    f.start();
+    const std::string overrides = f.path("skycue.overrides.toml");
+    // an edit made by hand: another table, written before the filters
+    writeFile(overrides, "[fisb]\nenable = false\n");
+    Overlay d;
+    d.max_range_nm = 42.5;
+    d.min_elevation_deg = -1.25;
+    f.applyUi(d);
+    BOOST_TEST(f.promote() == "");
+    const std::string text = readAll(overrides);
+    BOOST_TEST(text.compare(0, 20, "# written by skycued") == 0, text);
+    BOOST_TEST(has(text, "; settings saved from the web UI; filter keys apply live, the rest on restart\n"), text);
+    BOOST_TEST(has(text, "\n[fisb]\nenable = false\n"), text);
+    BOOST_TEST(has(text, "\n[filters]\nmax_range_nm = 42.5\nmin_elevation_deg = -1.25\n"), text);
+    BOOST_TEST(text.find("[filters]") < text.find("[fisb]"), text);  // keySpecs() order
+}
+
+BOOST_AUTO_TEST_CASE(overrides_bootstrap_key_rejected_by_watcher)
+{
+    RtFx f("[receiver]\nlat = 38.9\nlon = -77.0\n");
+    f.start(true);
+    StderrCapture err(f.path("stderr.txt"));
+    const auto port = f.fx->t.call([&] { return f.rc->effective().web_port; });
+    writeFile(f.path("skycue.overrides.toml"), "[web]\nport = 81\n");
+    BOOST_TEST(f.waitFor([&] { return has(err.text(), "skycue.overrides.toml:2:"); }, 4000ms));
+    BOOST_TEST(f.fx->t.call([&] { return f.rc->effective().web_port; }) == port);
 }
 
 BOOST_AUTO_TEST_CASE(promote_appends_to_list_files_and_clears_overlay)
@@ -706,6 +737,7 @@ BOOST_AUTO_TEST_CASE(restart_keys_cover_all_but_live_keys)
     b.web_bind = "0.0.0.0";
     b.record_max_gb = 1;
     b.trail_seconds = 60;
+    b.web_allow_restart = true;
     b.fisb_enable = false;
     b.fisb_experimental = true;
     b.inputs_file = "i.json";

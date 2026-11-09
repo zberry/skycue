@@ -96,6 +96,7 @@ block_list_file = ""    # aircraft to always exclude; "" for none
 port = 8080             # HTTP port of the web page; 0 turns it off
 bind = "127.0.0.1"      # "0.0.0.0" to listen on every interface
 trail_seconds = 120     # position history drawn behind each aircraft, 0..3600
+allow_restart = false   # let the web UI restart skycued; only under a supervisor that starts it again
 
 [recording]
 dir = ""                # where received-*/sent-* streams go; "" disables recording

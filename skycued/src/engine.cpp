@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdint>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -90,47 +91,14 @@ EngineEvent kindEvent(EventKind kind)
 // anything else: a FIFO is opened non-blocking, never read).
 std::optional<std::string> readWholeFile(const std::string& path)
 {
-    const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-    if (fd < 0)
+    std::string text;
+    if (readRegularFile(path, SIZE_MAX, text) != ReadStatus::ok)
         return std::nullopt;
-    struct ::stat st{};
-    std::optional<std::string> text;
-    int err = 0;
-    if (::fstat(fd, &st) != 0) {
-        err = errno;
-    } else if (!S_ISREG(st.st_mode)) {
-        err = S_ISDIR(st.st_mode) ? EISDIR : EINVAL;
-    } else {
-        text.emplace();
-        char buf[65536];
-        for (;;) {
-            const ssize_t n = ::read(fd, buf, sizeof buf);
-            if (n > 0) {
-                text->append(buf, static_cast<std::size_t>(n));
-            } else if (n == 0) {
-                break;
-            } else if (errno != EINTR) {
-                err = errno;
-                text.reset();
-                break;
-            }
-        }
-    }
-    ::close(fd);
-    errno = err;
     return text;
 }
 
 // "20261103T120000Z": a UTC stamp for a file name.
-std::string fileStamp()
-{
-    const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm tm{};
-    ::gmtime_r(&now, &tm);
-    char buf[32];
-    const std::size_t n = std::strftime(buf, sizeof buf, "%Y%m%dT%H%M%SZ", &tm);
-    return std::string(buf, n);  // empty, not indeterminate, if it ever did not fit
-}
+std::string fileStamp() { return formatUtc(std::chrono::system_clock::now(), "%Y%m%dT%H%M%SZ"); }
 
 }  // namespace
 
@@ -378,11 +346,11 @@ void Engine::loadLocations(const std::string& learned_path, const std::string& o
                 LOG_INFO(learned_path << ": " << locations_.learnedCount() << " learned locations");
             } catch (const std::exception& e) {
                 const std::string rejected = learned_path + ".rejected";
-                const bool renamed = std::rename(learned_path.c_str(), rejected.c_str()) == 0;
+                std::string rename_why;
+                const bool renamed = setAside(learned_path, ".rejected", rename_why);
                 LOG_ERROR(learned_path << ": " << e.what() << "; "
                                        << (renamed ? "renamed " + rejected
-                                                   : "could not rename it to " + rejected + ": " +
-                                                         std::strerror(errno))
+                                                   : "could not rename it to " + rejected + ": " + rename_why)
                                        << "; starting with no learned locations");
             }
         } else if (errno == EISDIR || errno == EINVAL) {
@@ -392,13 +360,15 @@ void Engine::loadLocations(const std::string& learned_path, const std::string& o
         } else if (errno != ENOENT) {
             // Unreadable (permissions, say): set it aside so the first save cannot overwrite it.
             const std::string why = std::strerror(errno);
-            const std::string aside = learned_path + ".unreadable-" + fileStamp();
-            if (std::rename(learned_path.c_str(), aside.c_str()) == 0) {
+            const std::string stamp = fileStamp();
+            const std::string aside = learned_path + ".unreadable-" + stamp;
+            std::string rename_why;
+            if (setAside(learned_path, ".unreadable-" + stamp, rename_why)) {
                 LOG_ERROR(learned_path << ": cannot read: " << why << "; renamed " << aside
                                        << "; starting with no learned locations");
             } else {
                 LOG_ERROR(learned_path << ": cannot read: " << why << "; could not rename it to " << aside << ": "
-                                       << std::strerror(errno) << "; learned locations are not saved this run");
+                                       << rename_why << "; learned locations are not saved this run");
                 locations_path_.clear();
             }
         }

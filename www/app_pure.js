@@ -330,36 +330,6 @@
   }
 
   // ---- Config tab ----
-  // GET /api/config's keys (the dotted names of skycue.toml) in the tab's
-  // tables, in this order; a key no group names (one added to skycued later)
-  // goes to a trailing Other. Each table's keys sit together, so configText
-  // writes every [table] header once.
-  var CONFIG_GROUPS = [
-    ['Receiver site', ['receiver.lat', 'receiver.lon', 'receiver.alt_m', 'receiver.antenna_height_m']],
-    ['Decoders', ['sdr.serial_1090', 'sdr.serial_978', 'sdr.gain_1090', 'sdr.gain_978', 'inputs.file', 'inputs.decoder',
-      'inputs.readsb.enable', 'inputs.readsb.host', 'inputs.readsb.json_port', 'inputs.readsb.beast_port',
-      'inputs.dump978.enable', 'inputs.dump978.host', 'inputs.dump978.raw_port', 'inputs.dump978.json_port']],
-    ['Cue outputs', ['cues.tcp_port', 'cues.tcp_connect', 'cues.udp_targets', 'cues.min_interval_s', 'cues.max_interval_s', 'cues.track_timeout_s', 'cues.keyframe_interval_s']],
-    ['Recording', ['recording.dir', 'recording.formats', 'recording.max_gb', 'recording.raw']],
-    ['Filters', ['filters.max_range_nm', 'filters.min_elevation_deg', 'filters.allow_list_file', 'filters.block_list_file']],
-    ['Web', ['web.bind', 'web.port', 'web.trail_seconds']],
-    ['Statistics', ['stats.file', 'stats.aircraft_max', 'stats.save_s']],
-    ['FIS-B', ['fisb.enable', 'fisb.experimental']],
-    ['Paths', ['paths.state_dir', 'paths.map_dir', 'paths.locations_file']]];
-
-  // How configText writes a key's value (the API gives every value as text):
-  // 'num' a number, 'bool' true/false, 'strs' a list of words (the entries
-  // separated by spaces); any other key is a string.
-  var CONFIG_TYPES = {
-    'receiver.lat': 'num', 'receiver.lon': 'num', 'receiver.alt_m': 'num', 'receiver.antenna_height_m': 'num',
-    'inputs.readsb.enable': 'bool', 'inputs.readsb.json_port': 'num', 'inputs.readsb.beast_port': 'num',
-    'inputs.dump978.enable': 'bool', 'inputs.dump978.raw_port': 'num', 'inputs.dump978.json_port': 'num',
-    'cues.tcp_port': 'num', 'cues.tcp_connect': 'strs', 'cues.udp_targets': 'strs', 'cues.min_interval_s': 'num',
-    'cues.max_interval_s': 'num', 'cues.track_timeout_s': 'num', 'cues.keyframe_interval_s': 'num',
-    'filters.max_range_nm': 'num', 'filters.min_elevation_deg': 'num', 'web.port': 'num', 'web.trail_seconds': 'num',
-    'recording.formats': 'strs', 'recording.raw': 'bool', 'recording.max_gb': 'num',
-    'fisb.enable': 'bool', 'fisb.experimental': 'bool', 'stats.aircraft_max': 'num', 'stats.save_s': 'num'};
-
   // The filter fields (max_range_nm, min_elevation_deg) that the environment or
   // --set pins, from /api/config's keys: {field: 'env'|'set'}.
   function pinnedFilters(keys) {
@@ -374,23 +344,114 @@
   // The label of a /api/config source: --set is "set" in the JSON.
   function configSourceLabel(source) { return source === 'set' ? '--set' : source; }
 
-  // [{group, rows}] in CONFIG_GROUPS order, each group's rows in its key
-  // order; groups with no key are left out.
-  function groupConfig(keys) {
-    var byKey = {}, named = {};
-    keys.forEach(function (k) { byKey[k.key] = k; });
-    var out = [];
-    CONFIG_GROUPS.forEach(function (g) {
-      var rows = [];
-      g[1].forEach(function (name) {
-        named[name] = true;
-        if (byKey[name]) rows.push(byKey[name]);
-      });
-      if (rows.length) out.push({ group: g[0], rows: rows });
+  // The table of a dotted key (everything before the last dot) and its bare
+  // key (the last segment); a key with no dot is in no table.
+  function configTableOf(key) { var d = key.lastIndexOf('.'); return d < 0 ? 'other' : key.slice(0, d); }
+  function configBareOf(key) { return key.slice(key.lastIndexOf('.') + 1); }
+
+  // The TOML tables of GET /api/config's keys, in the order the tables first
+  // appear in the schema (GET /api/config/schema's keys); a key the schema
+  // does not name goes last under table "other". A row carries the bare key.
+  function configTables(keys, schema) {
+    var specs = {}, order = [], seen = {};
+    (schema || []).forEach(function (s) {
+      specs[s.key] = s;
+      var t = configTableOf(s.key);
+      if (!seen[t]) { seen[t] = true; order.push(t); }
     });
-    var other = keys.filter(function (k) { return !named[k.key]; });
-    if (other.length) out.push({ group: 'Other', rows: other });
+    var by = {}, extra = [];
+    (keys || []).forEach(function (k) {
+      var spec = specs[k.key] || null, t = spec ? configTableOf(k.key) : 'other';
+      if (!by[t]) by[t] = [];
+      by[t].push({ key: k.key, bare: spec ? configBareOf(k.key) : k.key, value: k.value, source: k.source,
+        cls: k['class'], editable: k.editable, file_value: k.file_value, default: k['default'], spec: spec });
+    });
+    var rank = {};
+    (schema || []).forEach(function (s, i) { rank[s.key] = i; });
+    var out = [];
+    order.forEach(function (t) {
+      if (by[t]) out.push({ table: t, rows: by[t].sort(function (a, b) { return rank[a.key] - rank[b.key]; }) });
+    });
+    if (by.other) out.push({ table: 'other', rows: by.other });
     return out;
+  }
+
+  // The control for a schema entry: kind "number" | "checkbox" | "select" |
+  // "checkset" | "lines" | "text", with min/max/step for a number and the
+  // allowed values for select and checkset. A float steps by 0.1 when its
+  // range is under 10 (or it has no max and a minimum of 0.1 or more).
+  function configControl(spec) {
+    var t = spec.type, c = { kind: 'text', min: spec.min, max: spec.max, step: 1, values: spec.values };
+    if (t === 'int' || t === 'float') {
+      c.kind = 'number';
+      if (t === 'float') {
+        var hasMin = typeof spec.min === 'number', hasMax = typeof spec.max === 'number';
+        if ((hasMin && hasMax && spec.max - spec.min < 10) || (hasMin && !hasMax && spec.min >= 0.1)) c.step = 0.1;
+      }
+    } else if (t === 'bool') c.kind = 'checkbox';
+    else if (t === 'enum') c.kind = 'select';
+    else if (t === 'string_set') c.kind = 'checkset';
+    else if (t === 'host_port_list') c.kind = 'lines';
+    return c;
+  }
+
+  // The JSON value to PUT for a control's raw input (the text of a number,
+  // text, select or lines control; a boolean for a checkbox; an array for a
+  // checkset): {value}, or {error} when it is not of the schema type.
+  function configParse(spec, raw) {
+    var bare = configBareOf(spec.key), t = spec.type, s;
+    if (t === 'int' || t === 'float') {
+      s = String(raw).trim();
+      if (t === 'int' ? !/^[+-]?\d+$/.test(s) : !/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s))
+        return { error: bare + ': expected ' + (t === 'int' ? 'an integer' : 'a number') };
+      return { value: Number(s) };
+    }
+    if (t === 'bool') return { value: !!raw };
+    if (t === 'string_set') return { value: Array.isArray(raw) ? raw.slice() : [] };
+    if (t === 'host_port_list') {
+      return { value: String(raw).split('\n').map(function (l) { return l.trim(); })
+        .filter(function (l) { return l !== ''; }) };
+    }
+    return { value: String(raw) };
+  }
+
+  // Staged edits (dotted key -> JSON value, or null to clear) as the PUT body
+  // and the bar's text; keys in schema order when a schema is given.
+  function configStage(staged, schema) {
+    var keys = Object.keys(staged), set = {}, clear = [];
+    if (schema) {
+      var rank = {};
+      schema.forEach(function (s, i) { rank[s.key] = i; });
+      keys.sort(function (a, b) {
+        return (a in rank ? rank[a] : 1e9) - (b in rank ? rank[b] : 1e9);
+      });
+    }
+    keys.forEach(function (k) { if (staged[k] === null) clear.push(k); else set[k] = staged[k]; });
+    return { body: { set: set, clear: clear }, text: keys.length + (keys.length === 1 ? ' change' : ' changes'), keys: keys };
+  }
+
+  // GET /api/config's pending_restart as the note beside the Restart button.
+  function pendingRestartText(list) {
+    var n = (list || []).length;
+    return n === 0 ? '' : n + (n === 1 ? ' setting waits' : ' settings wait') + ' for a restart';
+  }
+
+  // The hint under a row: what the file holds when an override hides it.
+  function configRowHint(row) {
+    return row.source === 'overrides' && row.file_value !== undefined && row.file_value !== null
+      ? 'file: ' + (typeof row.file_value === 'string' ? row.file_value : JSON.stringify(row.file_value)) : '';
+  }
+
+  // The environment variable of a dotted key: web.bind -> SKYCUE_WEB_BIND.
+  function configEnvName(key) { return 'SKYCUE_' + key.toUpperCase().replace(/\./g, '_'); }
+
+  // Why a row's control is disabled: who set the value, or that it can only
+  // change in skycue.toml; "" when the row is editable.
+  function configDisabledTitle(row) {
+    if (row.source === 'set') return 'set by --set';
+    if (row.source === 'env') return 'set by ' + configEnvName(row.key);
+    if (row.editable === false) return 'edit skycue.toml and restart';
+    return '';
   }
 
   // GET /api/config's daemon facts as the Config tab's Daemon rows: how it
@@ -429,45 +490,48 @@
     }) + '"';
   }
 
-  // The value text of `key` as a TOML value (see CONFIG_TYPES); null when it
-  // cannot be written: a number or boolean that is not one, or a NUL.
+  // The JSON value `v` of `key` as a TOML value, by its JS type (number,
+  // boolean, array of strings, string); null when it cannot be written: not
+  // one of those, a non-finite number, or a NUL in a string.
   function tomlValue(key, v) {
-    var type = CONFIG_TYPES[key] || 'str';
-    if (type === 'num') return /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(v) ? v : null;
-    if (type === 'bool') return v === 'true' || v === 'false' ? v : null;
-    if (type === 'strs') {
-      var words = v.split(/\s+/).filter(function (w) { return w !== ''; }).map(tomlString);
+    if (typeof v === 'number') return isFinite(v) ? String(v) : null;
+    if (typeof v === 'boolean') return String(v);
+    if (typeof v === 'string') return tomlString(v);
+    if (Array.isArray(v)) {
+      var words = v.map(function (w) { return typeof w === 'string' ? tomlString(w) : null; });
       return words.indexOf(null) >= 0 ? null : '[' + words.join(', ') + ']';
     }
-    return tomlString(v);
+    return null;
   }
 
   // The whole configuration as skycue.toml text (the Config tab's copy):
-  // a `# <group>` line before each group, a [table] header where the table
-  // changes, and before each key a comment with its source and whether it
+  // a `# [table]` line before each table (tables in schema order when
+  // cfg.schema is given, else as they first appear in the keys), a [table]
+  // header, and before each key a comment with its source and whether it
   // needs a restart, so the text is a skycue.toml skycued accepts. A key that
-  // cannot be written (or whose table was written before, or that is in no
-  // table) is left as a comment saying so.
+  // cannot be written (or that is in no table) is left as a comment saying so.
   function configText(cfg) {
     var d = cfg.daemon || {}, out = '# ' + d.version + ', started ' + d.started + '\n';
-    var table = null, seen = {};
-    groupConfig(cfg.keys || []).forEach(function (g) {
-      out += '# ' + g.group + '\n';
+    var keys = cfg.keys || [], schema = cfg.schema;
+    if (!schema) {
+      schema = [];
+      keys.forEach(function (k) { schema.push({ key: k.key }); });
+    }
+    var restart = {}, table = null, seen = {};
+    keys.forEach(function (k) { restart[k.key] = k.restart; });
+    configTables(keys, schema).forEach(function (g) {
+      out += '# [' + g.table + ']\n';
       g.rows.forEach(function (r) {
-        var v = String(r.value), q = tomlValue(r.key, v), dot = r.key.lastIndexOf('.');
+        var q = tomlValue(r.key, r.value), dot = r.key.lastIndexOf('.');
         var t = dot < 0 ? null : r.key.slice(0, dot), name = r.key.slice(dot + 1);
-        var note = '# ' + r.key + ': ' + configSourceLabel(r.source) + (r.restart ? ', restart' : '') + '\n';
+        var note = '# ' + r.key + ': ' + configSourceLabel(r.source) + (restart[r.key] ? ', restart' : '') + '\n';
         if (q === null || t === null || (t !== table && seen[t])) {
-          out += note + '# ' + r.key + ' cannot be written in skycue.toml here: ' + v.replace(/[\r\n]+/g, ' ') + '\n';
+          out += note + '# ' + r.key + ' cannot be written in skycue.toml here: ' +
+            String(r.value).replace(/[\r\n]+/g, ' ') + '\n';
           return;
         }
-        if (t !== table) {
-          out += '[' + t + ']\n';
-          table = t;
-          seen[t] = true;
-        }
-        out += note;
-        out += name + ' = ' + q + '\n';
+        if (t !== table) { out += '[' + t + ']\n'; table = t; seen[t] = true; }
+        out += note + name + ' = ' + q + '\n';
       });
     });
     return out;
@@ -2118,7 +2182,9 @@
     dropRemovesMarker: dropRemovesMarker,
     CUE_COUNTERS: CUE_COUNTERS, DECISIONS_RING: DECISIONS_RING, pushRing: pushRing, decisionRow: decisionRow,
     filterHistoryRows: filterHistoryRows,
-    CONFIG_GROUPS: CONFIG_GROUPS, groupConfig: groupConfig, configText: configText, tomlValue: tomlValue,
+    configTables: configTables, configControl: configControl, configParse: configParse, configStage: configStage,
+    pendingRestartText: pendingRestartText, configRowHint: configRowHint, configDisabledTitle: configDisabledTitle,
+    configText: configText, tomlValue: tomlValue,
     configSourceLabel: configSourceLabel, pinnedFilters: pinnedFilters,
     daemonModeText: daemonModeText, daemonLocationsText: daemonLocationsText,
     backoffMs: backoffMs, CLOCK_RESET_MS: CLOCK_RESET_MS, nextClockOffset: nextClockOffset,

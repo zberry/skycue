@@ -1082,33 +1082,120 @@ test('filter_history_rows_diff_consecutive', () => {
   assert.deepStrictEqual(rows[2].diffs, [{ field: 'max_range_nm', from: null, to: 150 }, { field: 'min_elevation_deg', from: null, to: 0 }]);
   assert.deepStrictEqual(P.filterHistoryRows([]), []);
 });
+const SCHEMA = [
+  { key: 'receiver.lat', type: 'float', class: 'restart', default: 0, min: -90, max: 90 },
+  { key: 'inputs.readsb.host', type: 'string', class: 'restart', default: '127.0.0.1' },
+  { key: 'cues.udp_targets', type: 'host_port_list', class: 'restart', default: [] },
+  { key: 'cues.min_interval_s', type: 'float', class: 'live', default: 1, min: 0.1, max: 5 },
+  { key: 'web.bind', type: 'string', class: 'bootstrap', default: '127.0.0.1' },
+  { key: 'web.trail_seconds', type: 'int', class: 'live', default: 300, min: 0, max: 3600 },
+  { key: 'recording.formats', type: 'string_set', class: 'restart', default: ['jsonl'], values: ['jsonl', 'csv'] },
+  { key: 'recording.dir', type: 'path', class: 'restart', default: '' },
+  { key: 'recording.raw', type: 'bool', class: 'restart', default: false },
+  { key: 'sdr.mode', type: 'enum', class: 'restart', default: 'skycued', values: ['skycued', 'external'] },
+  { key: 'stats.save_s', type: 'int', class: 'external', default: 60 }];
+const KEYS = [
+  { key: 'web.trail_seconds', value: 300, source: 'env', restart: false, class: 'live', editable: false, default: 300 },
+  { key: 'receiver.lat', value: 38.9, source: 'conf', restart: true, class: 'restart', editable: true, default: 0 },
+  { key: 'web.bind', value: '127.0.0.1', source: 'default', restart: true, class: 'bootstrap', editable: false, default: '127.0.0.1' },
+  { key: 'cues.udp_targets', value: ['127.0.0.1:30501', '10.0.0.2:30502'], source: 'conf', restart: true, class: 'restart', editable: true, default: [] },
+  { key: 'cues.min_interval_s', value: 2, source: 'overrides', restart: false, class: 'live', editable: true, file_value: 1.5, default: 1 },
+  { key: 'recording.dir', value: '', source: 'default', restart: true, class: 'restart', editable: true, default: '' },
+  { key: 'stats.save_s', value: 60, source: 'set', restart: true, class: 'external', editable: false, default: 60 },
+  { key: 'new.key', value: 'x', source: 'conf', restart: true, class: 'restart', editable: true, default: '' }];
 const CFG = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
-  { key: 'receiver.lat', value: '38.9', source: 'conf', restart: true }, { key: 'web.bind', value: '127.0.0.1', source: 'default', restart: true },
-  { key: 'cues.udp_targets', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
-  { key: 'filters.max_range_nm', value: '20', source: 'runtime', restart: false }, { key: 'recording.dir', value: '', source: 'default', restart: true },
-  { key: 'web.trail_seconds', value: '300', source: 'env', restart: true }, { key: 'stats.save_s', value: '60', source: 'set', restart: true },
+  { key: 'receiver.lat', value: 38.9, source: 'conf', restart: true }, { key: 'web.bind', value: '127.0.0.1', source: 'default', restart: true },
+  { key: 'cues.udp_targets', value: ['127.0.0.1:30501', '10.0.0.2:30502'], source: 'conf', restart: true },
+  { key: 'filters.max_range_nm', value: 20, source: 'runtime', restart: false }, { key: 'recording.dir', value: '', source: 'default', restart: true },
+  { key: 'web.trail_seconds', value: 300, source: 'env', restart: true }, { key: 'stats.save_s', value: 60, source: 'set', restart: true },
+  { key: 'recording.raw', value: true, source: 'conf', restart: true },
   { key: 'new.key', value: 'x', source: 'conf', restart: true }] };
-test('config_grouping', () => {
-  const g = P.groupConfig(CFG.keys);
-  assert.deepStrictEqual(g.map((x) => x.group), ['Receiver site', 'Cue outputs', 'Recording', 'Filters', 'Web', 'Statistics', 'Other']);
-  assert.deepStrictEqual(g[6].rows.map((r) => r.key), ['new.key']);
-  // Every key of skycued's list is in a group (none falls to Other); the keys of one table sit together.
-  const all = P.CONFIG_GROUPS.reduce((a, x) => a.concat(x[1]), []);
-  assert.strictEqual(new Set(all).size, all.length);
-  assert.ok(all.every((k) => /^[a-z0-9_]+(\.[a-z0-9_]+)+$/.test(k)), 'dotted lower-case names');
-  const seen = new Set();
-  let last = null;
-  all.forEach((k) => { const t = k.slice(0, k.lastIndexOf('.')); if (t !== last) { assert.ok(!seen.has(t), 'table ' + t + ' split'); seen.add(t); last = t; } });
+const spec = (k) => SCHEMA.find((x) => x.key === k);
+test('configTables groups by TOML table in schema order with bare keys', () => {
+  const t = P.configTables(KEYS, SCHEMA);
+  assert.deepStrictEqual(t.map((x) => x.table), ['receiver', 'cues', 'web', 'recording', 'stats', 'other']);
+  assert.strictEqual(t[0].rows[0].bare, 'lat');
+  assert.strictEqual(t[0].rows[0].key, 'receiver.lat');
+  assert.strictEqual(t[0].rows[0].cls, 'restart');
+  assert.strictEqual(t[0].rows[0].spec, spec('receiver.lat'));
+  assert.deepStrictEqual(t[1].rows.map((r) => r.bare), ['udp_targets', 'min_interval_s']);
+  assert.strictEqual(t[1].rows[1].file_value, 1.5);
+  assert.strictEqual(t[1].rows[1].source, 'overrides');
+  assert.strictEqual(t[5].rows[0].key, 'new.key');
+  assert.strictEqual(t[5].rows[0].bare, 'new.key');
+  assert.strictEqual(t[5].rows[0].spec, null);
+  assert.deepStrictEqual(P.configTables([], SCHEMA), []);
 });
-test('config_text', () => {
+test('configControl kinds and steps', () => {
+  const c = (k) => P.configControl(spec(k));
+  assert.deepStrictEqual([c('web.trail_seconds').kind, c('web.trail_seconds').step, c('web.trail_seconds').min, c('web.trail_seconds').max], ['number', 1, 0, 3600]);
+  assert.deepStrictEqual([c('receiver.lat').kind, c('receiver.lat').step], ['number', 1]);
+  assert.deepStrictEqual([c('cues.min_interval_s').kind, c('cues.min_interval_s').step], ['number', 0.1]);
+  assert.strictEqual(P.configControl({ key: 'a.b', type: 'float', min: 0.5 }).step, 0.1);
+  assert.strictEqual(P.configControl({ key: 'a.b', type: 'float', min: 0 }).step, 1);
+  assert.strictEqual(c('recording.raw').kind, 'checkbox');
+  assert.deepStrictEqual([c('sdr.mode').kind, c('sdr.mode').values], ['select', ['skycued', 'external']]);
+  assert.deepStrictEqual([c('recording.formats').kind, c('recording.formats').values], ['checkset', ['jsonl', 'csv']]);
+  assert.strictEqual(c('cues.udp_targets').kind, 'lines');
+  assert.strictEqual(c('recording.dir').kind, 'text');
+  assert.strictEqual(c('web.bind').kind, 'text');
+});
+test('configParse per kind', () => {
+  assert.deepStrictEqual(P.configParse(spec('web.trail_seconds'), '300'), { value: 300 });
+  assert.deepStrictEqual(P.configParse(spec('web.trail_seconds'), '3.5'), { error: 'trail_seconds: expected an integer' });
+  assert.deepStrictEqual(P.configParse(spec('web.trail_seconds'), ''), { error: 'trail_seconds: expected an integer' });
+  assert.deepStrictEqual(P.configParse(spec('receiver.lat'), '38.9'), { value: 38.9 });
+  assert.deepStrictEqual(P.configParse(spec('receiver.lat'), 'abc'), { error: 'lat: expected a number' });
+  assert.deepStrictEqual(P.configParse(spec('cues.udp_targets'), 'a:1\n\nb:2\n'), { value: ['a:1', 'b:2'] });
+  assert.deepStrictEqual(P.configParse(spec('cues.udp_targets'), ' a:1 \r\n b:2'), { value: ['a:1', 'b:2'] });
+  assert.deepStrictEqual(P.configParse(spec('cues.udp_targets'), ''), { value: [] });
+  assert.deepStrictEqual(P.configParse(spec('recording.formats'), ['jsonl']), { value: ['jsonl'] });
+  assert.deepStrictEqual(P.configParse(spec('sdr.mode'), 'skycued'), { value: 'skycued' });
+  assert.deepStrictEqual(P.configParse(spec('recording.raw'), true), { value: true });
+  assert.deepStrictEqual(P.configParse(spec('recording.dir'), '/x y'), { value: '/x y' });
+});
+test('configStage body and bar text', () => {
+  const s = P.configStage({ 'web.trail_seconds': 1, 'cues.min_interval_s': null, 'receiver.lat': 'x' });
+  assert.deepStrictEqual(s.body, { set: { 'web.trail_seconds': 1, 'receiver.lat': 'x' }, clear: ['cues.min_interval_s'] });
+  assert.strictEqual(s.text, '3 changes');
+  assert.deepStrictEqual(s.keys, ['web.trail_seconds', 'cues.min_interval_s', 'receiver.lat']);
+  const o = P.configStage({ 'web.trail_seconds': 1, 'cues.min_interval_s': null, 'receiver.lat': 'x' }, SCHEMA);
+  assert.deepStrictEqual(o.keys, ['receiver.lat', 'cues.min_interval_s', 'web.trail_seconds']);
+  assert.strictEqual(P.configStage({ a: 1 }).text, '1 change');
+  assert.deepStrictEqual(P.configStage({}).body, { set: {}, clear: [] });
+});
+test('pendingRestartText plural', () => {
+  assert.strictEqual(P.pendingRestartText([]), '');
+  assert.strictEqual(P.pendingRestartText(undefined), '');
+  assert.strictEqual(P.pendingRestartText([{ key: 'a.b' }]), '1 setting waits for a restart');
+  assert.strictEqual(P.pendingRestartText([{ key: 'a.b' }, { key: 'c.d' }]), '2 settings wait for a restart');
+});
+test('configRowHint', () => {
+  assert.strictEqual(P.configRowHint({ source: 'overrides', file_value: 150 }), 'file: 150');
+  assert.strictEqual(P.configRowHint({ source: 'overrides', file_value: 'a' }), 'file: a');
+  assert.strictEqual(P.configRowHint({ source: 'overrides' }), '');
+  assert.strictEqual(P.configRowHint({ source: 'conf', file_value: 1 }), '');
+});
+test('configDisabledTitle for set, env and bootstrap', () => {
+  assert.strictEqual(P.configDisabledTitle({ key: 'stats.save_s', source: 'set', editable: false }), 'set by --set');
+  assert.strictEqual(P.configDisabledTitle({ key: 'web.bind', source: 'env', editable: false }), 'set by SKYCUE_WEB_BIND');
+  assert.strictEqual(P.configDisabledTitle({ key: 'inputs.readsb.host', source: 'env', editable: false }), 'set by SKYCUE_INPUTS_READSB_HOST');
+  assert.strictEqual(P.configDisabledTitle({ key: 'web.bind', source: 'default', cls: 'bootstrap', editable: false }), 'edit skycue.toml and restart');
+  assert.strictEqual(P.configDisabledTitle({ key: 'receiver.lat', source: 'conf', cls: 'restart', editable: true }), '');
+});
+test('config_text groups by table without CONFIG_GROUPS', () => {
   const t = P.configText(CFG);
+  assert.strictEqual(P.CONFIG_GROUPS, undefined);
   assert.ok(t.startsWith('# skycued 0.1.0, started 2026-01-01T00:00:00.000Z\n'));
-  assert.ok(t.includes('# Receiver site\n[receiver]\n# receiver.lat: conf, restart\nlat = 38.9\n'));
+  assert.ok(t.includes('# [receiver]\n[receiver]\n# receiver.lat: conf, restart\nlat = 38.9\n'));
   assert.ok(t.includes('# cues.udp_targets: conf, restart\nudp_targets = ["127.0.0.1:30501", "10.0.0.2:30502"]\n'));
   assert.ok(t.includes('# filters.max_range_nm: runtime\nmax_range_nm = 20\n'));
   assert.ok(t.includes('# recording.dir: default, restart\ndir = ""\n'));
+  assert.ok(t.includes('# recording.raw: conf, restart\nraw = true\n'));
   assert.ok(t.includes('# web.trail_seconds: env, restart\ntrail_seconds = 300\n'));
   assert.ok(t.includes('# stats.save_s: --set, restart\nsave_s = 60\n'));
+  assert.ok(t.indexOf('# [receiver]') < t.indexOf('# [web]') && t.indexOf('# [web]') < t.indexOf('# [recording]'));
+  assert.strictEqual(t.split('\n[web]\n').length, 2, 'one [web] header');
 });
 test('pinned filters disable their controls', () => {
   const keys = [{ key: 'filters.max_range_nm', source: 'set' }, { key: 'filters.min_elevation_deg', source: 'env' },
@@ -1119,11 +1206,9 @@ test('pinned filters disable their controls', () => {
   assert.deepStrictEqual(P.pinnedFilters(undefined), {});
 });
 test('config panel shows dotted keys and env/--set sources', () => {
-  // The keys come as the API gives them: dotted, with the sources conf, overrides, runtime, flag, env, set.
-  const keys = ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.trail_seconds', 'stats.save_s', 'web.port'].map((k) => ({ key: k, value: '1', source: 'conf', restart: false }));
-  const rows = P.groupConfig(keys).reduce((a, g) => a.concat(g.rows.map((r) => r.key)), []);
-  assert.deepStrictEqual(rows, ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.port', 'web.trail_seconds', 'stats.save_s']);
-  assert.ok(!P.groupConfig(keys).some((g) => g.group === 'Other'));
+  const keys = ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.trail_seconds', 'stats.save_s', 'web.port'].map((k) => ({ key: k, value: 1, source: 'conf', restart: false }));
+  const rows = P.configTables(keys, keys.map((k) => ({ key: k.key }))).reduce((a, g) => a.concat(g.rows.map((r) => r.key)), []);
+  assert.deepStrictEqual(rows, ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.trail_seconds', 'web.port', 'stats.save_s']);
   assert.deepStrictEqual(['conf', 'overrides', 'runtime', 'flag', 'env', 'set', 'default'].map(P.configSourceLabel),
     ['conf', 'overrides', 'runtime', 'flag', 'env', '--set', 'default']);
 });
@@ -1141,14 +1226,16 @@ test('daemon_mode_and_locations_text', () => {
     ['0 learned, not saved this run', '2 from /e/l.csv, 1 lines rejected, 3 over the cap']);
 });
 test('toml_value_every_branch', () => {
-  assert.strictEqual(P.tomlValue('receiver.lat', '38.9'), '38.9');
-  assert.strictEqual(P.tomlValue('web.port', '8080'), '8080');
-  assert.strictEqual(P.tomlValue('receiver.lat', ''), null);       // unset: left as a comment
-  assert.strictEqual(P.tomlValue('web.port', '80 80'), null);
-  assert.strictEqual(P.tomlValue('recording.raw', 'true'), 'true');
-  assert.strictEqual(P.tomlValue('recording.raw', 'yes'), null);
-  assert.strictEqual(P.tomlValue('cues.udp_targets', ''), '[]');
-  assert.strictEqual(P.tomlValue('cues.tcp_connect', 'h:1'), '["h:1"]');
+  // Values are the JSON the API gives: number, boolean, array of strings, string.
+  assert.strictEqual(P.tomlValue('receiver.lat', 38.9), '38.9');
+  assert.strictEqual(P.tomlValue('web.port', 8080), '8080');
+  assert.strictEqual(P.tomlValue('receiver.lat', NaN), null);
+  assert.strictEqual(P.tomlValue('receiver.lat', null), null);      // unset: left as a comment
+  assert.strictEqual(P.tomlValue('recording.raw', true), 'true');
+  assert.strictEqual(P.tomlValue('recording.raw', false), 'false');
+  assert.strictEqual(P.tomlValue('cues.udp_targets', []), '[]');
+  assert.strictEqual(P.tomlValue('cues.tcp_connect', ['h:1']), '["h:1"]');
+  assert.strictEqual(P.tomlValue('cues.tcp_connect', ['h:1', 2]), null);
   assert.strictEqual(P.tomlValue('recording.dir', ''), '""');
   assert.strictEqual(P.tomlValue('recording.dir', 'a b'), '"a b"');
   assert.strictEqual(P.tomlValue('recording.dir', 'say "hi" \\ $1'), '"say \\"hi\\" \\\\ $1"');
@@ -1181,12 +1268,12 @@ function tomlLines(text) {
 }
 // The same keys and values test_config.cpp (config_copy_text_parses) checks.
 const CFG_COPY = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
-  { key: 'receiver.lat', value: '38.9', source: 'conf', restart: true },
-  { key: 'receiver.lon', value: '-77.0', source: 'conf', restart: true },
+  { key: 'receiver.lat', value: 38.9, source: 'conf', restart: true },
+  { key: 'receiver.lon', value: -77, source: 'conf', restart: true },
   { key: 'sdr.serial_1090', value: '', source: 'default', restart: true },
-  { key: 'cues.udp_targets', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
+  { key: 'cues.udp_targets', value: ['127.0.0.1:30501', '10.0.0.2:30502'], source: 'conf', restart: true },
   { key: 'recording.dir', value: '/srv/sky cue/rec', source: 'conf', restart: true },
-  { key: 'filters.max_range_nm', value: '20', source: 'runtime', restart: false },
+  { key: 'filters.max_range_nm', value: 20, source: 'runtime', restart: false },
   { key: 'filters.allow_list_file', value: 'allow "main" $1.txt', source: 'conf', restart: false },
   { key: 'filters.block_list_file', value: "it's $HOME.txt", source: 'conf', restart: false },
   { key: 'paths.locations_file', value: "o'hare locations.csv", source: 'conf', restart: true }] };
@@ -1195,7 +1282,7 @@ test('config_text_round_trips_through_toml', () => {
   // test_config.cpp parses this same fixture with parseConfigText.
   assert.strictEqual(t, fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'config-copy.toml'), 'utf8'));
   const want = {};
-  CFG_COPY.keys.forEach((k) => { want[k.key] = k.value; });
+  CFG_COPY.keys.forEach((k) => { want[k.key] = Array.isArray(k.value) ? k.value.join(' ') : String(k.value); });
   assert.deepStrictEqual(tomlLines(t), want);
 });
 

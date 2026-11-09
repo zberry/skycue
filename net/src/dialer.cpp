@@ -227,7 +227,7 @@ void Dialer::connectNext(uint64_t gen, const std::shared_ptr<tcp::socket>& sock,
             sock->close(ignore); // aborts the connect, whose handler moves on
         });
     }
-    sock->async_connect(ep, [self, gen, sock, at, ep, step](const boost::system::error_code& cec) {
+    sock->async_connect(ep, [self, gen, sock, at, ep](const boost::system::error_code& cec) {
         auto& st = *self->impl_;
         if (gen != st.gen)
             return;

@@ -232,10 +232,9 @@ void Engine::stop()
         return;
     inputs_->stop();
     ++lost_gen_;
-    error_code ignored;
-    tick_timer_.cancel(ignored);
-    stats_timer_.cancel(ignored);
-    lost_timer_.cancel(ignored);
+    tick_timer_.cancel();
+    stats_timer_.cancel();
+    lost_timer_.cancel();
 
     // The Forwarder broadcasts the shutdown drops from the keyframe provider.
     uint64_t shutdown_drops = 0;
@@ -665,11 +664,10 @@ void Engine::inputsChanged()
     const bool up = inputs_->anyTrackInputConnected();
     const bool was = track_connected_;
     track_connected_ = up;
-    error_code ignored;
     if (up && !was) {
         LOG_INFO("source connected");
         ++lost_gen_;
-        lost_timer_.cancel(ignored);
+        lost_timer_.cancel();
     } else if (!up && was) {
         armLost();
     }

@@ -271,7 +271,7 @@ struct Client::Impl {
     {
         error_code ignored;
         tcp_sock.close(ignored);
-        tcp_watchdog.cancel(ignored);
+        tcp_watchdog.cancel();
         rx.clear();
     }
 
@@ -489,7 +489,7 @@ struct Client::Impl {
         p->open = false;
         error_code ignored;
         p->sock.close(ignored);
-        p->watchdog.cancel(ignored);
+        p->watchdog.cancel();
         p->rx.clear();
         peers.erase(p->id);
         if (peers.empty()) {
@@ -777,11 +777,11 @@ struct Client::Impl {
         tcp_sock.close(ignored);
         udp_sock.close(ignored);
         acceptor.close(ignored);
-        tcp_watchdog.cancel(ignored);
+        tcp_watchdog.cancel();
         for (auto& kv : peers) {
             kv.second->open = false;
             kv.second->sock.close(ignored);
-            kv.second->watchdog.cancel(ignored);
+            kv.second->watchdog.cancel();
         }
         peers.clear();
         rx.clear();

@@ -367,7 +367,7 @@ struct HttpSession : std::enable_shared_from_this<HttpSession> {
             return;
         closed = true;
         error_code ignored;
-        timer.cancel(ignored);
+        timer.cancel();
         if (sock.is_open()) {
             sock.shutdown(tcp::socket::shutdown_both, ignored);
             sock.close(ignored);
@@ -534,7 +534,7 @@ struct WsSession : std::enable_shared_from_this<WsSession> {
             return;
         closed = true;
         error_code ignored;
-        ping_timer.cancel(ignored);
+        ping_timer.cancel();
         auto& s = ws.next_layer();
         s.shutdown(tcp::socket::shutdown_both, ignored);
         s.close(ignored);
@@ -546,8 +546,7 @@ struct WsSession : std::enable_shared_from_this<WsSession> {
 void HttpSession::upgrade(http::request<http::string_body>&& req)
 {
     // The socket moves to the WebSocket session; this one is done.
-    error_code ignored;
-    timer.cancel(ignored);
+    timer.cancel();
     auto ws = std::make_shared<WsSession>(srv, std::move(sock), std::move(req));
     closed = true;
     srv->http_sessions.erase(this);
@@ -625,7 +624,7 @@ void WebServer::Impl::stop()
     stopped = true;
     error_code ignored;
     acceptor.close(ignored);
-    accept_retry.cancel(ignored);
+    accept_retry.cancel();
     if (started) {
         engine.onEvent(nullptr);
         runtime.onChange(nullptr);

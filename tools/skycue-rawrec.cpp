@@ -378,8 +378,7 @@ int run(int argc, char** argv)
         LOG_INFO("signal " << sig << ": flushing and exiting");
         for (auto& in : inputs)
             in->stop();
-        error_code ignored;
-        flush_timer.cancel(ignored);
+        flush_timer.cancel();
         beast_sink.flush();
         uat_sink.flush();
         io.stop();

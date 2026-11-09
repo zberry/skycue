@@ -489,7 +489,7 @@ A Hello's keyframe interval (also clamped to at least 10 ms) replaces
   ones in `types.hpp`. Give every `switch` a fallback and treat unknown
   values as `other` (for drops, as `source_lost`). An unknown `AddressType`
   is still a distinct, valid `TrackId`.
-- Version 1 will not change the meaning, order or encoding of an existing
+- Version 2 will not change the meaning, order or encoding of an existing
   field, frame type or enum value; an incompatible change gets a new version
   byte.
 - The C++ API is at version 0.1.0 and may still change before 1.0; the

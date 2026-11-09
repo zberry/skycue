@@ -76,7 +76,7 @@ one block in the script (`# --- pins ---`). Pinned upstream commits (resolved
 Provenance: derived facts (ICAO addresses, positions, identity fields, counts)
 computed by readsb 3.16.21 (regenerated 2026-11-09, now also with the Comm-B, TC29 and airspeed fields) from the pyModeS-hosted capture; no capture bytes are included.
 
-What readsb 3.16.21 makes of `raw/modes-120s.csv.gz`, committed (about 13 KB; the
+What readsb 3.16.21 makes of `raw/modes-120s.csv.gz`, committed (about 17.7 KB; the
 capture itself is not) so `decode_golden` can compare the 1090 decoder with it. It is
 aircraft data only: one JSON object per address, sorted by hex, with `positions` (the
 number of changes of readsb's reported position), `second` and `last` position

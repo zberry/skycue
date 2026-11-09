@@ -195,15 +195,15 @@ lines above).
 | `alt_baro_age_s` | number | seconds from the barometric altitude's measurement to `time`, one decimal (JSONL only; omitted when absent or 0: measured on arrival). A carried 1090 value is older than the frame that carries it |
 | `alt_geom_age_s` | number | the same for `alt_geom_ft` (JSONL only; omitted when absent or 0) |
 | `geom_minus_baro_age_s` | number | the same for `geom_minus_baro_ft` (JSONL only; omitted when absent or 0). A replay restores the three times from these ages, so the altitude estimates come out as they did live |
-| `heading_mag_deg` | number | magnetic heading, degrees (Comm-B BDS 6,0) (JSONL only) |
-| `heading_true_deg` | number | true heading, degrees (TC 19 subtype 3 or 4, Comm-B) (JSONL only) |
+| `heading_mag_deg` | number | magnetic heading, degrees (Comm-B BDS 6,0, TC 19 subtype 3 or 4, UAT track type 2) (JSONL only) |
+| `heading_true_deg` | number | true heading, degrees (UAT track type 3 only) (JSONL only) |
 | `ias_kt` | integer | indicated airspeed, knots (JSONL only) |
 | `tas_kt` | number | true airspeed, knots (JSONL only) |
 | `mach` | number | Mach number (JSONL only) |
 | `roll_deg` | number | roll angle, degrees, positive right wing down (BDS 5,0) (JSONL only) |
 | `track_rate_dps` | number | rate of change of track, degrees per second (BDS 5,0) (JSONL only) |
 | `sel_alt_ft` | integer | selected altitude, feet, from the MCP/FCU (BDS 4,0 or TC 29) (JSONL only) |
-| `sel_alt_fms_ft` | integer | selected altitude from the FMS, feet (BDS 4,0) (JSONL only) |
+| `sel_alt_fms_ft` | integer | selected altitude from the FMS, feet (BDS 4,0 FMS field, TC 29 subtype 1) (JSONL only) |
 | `qnh_mb` | number | barometric pressure setting, millibars (JSONL only) |
 | `sel_heading_deg` | number | selected heading, degrees (JSONL only) |
 | `nav_modes` | array of strings | active autopilot modes, any of `autopilot`, `vnav`, `althold`, `approach`, `lnav`, `tcas` (JSONL only) |

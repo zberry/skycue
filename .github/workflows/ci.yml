@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl
+      - name: Fetch web libraries
+        run: scripts/dev/fetch-web-libs.sh
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -LE 'needs-fixtures|needs-node|slow'
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl clang
+      - name: Fetch web libraries
+        run: scripts/dev/fetch-web-libs.sh
+      - name: AddressSanitizer and UBSan suite
+        # Exit status 77 means the script skipped itself; any other failure fails the job.
+        run: scripts/dev/run-sanitizers.sh asan || [ $? -eq 77 ]
+
+  node-helpers:
+    name: node-helpers (web page tests)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl nodejs
+      - name: Fetch web libraries
+        run: scripts/dev/fetch-web-libs.sh
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Web page tests
+        run: ctest --test-dir build -R '^web_ui$' --output-on-failure

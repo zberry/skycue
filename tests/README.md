@@ -63,4 +63,4 @@ that read the fetched captures, run the rest and report a pass. `web_ui` runs
 its node checks only when node is installed and passes without them.
 
 Any CI setup should include one job with the fetched fixtures and the external decoders set,
-or the differential tests never run.
+or the differential tests never run. The workflow in `.github/workflows/ci.yml` runs `ctest -LE 'needs-fixtures|needs-node|slow'` and has no such job.

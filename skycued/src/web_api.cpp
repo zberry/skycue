@@ -277,7 +277,7 @@ template <class Ok> ApiResponse apply(RuntimeConfig& rc, const Overlay& delta, O
 
 ApiResponse putFiltersRoute(const std::string& body, RuntimeConfig& rc)
 {
-    const auto obj = JsonObject::parse(body);
+    const auto obj = parseBodyObject(body, false);
     if (!obj)
         return fail(400, "the body must be a JSON object");
     for (const auto& k : obj->keys())
@@ -602,7 +602,7 @@ std::string leadingKey(const std::string& message)
 
 ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
 {
-    if (!JsonObject::parse(body))
+    if (!parseBodyObject(body, true))
         return fail(400, "the body must be a JSON object");
     std::vector<std::pair<std::string, JsonScalar>> raw;
     std::vector<std::string> clear_list;
@@ -664,7 +664,7 @@ ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
 
 ApiResponse postListRoute(ListKind kind, const std::string& body, const Engine& e, RuntimeConfig& rc)
 {
-    const auto obj = JsonObject::parse(body);
+    const auto obj = parseBodyObject(body, false);
     if (!obj)
         return fail(400, "the body must be a JSON object");
     for (const auto& k : obj->keys())

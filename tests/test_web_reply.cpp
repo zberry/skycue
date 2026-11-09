@@ -82,3 +82,21 @@ BOOST_AUTO_TEST_CASE(config_family_ladder)
     BOOST_TEST(fam(std::runtime_error("a")).status == 500u);
     BOOST_TEST(fam(InputNotFound("a")).status == 500u);
 }
+
+BOOST_AUTO_TEST_CASE(parse_body_object_accepts_objects_only)
+{
+    BOOST_TEST(parseBodyObject("{}", true).has_value());
+    const auto o = parseBodyObject(" \n{\"a\":1}", true);
+    BOOST_REQUIRE(o.has_value());
+    BOOST_REQUIRE(o->getInt("a").has_value());
+    BOOST_TEST(*o->getInt("a") == 1);
+    for (const char* bad : {"[]", " []", "[1]", "", "   ", "not json", "{"})
+        BOOST_TEST(!parseBodyObject(bad, true).has_value(), std::string(bad));
+
+    // Non-strict: the parser reads an array as an empty object (observed; the routes that pass
+    // false answer an empty-array body as an empty object today).
+    BOOST_TEST(parseBodyObject("[]", false).has_value());
+    BOOST_TEST(parseBodyObject(" []", false).has_value());
+    BOOST_TEST(!parseBodyObject("not json", false).has_value());
+    BOOST_TEST(!parseBodyObject("{", false).has_value());
+}

@@ -730,10 +730,8 @@ ApiResponse handleStatsApi(const ApiRequest& request, Engine& engine, StatsApiSt
         return notAllowed("POST");
     if (auto rejected = rejectUnsafe(request))
         return *rejected;
-    // PropertyTree reads "[]" as an empty object: the text must start with '{'.
-    const auto first = request.body.find_first_not_of(" \t\r\n");
-    const auto obj = JsonObject::parse(request.body);
-    if (!obj || first == std::string::npos || request.body[first] != '{')
+    const auto obj = parseBodyObject(request.body, true);
+    if (!obj)
         return fail(400, "the body must be a JSON object");
     const auto keys = obj->keys();
     if (!keys.empty())

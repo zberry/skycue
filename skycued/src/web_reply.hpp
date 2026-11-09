@@ -4,9 +4,11 @@
 // Two error families stay separate on purpose: std::invalid_argument is a server error in
 // the resource routes (inputs, outputs) and a bad request in the config routes.
 
+#include "json_lite.hpp"
 #include "web_api.hpp"
 
 #include <exception>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -24,6 +26,12 @@ ApiResponse fail(unsigned status, const std::string& message);
 ApiResponse notAllowed(const char* allow);
 // 409 {"error":<what>,"key":<key>,"source":<source>}: the key is pinned by --set or the environment.
 ApiResponse pinnedResponse(const PinnedKeyError& e);
+
+// The body as a JSON object, or nullopt when JsonObject::parse rejects it. `strict` also
+// requires the first non-whitespace character to be '{': the parser reads "[]" as an empty
+// object, so only the callers that already reject an array pass strict. The callers answer
+// "the body must be a JSON object" on nullopt.
+std::optional<JsonObject> parseBodyObject(const std::string& body, bool strict);
 
 enum class ErrorFamily { resource, config };
 

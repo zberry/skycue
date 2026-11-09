@@ -165,19 +165,7 @@ void UatDecoder::feed(const uat::UatFrame& f, Clock::time_point arrival, std::op
         o.geom_minus_baro_ft = frame_diff;
         o.geom_minus_baro_time = now_;
     }
-    o.gs_kt = ks.gs.fresh(now_, limits::kFieldFresh);
-    o.track_deg = ks.track.fresh(now_, limits::kFieldFresh);
-    o.heading_mag_deg = ks.heading_mag.fresh(now_, limits::kFieldFresh);
-    o.heading_true_deg = ks.heading_true.fresh(now_, limits::kFieldFresh);
-    o.baro_rate_fpm = ks.baro_rate.fresh(now_, limits::kFieldFresh);
-    o.geom_rate_fpm = ks.geom_rate.fresh(now_, limits::kFieldFresh);
-    o.callsign = ks.callsign.has ? std::optional(ks.callsign.value) : std::nullopt;  // identity: lives with the key
-    o.squawk = ks.squawk.has ? std::optional(ks.squawk.value) : std::nullopt;  // identity: lives with the key
-    o.emergency = ks.emergency.has ? std::optional(ks.emergency.value) : std::nullopt;  // identity: lives with the key
-    o.category = ks.category.has ? std::optional(ks.category.value) : std::nullopt;  // identity: lives with the key
-    o.nic = ks.nic.fresh(now_, limits::kFieldFresh);
-    o.nac_p = ks.nac_p.fresh(now_, limits::kFieldFresh);
-    o.rssi = ks.rssi.meanDb();
+    fillCommon(o, ks, now_);
     o.raw_line = "-" + coding::toHex(f.bytes, true) + ";";
     o.input_id = input_id_;
     o.rebroadcast = ks.key.rebroadcast;

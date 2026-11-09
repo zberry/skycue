@@ -427,6 +427,37 @@ BOOST_AUTO_TEST_CASE(repeated_identical_fix_emits_position)
     BOOST_CHECK(r.last().received_time > r.out[0].received_time);
 }
 
+BOOST_AUTO_TEST_CASE(emitted_observation_common_fields_pin)
+{
+    Rig r(withRef());
+    auto s = airborne();
+    s.csid = true;
+    r.feed(s, 0.0, -10.0);
+    BOOST_REQUIRE_EQUAL(r.out.size(), 1u);
+    const auto& o = r.last();
+    BOOST_CHECK_EQUAL(o.callsign.value_or(""), "KLM123");
+    BOOST_CHECK_EQUAL(o.category.value_or(""), "A3");
+    BOOST_REQUIRE(o.gs_kt && o.track_deg);
+    BOOST_CHECK_CLOSE(*o.gs_kt, 141.4f, 1.0);
+    BOOST_CHECK_CLOSE(*o.track_deg, 45.0f, 1.0);
+    BOOST_CHECK_EQUAL(o.nic.value_or(99), 8);
+    BOOST_CHECK(o.rssi);
+    BOOST_CHECK_EQUAL(o.input_id, "uat1");
+    BOOST_CHECK(!o.rebroadcast);
+    auto b = airborne();
+    b.lat = 52.11;
+    r.feed(b, 61.0);
+    BOOST_REQUIRE_EQUAL(r.out.size(), 2u);
+    BOOST_CHECK(r.last().gs_kt.has_value());  // fed again by this frame
+    r.feed(airborne(), 62.0);
+    auto m = airborne();
+    m.type = 0;
+    m.alt_ft = 5200;
+    r.feed(m, 130.0);
+    BOOST_CHECK(!r.last().nac_p);
+    BOOST_CHECK_EQUAL(r.last().callsign.value_or(""), "KLM123");
+}
+
 BOOST_AUTO_TEST_CASE(identity_outlives_60s_with_the_key)
 {
     Rig r;

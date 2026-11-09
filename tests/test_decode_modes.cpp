@@ -82,6 +82,39 @@ BOOST_AUTO_TEST_CASE(position_pair_emits_one_observation_with_fields) {
     BOOST_CHECK_EQUAL(r.c().cpr_pending, 1u);
 }
 
+BOOST_AUTO_TEST_CASE(emitted_observation_common_fields_pin) {
+    Rig r;
+    r.feed(df17(kAddr, identification(4, 3, "KLM1023")), 0.0);
+    r.feed(df17(kAddr, velocity(100, 100, 640)), 0.2);
+    r.feed(df17(kAddr, operationalStatus(2, true, 9)), 0.4);
+    r.feed(air(kP0, false, 38000, kAddr, 9), 1.0, 255);
+    r.feed(air(kP0, true, 38000, kAddr, 9), 1.5, 255);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
+    const auto& o = r.obs[0];
+    BOOST_CHECK_EQUAL(*o.callsign, "KLM1023");
+    BOOST_CHECK_EQUAL(*o.category, "A3");
+    BOOST_CHECK_CLOSE(static_cast<double>(*o.gs_kt), 141.42, 0.1);
+    BOOST_CHECK_CLOSE(static_cast<double>(*o.track_deg), 45.0, 0.1);
+    BOOST_CHECK_EQUAL(*o.geom_rate_fpm, 640.0f);
+    BOOST_CHECK(!o.baro_rate_fpm);
+    BOOST_REQUIRE(o.nic);
+    BOOST_REQUIRE(o.nac_p);
+    BOOST_CHECK_EQUAL(*o.nac_p, 9);
+    BOOST_REQUIRE(o.rssi);
+    BOOST_CHECK_SMALL(*o.rssi, 1e-9);
+    BOOST_CHECK_EQUAL(o.input_id, "in1");
+    BOOST_CHECK(!o.rebroadcast);
+    // 61 s later the dynamic fields have expired; the identity stays with the key.
+    r.feed(air(kP0, false, 38000, kAddr, 9), 62.5, 255);
+    r.feed(air(kP0, true, 38000, kAddr, 9), 63.0, 255);
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 2u);
+    const auto& q = r.obs[1];
+    BOOST_CHECK(!q.gs_kt && !q.track_deg && !q.geom_rate_fpm && !q.baro_rate_fpm);
+    BOOST_CHECK(!q.nac_p);  // nic is renewed by the position frames themselves
+    BOOST_CHECK_EQUAL(*q.callsign, "KLM1023");
+    BOOST_CHECK_EQUAL(*q.category, "A3");
+}
+
 BOOST_AUTO_TEST_CASE(second_position_decodes_locally) {
     Rig r;
     r.feed(air(kP0, false), 1.0);

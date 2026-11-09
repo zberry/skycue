@@ -359,7 +359,7 @@ need a connection of its own to readsb. One readsb serves Beast on port
 30005 (the readsb service does so already); skycued reads that port as a
 `beast_raw` input and serves it again, on a TCP port and on a multicast group,
 next to the JSON it reads for itself. Put this in `skycue.inputs.json` (in
-`/var/lib/skycue`; the page's Receiver tab makes the same entries) and
+`/var/lib/skycue`; the page's Feeds tab makes the same entries) and
 leave the built-ins as they are:
 
 ```json

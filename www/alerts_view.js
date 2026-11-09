@@ -351,7 +351,7 @@
       engine.rows().forEach(function (r) { if (r.id === id) found = r; });
       return found;
     }
-    // A click on an alert: an input's opens the Receiver tab; a track's
+    // A click on an alert: an input's opens the Feeds tab; a track's
     // selects it on the map, turning Hide filtered off when that would hide
     // it, or says it is gone and offers Stats when the ledger has it.
     function activate(row) {

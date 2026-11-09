@@ -360,5 +360,6 @@ copy_shots() {
 }
 copy_shots 'skycue-*.png' "$shots_dir"
 copy_shots 'fisb-*.png' "$fisb_shots_dir"
+copy_shots 'flow-card*.png' "$shots_dir"
 [ "$rc" -eq 0 ] || fail "playwright exit $rc"
 echo "PASS"

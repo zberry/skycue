@@ -14,6 +14,7 @@
   --elev: #f0883e;
   --blocked: #f85149;
   --unknown: #d2a8ff;
+  --uat: #d2a8ff;   /* 978 MHz inputs (the Flow card) */
   --gutter: 16px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
@@ -223,7 +224,7 @@ input.invalid { border-color: var(--blocked); }
 #alerts-log .al-ack { padding: 0 6px; font-size: 12px; }
 #alerts-sound-hint { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
 /* The config panel (spec 3.4, 7): over the drawer at the strip's right end,
-   above the bar; the field look of the Receiver tab's #input-form. */
+   above the bar; the field look of the Feeds tab's #input-form. */
 #alerts-config {
   position: absolute; right: 8px; bottom: var(--alert-strip); z-index: 1; width: 360px; max-width: calc(100% - 16px);
   max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 8px;
@@ -283,6 +284,8 @@ input.invalid { border-color: var(--blocked); }
 .card-head .card-action { margin-left: auto; }
 .card-caption { margin: 2px 0 6px; font-size: 12px; color: var(--muted); min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-chart { height: 260px; min-width: 0; }
+.stats-grid [data-card="traffic-flow"] { grid-column: 1 / -1; }
+[data-card="traffic-flow"] .card-chart { height: 360px; }
 @media (min-width: 1700px) {
   .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   /* The fourth Traffic card takes the whole row, not one cell of three. */
@@ -508,6 +511,8 @@ table.kv td { padding: 2px 0; word-break: break-word; }
 .input-device { color: var(--muted); margin-top: 2px; }
 .input-decoder { color: var(--muted); margin-top: 2px; }
 .input-device.stale { color: var(--elev); }
+.feeds-stale { color: var(--elev); }
+.feeds-down { color: var(--blocked); }
 .input-error, .output-error { color: var(--blocked); margin-top: 2px; overflow-wrap: anywhere; }
 .input-actions, .output-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .input-actions button, .output-actions button { font-size: 12px; padding: 2px 8px; }
@@ -682,3 +687,4 @@ label.check input { width: auto; margin: 0; }
 #view-set-menu button:hover:not(:disabled) { background: var(--panel); }
 #settings-import-text { color: var(--text); overflow-wrap: anywhere; }
 .est { color: var(--muted); font-size: 11px; }
+.stats-grid [data-card="traffic-flow"] .card-caption { white-space: normal; overflow: visible; }

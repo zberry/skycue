@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
@@ -766,10 +767,10 @@ uint64_t existingSize(const std::string& path, bool& partial_line)
 // file that ends mid-line (a write cut short by the failure) gets a newline
 // first, so the next record starts on a line of its own. Sets `bytes` to the
 // file's size.
-bool openStream(std::ofstream& f, const std::string& path, bool reuse, uint64_t& bytes)
+bool openStream(std::ofstream& f, const std::string& path, bool reuse, std::atomic<uint64_t>& bytes_out)
 {
     bool partial = false;
-    bytes = reuse ? existingSize(path, partial) : 0;
+    uint64_t bytes = reuse ? existingSize(path, partial) : 0;
     f.open(path, std::ios::out | std::ios::binary | (reuse ? std::ios::app : std::ios::trunc));
     if (!f)
         return false;
@@ -777,6 +778,7 @@ bool openStream(std::ofstream& f, const std::string& path, bool reuse, uint64_t&
         f << '\n';
         ++bytes;
     }
+    bytes_out.store(bytes, std::memory_order_relaxed);
     return true;
 }
 
@@ -791,7 +793,8 @@ bool Recorder::openFiles(bool reuse)
         const std::string base = config_.dir + "/" + stream_ + "-" + formatCompactUtc(std::chrono::system_clock::now());
         stem_ = uniqueStem(base, {"jsonl", "csv"}, last_base_, last_suffix_);
     }
-    jsonl_bytes_ = csv_bytes_ = 0;
+    jsonl_bytes_.store(0, std::memory_order_relaxed);
+    csv_bytes_.store(0, std::memory_order_relaxed);
     if (config_.jsonl && !openStream(jsonl_, stem_ + ".jsonl", reuse, jsonl_bytes_))
         return false;
     if (config_.csv) {
@@ -806,10 +809,10 @@ bool Recorder::openFiles(bool reuse)
             errno = err;
             return false;
         }
-        if (csv_bytes_ == 0) {
+        if (csv_bytes_.load(std::memory_order_relaxed) == 0) {
             const std::string head = (sent_ ? recording::sentCsvHeader() : recording::receivedCsvHeader()) + "\n";
             csv_ << head;
-            csv_bytes_ = head.size();
+            csv_bytes_.store(head.size(), std::memory_order_relaxed);
         }
     }
     opened_ = std::chrono::steady_clock::now();
@@ -831,7 +834,8 @@ void Recorder::closeFiles()
 
 bool Recorder::rotationDue() const
 {
-    if (config_.rotate_bytes > 0 && (jsonl_bytes_ >= config_.rotate_bytes || csv_bytes_ >= config_.rotate_bytes))
+    if (config_.rotate_bytes > 0 && (jsonl_bytes_.load(std::memory_order_relaxed) >= config_.rotate_bytes ||
+                                  csv_bytes_.load(std::memory_order_relaxed) >= config_.rotate_bytes))
         return true;
     return config_.rotate_after.count() > 0 && std::chrono::steady_clock::now() - opened_ >= config_.rotate_after;
 }
@@ -872,13 +876,13 @@ void Recorder::write(const Record& record)
     if (config_.jsonl) {
         const std::string line = recording::jsonLine(record);
         jsonl_ << line;
-        jsonl_bytes_ += line.size();
+        jsonl_bytes_.fetch_add(line.size(), std::memory_order_relaxed);
     }
     if (config_.csv) {
         const std::string line = recording::csvRow(sent_ ? recording::sentColumns() : recording::receivedColumns(),
                                                    record);
         csv_ << line;
-        csv_bytes_ += line.size();
+        csv_bytes_.fetch_add(line.size(), std::memory_order_relaxed);
     }
     endWrite();
 }
@@ -890,7 +894,7 @@ void Recorder::writeFisb(const fisb::FisbEvent& event, std::chrono::system_clock
     if (config_.jsonl) {
         const std::string line = fisb::eventRecordJson(event, time) + '\n';
         jsonl_ << line;
-        jsonl_bytes_ += line.size();
+        jsonl_bytes_.fetch_add(line.size(), std::memory_order_relaxed);
     }
     endWrite();
 }
@@ -1009,5 +1013,16 @@ std::string Recorder::currentPath(const char* ext) const
     return "";
 }
 
-}  // namespace skycued
+uint64_t Recorder::bytesWritten(const char* ext) const
+{
+    std::string e = ext ? ext : "";
+    if (!e.empty() && e[0] == '.')
+        e.erase(0, 1);
+    if (e == "jsonl" && config_.jsonl)
+        return jsonl_bytes_.load(std::memory_order_relaxed);
+    if (e == "csv" && config_.csv)
+        return csv_bytes_.load(std::memory_order_relaxed);
+    return 0;
+}
 
+}  // namespace skycued

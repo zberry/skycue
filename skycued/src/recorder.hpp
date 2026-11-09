@@ -18,6 +18,7 @@
 
 #include <skycue/types.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -106,6 +107,11 @@ public:
     // Path of the file currently written for "jsonl" or "csv" (a leading '.'
     // is accepted); "" when that format is disabled.
     std::string currentPath(const char* ext) const;
+    // Bytes written to the current "jsonl" or "csv" file; 0 for a format this
+    // recorder does not write. Safe to read from another thread should the
+    // web server ever run on one; today everything runs on the one
+    // io_context thread. The value may lag a write in progress.
+    uint64_t bytesWritten(const char* ext) const;
 
     // Records not written because the files could not be created or written
     // (records still in the write buffer when a failure hits are not counted).
@@ -135,7 +141,7 @@ private:
     std::string stem_;  // <dir>/<stream>-YYYYMMDD-HHMMSS[-N]
     std::ofstream jsonl_, csv_;
     bool open_ = false;
-    uint64_t jsonl_bytes_ = 0, csv_bytes_ = 0;
+    std::atomic<uint64_t> jsonl_bytes_{0}, csv_bytes_{0};  // written by the io thread, read by bytesWritten()
     std::chrono::steady_clock::time_point opened_{};
     std::size_t unflushed_ = 0;
     std::string last_base_;  // name stem without suffix, and the suffix used last

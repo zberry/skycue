@@ -469,7 +469,8 @@ test('cues_tab_rows_counters_history_clients', async ({ page }) => {
     try {
       await expect(page.locator('#cues-filters li').first()).toContainText(`ui: max range ${r0} → ${r0 + 1} nm`);
     } finally { expect(await putRange(null)).toBe(200); }
-    // this test's own cue connection is listed
+    // this test's own cue connection is listed (cue clients are on the Feeds tab)
+    await page.locator('#tab-receiver').click();
     await expect(page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` })).toHaveCount(1, { timeout: 10000 });
     await expect(page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` })).toContainText('accepted');
   } finally { sock.destroy(); }
@@ -576,13 +577,13 @@ test('header_long_stat_is_ellipsised_on_one_row', async ({ page }) => {
   for (const d of r.offsets) expect(d).toBeLessThan(4);
 });
 
-// One header button per side-panel tab (Weather, Receiver, Cues, Config): each
+// One header button per side-panel tab (Weather, Feeds, Cues, Config): each
 // opens the panel on its tab and is the only one pressed; pressed again it
 // closes the panel; Escape closes it and clears all four.
 test('header_buttons_open_each_panel_tab', async ({ page }) => {
   await openPage(page);
   const buttons = { weather: '#wx-toggle', receiver: '#rx-toggle', cues: '#cues-toggle', config: '#cfg-toggle' };
-  await expect(page.locator('#panel-buttons > button')).toHaveText(['Weather', 'Receiver', 'Cues', 'Config']);
+  await expect(page.locator('#panel-buttons > button')).toHaveText(['Weather', 'Feeds', 'Cues', 'Config']);
   const panel = page.locator('#details');
   const pressed = () => page.locator('#panel-buttons > button').evaluateAll((bs) =>
     bs.map((b) => b.id + '=' + b.getAttribute('aria-pressed')));
@@ -599,14 +600,14 @@ test('header_buttons_open_each_panel_tab', async ({ page }) => {
   await page.locator('#cfg-toggle').click();
   await expect(panel).toBeHidden();
   await expectPressed(null);
-  // Open on Receiver, then Escape closes it and clears all four.
+  // Open on Feeds, then Escape closes it and clears all four.
   await page.locator('#rx-toggle').click();
   await expect(panel).toBeVisible();
   await expectPressed('#rx-toggle');
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await expectPressed(null);
-  // The inputs counter still opens the Receiver tab, and presses Receiver.
+  // The inputs counter still opens the Feeds tab, and presses Feeds.
   await page.locator('#stat-inputs').click();
   await expect(page.locator('#tab-receiver')).toHaveAttribute('aria-selected', 'true');
   await expectPressed('#rx-toggle');
@@ -2900,7 +2901,7 @@ test.describe('overlays without tiles', () => {
   });
 });
 
-// ---- Receiver tab ----------------------------------------------------------------
+// ---- Feeds tab ----------------------------------------------------------------
 // Against the "receivers" skycued run.sh starts: no built-in decoder inputs,
 // one pingstation_json input ps-sim that skycue-pingsim feeds (a device
 // status every 2 s at 38.9 N 77.0 W). Every case leaves only ps-sim, enabled.
@@ -2976,6 +2977,22 @@ test.describe('receiver tab (pingsim)', () => {
     await expect(page.locator('#pane-receiver')).toBeVisible();
     await page.locator('#stat-inputs').click();
     await expect(page.locator('#details')).toBeHidden();
+  });
+
+  test('feeds_tab_summary_and_clients', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openPage(page);
+    await page.locator('#rx-toggle').click();
+    await expect(page.locator('#rx-toggle')).toHaveText('Feeds');
+    await expect(page.locator('#tab-receiver')).toHaveText('Feeds');
+    await expect(page.locator('#pane-receiver')).toBeVisible();
+    await expect(page.locator('#feeds-summary')).toHaveText(/\d+ inputs? up/, { timeout: 10000 });
+    await expect(page.locator('#feeds-summary')).toHaveText(/\d+ clients?|\d+ outputs?/);
+    await expect(page.locator('#pane-receiver #cues-clients')).toHaveCount(1);
+    await expect(page.locator('#pane-cues #cues-clients')).toHaveCount(0);
+    await page.locator('#stats-toggle').click();
+    await expect(page.locator('#stats-receiver-link')).toHaveText('Feeds');
+    expect(errors).toEqual([]);
   });
 
   test('receiver_tab_lists_inputs_with_live_counts', async ({ page }) => {
@@ -3234,7 +3251,7 @@ test.describe('receiver tab (pingsim)', () => {
   });
 });
 
-// ---- Receiver tab: input endpoint fields and Outputs ----
+// ---- Feeds tab: input endpoint fields and Outputs ----
 const RX_OUT_PORT = Number(process.env.SKYCUE_RX_OUTPUT_PORT);
 const rxOutputs = async () => (await rxApi('GET', '/api/outputs')).body.outputs;
 const outputCard = (page, id) => page.locator(`#outputs-list .output-card[data-id="${id}"]`);
@@ -3477,8 +3494,8 @@ test.describe('receiver tab (outputs)', () => {
     try {
       await openPage(page);
       await page.locator('#wx-toggle').click();
-      await page.locator('#tab-cues').click();
-      await expect(page.locator('#pane-cues')).toBeVisible();
+      await page.locator('#tab-receiver').click();
+      await expect(page.locator('#pane-receiver')).toBeVisible();
       // The session is listed as before; the daemon's `output` field is not shown.
       const row = page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` });
       await expect(row).toHaveCount(1, { timeout: 10000 });
@@ -4259,7 +4276,7 @@ test('stats_reset_asks_first_and_empties', async ({ page }) => {
   await expect.poll(() => tileNumber(page, 'observations'), { timeout: 10000 }).toBeLessThan(t0);
 });
 
-// Input health lives in the Receiver tab (spec 2): the toolbar opens it
+// Feeds (inputs, outputs, cue clients) lives in the Feeds tab (spec 2): the toolbar opens it
 // beside the view.
 test('stats_receiver_link_opens_receiver_tab', async ({ page }) => {
   await openStats(page);
@@ -4291,6 +4308,45 @@ async function openTraffic(page) {
   await expect.poll(async () => (await statsState(page)).cards.filter((c) => TRAFFIC_CARDS.includes(c.id) && c.canvas)
     .map((c) => c.id), { timeout: 15000 }).toEqual(TRAFFIC_CARDS);
 }
+
+// The Flow card leads Traffic at full width, draws its Sankey, and keeps its node labels to
+// two lines (a tall node may add a third with the recording tag).
+test('flow_card_first_in_traffic_full_width_and_draws', async ({ page }, testInfo) => {
+  await openStats(page);
+  const grid = page.locator('#stats-traffic');
+  const card = page.locator('#stats-traffic > :first-child');
+  await expect(card).toHaveAttribute('data-card', 'traffic-flow');
+  const [gb, cb] = [await grid.boundingBox(), await card.boundingBox()];
+  expect(Math.abs(cb.width - gb.width)).toBeLessThanOrEqual(2);
+  await expect(card.locator('.card-chart canvas').first()).toBeAttached({ timeout: 15000 });
+  await expect(card.locator('.card-caption')).toHaveText(/messages per second/, { timeout: 15000 });
+  expect(cb.height).toBeGreaterThanOrEqual(360);
+  await expect.poll(async () => ((await cardOption(page, 'traffic-flow')).series[0].data || []).length,
+    { timeout: 15000 }).toBeGreaterThanOrEqual(10);
+  await page.waitForTimeout(300);
+  // the right half of the chart is not blank
+  const painted = await page.evaluate(() => {
+    const cv = document.querySelector('[data-card="traffic-flow"] .card-chart canvas');
+    const w = cv.width, h = cv.height, x = Math.floor(w * 0.7);
+    const d = cv.getContext('2d').getImageData(x, 0, 20, h).data;
+    const bg = [d[0], d[1], d[2], d[3]];
+    for (let i = 4; i < d.length; i += 4) {
+      if (d[i] !== bg[0] || d[i + 1] !== bg[1] || d[i + 2] !== bg[2] || d[i + 3] !== bg[3]) return true;
+    }
+    return false;
+  });
+  expect(painted).toBe(true);
+  const tall = await page.evaluate(() => {
+    const inst = window.echarts.getInstanceByDom(document.querySelector('[data-card="traffic-flow"] .card-chart'));
+    return inst.__flowTall || [];
+  });
+  const data = (await cardOption(page, 'traffic-flow')).series[0].data;
+  for (const n of data) {
+    const lines = String(n.label.formatter).split('\n').length;
+    expect(lines, n.name).toBeLessThanOrEqual(tall.includes(n.name) ? 3 : 2);
+  }
+  await card.screenshot({ path: testInfo.outputPath(`flow-card-${testInfo.project.name}.png`) });
+});
 
 test('stats_traffic_inputs_stacked_by_input_with_zoom', async ({ page }, testInfo) => {
   await openTraffic(page);
@@ -5062,7 +5118,7 @@ test('stats_coverage_fleet_signal_rows_are_full', async ({ page }) => {
 // ---- Stats: the whole view, chart disposal, the ledger across a restart -------
 // The chart cards a view on `summary` draws: Weather only once UAT was
 // seen (the aircraft detail card, made empty, draws once a row is opened).
-const allCards = (summary) => TRAFFIC_CARDS.concat(COVERAGE_CARDS, FLEET_CARDS, SIGNAL_CARDS,
+const allCards = (summary) => ['traffic-flow'].concat(TRAFFIC_CARDS, COVERAGE_CARDS, FLEET_CARDS, SIGNAL_CARDS,
   summary.uat_seen ? ['weather-uat'] : []).sort();
 const drawnCards = async (page) => (await statsState(page)).cards.filter((c) => c.canvas).map((c) => c.id).sort();
 

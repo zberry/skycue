@@ -204,7 +204,9 @@ about the daemon. To change it, see [`PUT /api/config`](#put-apiconfig).
             "overrides_path": "/var/lib/skycue/skycue.overrides.toml",
             "www_dir": "/usr/local/share/skycue/www", "map_dir": "/usr/local/share/skycue/www",
             "record_dir": "/var/lib/skycue/rec",
-            "recording_files": ["received-20261102-140306.jsonl", "sent-20261102-140306.jsonl"],
+            "recording_files": [
+              {"name": "received-20261102-140306.jsonl", "stream": "received", "bytes": 1048576},
+              {"name": "sent-20261102-140306.jsonl", "stream": "sent", "bytes": 20480}],
             "log_level": "info", "mode": "live", "readsb": true, "dump978": true,
             "locations": {"learned_path": "/etc/skycue/fisb-locations.json", "learned": 42,
                           "operator_path": "/etc/skycue/locations.csv", "operator": 61234,
@@ -239,9 +241,10 @@ when that is set, else beside the config file (see
 `/overlays/` and `/api/tiles-available` are read from: `paths.map_dir`, or
 `www_dir` when `paths.map_dir` is unset;
 `record_dir` is `recording.dir` (`""`:
-not recording) and `recording_files` the base names of the recording files
-being written now; `log_level` is `--log-level`. `mode` is `"live"` or
-`"replay"`; a replay adds `"replay": {"file": "<--replay FILE>", "speed":
+not recording) and `recording_files` one object per recording file
+being written now (`name` the base name, `stream` `"received"`, `"sent"` or
+`"fisb"`, `bytes` the bytes written to it so far); `log_level` is
+`--log-level`. `mode` is `"live"` or `"replay"`; a replay adds `"replay": {"file": "<--replay FILE>", "speed":
 <--replay-speed, 0 = unpaced>, "loop": <--replay-loop>}`. `readsb` and
 `dump978` say whether the built-in readsb and dump978 inputs are used
 (`false` while replaying, and for `--no-readsb` / `--no-uat`), so their
@@ -539,7 +542,7 @@ with either is a `400`. `state`:
 | `connects`, `bytes`, `messages`, `observations`, `uplinks`, `rejected` | connections made, bytes received, messages decoded (a readsb or dump978 line, a JSON datagram, a CAT021 record), track observations and FIS-B uplinks passed on, data that could not be used |
 | `records_skipped`, `sac_sic_mismatch`, `nogo_records` | CAT021 records skipped (simulated, test or RAB records, records without an address, blocks cut short by a length error), with another SAC/SIC than configured, with the NOGO bit set |
 | `clock_rejects` | device timestamps more than 10 s from arrival, replaced by the arrival time |
-| `rejected_peer` | datagrams or connections from an address other than `peer`; each refused connection, and a refused datagram at most once a second, also sets `last_error` ("datagram from X refused (not the configured peer)"); the Receiver tab shows it beside `rejected` when not 0 |
+| `rejected_peer` | datagrams or connections from an address other than `peer`; each refused connection, and a refused datagram at most once a second, also sets `last_error` ("datagram from X refused (not the configured peer)"); the Feeds tab shows it beside `rejected` when not 0 |
 | `raw_unknown_len` | `rawData` of no known frame length (not written to the raw files) |
 | `status_ok`, `status_fail` | status polls answered with a status document, and failed |
 | `capture_dropped` | capture lines and raw frames dropped because the file could not be written |

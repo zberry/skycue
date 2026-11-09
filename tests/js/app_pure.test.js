@@ -505,7 +505,7 @@ test('overlayOffer: toggles from overlays/meta.json', () => {
   assert.deepStrictEqual(P.overlayOffer({ files: 'x' }), { borders: false, cities: false });
 });
 
-// ---- Receiver tab -------------------------------------------------------------
+// ---- Feeds tab -------------------------------------------------------------
 // The messages are parseInputDef's (skycued/src/inputs/input_def.cpp).
 const CAT021_UDP = { id: 'ps-north', name: 'North mast', type: 'pingstation_cat021', enabled: true, transport: 'udp',
   bind: '0.0.0.0', port: 4001, peer: '', edition: '2.5', sac: null, sic: null, status_url: 'http://192.0.2.10/api/v1/status',
@@ -846,6 +846,20 @@ test('inputsSummary counts', () => {
   assert.deepStrictEqual(P.inputsSummary(null), { connected: 0, enabled: 0 });
   assert.deepStrictEqual(P.inputsSummary([live({}), live({ connected: false }), live({}, { enabled: false }),
     live({ connected: true, receiving: false })]), { connected: 2, enabled: 3 });
+});
+
+test('feedsSummary counts and singulars', () => {
+  const up = () => live({}), stale = () => live({ connected: true, receiving: false });
+  const down = () => live({ connected: false, receiving: false });
+  assert.strictEqual(P.feedsSummary([up(), up(), up(), stale()], [{}, {}], { tcp: [{}, {}, {}], udp: [{}] }, [{}, {}]),
+    '3 inputs up · 1 stale · 2 outputs · 4 clients · recording 2 files');
+  assert.strictEqual(P.feedsSummary([up(), stale()], [{}], { tcp: [{}] }, [{}]),
+    '1 input up · 1 stale · 1 output · 1 client · recording 1 file');
+  assert.strictEqual(P.feedsSummary([up()], [{}], { udp: [{}] }, [{}]), '1 input up · 1 output · 1 client · recording 1 file');
+  assert.strictEqual(P.feedsSummary([], [{}], { tcp: [{}] }, []), 'no feeds');
+  assert.strictEqual(P.feedsSummary(null, null, null, null), 'no feeds');
+  assert.strictEqual(P.feedsSummary([up(), down()], [], {}, null), '1 input up · 1 down');
+  assert.strictEqual(P.feedsSummary([down()], [], null, []), '1 down');
 });
 
 test('gpsStatusText and receiverStatusText: the documented codes, else the number', () => {

@@ -424,7 +424,7 @@ else that is hex counts in `rejected`. What you get:
   second. Call sign, category, squawk and emergency status are kept for as long
   as the aircraft is tracked, on both bands; all other fields for 60 s.
 - **Counters.** The same set as for 1090 ([`GET /api/inputs`](web-api.md#inputs)),
-  and the `decoder` object of `GET /api/stats` sums them. The Receiver tab shows
+  and the `decoder` object of `GET /api/stats` sums them. The Feeds tab shows
   one line on the card of a decoding input: frames per second, the share of
   frames that failed the CRC, and the counts of frames the decoder repaired
   (`fixed`), positions waiting for their pair (`pending`), positions rejected
@@ -499,7 +499,7 @@ one (`status_url`), else `receiver.lat` and `receiver.lon`.
   it does not reach the track table. Check that the device sends raw frames
   before switching a receiver to `decode`.
 - The decoder counters of [UAT](#uat-978-mhz-in-skycued) and Mode S appear on the
-  input, and the Receiver tab offers `source` in the input form and the decoder
+  input, and the Feeds tab offers `source` in the input form and the decoder
   line on the card.
 
 ## Geometric altitude
@@ -890,7 +890,7 @@ holds a C1 control or is over 64 characters; nothing when all are fine.
 ## A pingStation without hardware: skycue-pingsim
 
 `skycue-pingsim` plays the part of a pingStation 3 towards a skycued input.
-It is how the Receiver tab is demonstrated and how the end-to-end test runs.
+It is how the Feeds tab is demonstrated and how the end-to-end test runs.
 It reads one of two kinds of file:
 
 - `--capture FILE`: a capture file written by an input with
@@ -928,7 +928,7 @@ everything is sent; with `--loop` it exits 1 when a pass sends nothing. A
 usage error exits 2. The last line on stderr sums up: `done: N records sent,
 M lines skipped, K status messages, ...`.
 
-To demonstrate the Receiver tab with no readsb or dump978 running, put two
+To demonstrate the Feeds tab with no readsb or dump978 running, put two
 simulated inputs in an inputs file, `sim.inputs.json`:
 
 ```json
@@ -1141,9 +1141,9 @@ never sent to skycued.
 
 The header shows the counters: tracks known and forwarded, observations per
 second, `inputs n/m` (enabled inputs connected / enabled inputs: green when
-all are, else red; a click opens the [Receiver tab](#receiver-tab)), UAT
+all are, else red; a click opens the [Feeds tab](#feeds-tab)), UAT
 downlinks and uplinks per minute, cue clients, recorder drops and web
-clients. To the right, **Weather**, **Receiver**, **Cues** and **Config**
+clients. To the right, **Weather**, **Feeds**, **Cues** and **Config**
 open the side panel on that tab (the one whose tab is showing is
 highlighted; a second click, or Escape, closes the panel). **Table**
 swaps the map for the track table and **Stats** for the
@@ -1381,7 +1381,7 @@ at once; Escape or **×** closes the panel.
 
 A click on an alert (the strip's line, or a drawer row) goes to what it is
 about. An input's alert (and skycued's) opens the
-[Receiver tab](#receiver-tab). An aircraft's switches to the map and
+[Feeds tab](#feeds-tab). An aircraft's switches to the map and
 selects it, even when the Display filters leave it out; when "Hide
 filtered" would hide it, Hide filtered is turned off and the strip says
 "Hide filtered turned off to show <aircraft>.". An aircraft no longer
@@ -1415,13 +1415,32 @@ The toolbar along the top:
   Off, the charts stay as they are until a range is picked again.
 - "since 2026-11-03 12:00Z": when the statistics began, in UTC like every
   time in the view.
-- **Input health** opens the [Receiver tab](#receiver-tab).
+- **Feeds** opens the [Feeds tab](#feeds-tab).
 - **Reset statistics** asks first ("Reset all statistics? ... this cannot
   be undone."), then empties all of it (series, charts, coverage, the
   aircraft ledger and its evicted count) and saves the empty file at once.
   The header counters and `GET /api/stats` are the process's own counts and
   are not touched. Another reset within 5 s of the last one is refused
   ("Reset failed: the statistics were reset less than 5 s ago").
+
+The first Traffic card, **Flow**, is a live diagram of the pipeline: one band
+per input flows into the decoder, then to rejected messages and track
+updates, which split by decision (passed filters, out of range, below
+elevation, blocked, no position); the passed band goes through the cue
+scheduler to one node per cue connection. Band widths are messages per
+second over the last minute, and the cue connections show the copies after
+the scheduler (one per connection). Drops are counted per track, not per
+message, so the decision bands are an estimate: the track-update rate split
+by the tracks now under each decision (each node says how many, and
+hovering shows the drops per minute and the filter that applies, such as
+`> 150 nm`). A thin band carries nothing. A new input, cue connection or
+recording file shows its rate from its own first sample, "no data" for the
+first 5 s; after a pause (the page hidden) the window starts again. A ● marks a
+node a recording file is written from (hover for the file, its size and
+write rate) and ↗ one a raw output serves. Click an input or a cue
+connection to open its card in the [Feeds tab](#feeds-tab). It
+refreshes every 5 s while **live** is on and the page is visible, and its
+**CSV** button saves the rates.
 
 Below it, the sections:
 
@@ -1583,10 +1602,14 @@ dot on the Weather button, with the box closed, says that a radar layer that
 is switched on is stale (drawn at half opacity), or has no mosaic while the
 daemon has FIS-B ground stations.
 
-### Receiver tab
+### Feeds tab
 
-The side panel's third tab, after Track and Weather; **Receiver** or
-`inputs n/m` in the header opens and closes it. It has four sections.
+The side panel's third tab, after Track and Weather; **Feeds** or
+`inputs n/m` in the header opens and closes it. A summary line at the top
+counts what is flowing, e.g. `3 inputs up · 1 stale · 2 outputs · 4 clients ·
+recording 2 files` (parts that are 0 are left out; an enabled input is up when
+it is connected and receiving, stale when connected with no data, else down;
+`no feeds` when no input is enabled). It has five sections.
 
 **Inputs**: one card per input (the built-ins first, then the added ones in
 file order) with its name, id and type, where it gets its data
@@ -1646,6 +1669,12 @@ refuses (a port in use, a loop). The counters refresh once a second while the
 tab is open. The Add input form now offers the raw types and, for every type,
 the transport and, for UDP, the multicast group.
 
+**Cue clients**: every open cue TCP connection, with its endpoint,
+`accepted` (it connected to `cues.tcp_port`) or `dialled` (one of
+`cues.tcp_connect`), when it connected and the bytes written to it, then
+every UDP target with the datagrams sent to it. The list is refreshed every
+5 s while the tab is open.
+
 **Ground stations**: the FIS-B ground stations heard in the last 60 minutes,
 with position, products received and when last heard; each is a triangle
 on the map.
@@ -1658,8 +1687,7 @@ records (received / sent).
 ### Cues tab
 
 The side panel's fourth tab (**Cues** in the header opens and closes
-it): what skycued sends to the cue consumers. It has
-four sections.
+it): what skycued sends to the cue consumers (the clients are on the [Feeds tab](#feeds-tab)). It has three sections.
 
 **Counters**: updates and drops sent since skycued started, the drops by
 reason (timeout, filtered, source lost) and the filtered drops by the
@@ -1683,12 +1711,6 @@ time (the wall clock, also during a replay, unlike Recent decisions'
 data-clock times), origin (`startup`, `ui`, `file:<name>`, `save-baseline`) and what
 changed, e.g. `14:10:41Z ui: max range 150 → 20 nm`. The oldest entry is
 the state skycued started with. List changes are not in it.
-
-**Cue clients**: every open cue TCP connection, with its endpoint,
-`accepted` (it connected to `cues.tcp_port`) or `dialled` (one of
-`cues.tcp_connect`), when it connected and the bytes written to it, then
-every UDP target with the datagrams sent to it. The filter changes and the
-clients are refreshed every 5 s while the tab is open.
 
 ### Config tab
 

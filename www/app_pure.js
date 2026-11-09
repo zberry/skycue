@@ -730,7 +730,7 @@
     return String(station || '').toUpperCase().indexOf(String(prefix).toUpperCase()) === 0;
   }
 
-  // ---- Receiver tab: input definitions (docs/web-api.md, Inputs) ----
+  // ---- Feeds tab: input definitions (docs/web-api.md, Inputs) ----
   // The rules and messages of skycued's parseInputDef
   // (skycued/src/inputs/input_def.cpp), for the fields the add form has.
   var INPUT_TYPES = ['readsb', 'dump978', 'pingstation_json', 'pingstation_cat021', 'beast_raw', 'uat_raw'];
@@ -876,7 +876,7 @@
     return { ok: Object.keys(errors).length === 0, errors: errors };
   }
 
-  // ---- Receiver tab: output definitions (docs/web-api.md, Outputs) ----
+  // ---- Feeds tab: output definitions (docs/web-api.md, Outputs) ----
   // The rules and messages of skycued's parseOutputDef
   // (skycued/src/outputs/output_def.cpp).
   var OUTPUT_KINDS = ['beast', 'uat', 'json', 'pingstation_json', 'cat021', 'cue'];
@@ -1060,6 +1060,32 @@
       if (i.state && i.state.connected) out.connected++;
     });
     return out;
+  }
+
+  // The Feeds tab's summary line: inputs up/stale/down, outputs, cue clients
+  // (tcp + udp) and recording files; parts with a count of 0 are left out.
+  // A disabled input is not counted. clients is the GET /api/cues/clients body.
+  function feedsSummary(inputs, outputs, clients, files) {
+    var up = 0, stale = 0, down = 0, parts = [];
+    (inputs || []).forEach(function (i) {
+      if (i.enabled === false) return;
+      var s = i.state || {};
+      if (s.connected && s.receiving) up++;
+      else if (s.connected) stale++;
+      else down++;
+    });
+    if (!up && !stale && !down) return 'no feeds';
+    function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+    var nOut = (outputs || []).length;
+    var c = clients || {}, nCli = (c.tcp || []).length + (c.udp || []).length;
+    var nFiles = (files || []).length;
+    if (up) parts.push(plural(up, 'input', 'inputs') + ' up');
+    if (stale) parts.push(stale + ' stale');
+    if (down) parts.push(down + ' down');
+    if (nOut) parts.push(plural(nOut, 'output', 'outputs'));
+    if (nCli) parts.push(plural(nCli, 'client', 'clients'));
+    if (nFiles) parts.push('recording ' + plural(nFiles, 'file', 'files'));
+    return parts.join(' · ');
   }
 
   // ---- FIS-B weather text (spec §3.2-§3.3) ----
@@ -2202,7 +2228,7 @@
     inputTransport: inputTransport, OUTPUT_KINDS: OUTPUT_KINDS, OUTPUT_TRANSPORTS: OUTPUT_TRANSPORTS,
     outputFields: outputFields, validateOutputDef: validateOutputDef, outputEndpoint: outputEndpoint,
     outputDot: outputDot,
-    inputsSummary: inputsSummary,
+    inputsSummary: inputsSummary, feedsSummary: feedsSummary,
     gpsStatusText: gpsStatusText, receiverStatusText: receiverStatusText,
     FLIGHT_CATEGORIES: FLIGHT_CATEGORIES, reportBody: reportBody, visibilitySm: visibilitySm,
     ceilingFt: ceilingFt, flightCategory: flightCategory, windGroup: windGroup, parseMetar: parseMetar,

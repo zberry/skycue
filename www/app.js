@@ -1517,15 +1517,15 @@
 
   // ---- selection panel ---------------------------------------------------------
   // The side panel: a Track tab (the selected aircraft), a Weather tab
-  // (FIS-B text reports and the clicked airspace shape), a Receiver tab
-  // (inputs, ground stations, decoder health) and a Cues tab (what was sent
-  // and dropped, filter changes, cue clients). The tabs are the panel's
+  // (FIS-B text reports and the clicked airspace shape), a Feeds tab
+  // (inputs, outputs, cue clients, ground stations, decoder health) and a Cues
+  // tab (what was sent and dropped, filter changes). The tabs are the panel's
   // [role=tab] buttons, tab-<name> showing pane-<name>; a header button with
   // data-opens-tab="<name>" toggles the panel on that tab. TAB_SHOWN[name]
   // draws a tab when it is shown. A new tab: its markup and one entry here.
   var TAB_SHOWN = {
     weather: function () { renderWx(true); },
-    receiver: function () { renderReceiver(); pollOutputs(); },
+    receiver: function () { renderReceiver(); pollOutputs(); fetchCueClients(); ensureConfigData(); },
     cues: showCues,
     config: showConfig
   };
@@ -2727,7 +2727,7 @@
     pre.hidden = !r.text;
     card.hidden = false;
   }
-  // The list's "show": pans to the report's position (as the Receiver tab's).
+  // The list's "show": pans to the report's position (as the Feeds tab's).
   function showWxPos(key) {
     var r = fisb.text.get(key), ll = r && wxPlotPos(r);
     if (!ll || !map) return;
@@ -2895,7 +2895,7 @@
     }
   }
 
-  // ---- Receiver tab ------------------------------------------------------------------
+  // ---- Feeds tab ------------------------------------------------------------------
   // docs/web-api.md, Inputs. The list comes with the snapshot, the `inputs`
   // items (a change) and GET /api/inputs every INPUTS_POLL_MS (device status,
   // status poll failures and data ages are not changes); the live counters
@@ -2904,7 +2904,7 @@
   var INPUTS_POLL_MS = 5000;
   var SHOW_MIN_ZOOM = 6;            // "Show" zooms in to this from further out
   var NUMERIC_FIELDS = { port: true, sac: true, sic: true, status_interval_s: true, ttl: true };
-  var OUTPUTS_POLL_MS = 1000;       // GET /api/outputs while the Receiver tab is shown (the counters)
+  var OUTPUTS_POLL_MS = 1000;       // GET /api/outputs while the Feeds tab is shown (the counters)
   var DOT_TITLES = { green: 'connected, receiving', amber: 'connected, no data for 30 s',
     red: 'disconnected, or the status poll failed 3 times', grey: 'disabled' };
   var ACT_LABELS = { toggle: 'Disable', edit: 'Edit', remove: 'Remove', show: 'Show' };
@@ -3103,6 +3103,18 @@
     renderOutputs();
     renderStations();
     renderHealth();
+    renderFeedsSummary();
+  }
+  function renderFeedsSummary() {
+    var box = $('feeds-summary');
+    if (!box) return;
+    var text = P.feedsSummary(rx.inputs, rx.outputs, cues.clients, config.data && config.data.daemon && config.data.daemon.recording_files);
+    box.textContent = '';
+    text.split(' · ').forEach(function (part, i) {
+      if (i) box.appendChild(document.createTextNode(' · '));
+      var cls = /^\d+ stale$/.test(part) ? 'feeds-stale' : /^\d+ down$/.test(part) ? 'feeds-down' : null;
+      box.appendChild(cls ? el('span', cls, part) : document.createTextNode(part));
+    });
   }
 
   function updateDeviceMarkers() {
@@ -3202,15 +3214,15 @@
   // docs/operating.md, Cues tab. The counters follow every stats item; every
   // update and drop item goes into a ring of the last DECISIONS_RING whether
   // the tab is shown or not; the filter changes (GET /api/filters/history)
-  // and the cue clients (GET /api/cues/clients) are fetched when the tab is
-  // shown and every CUES_POLL_MS while it is, the history also on every
-  // `filters` item. Server strings go in through textContent.
+  // are fetched when the tab is shown and every CUES_POLL_MS while it is, also
+  // on every `filters` item. The cue clients (GET /api/cues/clients) belong to
+  // the Feeds tab and are fetched the same way. Server strings go in through textContent.
   var CUES_POLL_MS = 5000;
   var FILTER_TEXT = { max_range_nm: ['max range', ' nm'], min_elevation_deg: ['min elevation', '°'] };
   // ring: the last updates and drops; dropRing: the last drops alone, so
   // "Drops only" still has them when max-interval resends fill `ring`.
   var CUES_DROPS_ONLY_KEY = 'skycue.cues.dropsOnly';   // a view option in localStorage
-  var cues = { ring: [], dropRing: [], dropsOnly: false, recentDirty: true, historySeq: 0, clientsSeq: 0 };
+  var cues = { ring: [], dropRing: [], dropsOnly: false, recentDirty: true, historySeq: 0, clientsSeq: 0, clients: null };
 
   function onDecision(it) {
     var row = P.decisionRow(it);
@@ -3278,21 +3290,24 @@
       ul.appendChild(li);
     });
   }
-  function clientRow(cls, cells) {
+  function clientRow(cls, cells, id) {
     var tr = el('tr', cls);
+    if (id) tr.setAttribute('data-id', id);
     cells.forEach(function (c) { tr.appendChild(el('td', null, c)); });
     return tr;
   }
   function renderCueClients(c) {
     var body = $('cues-clients').tBodies[0], tcp = c.tcp || [], udp = c.udp || [], now = Date.now();
+    cues.clients = c;
+    renderFeedsSummary();
     body.textContent = '';
     tcp.forEach(function (t) {
       var ms = Date.parse(t.connected_since);
       body.appendChild(clientRow('tcp', [t.endpoint, t.direction,
-        isNaN(ms) ? '' : clockTime(t.connected_since) + ' · ' + P.formatAge(ms, now), P.thousands(t.bytes_sent || 0) + ' B']));
+        isNaN(ms) ? '' : clockTime(t.connected_since) + ' · ' + P.formatAge(ms, now), P.thousands(t.bytes_sent || 0) + ' B'], 'tcp:' + t.endpoint));
     });
     udp.forEach(function (u) {
-      body.appendChild(clientRow('udp', [u.endpoint, 'udp', '', P.thousands(u.datagrams_sent || 0) + ' datagrams']));
+      body.appendChild(clientRow('udp', [u.endpoint, 'udp', '', P.thousands(u.datagrams_sent || 0) + ' datagrams'], 'udp:' + u.endpoint));
     });
     if (!tcp.length && !udp.length) {
       var td = el('td', 'empty', 'None.');
@@ -3317,12 +3332,11 @@
     renderCueCounters();
     renderCueRecent();
     fetchCueHistory();
-    fetchCueClients();
   }
   function pollCues() {
-    if (!connected || !tabShown('cues')) return;
-    fetchCueHistory();
-    fetchCueClients();
+    if (!connected) return;
+    if (tabShown('cues')) fetchCueHistory();
+    if (tabShown('receiver')) fetchCueClients();
   }
 
   // ---- Config tab ----------------------------------------------------------------
@@ -3333,7 +3347,7 @@
   // the sticky bar's Apply sends it as one PUT /api/config. A key the launcher
   // owns, the bootstrap keys and keys --set or the environment pin have a
   // disabled control. Server strings go in through textContent.
-  var config = { data: null, schema: null, seq: 0, staged: {}, rows: {}, restarting: false };
+  var config = { data: null, schema: null, seq: 0, staged: {}, rows: {}, restarting: false, ensuring: false };
 
   function renderConfigDaemon(d) {
     var body = $('config-daemon').tBodies[0], started = Date.parse(d.started);
@@ -3347,7 +3361,7 @@
       ['Supervisor', d.supervisor],
       ['www directory', d.www_dir],
       ['Recording to', d.record_dir || 'not recording'],
-      ['Recording files', (d.recording_files || []).join(', ') || 'none'],
+      ['Recording files', (d.recording_files || []).map(function (f) { return f.name; }).join(', ') || 'none'],
       ['Log level', d.log_level],
       ['Runs', P.daemonModeText(d)],
       ['Learned locations', P.daemonLocationsText(d)[0]],
@@ -3548,6 +3562,18 @@
     $('config-copy').disabled = false;
   }
 
+  // A response that an answer to a later request overtook is not shown.
+  // The Feeds summary's recording files come from GET /api/config: fetched
+  // once when the Config tab has not been shown.
+  function ensureConfigData() {
+    if (config.data || config.ensuring) return;
+    config.ensuring = true;
+    request('GET', 'api/config').then(function (c) {
+      config.ensuring = false;
+      if (!config.data) config.data = c;
+      renderFeedsSummary();
+    }).catch(function () { config.ensuring = false; });
+  }
   // A response that an answer to a later request overtook is not shown. A
   // fresh load drops the staged edits.
   function showConfig() {
@@ -4194,7 +4220,13 @@
         request: request, select: select, hasTrack: function (key) { return tracks.has(key); },
         setViewFilter: function (partial) { setViewFilters(partial); }, showMain: showMain,
         thousands: P.thousands, formatNum: P.formatNum, storeGet: storeGet, storeSet: storeSet, dataNow: dataNow,
-        download: downloadText
+        download: downloadText,
+        openFeeds: function (id) {
+          openPanel('receiver');
+          showMain('map');
+          var el = document.querySelector('#pane-receiver [data-id="' + String(id).replace(/["\\]/g, '') + '"]');
+          if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+        }
       });
     } else $('stats-toggle').hidden = true;
     $('stats-toggle').addEventListener('click', function () { showMain(mainView === 'stats' ? 'map' : 'stats'); });
@@ -4308,7 +4340,7 @@
       });
       return out;
     },
-    // The map centre, to 4 decimals (the Receiver tab's "show").
+    // The map centre, to 4 decimals (the Feeds tab's "show").
     center: function () {
       var c = map.getCenter();
       return { lat: Math.round(c.lat * 1e4) / 1e4, lon: Math.round(c.lng * 1e4) / 1e4 };

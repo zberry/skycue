@@ -47,9 +47,9 @@ Download the `.deb`, the `.rpm` or the source tarball from the
 Each input is TCP (client or server), UDP unicast or multicast. Two inputs are
 built in and configured in `skycue.toml`: a readsb on this machine and a
 dump978-fa on this machine; disable either if you do not have it. Any other
-input is added in the web page (Receiver tab), through the API, or in the
+input is added in the web page (Feeds tab), through the API, or in the
 inputs file, and several of a kind can run at once. Everything merges into one
-track table, and the Receiver tab shows the health of every input. See the
+track table, and the Feeds tab shows the health of every input. See the
 `[inputs]` comments in `packaging/skycue.toml.example`; details in
 [docs/operating.md](docs/operating.md#the-inputs-file) and
 [Decoding in skycued](docs/operating.md#decoding-in-skycued).
@@ -82,7 +82,7 @@ internet. It shows:
 - one toolbar on the map whose buttons fold out the map style, the aircraft trails, the weather layers and the radar controls, so the map stays clear until you need them;
 - saved views that bring back a set of filters and map settings with one key;
 - a track table, and a side panel for the selected aircraft;
-- alerts, a statistics view, and a Receiver tab with the health of every input;
+- alerts, a statistics view, and a Feeds tab with the health of every input;
 - offline map tiles and overlays that you bake once.
 
 There is no login, so open the page only to a network you trust. The page is

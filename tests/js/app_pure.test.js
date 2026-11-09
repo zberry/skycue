@@ -1095,20 +1095,23 @@ const SCHEMA = [
   { key: 'sdr.mode', type: 'enum', class: 'restart', default: 'skycued', values: ['skycued', 'external'] },
   { key: 'stats.save_s', type: 'int', class: 'external', default: 60 }];
 const KEYS = [
-  { key: 'web.trail_seconds', value: 300, source: 'env', restart: false, class: 'live', editable: false, default: 300 },
-  { key: 'receiver.lat', value: 38.9, source: 'conf', restart: true, class: 'restart', editable: true, default: 0 },
+  { key: 'web.trail_seconds', value: '300', source: 'env', restart: false, class: 'live', editable: false, default: 300 },
+  { key: 'receiver.lat', value: '38.9', source: 'conf', restart: true, class: 'restart', editable: true, default: 0 },
   { key: 'web.bind', value: '127.0.0.1', source: 'default', restart: true, class: 'bootstrap', editable: false, default: '127.0.0.1' },
-  { key: 'cues.udp_targets', value: ['127.0.0.1:30501', '10.0.0.2:30502'], source: 'conf', restart: true, class: 'restart', editable: true, default: [] },
-  { key: 'cues.min_interval_s', value: 2, source: 'overrides', restart: false, class: 'live', editable: true, file_value: 1.5, default: 1 },
+  { key: 'cues.udp_targets', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true, class: 'restart', editable: true, default: '' },
+  { key: 'cues.min_interval_s', value: '2', source: 'overrides', restart: false, class: 'live', editable: true, file_value: '1.5', default: 1 },
   { key: 'recording.dir', value: '', source: 'default', restart: true, class: 'restart', editable: true, default: '' },
-  { key: 'stats.save_s', value: 60, source: 'set', restart: true, class: 'external', editable: false, default: 60 },
+  { key: 'stats.save_s', value: '60', source: 'set', restart: true, class: 'external', editable: false, default: 60 },
   { key: 'new.key', value: 'x', source: 'conf', restart: true, class: 'restart', editable: true, default: '' }];
-const CFG = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
-  { key: 'receiver.lat', value: 38.9, source: 'conf', restart: true }, { key: 'web.bind', value: '127.0.0.1', source: 'default', restart: true },
-  { key: 'cues.udp_targets', value: ['127.0.0.1:30501', '10.0.0.2:30502'], source: 'conf', restart: true },
-  { key: 'filters.max_range_nm', value: 20, source: 'runtime', restart: false }, { key: 'recording.dir', value: '', source: 'default', restart: true },
-  { key: 'web.trail_seconds', value: 300, source: 'env', restart: true }, { key: 'stats.save_s', value: 60, source: 'set', restart: true },
-  { key: 'recording.raw', value: true, source: 'conf', restart: true },
+// Values as GET /api/config sends them: all text (arrays space-separated, bools "true"/"false").
+const CFG = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, schema: SCHEMA.concat([
+  { key: 'filters.max_range_nm', type: 'float', class: 'live', default: 0 }, { key: 'sdr.gain_1090', type: 'string', class: 'restart', default: '' }]),
+  keys: [
+  { key: 'receiver.lat', value: '38.9', source: 'conf', restart: true }, { key: 'web.bind', value: '127.0.0.1', source: 'default', restart: true },
+  { key: 'cues.udp_targets', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
+  { key: 'filters.max_range_nm', value: '20', source: 'runtime', restart: false }, { key: 'recording.dir', value: '', source: 'default', restart: true },
+  { key: 'web.trail_seconds', value: '300', source: 'env', restart: true }, { key: 'stats.save_s', value: '60', source: 'set', restart: true },
+  { key: 'recording.raw', value: 'false', source: 'conf', restart: true }, { key: 'sdr.gain_1090', value: '49.6', source: 'conf', restart: true },
   { key: 'new.key', value: 'x', source: 'conf', restart: true }] };
 const spec = (k) => SCHEMA.find((x) => x.key === k);
 test('configTables groups by TOML table in schema order with bare keys', () => {
@@ -1119,7 +1122,7 @@ test('configTables groups by TOML table in schema order with bare keys', () => {
   assert.strictEqual(t[0].rows[0].cls, 'restart');
   assert.strictEqual(t[0].rows[0].spec, spec('receiver.lat'));
   assert.deepStrictEqual(t[1].rows.map((r) => r.bare), ['udp_targets', 'min_interval_s']);
-  assert.strictEqual(t[1].rows[1].file_value, 1.5);
+  assert.strictEqual(t[1].rows[1].file_value, '1.5');
   assert.strictEqual(t[1].rows[1].source, 'overrides');
   assert.strictEqual(t[5].rows[0].key, 'new.key');
   assert.strictEqual(t[5].rows[0].bare, 'new.key');
@@ -1191,7 +1194,9 @@ test('config_text groups by table without CONFIG_GROUPS', () => {
   assert.ok(t.includes('# cues.udp_targets: conf, restart\nudp_targets = ["127.0.0.1:30501", "10.0.0.2:30502"]\n'));
   assert.ok(t.includes('# filters.max_range_nm: runtime\nmax_range_nm = 20\n'));
   assert.ok(t.includes('# recording.dir: default, restart\ndir = ""\n'));
-  assert.ok(t.includes('# recording.raw: conf, restart\nraw = true\n'));
+  assert.ok(t.includes('# recording.raw: conf, restart\nraw = false\n'));
+  assert.ok(t.includes('gain_1090 = "49.6"\n'));
+  assert.ok(t.includes('# new.key = x\n'));
   assert.ok(t.includes('# web.trail_seconds: env, restart\ntrail_seconds = 300\n'));
   assert.ok(t.includes('# stats.save_s: --set, restart\nsave_s = 60\n'));
   assert.ok(t.indexOf('# [receiver]') < t.indexOf('# [web]') && t.indexOf('# [web]') < t.indexOf('# [recording]'));
@@ -1206,7 +1211,7 @@ test('pinned filters disable their controls', () => {
   assert.deepStrictEqual(P.pinnedFilters(undefined), {});
 });
 test('config panel shows dotted keys and env/--set sources', () => {
-  const keys = ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.trail_seconds', 'stats.save_s', 'web.port'].map((k) => ({ key: k, value: 1, source: 'conf', restart: false }));
+  const keys = ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.trail_seconds', 'stats.save_s', 'web.port'].map((k) => ({ key: k, value: '1', source: 'conf', restart: false }));
   const rows = P.configTables(keys, keys.map((k) => ({ key: k.key }))).reduce((a, g) => a.concat(g.rows.map((r) => r.key)), []);
   assert.deepStrictEqual(rows, ['receiver.lat', 'inputs.readsb.host', 'filters.max_range_nm', 'web.trail_seconds', 'web.port', 'stats.save_s']);
   assert.deepStrictEqual(['conf', 'overrides', 'runtime', 'flag', 'env', 'set', 'default'].map(P.configSourceLabel),
@@ -1226,22 +1231,29 @@ test('daemon_mode_and_locations_text', () => {
     ['0 learned, not saved this run', '2 from /e/l.csv, 1 lines rejected, 3 over the cap']);
 });
 test('toml_value_every_branch', () => {
-  // Values are the JSON the API gives: number, boolean, array of strings, string.
-  assert.strictEqual(P.tomlValue('receiver.lat', 38.9), '38.9');
-  assert.strictEqual(P.tomlValue('web.port', 8080), '8080');
-  assert.strictEqual(P.tomlValue('receiver.lat', NaN), null);
-  assert.strictEqual(P.tomlValue('receiver.lat', null), null);      // unset: left as a comment
-  assert.strictEqual(P.tomlValue('recording.raw', true), 'true');
-  assert.strictEqual(P.tomlValue('recording.raw', false), 'false');
-  assert.strictEqual(P.tomlValue('cues.udp_targets', []), '[]');
-  assert.strictEqual(P.tomlValue('cues.tcp_connect', ['h:1']), '["h:1"]');
-  assert.strictEqual(P.tomlValue('cues.tcp_connect', ['h:1', 2]), null);
-  assert.strictEqual(P.tomlValue('recording.dir', ''), '""');
-  assert.strictEqual(P.tomlValue('recording.dir', 'a b'), '"a b"');
-  assert.strictEqual(P.tomlValue('recording.dir', 'say "hi" \\ $1'), '"say \\"hi\\" \\\\ $1"');
-  assert.strictEqual(P.tomlValue('recording.dir', 'a\nb\tc\u0001\u007f'), '"a\\nb\\tc\\u0001\\u007F"');
-  assert.strictEqual(P.tomlValue('recording.dir', 'a\u0000b'), null);
-  assert.strictEqual(P.tomlValue('inputs.decoder', 'readsb'), '"readsb"');
+  // The API's value text, written by the schema type.
+  const v = (type, text) => P.tomlValue({ key: 'a.b', type }, text);
+  assert.strictEqual(v('float', '38.9'), '38.9');
+  assert.strictEqual(v('float', '-77'), '-77');
+  assert.strictEqual(v('float', ''), null);                // unset: left as a comment
+  assert.strictEqual(v('float', 'abc'), null);
+  assert.strictEqual(v('int', '8080'), '8080');
+  assert.strictEqual(v('int', '80 80'), null);
+  assert.strictEqual(v('int', '3.5'), null);
+  assert.strictEqual(v('bool', 'true'), 'true');
+  assert.strictEqual(v('bool', 'false'), 'false');
+  assert.strictEqual(v('bool', 'yes'), null);
+  assert.strictEqual(v('host_port_list', ''), '[]');
+  assert.strictEqual(v('host_port_list', 'a:1 b:2'), '["a:1", "b:2"]');
+  assert.strictEqual(v('string_set', 'jsonl'), '["jsonl"]');
+  assert.strictEqual(v('string', '49.6'), '"49.6"');       // numeric-looking text stays a string
+  assert.strictEqual(v('string', ''), '""');
+  assert.strictEqual(v('path', 'a b'), '"a b"');
+  assert.strictEqual(v('path', 'say "hi" \\ $1'), '"say \\"hi\\" \\\\ $1"');
+  assert.strictEqual(v('path', 'a\nb\tc\u0001\u007f'), '"a\\nb\\tc\\u0001\\u007F"');
+  assert.strictEqual(v('path', 'a\u0000b'), null);
+  assert.strictEqual(v('enum', 'readsb'), '"readsb"');
+  assert.strictEqual(v('weird', 'x'), null);
 });
 // A reader for the lines configText writes: a comment, a [table] header, or key = value with a
 // string (the escapes \" \\ \n \t \r \uXXXX), a number, a boolean or an array of strings
@@ -1267,13 +1279,20 @@ function tomlLines(text) {
   return out;
 }
 // The same keys and values test_config.cpp (config_copy_text_parses) checks.
-const CFG_COPY = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, keys: [
-  { key: 'receiver.lat', value: 38.9, source: 'conf', restart: true },
-  { key: 'receiver.lon', value: -77, source: 'conf', restart: true },
+const CFG_COPY = { daemon: { version: 'skycued 0.1.0', started: '2026-01-01T00:00:00.000Z' }, schema: [
+  { key: 'receiver.lat', type: 'float' }, { key: 'receiver.lon', type: 'float' }, { key: 'sdr.serial_1090', type: 'string' },
+  { key: 'sdr.gain_1090', type: 'string' }, { key: 'cues.tcp_port', type: 'int' }, { key: 'cues.udp_targets', type: 'host_port_list' },
+  { key: 'recording.dir', type: 'path' }, { key: 'recording.raw', type: 'bool' }, { key: 'filters.max_range_nm', type: 'float' },
+  { key: 'filters.allow_list_file', type: 'path' }, { key: 'filters.block_list_file', type: 'path' }, { key: 'paths.locations_file', type: 'path' }], keys: [
+  { key: 'receiver.lat', value: '38.9', source: 'conf', restart: true },
+  { key: 'receiver.lon', value: '-77.0', source: 'conf', restart: true },
   { key: 'sdr.serial_1090', value: '', source: 'default', restart: true },
-  { key: 'cues.udp_targets', value: ['127.0.0.1:30501', '10.0.0.2:30502'], source: 'conf', restart: true },
+  { key: 'sdr.gain_1090', value: '49.6', source: 'conf', restart: true },
+  { key: 'cues.tcp_port', value: '30003', source: 'conf', restart: true },
+  { key: 'cues.udp_targets', value: '127.0.0.1:30501 10.0.0.2:30502', source: 'conf', restart: true },
   { key: 'recording.dir', value: '/srv/sky cue/rec', source: 'conf', restart: true },
-  { key: 'filters.max_range_nm', value: 20, source: 'runtime', restart: false },
+  { key: 'recording.raw', value: 'false', source: 'conf', restart: true },
+  { key: 'filters.max_range_nm', value: '20', source: 'runtime', restart: false },
   { key: 'filters.allow_list_file', value: 'allow "main" $1.txt', source: 'conf', restart: false },
   { key: 'filters.block_list_file', value: "it's $HOME.txt", source: 'conf', restart: false },
   { key: 'paths.locations_file', value: "o'hare locations.csv", source: 'conf', restart: true }] };

@@ -4,19 +4,25 @@
 # receiver.lat: conf, restart
 lat = 38.9
 # receiver.lon: conf, restart
-lon = -77
+lon = -77.0
 # [sdr]
 [sdr]
 # sdr.serial_1090: default, restart
 serial_1090 = ""
+# sdr.gain_1090: conf, restart
+gain_1090 = "49.6"
 # [cues]
 [cues]
+# cues.tcp_port: conf, restart
+tcp_port = 30003
 # cues.udp_targets: conf, restart
 udp_targets = ["127.0.0.1:30501", "10.0.0.2:30502"]
 # [recording]
 [recording]
 # recording.dir: conf, restart
 dir = "/srv/sky cue/rec"
+# recording.raw: conf, restart
+raw = false
 # [filters]
 [filters]
 # filters.max_range_nm: runtime

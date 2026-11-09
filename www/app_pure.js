@@ -361,6 +361,7 @@
     });
     var by = {}, extra = [];
     (keys || []).forEach(function (k) {
+      // value, file_value and default stay the API's text.
       var spec = specs[k.key] || null, t = spec ? configTableOf(k.key) : 'other';
       if (!by[t]) by[t] = [];
       by[t].push({ key: k.key, bare: spec ? configBareOf(k.key) : k.key, value: k.value, source: k.source,
@@ -415,7 +416,7 @@
     return { value: String(raw) };
   }
 
-  // Staged edits (dotted key -> JSON value, or null to clear) as the PUT body
+  // Staged edits (PUT takes typed JSON, unlike the API's text values) (dotted key -> JSON value, or null to clear) as the PUT body
   // and the bar's text; keys in schema order when a schema is given.
   function configStage(staged, schema) {
     var keys = Object.keys(staged), set = {}, clear = [];
@@ -490,43 +491,41 @@
     }) + '"';
   }
 
-  // The JSON value `v` of `key` as a TOML value, by its JS type (number,
-  // boolean, array of strings, string); null when it cannot be written: not
-  // one of those, a non-finite number, or a NUL in a string.
-  function tomlValue(key, v) {
-    if (typeof v === 'number') return isFinite(v) ? String(v) : null;
-    if (typeof v === 'boolean') return String(v);
-    if (typeof v === 'string') return tomlString(v);
-    if (Array.isArray(v)) {
-      var words = v.map(function (w) { return typeof w === 'string' ? tomlString(w) : null; });
+  // The API's value text (GET /api/config reports every value, file_value and
+  // default as text: "38.9", "false", "a:1 b:2", "") as a TOML value by the
+  // schema entry's type; null when it cannot be written: not a number or
+  // boolean where the type says so, an entry with a NUL, or an unknown type.
+  function tomlValue(spec, text) {
+    var t = spec.type, v = String(text);
+    if (t === 'int') return /^[+-]?\d+$/.test(v) ? v : null;
+    if (t === 'float') return /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(v) ? v : null;
+    if (t === 'bool') return v === 'true' || v === 'false' ? v : null;
+    if (t === 'string' || t === 'enum' || t === 'path') return tomlString(v);
+    if (t === 'string_set' || t === 'host_port_list') {
+      var words = v.split(/\s+/).filter(function (w) { return w !== ''; }).map(tomlString);
       return words.indexOf(null) >= 0 ? null : '[' + words.join(', ') + ']';
     }
     return null;
   }
 
   // The whole configuration as skycue.toml text (the Config tab's copy):
-  // a `# [table]` line before each table (tables in schema order when
-  // cfg.schema is given, else as they first appear in the keys), a [table]
+  // a `# [table]` line before each table (in the order of cfg.schema, the
+  // /api/config/schema keys; a key it lacks is a trailing comment), a [table]
   // header, and before each key a comment with its source and whether it
   // needs a restart, so the text is a skycue.toml skycued accepts. A key that
   // cannot be written (or that is in no table) is left as a comment saying so.
   function configText(cfg) {
     var d = cfg.daemon || {}, out = '# ' + d.version + ', started ' + d.started + '\n';
-    var keys = cfg.keys || [], schema = cfg.schema;
-    if (!schema) {
-      schema = [];
-      keys.forEach(function (k) { schema.push({ key: k.key }); });
-    }
-    var restart = {}, table = null, seen = {};
+    var keys = cfg.keys || [], restart = {}, table = null, seen = {};
     keys.forEach(function (k) { restart[k.key] = k.restart; });
-    configTables(keys, schema).forEach(function (g) {
+    configTables(keys, cfg.schema || []).forEach(function (g) {
       out += '# [' + g.table + ']\n';
       g.rows.forEach(function (r) {
-        var q = tomlValue(r.key, r.value), dot = r.key.lastIndexOf('.');
+        var q = r.spec ? tomlValue(r.spec, r.value) : null, dot = r.key.lastIndexOf('.');
         var t = dot < 0 ? null : r.key.slice(0, dot), name = r.key.slice(dot + 1);
         var note = '# ' + r.key + ': ' + configSourceLabel(r.source) + (restart[r.key] ? ', restart' : '') + '\n';
         if (q === null || t === null || (t !== table && seen[t])) {
-          out += note + '# ' + r.key + ' cannot be written in skycue.toml here: ' +
+          out += note + '# ' + r.key + (r.spec ? ' cannot be written in skycue.toml here: ' : ' = ') +
             String(r.value).replace(/[\r\n]+/g, ' ') + '\n';
           return;
         }

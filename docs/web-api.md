@@ -439,7 +439,7 @@ with either is a `400`. `state`:
 | `connects`, `bytes`, `messages`, `observations`, `uplinks`, `rejected` | connections made, bytes received, messages decoded (a readsb or dump978 line, a JSON datagram, a CAT021 record), track observations and FIS-B uplinks passed on, data that could not be used |
 | `records_skipped`, `sac_sic_mismatch`, `nogo_records` | CAT021 records skipped (simulated, test or RAB records, records without an address, blocks cut short by a length error), with another SAC/SIC than configured, with the NOGO bit set |
 | `clock_rejects` | device timestamps more than 10 s from arrival, replaced by the arrival time |
-| `rejected_peer` | datagrams or connections from an address other than `peer`; each refused connection, and a refused datagram at most once a second, also sets `last_error` ("datagram from X refused (not the configured peer)"); the Receiver tab shows it beside `rejected` when not 0 |
+| `rejected_peer` | datagrams or connections from an address other than `peer`; each refused connection, and a refused datagram at most once a second, also sets `last_error` ("datagram from X refused (not the configured peer)"); the Feeds tab shows it beside `rejected` when not 0 |
 | `raw_unknown_len` | `rawData` of no known frame length (not written to the raw files) |
 | `status_ok`, `status_fail` | status polls answered with a status document, and failed |
 | `capture_dropped` | capture lines and raw frames dropped because the file could not be written |

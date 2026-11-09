@@ -469,7 +469,8 @@ test('cues_tab_rows_counters_history_clients', async ({ page }) => {
     try {
       await expect(page.locator('#cues-filters li').first()).toContainText(`ui: max range ${r0} → ${r0 + 1} nm`);
     } finally { expect(await putRange(null)).toBe(200); }
-    // this test's own cue connection is listed
+    // this test's own cue connection is listed (cue clients are on the Feeds tab)
+    await page.locator('#tab-receiver').click();
     await expect(page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` })).toHaveCount(1, { timeout: 10000 });
     await expect(page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` })).toContainText('accepted');
   } finally { sock.destroy(); }
@@ -2918,6 +2919,22 @@ test.describe('receiver tab (pingsim)', () => {
     await expect(page.locator('#details')).toBeHidden();
   });
 
+  test('feeds_tab_summary_and_clients', async ({ page }) => {
+    const errors = watchErrors(page);
+    await openPage(page);
+    await page.locator('#rx-toggle').click();
+    await expect(page.locator('#rx-toggle')).toHaveText('Feeds');
+    await expect(page.locator('#tab-receiver')).toHaveText('Feeds');
+    await expect(page.locator('#pane-receiver')).toBeVisible();
+    await expect(page.locator('#feeds-summary')).toHaveText(/\d+ inputs? up/, { timeout: 10000 });
+    await expect(page.locator('#feeds-summary')).toHaveText(/\d+ clients?|\d+ outputs?/);
+    await expect(page.locator('#pane-receiver #cues-clients')).toHaveCount(1);
+    await expect(page.locator('#pane-cues #cues-clients')).toHaveCount(0);
+    await page.locator('#stats-toggle').click();
+    await expect(page.locator('#stats-receiver-link')).toHaveText('Feeds');
+    expect(errors).toEqual([]);
+  });
+
   test('receiver_tab_lists_inputs_with_live_counts', async ({ page }) => {
     const errors = watchErrors(page);
     await openReceiverTab(page);
@@ -3417,8 +3434,8 @@ test.describe('receiver tab (outputs)', () => {
     try {
       await openPage(page);
       await page.locator('#wx-toggle').click();
-      await page.locator('#tab-cues').click();
-      await expect(page.locator('#pane-cues')).toBeVisible();
+      await page.locator('#tab-receiver').click();
+      await expect(page.locator('#pane-receiver')).toBeVisible();
       // The session is listed as before; the daemon's `output` field is not shown.
       const row = page.locator('#cues-clients tr.tcp', { hasText: `127.0.0.1:${sock.localPort}` });
       await expect(row).toHaveCount(1, { timeout: 10000 });
@@ -4199,7 +4216,7 @@ test('stats_reset_asks_first_and_empties', async ({ page }) => {
   await expect.poll(() => tileNumber(page, 'observations'), { timeout: 10000 }).toBeLessThan(t0);
 });
 
-// Input health lives in the Receiver tab (spec 2): the toolbar opens it
+// Feeds (inputs, outputs, cue clients) lives in the Feeds tab (spec 2): the toolbar opens it
 // beside the view.
 test('stats_receiver_link_opens_receiver_tab', async ({ page }) => {
   await openStats(page);
@@ -4231,6 +4248,27 @@ async function openTraffic(page) {
   await expect.poll(async () => (await statsState(page)).cards.filter((c) => TRAFFIC_CARDS.includes(c.id) && c.canvas)
     .map((c) => c.id), { timeout: 15000 }).toEqual(TRAFFIC_CARDS);
 }
+
+// The Flow card leads Traffic at full width, draws its Sankey, and keeps its node labels to
+// two lines (a tall node may add a third with the recording tag).
+test('flow_card_first_in_traffic_full_width_and_draws', async ({ page }, testInfo) => {
+  await openStats(page);
+  const grid = page.locator('#stats-traffic');
+  const card = page.locator('#stats-traffic > :first-child');
+  await expect(card).toHaveAttribute('data-card', 'traffic-flow');
+  const [gb, cb] = [await grid.boundingBox(), await card.boundingBox()];
+  expect(Math.abs(cb.width - gb.width)).toBeLessThanOrEqual(2);
+  await expect(card.locator('.card-chart canvas').first()).toBeAttached({ timeout: 15000 });
+  await expect(card.locator('.card-caption')).toHaveText(/messages per second/, { timeout: 15000 });
+  expect(cb.height).toBeGreaterThanOrEqual(360);
+  await card.screenshot({ path: testInfo.outputPath(`flow-card-${testInfo.project.name}.png`) });
+  const data = (await cardOption(page, 'traffic-flow')).series[0].data;
+  expect(data.length).toBeGreaterThan(2);
+  for (const n of data) {
+    const lines = String(n.label.formatter).split('\n').length;
+    expect(lines, n.name).toBeLessThanOrEqual(3);
+  }
+});
 
 test('stats_traffic_inputs_stacked_by_input_with_zoom', async ({ page }, testInfo) => {
   await openTraffic(page);

@@ -98,7 +98,7 @@ lat = 38.9
 lon = -77.0
 [cues]
 tcp_port = $3
-$6
+${6:-}
 [web]
 port = $2
 trail_seconds = 120
@@ -107,7 +107,7 @@ max_range_nm = 150
 min_elevation_deg = 0
 [stats]
 file = "$4"
-$5
+${5:-}
 EOC
 }
 write_conf "$tmp/skycue.toml" "$web_port" "$cue_port" ""
@@ -360,5 +360,6 @@ copy_shots() {
 }
 copy_shots 'skycue-*.png' "$shots_dir"
 copy_shots 'fisb-*.png' "$fisb_shots_dir"
+copy_shots 'flow-card*.png' "$shots_dir"
 [ "$rc" -eq 0 ] || fail "playwright exit $rc"
 echo "PASS"

@@ -14,7 +14,7 @@
   <span class="stat">tracks <b id="stat-tracks-total">–</b> / fwd <b id="stat-tracks-forwarded">–</b></span>
   <span class="stat">obs/s <b id="stat-obs-rate">–</b></span>
   <span class="stat stat-btn">inputs <button id="stat-inputs" type="button" class="dot" data-opens-tab="receiver" aria-pressed="false"
-    title="Inputs connected / enabled: open the Receiver tab">–</button></span>
+    title="Inputs connected / enabled: open the Feeds tab">–</button></span>
   <span class="stat">UAT dl/ul per min <b id="stat-uat">–</b></span>
   <span class="stat">TCP clients <b id="stat-tcp">–</b></span>
   <span class="stat">UDP targets <b id="stat-udp">–</b></span>
@@ -27,7 +27,7 @@
   <span class="stat fisb warn" id="stat-fisb-skew" role="status" hidden>clock skew: <b id="stat-fisb-skew-text"></b></span>
   <span id="panel-buttons" role="group" aria-label="Side panel">
     <button id="wx-toggle" type="button" data-opens-tab="weather" aria-pressed="false">Weather</button>
-    <button id="rx-toggle" type="button" data-opens-tab="receiver" aria-pressed="false">Receiver</button>
+    <button id="rx-toggle" type="button" data-opens-tab="receiver" aria-pressed="false" title="Feeds: inputs, outputs and cue clients">Feeds</button>
     <button id="cues-toggle" type="button" data-opens-tab="cues" aria-pressed="false">Cues</button>
     <button id="cfg-toggle" type="button" data-opens-tab="config" aria-pressed="false">Config</button>
   </span>
@@ -236,7 +236,7 @@
         <span id="stats-since" class="stats-since"></span>
         <span id="stats-msg" class="msg" role="status"></span>
         <button id="stats-receiver-link" type="button" data-opens-tab="receiver" aria-pressed="false"
-          title="Input health: open the Receiver tab">Input health</button>
+          title="Feeds: inputs, outputs and cue clients">Feeds</button>
         <button id="stats-reset" type="button">Reset statistics</button>
       </div>
       <div id="stats-tiles" class="stats-tiles"></div>
@@ -307,7 +307,7 @@
       <div role="tablist" aria-label="Side panel">
         <button type="button" role="tab" id="tab-track" aria-controls="pane-track" aria-selected="true">Track</button>
         <button type="button" role="tab" id="tab-weather" aria-controls="pane-weather" aria-selected="false">Weather</button>
-        <button type="button" role="tab" id="tab-receiver" aria-controls="pane-receiver" aria-selected="false">Receiver</button>
+        <button type="button" role="tab" id="tab-receiver" aria-controls="pane-receiver" aria-selected="false">Feeds</button>
         <button type="button" role="tab" id="tab-cues" aria-controls="pane-cues" aria-selected="false">Cues</button>
         <button type="button" role="tab" id="tab-config" aria-controls="pane-config" aria-selected="false">Config</button>
       </div>
@@ -347,6 +347,7 @@
       <div id="wx-list"></div>
     </section>
     <section id="pane-receiver" role="tabpanel" aria-labelledby="tab-receiver" hidden>
+      <p id="feeds-summary" class="msg"></p>
       <h2>Inputs</h2>
       <div id="inputs-list"></div>
       <p id="inputs-msg" class="msg" role="status"></p>
@@ -464,6 +465,11 @@
       <p class="msg help">Outputs republish what the inputs receive: beast, uat, json and pingstation_json as the
         inputs saw them, cat021 as received, cue as the cue stream. A green dot: up; amber: up, with a last error; red:
         not up; grey: disabled. The built-in cue outputs can be disabled but not edited or removed.</p>
+      <h2>Cue clients</h2>
+      <table id="cues-clients" class="cues-table">
+        <thead><tr><th>Endpoint</th><th>Direction</th><th>Since</th><th>Sent</th></tr></thead>
+        <tbody></tbody>
+      </table>
       <h2>Ground stations</h2>
       <ul id="stations-list" class="rx-list"></ul>
       <h2>Decoder health</h2>
@@ -482,11 +488,6 @@
       </div>
       <h2>Filter changes</h2>
       <ul id="cues-filters" class="rx-list"></ul>
-      <h2>Cue clients</h2>
-      <table id="cues-clients" class="cues-table">
-        <thead><tr><th>Endpoint</th><th>Direction</th><th>Since</th><th>Sent</th></tr></thead>
-        <tbody></tbody>
-      </table>
     </section>
     <section id="pane-config" role="tabpanel" aria-labelledby="tab-config" hidden>
       <div class="config-actions">

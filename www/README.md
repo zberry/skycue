@@ -166,7 +166,7 @@ most 300: METAR first, then TAF, PIREP and winds, each nearest the map centre
 first. They are redrawn at most once a second, only on a change (a record, a
 location, a toggle, the filter, a pan or zoom, the age tick).
 
-## Side panel tabs and the Receiver tab
+## Side panel tabs and the Feeds tab
 
 The side panel's tabs are its `[role=tab]` buttons: `tab-<name>` shows
 `pane-<name>`, a header button with `data-opens-tab="<name>"` opens and
@@ -176,7 +176,7 @@ presses the ones whose tab is showing), and `TAB_SHOWN[<name>]` in `app.js` draw
 tab when it is shown. A new tab is its markup in `index.html` and one entry
 in `TAB_SHOWN`.
 
-The Receiver tab (docs/web-api.md, Inputs) takes the input list from the
+The Feeds tab (docs/web-api.md, Inputs) takes the input list from the
 snapshot, the `inputs` WebSocket items and `GET /api/inputs` every 5 s (the
 device status, status-poll failures and data ages are not changes), and the
 live counters from every `stats` item (`inputRates`). One card per input

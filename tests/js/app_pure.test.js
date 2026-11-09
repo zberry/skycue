@@ -848,6 +848,20 @@ test('inputsSummary counts', () => {
     live({ connected: true, receiving: false })]), { connected: 2, enabled: 3 });
 });
 
+test('feedsSummary counts and singulars', () => {
+  const up = () => live({}), stale = () => live({ connected: true, receiving: false });
+  const down = () => live({ connected: false, receiving: false });
+  assert.strictEqual(P.feedsSummary([up(), up(), up(), stale()], [{}, {}], { tcp: [{}, {}, {}], udp: [{}] }, [{}, {}]),
+    '3 inputs up · 1 stale · 2 outputs · 4 clients · recording 2 files');
+  assert.strictEqual(P.feedsSummary([up(), stale()], [{}], { tcp: [{}] }, [{}]),
+    '1 input up · 1 stale · 1 output · 1 client · recording 1 file');
+  assert.strictEqual(P.feedsSummary([up()], [{}], { udp: [{}] }, [{}]), '1 input up · 1 output · 1 client · recording 1 file');
+  assert.strictEqual(P.feedsSummary([], [{}], { tcp: [{}] }, []), 'no feeds');
+  assert.strictEqual(P.feedsSummary(null, null, null, null), 'no feeds');
+  assert.strictEqual(P.feedsSummary([up(), down()], [], {}, null), '1 input up · 1 down');
+  assert.strictEqual(P.feedsSummary([down()], [], null, []), '1 down');
+});
+
 test('gpsStatusText and receiverStatusText: the documented codes, else the number', () => {
   assert.deepStrictEqual([0, 1, 2, 3, 4].map(P.gpsStatusText), ['no GPS', 'no lock', '2D fix', '3D fix', 'DGPS']);
   assert.strictEqual(P.gpsStatusText(7), '7');

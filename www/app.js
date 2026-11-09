@@ -1523,7 +1523,7 @@
   // draws a tab when it is shown. A new tab: its markup and one entry here.
   var TAB_SHOWN = {
     weather: function () { renderWx(true); },
-    receiver: function () { renderReceiver(); pollOutputs(); },
+    receiver: function () { renderReceiver(); pollOutputs(); fetchCueClients(); },
     cues: showCues,
     config: showConfig
   };
@@ -3101,6 +3101,18 @@
     renderOutputs();
     renderStations();
     renderHealth();
+    renderFeedsSummary();
+  }
+  function renderFeedsSummary() {
+    var box = $('feeds-summary');
+    if (!box) return;
+    var text = P.feedsSummary(rx.inputs, rx.outputs, cues.clients, config.data && config.data.daemon && config.data.daemon.recording_files);
+    box.textContent = '';
+    text.split(' · ').forEach(function (part, i) {
+      if (i) box.appendChild(document.createTextNode(' · '));
+      var cls = /^\d+ stale$/.test(part) ? 'feeds-stale' : /^\d+ down$/.test(part) ? 'feeds-down' : null;
+      box.appendChild(cls ? el('span', cls, part) : document.createTextNode(part));
+    });
   }
 
   function updateDeviceMarkers() {
@@ -3208,7 +3220,7 @@
   // ring: the last updates and drops; dropRing: the last drops alone, so
   // "Drops only" still has them when max-interval resends fill `ring`.
   var CUES_DROPS_ONLY_KEY = 'skycue.cues.dropsOnly';   // a view option in localStorage
-  var cues = { ring: [], dropRing: [], dropsOnly: false, recentDirty: true, historySeq: 0, clientsSeq: 0 };
+  var cues = { ring: [], dropRing: [], dropsOnly: false, recentDirty: true, historySeq: 0, clientsSeq: 0, clients: null };
 
   function onDecision(it) {
     var row = P.decisionRow(it);
@@ -3276,21 +3288,24 @@
       ul.appendChild(li);
     });
   }
-  function clientRow(cls, cells) {
+  function clientRow(cls, cells, id) {
     var tr = el('tr', cls);
+    if (id) tr.setAttribute('data-id', id);
     cells.forEach(function (c) { tr.appendChild(el('td', null, c)); });
     return tr;
   }
   function renderCueClients(c) {
     var body = $('cues-clients').tBodies[0], tcp = c.tcp || [], udp = c.udp || [], now = Date.now();
+    cues.clients = c;
+    renderFeedsSummary();
     body.textContent = '';
     tcp.forEach(function (t) {
       var ms = Date.parse(t.connected_since);
       body.appendChild(clientRow('tcp', [t.endpoint, t.direction,
-        isNaN(ms) ? '' : clockTime(t.connected_since) + ' · ' + P.formatAge(ms, now), P.thousands(t.bytes_sent || 0) + ' B']));
+        isNaN(ms) ? '' : clockTime(t.connected_since) + ' · ' + P.formatAge(ms, now), P.thousands(t.bytes_sent || 0) + ' B'], 'tcp:' + t.endpoint));
     });
     udp.forEach(function (u) {
-      body.appendChild(clientRow('udp', [u.endpoint, 'udp', '', P.thousands(u.datagrams_sent || 0) + ' datagrams']));
+      body.appendChild(clientRow('udp', [u.endpoint, 'udp', '', P.thousands(u.datagrams_sent || 0) + ' datagrams'], 'udp:' + u.endpoint));
     });
     if (!tcp.length && !udp.length) {
       var td = el('td', 'empty', 'None.');
@@ -3315,12 +3330,11 @@
     renderCueCounters();
     renderCueRecent();
     fetchCueHistory();
-    fetchCueClients();
   }
   function pollCues() {
-    if (!connected || !tabShown('cues')) return;
-    fetchCueHistory();
-    fetchCueClients();
+    if (!connected) return;
+    if (tabShown('cues')) fetchCueHistory();
+    if (tabShown('receiver')) fetchCueClients();
   }
 
   // ---- Config tab ----------------------------------------------------------------

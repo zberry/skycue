@@ -1078,3 +1078,59 @@ BOOST_AUTO_TEST_CASE(example_comments_cover_every_key)
                "let the web UI restart skycued; only under a supervisor that starts it again");
     BOOST_TEST(comments.at("paths.state_dir").rfind("state_dir: an absolute directory", 0) == 0);
 }
+
+// Cross-field checks run after every key has been read, so the order of the
+// keys in the file must not change the outcome. The error carries the line of
+// the key it names, so the position differs with the order; the text after it
+// does not. Both are pinned for each order.
+BOOST_AUTO_TEST_CASE(cross_field_checks_do_not_depend_on_key_order)
+{
+    const auto body = [](const ConfigError& e) {  // the message without "test.toml:N: "
+        const std::string w = e.what();
+        const size_t at = w.find(": ", w.find(':') + 1);
+        return w.substr(at + 2);
+    };
+    const std::string head = std::string(kLatLon) + "[sdr]\n";
+
+    const ConfigError e1 = expectError(head + "serial_1090 = \"abc\"\nserial_978 = \"abc\"\n");
+    const ConfigError e2 = expectError(head + "serial_978 = \"abc\"\nserial_1090 = \"abc\"\n");
+    BOOST_TEST(std::string(e1.what()) == "test.toml:6: sdr.serial_978 must differ from sdr.serial_1090, both are 'abc'");
+    BOOST_TEST(std::string(e2.what()) == "test.toml:5: sdr.serial_978 must differ from sdr.serial_1090, both are 'abc'");
+    BOOST_TEST(body(e1) == body(e2));
+
+    // Distinct serials parse in either order; an empty one beside a set one is allowed.
+    for (const char* b : {"serial_1090 = \"a\"\nserial_978 = \"b\"\n", "serial_978 = \"b\"\nserial_1090 = \"a\"\n",
+                          "serial_1090 = \"a\"\nserial_978 = \"\"\n", "serial_978 = \"\"\nserial_1090 = \"a\"\n",
+                          "serial_1090 = \"\"\nserial_978 = \"b\"\n", "serial_978 = \"b\"\nserial_1090 = \"\"\n"})
+        BOOST_CHECK_NO_THROW(parseWith(std::string("[sdr]\n") + b));
+
+    // auto-verbose is valid for gain_1090 only, whichever key comes first.
+    for (const char* b : {"gain_1090 = \"auto-verbose\"\ngain_978 = \"auto\"\n", "gain_978 = \"auto\"\ngain_1090 = \"auto-verbose\"\n"})
+        BOOST_CHECK_NO_THROW(parseWith(std::string("[sdr]\n") + b));
+    const ConfigError g1 = expectError(head + "gain_1090 = \"auto-verbose\"\ngain_978 = \"auto-verbose\"\n");
+    const ConfigError g2 = expectError(head + "gain_978 = \"auto-verbose\"\ngain_1090 = \"auto-verbose\"\n");
+    BOOST_TEST(std::string(g1.what()) ==
+               "test.toml:6: sdr.gain_978 must be \"auto\" or a number of dB in a string, got 'auto-verbose'");
+    BOOST_TEST(std::string(g2.what()) ==
+               "test.toml:5: sdr.gain_978 must be \"auto\" or a number of dB in a string, got 'auto-verbose'");
+    BOOST_TEST(body(g1) == body(g2));
+
+    // Gains written before the serials and after them: the gain error is reported either way.
+    const std::string gains = "gain_1090 = \"auto-verbose\"\ngain_978 = \"auto-verbose\"\n";
+    const std::string serials = "serial_1090 = \"abc\"\nserial_978 = \"abc\"\n";
+    const ConfigError h1 = expectError(head + gains + serials);
+    const ConfigError h2 = expectError(head + serials + gains);
+    BOOST_TEST(contains(h1.what(), "sdr.gain_978 must be"), h1.what());
+    BOOST_TEST(contains(h2.what(), "sdr.gain_978 must be"), h2.what());
+    BOOST_TEST(body(h1) == body(g1));
+    BOOST_TEST(body(h2) == body(g1));
+
+    // The same keys with a [web] section before or after [sdr]: line numbers move, the text does not.
+    const std::string sdr = "[sdr]\nserial_1090 = \"abc\"\nserial_978 = \"abc\"\n";
+    const std::string web = "[web]\nport = 80\n";
+    const ConfigError s1 = expectError(std::string(kLatLon) + web + sdr);
+    const ConfigError s2 = expectError(std::string(kLatLon) + sdr + web);
+    BOOST_TEST(std::string(s1.what()) == "test.toml:8: sdr.serial_978 must differ from sdr.serial_1090, both are 'abc'");
+    BOOST_TEST(std::string(s2.what()) == "test.toml:6: sdr.serial_978 must differ from sdr.serial_1090, both are 'abc'");
+    BOOST_TEST(body(s1) == body(s2));
+}

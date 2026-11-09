@@ -511,5 +511,43 @@ skycue_add_script_test(config_cli
 
 skycue_add_unit_test(ecef LIBS skycue::skycue TIMEOUT 60)
 
+# CTest labels (ctest -L / -LE):
+#   unit          a Boost.Test executable; no network access, no fetched data
+#   integration   a shell or python script that drives built tools or the tree
+#   needs-fixtures  skips without data from scripts/fixtures/fetch-*.sh
+#   needs-node    needs node (the page's JS tests, the browser suite)
+#   slow          builds, configures or runs for minutes
+#   packaging     checks the install layout, packages, tarballs or consumers
+# The unit label comes from skycue_add_unit_test and integration is the default
+# of skycue_add_script_test; the rest is applied here. A name that is not
+# registered in this configuration is skipped.
+function(skycue_label_existing label)
+  set(_present)
+  foreach(_t IN LISTS ARGN)
+    if(TEST ${_t})
+      list(APPEND _present ${_t})
+    endif()
+  endforeach()
+  skycue_label_tests(${label} ${_present})
+endfunction()
+
+# Hand-registered tests take their base label here.
+skycue_label_existing(unit web_server)
+skycue_label_existing(integration icao_tables_current package_conf soak_eval)
+skycue_label_existing(integration
+  hub dump pingsim stats stats_cli config_cli web_ui rawtools fisb_cli iqgen_cli
+  decode_differential decode_differential_uat icao_tables_generator)
+skycue_label_existing(needs-fixtures
+  rawtools hub fisb_cli iqgen_cli geom_eval decode_acas_opensky decode_uat_golden
+  decode_uat_synthetic decode_differential decode_differential_uat)
+skycue_label_existing(needs-node web_ui ui_playwright)
+skycue_label_existing(slow
+  consumer_smoke parent_project slow_factor install_layout fuzz_build fuzz_smoke
+  static_analysis soak_eval soak_short)
+skycue_label_existing(packaging
+  consumer_smoke parent_project install_layout package_conf package_postinst
+  script_test_package_metadata script_test_package_scripts script_test_skycue_web_tarballs
+  script_test_source_tarball script_test_net_standalone)
+
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

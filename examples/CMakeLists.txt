@@ -27,5 +27,8 @@ add_test(NAME example_ecef_batch_consumer_help
   COMMAND bash -c "out=$(\"$0\" 2>&1); rc=$?; echo \"$out\"; [ $rc -eq 2 ] && [[ $out == usage:* ]]"
     $<TARGET_FILE:ecef_batch_consumer>)
 
+set_tests_properties(example_minimal_consumer_help example_ecef_consumer_help
+  example_ecef_consumer_bad_sensor example_ecef_batch_consumer_help PROPERTIES LABELS integration)
+
 # Timeouts and SKYCUE_TEST_SLOW scaled by the slow factor (Hardening.cmake).
 skycue_scale_test_timeouts()

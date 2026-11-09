@@ -13,7 +13,7 @@ function(skycue_net_unit_test name source)
     skycue_set_warnings(test_net_${name})
   endif()
   add_test(NAME net_${name} COMMAND test_net_${name})
-  set_tests_properties(net_${name} PROPERTIES TIMEOUT 60)
+  set_tests_properties(net_${name} PROPERTIES TIMEOUT 60 LABELS unit)
 endfunction()
 
 skycue_net_unit_test(endpoint test_endpoint.cpp)

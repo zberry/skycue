@@ -295,22 +295,22 @@ skycue_add_unit_test(transports LIBS skycued_core Threads::Threads FIXTURE_DIR N
   TIMEOUT 60)
 
 # Mode S CRC, bit helpers and single-bit syndrome correction.
-skycue_add_unit_test(coding)
+skycue_add_unit_test(coding LIBS skycued_decode)
 
 # Comm-B BDS 4,0/5,0/6,0 inference, ACAS RA decoding (frame level, pure).
-skycue_add_unit_test(decode_commb)
+skycue_add_unit_test(decode_commb LIBS skycued_decode)
 
 # Mode S frame fields and altitude/squawk code tables.
-skycue_add_unit_test(decode_fields)
+skycue_add_unit_test(decode_fields LIBS skycued_decode)
 
 # CPR position math: global, surface and local decoding with NL.
-skycue_add_unit_test(decode_cpr FIXTURE_DIR)
+skycue_add_unit_test(decode_cpr LIBS skycued_decode FIXTURE_DIR)
 
 # KeyTable: pointer stability, LRU order, idle eviction.
-skycue_add_unit_test(key_table)
+skycue_add_unit_test(key_table LIBS skycued_decode)
 
 # The 1090 decoder: address confirmation, CPR pairing, observation production.
-skycue_add_unit_test(decode_modes)
+skycue_add_unit_test(decode_modes LIBS skycued_decode)
 
 # Damaged input: random bytes, bit flips, key table limits, wrong frame lengths.
 skycue_add_unit_test(decode_robustness TIMEOUT 120)
@@ -442,11 +442,11 @@ skycue_add_unit_test(decode_golden LIBS skycued_core ZLIB::ZLIB FIXTURE_DIR TIME
 # The 1090 decoder against OpenSky's decoded fields for the same frames
 # (fixtures/opensky/*, fetched and unpacked by fetch-test-captures.sh; skips
 # when absent).
-skycue_add_unit_test(decode_opensky FIXTURE_DIR TIMEOUT 120)
+skycue_add_unit_test(decode_opensky LIBS skycued_decode FIXTURE_DIR TIMEOUT 120)
 
 # ACAS resolution advisories and rollcall altitude / identity against the same OpenSky
 # tables (fixtures/opensky/*_acas_data4.csv, *_rollcall_replies_data4.csv; skips when absent).
-skycue_add_unit_test(decode_acas_opensky FIXTURE_DIR TIMEOUT 120 SKIPPABLE)
+skycue_add_unit_test(decode_acas_opensky LIBS skycued_decode FIXTURE_DIR TIMEOUT 120 SKIPPABLE)
 
 # AltitudeFit: rolling GNSS-minus-baro fit over all aircraft.
 skycue_add_unit_test(altitude_fit)
@@ -467,10 +467,10 @@ skycue_add_script_test(decode_differential
   TIMEOUT 400 SKIPPABLE)
 
 # UAT (978 MHz) frame layout, line parser and pure field decoders.
-skycue_add_unit_test(decode_uat_frame)
+skycue_add_unit_test(decode_uat_frame LIBS skycued_decode)
 
 # UatDecoder: observations, range check, geometric altitude.
-skycue_add_unit_test(decode_uat)
+skycue_add_unit_test(decode_uat LIBS skycued_decode)
 
 # The UAT frame decoders against dump978-fa, field by field, on the sample's 439
 # downlinks (fixtures/raw/uat-sample.golden.jsonl.gz) and the two Stratux captures' 3760

@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -640,5 +641,46 @@ BOOST_AUTO_TEST_CASE(uat_heading_codes_map_to_heading_fields)
         BOOST_CHECK_EQUAL(o.heading_true_deg.has_value(), t == 3);
         if (t == 2) BOOST_CHECK_CLOSE(*o.heading_mag_deg, 90.0f, 1.0);
         if (t == 3) BOOST_CHECK_CLOSE(*o.heading_true_deg, 90.0f, 1.0);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(rssi_exact_values_to_a_tenth_db)
+{
+    auto after = [](const std::vector<double>& levels) {
+        Rig r;
+        for (size_t i = 0; i < levels.size(); ++i) {
+            auto s = airborne();
+            s.alt_ft = 5000 + 100 * static_cast<int>(i);  // every frame changes and so emits
+            r.feed(s, static_cast<double>(i), levels[i]);
+        }
+        BOOST_REQUIRE_EQUAL(r.out.size(), levels.size());
+        BOOST_REQUIRE(r.last().rssi);
+        return *r.last().rssi;
+    };
+    BOOST_CHECK_EQUAL(after({-40, -40, -10, -10, -10, -10, -20, -20, -20, -20}), -12.6);
+    BOOST_CHECK_EQUAL(after(std::vector<double>(8, -3.0)), -3.0);
+    BOOST_CHECK_EQUAL(after({-10, -20, -30}), -14.3);  // fewer than eight frames
+    BOOST_CHECK_EQUAL(after({-10, -20, -30, -40, -50, -60, -70, -80, -90}), -28.6);  // the first fell out
+}
+
+BOOST_AUTO_TEST_CASE(rssi_non_finite_level_is_ignored)
+{
+    Rig r;
+    for (int i = 0; i < 3; ++i) {
+        auto s = airborne();
+        s.alt_ft = 5000 + 100 * i;
+        r.feed(s, i, -10.0);
+    }
+    BOOST_REQUIRE_EQUAL(r.out.size(), 3u);
+    BOOST_REQUIRE(r.last().rssi);
+    BOOST_CHECK_EQUAL(*r.last().rssi, -10.0);
+    const double bad[] = {std::nan(""), std::numeric_limits<double>::infinity()};
+    for (int k = 0; k < 2; ++k) {
+        auto s = airborne();
+        s.alt_ft = 5300 + 100 * k;
+        r.feed(s, 3 + k, bad[k]);
+        BOOST_REQUIRE_EQUAL(r.out.size(), static_cast<size_t>(4 + k));
+        BOOST_REQUIRE(r.last().rssi);
+        BOOST_CHECK_EQUAL(*r.last().rssi, -10.0);
     }
 }

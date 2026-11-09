@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 #include "coding/bits.hpp"
@@ -409,6 +410,34 @@ BOOST_AUTO_TEST_CASE(rssi_mean_of_last_eight) {
     r.feed(air(kP0, true), 0.5);
     BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
     BOOST_CHECK(!r.obs[0].rssi);
+}
+
+namespace {
+// Filler identification frames, then the even/odd pair that emits; one signal byte per frame.
+std::optional<double> rssiAfter(const std::vector<int>& sigs)
+{
+    Rig r;
+    double t = 0.0;
+    for (size_t i = 0; i + 2 < sigs.size(); ++i, t += 0.05)
+        r.feed(df17(kAddr, identification(4, 3, "RSSI1")), t, static_cast<uint8_t>(sigs[i]));
+    r.feed(air(kP0, false), t, static_cast<uint8_t>(sigs[sigs.size() - 2]));
+    r.feed(air(kP0, true), t + 0.05, static_cast<uint8_t>(sigs.back()));
+    BOOST_REQUIRE_EQUAL(r.obs.size(), 1u);
+    return r.obs[0].rssi;
+}
+}  // namespace
+
+BOOST_AUTO_TEST_CASE(rssi_exact_values_to_a_tenth_db)
+{
+    BOOST_CHECK_EQUAL(*rssiAfter(std::vector<int>(8, 128)), -6.0);
+    BOOST_CHECK_EQUAL(*rssiAfter({255, 128, 64, 32, 16, 8, 4, 2}), -7.8);
+    BOOST_CHECK_EQUAL(*rssiAfter({10, 255, 128, 64, 32, 16, 8, 4, 2}), -7.8);  // the ring wrapped: the oldest fell out
+    BOOST_CHECK_EQUAL(*rssiAfter({255, 0, 255, 0, 255, 0, 255, 0}), -3.0);
+}
+
+BOOST_AUTO_TEST_CASE(rssi_all_zero_signal_gives_no_rssi)
+{
+    BOOST_CHECK(!rssiAfter(std::vector<int>(8, 0)));
 }
 
 BOOST_AUTO_TEST_CASE(gnss_baro_difference_sets_geom_altitude) {

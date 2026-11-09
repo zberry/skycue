@@ -9,9 +9,10 @@ add_library(skycued_asterix STATIC
   src/asterix/cat021_encode.cpp
   src/asterix/cat021_framer.cpp
   src/json_escape.cpp
-  src/time_util.cpp)
+  src/time_util.cpp
+  src/track_names.cpp)
 target_include_directories(skycued_asterix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(skycued_asterix PUBLIC Boost::boost)
+target_link_libraries(skycued_asterix PUBLIC skycue::skycue Boost::boost)
 skycue_set_warnings(skycued_asterix)
 
 # --convert-conf fills in the text of the example config: embed it.

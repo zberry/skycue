@@ -213,6 +213,67 @@ BOOST_AUTO_TEST_CASE(malformed_or_missing_overlay_ignored_on_load)
     }
 }
 
+BOOST_AUTO_TEST_CASE(overlay_missing_is_a_fresh_start)
+{
+    RtFx f(headConf({{"filters.max_range_nm", "150"}}));
+    StderrCapture err(f.path("stderr.txt"));
+    f.start();
+    err.restore();
+    BOOST_TEST(f.filters().max_range_nm == 150.0);
+    BOOST_TEST(!has(err.text(), "ERROR"), err.text());
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json")));
+    BOOST_TEST(!fileExists(f.path("skycue.runtime.json.rejected")));
+}
+
+BOOST_AUTO_TEST_CASE(overlay_is_a_directory)
+{
+    RtFx f(headConf({{"filters.max_range_nm", "150"}}));
+    BOOST_REQUIRE(::mkdir(f.path("skycue.runtime.json").c_str(), 0755) == 0);
+    StderrCapture err(f.path("stderr.txt"));
+    BOOST_CHECK_NO_THROW(f.start());
+    err.restore();
+    BOOST_TEST(f.filters().max_range_nm == 150.0);
+    // Observed: the directory reads as empty text, which is not an overlay: one ERROR line, and the
+    // directory is moved aside like any rejected overlay.
+    const std::string file = f.path("skycue.runtime.json");
+    BOOST_TEST(has(err.text(), "ERROR " + file + ": "), err.text());
+    BOOST_TEST(has(err.text(), "ignoring it (the baseline applies), moved to " + file + ".rejected"), err.text());
+    BOOST_TEST(!fileExists(file));
+    struct stat st {};
+    BOOST_TEST((::stat((file + ".rejected").c_str(), &st) == 0 && S_ISDIR(st.st_mode)));
+}
+
+BOOST_AUTO_TEST_CASE(overlay_empty_file)
+{
+    RtFx f(headConf({{"filters.max_range_nm", "150"}}), {{"skycue.runtime.json", ""}});
+    StderrCapture err(f.path("stderr.txt"));
+    f.start();
+    err.restore();
+    BOOST_TEST(f.filters().max_range_nm == 150.0);
+    // Observed: an empty file is not an overlay either: rejected and set aside.
+    const std::string file = f.path("skycue.runtime.json");
+    BOOST_TEST(has(err.text(), "ERROR " + file + ": not a JSON object; ignoring it (the baseline applies), moved to " +
+                                   file + ".rejected"),
+               err.text());
+    BOOST_TEST(!fileExists(file));
+    BOOST_TEST(readAll(file + ".rejected") == "");
+}
+
+BOOST_AUTO_TEST_CASE(overlay_unreadable_names_path_and_strerror)
+{
+    RtFx f(headConf({{"filters.max_range_nm", "150"}}), {{"skycue.runtime.json", "{\"version\":1}"}});
+    BOOST_REQUIRE(::chmod(f.path("skycue.runtime.json").c_str(), 0) == 0);
+    if (::access(f.path("skycue.runtime.json").c_str(), R_OK) == 0) {
+        BOOST_TEST_MESSAGE("running with read access to mode 000 files: skipped");
+        return;
+    }
+    StderrCapture err(f.path("stderr.txt"));
+    f.start();
+    err.restore();
+    BOOST_TEST(f.filters().max_range_nm == 150.0);
+    BOOST_TEST(has(err.text(), f.path("skycue.runtime.json") + ": cannot open: Permission denied"), err.text());
+}
+
 BOOST_AUTO_TEST_CASE(apply_ui_writes_overlay_and_engine)
 {
     const std::string conf_text = headConf({{"filters.max_range_nm", "150"}});

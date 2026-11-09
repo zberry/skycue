@@ -445,6 +445,58 @@ BOOST_AUTO_TEST_CASE(static_fifo_is_404)
     BOOST_TEST(rc == 0);  // -1: the server blocked on the FIFO
 }
 
+BOOST_AUTO_TEST_CASE(static_directory_is_404)
+{
+    WebFx f;
+    BOOST_REQUIRE(::mkdir((f.www + "/dir.js").c_str(), 0755) == 0);
+    BOOST_TEST(get(f.port, "/dir.js").status == 404u);
+}
+
+BOOST_AUTO_TEST_CASE(static_missing_file_is_404)
+{
+    WebFx f;
+    BOOST_TEST(get(f.port, "/nope.js").status == 404u);
+}
+
+BOOST_AUTO_TEST_CASE(static_empty_file_is_200)
+{
+    WebFx f;
+    writeFile(f.www + "/empty.js", "");
+    const Reply r = get(f.port, "/empty.js");
+    BOOST_TEST(r.status == 200u);
+    BOOST_TEST(r.body == "");
+}
+
+BOOST_AUTO_TEST_CASE(static_unreadable_file_is_500)
+{
+    WebFx f;
+    writeFile(f.www + "/secret.js", "var s;\n");
+    BOOST_REQUIRE(::chmod((f.www + "/secret.js").c_str(), 0) == 0);
+    if (::access((f.www + "/secret.js").c_str(), R_OK) == 0) {
+        BOOST_TEST_MESSAGE("running with read access to mode 000 files: skipped");
+        return;
+    }
+    const Reply r = get(f.port, "/secret.js");
+    BOOST_TEST(r.status == 500u);
+    BOOST_TEST(r.body == "cannot read the file\n");
+    BOOST_TEST(r.cache_control == "no-store");
+}
+
+BOOST_AUTO_TEST_CASE(tiles_meta_dir_empty_and_oversize_fall_back)
+{
+    WebFx f;
+    const std::string meta = f.www + "/tiles/meta.json";
+    const std::string none = "{\"tiles\":false,\"overlays\":false}";
+    BOOST_REQUIRE(::mkdir((f.www + "/tiles").c_str(), 0755) == 0);
+    BOOST_REQUIRE(::mkdir(meta.c_str(), 0755) == 0);
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == none);
+    BOOST_REQUIRE(::rmdir(meta.c_str()) == 0);
+    writeFile(meta, "");
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == none);
+    writeFile(meta, std::string(64 * 1024 + 1, '{'));
+    BOOST_TEST(get(f.port, "/api/tiles-available").body == none);
+}
+
 BOOST_AUTO_TEST_CASE(tiles_meta_is_not_cached)
 {
     BOOST_TEST(std::string(skycued::webapi::cacheControl("/tiles/meta.json")) == "no-cache");

@@ -24,8 +24,12 @@
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 
+#include <signal.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <map>
 #include <set>
@@ -1004,6 +1008,73 @@ BOOST_AUTO_TEST_CASE(locations_paths_that_are_directories)
     struct stat st {};
     BOOST_TEST((::stat(learned.c_str(), &st) == 0 && S_ISDIR(st.st_mode)));
     BOOST_TEST(!fileExists(learned + ".rejected"));
+}
+
+// A FIFO at the learned path is not read (a writer-less open must not block) and not renamed.
+// The probe runs in a forked child, so a block cannot hang this binary.
+BOOST_AUTO_TEST_CASE(learned_locations_fifo_is_not_a_regular_file)
+{
+    TempDir dir;
+    const std::string learned = dir.path + "/fisb-locations.json";
+    BOOST_REQUIRE(::mkfifo(learned.c_str(), 0644) == 0);
+    const std::string errfile = dir.path + "/stderr.txt";
+    std::fflush(nullptr);
+    const pid_t pid = ::fork();
+    BOOST_REQUIRE(pid >= 0);
+    if (pid == 0) {
+        int rc = 3;
+        try {
+            StderrCapture err(errfile);
+            FisbWebOptions o;
+            o.replay = false;
+            o.start_engine = false;
+            FisbWebFx f(o);
+            f.t.call([&] { f.engine->loadLocations(learned, ""); });
+            f.t.call([&] { f.engine->stop(); });
+            rc = 0;
+        } catch (...) {
+        }
+        ::_exit(rc);
+    }
+    int status = 0;
+    bool exited = false;
+    for (int i = 0; i < 300 && !exited; ++i) {  // 15 s
+        exited = ::waitpid(pid, &status, WNOHANG) == pid;
+        if (!exited)
+            std::this_thread::sleep_for(50ms);
+    }
+    if (!exited) {
+        ::kill(pid, SIGKILL);
+        ::waitpid(pid, &status, 0);
+    }
+    BOOST_REQUIRE_MESSAGE(exited, "loadLocations blocked on the FIFO");
+    BOOST_TEST((WIFEXITED(status) && WEXITSTATUS(status) == 0));
+    const std::string text = readAll(errfile);
+    BOOST_TEST(linesWith(text, " ERROR ") == 1u, text);
+    BOOST_TEST(has(text, learned + ": not a regular file"), text);
+    struct stat st {};
+    BOOST_TEST((::stat(learned.c_str(), &st) == 0 && S_ISFIFO(st.st_mode)));
+    BOOST_TEST(!fileExists(learned + ".rejected"));
+}
+
+BOOST_AUTO_TEST_CASE(learned_locations_empty_file)
+{
+    TempDir dir;
+    const std::string learned = dir.path + "/fisb-locations.json";
+    writeFile(learned, "");
+    FisbWebOptions o;
+    o.replay = false;
+    o.start_engine = false;
+    FisbWebFx f(o);
+    StderrCapture err(dir.path + "/stderr.txt");
+    BOOST_CHECK_NO_THROW(f.t.call([&] { f.engine->loadLocations(learned, ""); }));
+    f.t.call([&] { f.engine->stop(); });
+    err.restore();
+    // Observed: an empty file is rejected by the parser ("empty file") and set aside.
+    BOOST_TEST(linesWith(err.text(), " ERROR ") == 1u, err.text());
+    BOOST_TEST(has(err.text(), learned + ": empty file; renamed " + learned + ".rejected"), err.text());
+    BOOST_TEST(!fileExists(learned));
+    BOOST_TEST(readAll(learned + ".rejected") == "");
 }
 
 // A learned file that cannot be read is set aside, so the first save does not overwrite it.

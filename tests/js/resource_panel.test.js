@@ -139,6 +139,19 @@ test('refresh asks GET listPath once and applies the list', async function () {
   assert.strictEqual(x.list.children.length, 1);
 });
 
+test('refresh delivers the list through onList when the descriptor has one, through apply otherwise', async function () {
+  const got = [];
+  const x = setup({ desc: { onList: function (l) { got.push(l); } } });
+  x.state.listBody = { inputs: [A] };
+  await x.panel.refresh();
+  assert.deepStrictEqual(got, [[A]]);
+  assert.strictEqual(x.list.children.length, 0); // onList did not apply it
+  const y = setup();
+  y.state.listBody = { inputs: [A] };
+  await y.panel.refresh();
+  assert.strictEqual(y.list.children.length, 1);
+});
+
 test('poll refreshes only while connected, and with pollNeedsTab only while the tab is shown', async function () {
   const x = setup();
   x.state.connected = false;

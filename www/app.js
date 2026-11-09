@@ -3132,7 +3132,7 @@
     onFormInput: function (name, formEl) {
       if (name === 'type') formEl('transport').value = P.inputTransport(formEl('type').value);
     },
-    syncOn: ['type', 'transport', 'group'], alwaysShown: ['type'],
+    syncOn: ['type', 'transport', 'group'], alwaysShown: ['type'], onList: applyInputs,
     onReset: function (formEl) { formEl('type').disabled = false; }
   });
   // ---- the Outputs panel: the same module, over P.outputFields ----

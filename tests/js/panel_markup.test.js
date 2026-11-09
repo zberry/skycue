@@ -50,11 +50,11 @@ function build() {
     tabShown: function () { return true; }, confirm: function () { return true; }, now: function () { return fx.NOW; }
   };
   const makePanel = global.window.skycueResourcePanel.create(host);
-  const names = ['P', 'rx', 'el', 'makePanel', '$', 'dataNow', 'map', 'SHOW_MIN_ZOOM', 'NUMERIC_FIELDS'];
+  const names = ['P', 'rx', 'el', 'makePanel', '$', 'dataNow', 'map', 'SHOW_MIN_ZOOM', 'NUMERIC_FIELDS', 'applyInputs'];
   const hasOutputs = region.indexOf('outputsPanel') >= 0;
   const f = new Function(names.join(','),
     region + '; return {inputs: inputsPanel, outputs: ' + (hasOutputs ? 'outputsPanel' : 'null') + '};');
-  const panels = f(P, rx, shim.el, makePanel, host.$, host.now, null, 6, {});
+  const panels = f(P, rx, shim.el, makePanel, host.$, host.now, null, 6, {}, null);
   return { lists: lists, panels: panels };
 }
 

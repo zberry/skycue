@@ -22,6 +22,7 @@
 //         syncOn: names whose change shows or hides fields,
 //         alwaysShown: [field names that stay visible beside fieldsFn's],
 //         onReset(formEl),                    // optional, part of reset()
+//         onList(list),                       // optional: where a fetched list goes, instead of apply
 //         pollNeedsTab: poll only while the Receiver tab is shown}
 // formEl(name) is the form's element of that name. Everything a resource or
 // the daemon says goes in with textContent, never as markup. Plain ES2017.
@@ -86,7 +87,7 @@
         if (host.tabShown('receiver')) render();
       }
       function refresh() {
-        return host.request('GET', desc.listPath).then(function (j) { apply(j[noun + 's']); });
+        return host.request('GET', desc.listPath).then(function (j) { (desc.onList || apply)(j[noun + 's']); });
       }
       function poll() {
         if (host.connected() && (!desc.pollNeedsTab || host.tabShown('receiver'))) {

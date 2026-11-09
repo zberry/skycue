@@ -129,7 +129,7 @@ coverage, range, signal and rates over time
 
 ## How it fits beside your receiver
 
-![Data flow: source programs feed seven input kinds; the hub copies raw bytes to raw outputs and hands frames to the decoders; one engine filters and paces tracks to the cue stream, the web page, the recorder and statistics](docs/images/data-flow.svg)
+![Data flow: source programs feed the inputs, each of which decodes or parses its own stream; the hub copies raw bytes to the raw outputs; one engine filters and paces tracks to the cue stream, the web page, the recorder and statistics](docs/images/data-flow.svg)
 
 skycue is a client of the decoders you already run and never feeds a
 network, restarts or reconfigures them. readsb (also inside ultrafeeder)

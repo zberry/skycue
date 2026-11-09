@@ -53,6 +53,8 @@ Whole tree (daemon, tools, tests, examples), Release:
 
 ### Final review regeneration (2026-11-02)
 
+From `docs/fisb-golden.md`; the table and adjudications are there.
+
 The golden was regenerated after the final review's store fixes. Against the
 previous golden (1749 lines): the `fisb_text`, `fisb_radar` and
 `fisb_raster` records are identical, and the `fisb_expired` records name the
@@ -85,6 +87,8 @@ Adjudication 5 is still used, by the two 2020 stuck SIGMETs named there,
 not by 19-7540.
 
 ### Stuck-SIGMET regeneration (2026-11-02)
+
+From `docs/fisb-golden.md`; the table and adjudications are there.
 
 The golden was regenerated after the store began rejecting stale-on-arrival
 AIRMET, SIGMET and CWA reports. Against

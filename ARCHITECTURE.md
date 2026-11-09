@@ -15,9 +15,10 @@ listener, and speaks one format: readsb JSON, Beast frames, UAT lines,
 pingStation JSON texts or ASTERIX CAT021, or a recording. Any number of
 inputs run at once.
 
-Inputs that carry raw bytes pass them to the **hub**. The hub copies the raw
-bytes unchanged to the raw outputs (a consumer that stops reading is dropped
-without delaying the others) and hands the frames to the decoders.
+Inputs that carry raw bytes also pass them to the **hub**. The hub copies the
+raw bytes unchanged to the raw outputs (a consumer that stops reading is
+dropped without delaying the others); it does not feed the decoders. Each
+input feeds its own stream to the decoders itself.
 
 The **decoders** are the 1090 MHz Mode S decoder and the 978 MHz UAT decoder
 in `skycued/src/decode/`. They are pure: no I/O and no clock of their own,
@@ -83,7 +84,8 @@ The details are in the comments of `skycued/src/inputs/input.hpp` and
 - **key**: the state key of a track: address, address type and rebroadcast
   class. Not the same as a config key.
 - **decision**: whether to forward a track, from the filter chain.
-- **baseline**: the saved overrides file.
+- **baseline**: the configuration layer under the overlay: `skycue.toml` and
+  `skycue.overrides.toml`, with the `SKYCUE_*` environment and `--set` above both.
 - **overrides**: `skycue.overrides.toml`, layered over `skycue.toml`.
 - **overlay**: unsaved live state, kept in `skycue.runtime.json`. The word
   also means a map overlay, which is unrelated.

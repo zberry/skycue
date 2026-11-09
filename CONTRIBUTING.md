@@ -21,7 +21,8 @@ variables that control them and why each test skips. The sanitizer, fuzzing,
 static-analysis and soak runs are in [docs/hardening.md](docs/hardening.md);
 build details are in [docs/installing.md](docs/installing.md#build).
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the code fits together.
-CI runs `ctest -LE 'needs-fixtures|needs-node|slow'`, the tests that need neither fetched data, node nor minutes.
+CI's build job runs `ctest -LE 'needs-fixtures|needs-node|slow'`, the tests that need neither fetched data, node nor minutes;
+its sanitizers job runs the whole suite under ASan/UBSan; its node job runs `web_ui`.
 
 ## Test first
 

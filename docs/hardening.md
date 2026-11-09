@@ -595,22 +595,10 @@ the accepted findings, for the reasons above.
 ### -Werror
 
 `SKYCUE_WERROR=ON` (skycue's own option) adds `-Werror` to every skycue
-target. Whole tree (daemon, tools, tests, examples), Release:
+target.
 
-- gcc 11.5: two `-Wstringop-overread` false positives in test code
-  (`test_cat021.cpp` `block()`, `test_inputs.cpp` `rawBlock()`: the memcpy
-  inlined from `vector::insert`, on the path where the inserted range is
-  empty). Each `insert` has a local `#pragma GCC diagnostic` push/ignored/pop,
-  for gcc 11 and later only, with a comment naming the false positive. Then
-  clean.
-- clang 21: `-Wunused-private-field` (`Engine::io_`, never read: removed)
-  and `-Wc++20-extensions` (a lambda in `InputManager::applyFile` captured
-  a structured binding, which C++17 does not allow: named references
-  instead). Then clean.
-- gcc 8.5 (RHEL 8 compatible, Boost 1.66): proved on the sweep's final head by
-  a clean-room build with `SKYCUE_WERROR=ON` (0 compiler
-  warnings), and gcc 11 again on RHEL 9 compatible; both plain and with
-  `SKYCUE_WERROR=ON`.
+The results of the compiler sweep that introduced the option are in
+[CHANGELOG.md](../CHANGELOG.md#compiler-sweep-with-skycue_werroron).
 
 `SKYCUE_WERROR` (default `OFF`) turns compiler warnings into errors; the
 default argument list is unchanged.

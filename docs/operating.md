@@ -1751,9 +1751,9 @@ cleanly with exit status 75; the tab waits for it to come back and reloads.
 Without it the banner says "restart skycued to apply" and you restart it
 yourself (`sudo systemctl restart skycued`, or stop and start `skycue-start.sh`).
 Below the banner a `Supervisor:` line names what will start skycued again:
-`systemd`, `launcher` (`skycue-start.sh`) or `none`. Only `systemd` starts skycued again
-after the Restart button; under `launcher` or `none` it ends and stays stopped
-until you start it, so leave `web.allow_restart` off there.
+`systemd`, `launcher` (`skycue-start.sh`) or `none`. Under `systemd` and `launcher` the
+Restart button brings skycued back; with `none` it ends and stays stopped until
+you start it, so leave `web.allow_restart` off for a skycued started by hand.
 
 **Where saves go.** Into `skycue.overrides.toml`, never `skycue.toml`. Under the
 packages that is `/var/lib/skycue/skycue.overrides.toml` (`paths.state_dir`),

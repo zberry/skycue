@@ -349,8 +349,9 @@ happens. Otherwise **202** `{"ok": true, "exit_status": 75}`, and skycued shuts
 down cleanly (the same orderly stop as `SIGTERM`: it saves its state first) and
 exits with status 75. A supervisor that starts it again on that status makes
 this a restart: the packaged systemd unit has `SuccessExitStatus=75` and
-`RestartForceExitStatus=75`. `skycue-start.sh` does not start skycued again, and
-run by hand there is no supervisor either: skycued simply ends. The page shows the
+`RestartForceExitStatus=75`, and `skycue-start.sh` starts skycued again at once
+(logging "restart requested from the web UI"). Run by hand there is no
+supervisor: skycued simply ends. The page shows the
 supervisor in `daemon.supervisor`. Other methods: 405 with `Allow: POST`.
 
 `GET /api/tiles-available` reads the map directory (`paths.map_dir` when it is

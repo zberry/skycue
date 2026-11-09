@@ -16,6 +16,7 @@
 #include "web_api.hpp"
 #include "web_fisb.hpp"
 #include "web_server.hpp"
+#include "web_test_support.hpp"
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -30,6 +31,10 @@
 #include <set>
 
 using skycue_test::fileExists;
+using skycue_test::get;
+using skycue_test::Reply;
+using skycue_test::request;
+using skycue_test::WsClient;
 
 using namespace enginetest;
 using skycued::RuntimeConfig;
@@ -90,93 +95,6 @@ pt::ptree parseJson(const std::string& text)
     pt::read_json(in, tree);
     return tree;
 }
-
-struct Reply {
-    unsigned status = 0;
-    std::string body, allow;
-};
-
-Reply request(uint16_t port, http::verb verb, const std::string& target)
-{
-    asio::io_context io;
-    tcp::socket s(io);
-    s.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
-    timeval tv{};
-    tv.tv_sec = 10;
-    ::setsockopt(s.native_handle(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    http::request<http::string_body> req{verb, target, 11};
-    req.set(http::field::host, "127.0.0.1");
-    req.keep_alive(false);
-    req.prepare_payload();
-    http::write(s, req);
-    beast::flat_buffer buf;
-    http::response_parser<http::string_body> parser;
-    parser.body_limit(64u << 20);
-    http::read(s, buf, parser);
-    Reply r;
-    r.status = parser.get().result_int();
-    r.body = parser.get().body();
-    r.allow = std::string(parser.get()[http::field::allow]);
-    return r;
-}
-
-Reply get(uint16_t port, const std::string& target) { return request(port, http::verb::get, target); }
-
-// A WebSocket client whose thread collects every text message.
-struct WsClient {
-    asio::io_context io;
-    websocket::stream<tcp::socket> ws{io};
-    std::thread reader;
-    std::mutex m;
-    std::condition_variable cv;
-    std::vector<std::string> msgs;
-
-    explicit WsClient(uint16_t port)
-    {
-        ws.next_layer().connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), port));
-        ws.handshake("127.0.0.1", "/ws");
-        reader = std::thread([this] {
-            for (;;) {
-                beast::flat_buffer b;
-                boost::system::error_code ec;
-                ws.read(b, ec);
-                std::lock_guard<std::mutex> lk(m);
-                if (ec)
-                    return;
-                msgs.emplace_back(asio::buffers_begin(b.data()), asio::buffers_end(b.data()));
-                cv.notify_all();
-            }
-        });
-    }
-    ~WsClient()
-    {
-        ::shutdown(ws.next_layer().native_handle(), SHUT_RDWR);
-        if (reader.joinable())
-            reader.join();
-        boost::system::error_code ec;
-        ws.next_layer().close(ec);
-    }
-    // Waits until some message contains `needle`; returns it ("" on timeout).
-    std::string waitFor(const std::string& needle, std::chrono::milliseconds timeout = kWait)
-    {
-        std::unique_lock<std::mutex> lk(m);
-        std::string found;
-        cv.wait_for(lk, timeout, [&] {
-            for (const auto& msg : msgs)
-                if (has(msg, needle)) {
-                    found = msg;
-                    return true;
-                }
-            return false;
-        });
-        return found;
-    }
-    std::vector<std::string> all()
-    {
-        std::lock_guard<std::mutex> lk(m);
-        return msgs;
-    }
-};
 
 struct FisbWebOptions {
     bool fisb = true;         // fisb.enable
@@ -388,7 +306,7 @@ BOOST_AUTO_TEST_CASE(fisb_status_shape, *skycue_test::needs_fixture("fisb/receiv
 
     // The same object in the snapshot, and never a mosaic's blocks.
     WsClient c(f.port);
-    const std::string snap = c.waitFor("\"type\":\"snapshot\"");
+    const std::string snap = c.waitForText("\"type\":\"snapshot\"");
     BOOST_REQUIRE(!snap.empty());
     const pt::ptree sp = parseJson(snap);
     const pt::ptree& fisb = sp.get_child("fisb");
@@ -668,14 +586,14 @@ BOOST_AUTO_TEST_CASE(ws_fisb_events_on_replay, *skycue_test::needs_fixture("fisb
 {
     FisbWebFx f(FisbWebOptions{true, true, false});
     WsClient c(f.port);
-    const std::string snap = c.waitFor("\"type\":\"snapshot\"");
+    const std::string snap = c.waitForText("\"type\":\"snapshot\"");
     BOOST_REQUIRE(!snap.empty());
     BOOST_TEST(has(snap, "\"fisb\":{\"enabled\":true"));
     f.startEngine();
 
-    BOOST_TEST(!c.waitFor("\"type\":\"fisb_text\"").empty());
-    BOOST_TEST(!c.waitFor("\"type\":\"fisb_shape\"").empty());
-    const std::string radar = c.waitFor("\"type\":\"fisb_radar\"", 30s);
+    BOOST_TEST(!c.waitForText("\"type\":\"fisb_text\"").empty());
+    BOOST_TEST(!c.waitForText("\"type\":\"fisb_shape\"").empty());
+    const std::string radar = c.waitForText("\"type\":\"fisb_radar\"", 30s);
     BOOST_REQUIRE(!radar.empty());
 
     std::size_t texts = 0, shapes = 0, radars = 0;
@@ -894,7 +812,7 @@ BOOST_AUTO_TEST_CASE(locations_learned_on_tg30, *skycue_test::needs_fixture("fis
     o.start_engine = false;
     FisbWebFx f(o);
     WsClient c(f.port);
-    BOOST_REQUIRE(!c.waitFor("\"type\":\"snapshot\"").empty());
+    BOOST_REQUIRE(!c.waitForText("\"type\":\"snapshot\"").empty());
     f.startEngine();
     BOOST_REQUIRE(f.waitReplayed(uplinks, 0));
 
@@ -908,7 +826,7 @@ BOOST_AUTO_TEST_CASE(locations_learned_on_tg30, *skycue_test::needs_fixture("fis
     for (const auto& kv : locs)
         BOOST_TEST(skycued::fisb::airportStyleId(kv.first), kv.first);
 
-    BOOST_REQUIRE(!c.waitFor("\"type\":\"fisb_location\",\"id\":\"KPRG\"").empty());
+    BOOST_REQUIRE(!c.waitForText("\"type\":\"fisb_location\",\"id\":\"KPRG\"").empty());
     std::size_t items = 0;
     for (const auto& msg : c.all()) {
         const pt::ptree m = parseJson(msg);

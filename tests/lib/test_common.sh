@@ -40,3 +40,44 @@ free_port() {
 t = socket.SOCK_DGRAM if sys.argv[1] == "udp" else socket.SOCK_STREAM
 s = socket.socket(socket.AF_INET, t); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' "${1:-tcp}"
 }
+
+# test_init NAME: the setup every script test starts with. Sets TEST_NAME, a
+# scratch directory $tmp, an empty bg_pids array, and runs cleanup on exit.
+test_init() {
+  TEST_NAME=$1
+  tmp=$(mktemp -d)
+  bg_pids=()
+  trap cleanup EXIT
+}
+
+# bg CMD [ARG...]: run CMD in the background and remember its pid in bg_pids
+# (cleanup stops it). $! is set as for a plain `CMD &`.
+bg() {
+  "$@" &
+  bg_pids+=($!)
+}
+
+# cleanup: stop every pid in bg_pids with SIGTERM, give each up to 3 s (times
+# the slow factor, polled every 0.1 s) to go, SIGKILL what is left, reap, and
+# remove $tmp. A script that needs more on exit defines its own exit trap and
+# calls cleanup from it.
+cleanup() {
+  local p i
+  for p in ${bg_pids[@]+"${bg_pids[@]}"}; do kill "$p" 2>/dev/null; done
+  for p in ${bg_pids[@]+"${bg_pids[@]}"}; do
+    for (( i=0; i<30*slowf; i++ )); do kill -0 "$p" 2>/dev/null || break; sleep 0.1; done
+    kill -9 "$p" 2>/dev/null
+  done
+  wait 2>/dev/null
+  [ -n "${tmp:-}" ] && rm -rf "$tmp"
+  return 0
+}
+
+# fail MSG...: report the failure and exit 1. $current (a step name the script
+# keeps up to date) takes the place of the test name when set. A script that
+# wants logs shown defines fail_context, which runs after the message.
+fail() {
+  echo "FAIL (${current:-$TEST_NAME}): $*"
+  if declare -F fail_context >/dev/null; then fail_context; fi
+  exit 1
+}

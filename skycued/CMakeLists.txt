@@ -32,8 +32,9 @@ add_library(skycued_coding STATIC src/coding/bits.cpp src/coding/modes_crc.cpp)
 target_include_directories(skycued_coding PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 skycue_set_warnings(skycued_coding)
 
-# The decoders: frames in, observations out. No I/O, no sockets, no files; the
-# link line is what keeps it so (libskycue only for skycue/types.hpp).
+# The decoders: frames in, observations out. No I/O, no sockets, no files. The
+# link line stops decode from calling core code; it does not stop stray includes
+# (libskycue only for skycue/types.hpp).
 add_library(skycued_decode STATIC
   src/decode/acas.cpp
   src/decode/altitude.cpp

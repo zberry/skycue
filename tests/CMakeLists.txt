@@ -550,10 +550,8 @@ endfunction()
 
 # Hand-registered tests take their base label here.
 skycue_label_existing(unit web_server)
+# Only the tests not registered through skycue_add_script_test need it here.
 skycue_label_existing(integration icao_tables_current package_conf soak_eval)
-skycue_label_existing(integration
-  hub dump pingsim stats_cli config_cli skycued_cli web_ui rawtools fisb_cli iqgen_cli
-  decode_differential decode_differential_uat icao_tables_generator)
 skycue_label_existing(needs-fixtures
   rawtools hub fisb_cli iqgen_cli geom_eval decode_acas_opensky decode_uat_golden
   decode_uat_synthetic decode_differential decode_differential_uat)

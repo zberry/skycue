@@ -1,6 +1,9 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+# find_dependency sets skycue_FOUND to FALSE and returns when Boost is missing, so a consumer's
+# find_package(skycue QUIET) does not abort; the Boost::system fallback runs only after it.
+find_dependency(Boost 1.66)
 include("${CMAKE_CURRENT_LIST_DIR}/skycueBoostSystem.cmake")
 skycue_require_boost_system(1.66)
 find_dependency(Threads)

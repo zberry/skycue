@@ -188,9 +188,6 @@ These records were checked by hand against fisb-decode's output and source:
 35. Expired SIGMET 20-9878 at 08:55:00Z: its end `0855Z` (FD
    `for_use_to_time` 08:55Z) is reached, so the record is removed.
 
-The dated regenerations of the golden (2026-11-02) are in
-[CHANGELOG.md](../CHANGELOG.md#development-history).
-
 ## Regenerating
 
 After an intended change to the decoder, store or JSON writers:

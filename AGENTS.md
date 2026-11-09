@@ -32,7 +32,7 @@ Read `ARCHITECTURE.md` first for the data flow and the glossary.
   `SKYCUE_DUMP978` (dump978-fa) name executables for `decode_differential` and `decode_differential_uat`;
   `SKYCUE_TEST_READSB` (CMake cache variable) does the same for `rawtools`. Unset: the committed
   goldens stand and the live run is skipped. Never put a path to them in a file.
-- Sanitizers, fuzzing, static analysis, soak: `docs/hardening.md` (what the fuzz harnesses found: `docs/hardening-results.md`). Test fixtures: `tests/fixtures/README.md`.
+- Sanitizers, fuzzing, static analysis, soak: `docs/hardening.md`. Test fixtures: `tests/fixtures/README.md`.
 
 ## Dependencies (fixed set)
 - Allowed: Boost, the vendored Leaflet and ECharts tarballs, the C++17 standard library, system libraries (zlib).

@@ -3,9 +3,7 @@
 How to run the sanitizer, fuzz, static-analysis and soak checks. None of the
 instrumentation here is in the default configure or any release; the shipped
 binaries are built exactly as before. Run output (logs, summaries, soak CSVs)
-is not kept in the repository. What the fuzz harnesses found and fixed is in
-[hardening-results.md](hardening-results.md); dated results of other runs are
-in the [changelog](../CHANGELOG.md#development-history).
+is not kept in the repository.
 
 ## Skip rules and suppression formats
 
@@ -368,13 +366,7 @@ in the same change:
    `scripts/dev/run-fuzz.sh <name>` (600 s) with `findings=0`.
 5. Each finding: a regression test in the parser's own test file, named
    `fuzz_<name>_<what>`, red before the fix; the fix; then the 600 s run
-   again on the kept corpus. Record the fix and its test in
-   [hardening-results.md](hardening-results.md).
-
-### Harnesses and the fixes they led to
-
-The table of harnesses, their entry points and the fixes they led to is in
-[hardening-results.md](hardening-results.md).
+   again on the kept corpus. Name the fix and its test in the commit message.
 
 ## Static analysis
 
@@ -483,9 +475,6 @@ the accepted findings, for the reasons above.
 
 `SKYCUE_WERROR=ON` (skycue's own option) adds `-Werror` to every skycue
 target.
-
-The results of the compiler sweep that introduced the option are in
-[CHANGELOG.md](../CHANGELOG.md#compiler-sweep-with-skycue_werroron).
 
 `SKYCUE_WERROR` (default `OFF`) turns compiler warnings into errors; the
 default argument list is unchanged.

@@ -172,9 +172,8 @@ For contributors:
 | [fisb-golden.md](docs/fisb-golden.md) | you change the FIS-B decoder and check its golden output |
 | [asterix-cat021-reference.md](docs/asterix-cat021-reference.md) | you work on the pingStation ASTERIX CAT021 decoding |
 | [hardening.md](docs/hardening.md) | you run the sanitizer, fuzz, static-analysis and soak checks |
-| [hardening-results.md](docs/hardening-results.md) | you want to know what the fuzz harnesses found and fixed |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | you want the data flow, where things live and the glossary |
-| [CHANGELOG.md](CHANGELOG.md) | you want what each release changed, and the dated development records |
+| [CHANGELOG.md](CHANGELOG.md) | you want what each release changed |
 | [releasing.md](docs/releasing.md) | you cut a release and build the packages |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | you send a change |
 | [SECURITY.md](SECURITY.md) | you report a vulnerability or want to know what the web page exposes |

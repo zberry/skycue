@@ -41,13 +41,6 @@ code without the maintainer's explicit decision. Use the in-tree helpers first:
 `json_lite`, `toml_lite`, `skycue::net` and the test-support headers in `tests/`
 (`*_test_support.hpp`).
 
-## Clean room
-
-Never read the source of readsb, dump1090, dump978, pyModeS or stratux. Running
-them and reading their output as a reference is allowed. Do not paste or
-paraphrase their code, in code, tests or comments. Implement from public
-specifications and from this repository's docs.
-
 ## The web page
 
 The page is plain ES2017 with no build step and no framework, as

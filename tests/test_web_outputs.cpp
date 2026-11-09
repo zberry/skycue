@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 using namespace enginetest;
 using skycue::net::test::eventually;

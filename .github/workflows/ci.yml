@@ -160,10 +160,12 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('tests/ui/package-lock.json') }}
-      - name: Install Playwright
-        run: npm ci --prefix tests/ui
+      - name: Install npm dependencies
+        working-directory: tests/ui
+        run: npm ci
       - name: Install Chromium
-        run: npx --prefix tests/ui playwright install --with-deps chromium
+        working-directory: tests/ui
+        run: npx --no-install playwright install --with-deps chromium
       - name: Playwright suite
         # A skip (exit 77) must fail here, so the log has to show a pass.
         run: |

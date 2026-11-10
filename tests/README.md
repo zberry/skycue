@@ -64,8 +64,10 @@ Two tests do not skip as a whole: `rawtools` and `iqgen_cli` print `SKIP` for th
 that read the fetched captures, run the rest and report a pass. `web_ui` runs
 its node checks only when node is installed and passes without them.
 
+`scripts/dev/build-reference-decoders.sh DIR` builds readsb and dump978-fa from pinned tarballs into `DIR/bin` for `SKYCUE_READSB`, `SKYCUE_DUMP978` and `SKYCUE_TEST_READSB`.
+
 Unit tests that need a fetched sample for only some cases, such as `beast_raw` and `uat_raw_decode`, skip those
 cases (Boost.Test reports them as skipped) and run the rest.
 
 Any CI setup should include one job with the fetched test data and the external decoders set,
-or the differential tests never run. The workflow in `.github/workflows/ci.yml` runs `ctest -LE 'needs-test-data|needs-node|slow'` and has no such job.
+or the differential tests never run. The `test-data` job in `.github/workflows/ci.yml` is that job: it fetches the captures, builds the decoders and runs `ctest -L needs-test-data`.

@@ -122,6 +122,13 @@ skycue_add_script_test(package_postinst
     ${CMAKE_CURRENT_BINARY_DIR}/package-postinst-work
   TIMEOUT 60)
 
+# build_reference_decoders: argument handling, pins and the digest check of
+# scripts/dev/build-reference-decoders.sh (builds nothing).
+skycue_add_script_test(script_test_build_reference_decoders
+  SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_build_reference_decoders.sh
+  ARGS ${CMAKE_SOURCE_DIR}/scripts/dev/build-reference-decoders.sh
+  TIMEOUT 60)
+
 # SKYCUE_TEST_SLOW_FACTOR outside sanitizer and fuzz builds: two configures
 # of this tree (no build), their registered timeouts and environments compared.
 if(NOT SKYCUE_PYTHON3)
@@ -420,6 +427,7 @@ endif()
 #   script_test_skycue_web_tarballs   script_test_source_tarball
 file(GLOB _script_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_*.sh")
 list(FILTER _script_tests EXCLUDE REGEX "/test_package_postinst\\.sh$")  # registered above (takes arguments)
+list(FILTER _script_tests EXCLUDE REGEX "/test_build_reference_decoders\\.sh$")  # registered above (takes arguments)
 foreach(f IN LISTS _script_tests)
   get_filename_component(name "${f}" NAME_WE)
   if(name STREQUAL "test_net_standalone")

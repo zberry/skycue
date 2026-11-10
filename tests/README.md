@@ -71,13 +71,13 @@ cases (Boost.Test reports them as skipped) and run the rest.
 
 ## What CI runs
 
-The workflows are in `.github/workflows/`. The `needs-test-data` label marks the tests that need the fetched captures or the external decoders, so the first job leaves them out and the `test-data` job runs only them with fresh reference decoders; without that job the differential tests never run.
+The workflows are in `.github/workflows/`. The `needs-test-data` label marks the tests that need the fetched captures or the external decoders, so the first job leaves them out and the `test-data` job runs them, and every other offline test, with the captures and fresh reference decoders; without that job the differential tests never run.
 
 | Job | What it runs | When |
 | --- | --- | --- |
 | build-test | the offline tests, `ctest -LE 'needs-test-data\|slow'` | push, pull request |
 | sanitizers | the whole suite under ASan and UBSan | push, pull request |
-| test-data | `ctest -L needs-test-data` with the fetched captures and freshly built reference decoders | push, pull request |
+| test-data | everything but slow and browser tests, with the captures and fresh references (`ctest -LE 'slow\|needs-node'`; a skipped test fails the job) | push, pull request |
 | platforms | build and test in Debian 12, Debian 13, Rocky Linux 8 and 9 containers | push, pull request |
 | arm64 | the same build and test on an arm64 runner | public repository only |
 | playwright | the browser suite | push, pull request |
@@ -86,3 +86,4 @@ The workflows are in `.github/workflows/`. The `needs-test-data` label marks the
 | codeql | CodeQL analysis of the C++ code | public repository only |
 
 CI builds Release, the configuration the packages ship; the playwright job runs with slow factor 2.
+`hub` fails in an unoptimised build: under the test's replay speed the daemon's per-client send queue passes its 1 MiB cap and the listener cuts the consumers; the daemon-side fix (coalescing queued frames into larger writes) is tracked. Configure with `-DCMAKE_BUILD_TYPE=Release` to run the suite.

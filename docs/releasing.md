@@ -30,15 +30,12 @@ version throughout.
    bash tests/scripts/test_package_metadata.sh
    ```
 
-3. **Commit and tag.** Commit the bump, the changelogs and the page
-   updates, then tag the commit (the source tarball takes its name from the
-   version):
+3. **Commit the release.** Commit the bump, the changelogs and the page
+   updates, and push the commit. Do not tag yet: the tag comes in step 7,
+   after the packages are checked (the source tarball takes its name from
+   the version in the commit).
 
-   ```sh
-   git tag -a v0.2.0 -m "skycue 0.2.0"
-   ```
-
-4. **Make the source tarball.** `dist/skycue-0.2.0.tar.gz`: the tagged tree
+4. **Make the source tarball.** `dist/skycue-0.2.0.tar.gz`: the release commit's tree
    plus the Leaflet and ECharts tarballs from `sources/`. The package builds
    below use it, it is what a from-source reader downloads.
 
@@ -46,12 +43,14 @@ version throughout.
    packaging/make-source-tarball.sh          # -o DIR for another directory than dist/
    ```
 
-5. **Build and verify the six packages.** Run the release workflow
-   (`.github/workflows/release.yml`) by hand first (`workflow_dispatch` on
-   the release commit; its draft-release job is skipped without a tag) and
-   wait for all six `packages` legs to pass, then push the tag: the tag run
-   repeats the builds and creates a draft release holding the tarball, the
-   packages and `SHA256SUMS`. To do it locally instead: each target
+5. **Build and verify the six packages.** Dispatch the release workflow
+   (`.github/workflows/release.yml`, `workflow_dispatch`) on the pushed
+   release commit (its draft-release job is skipped without a tag) and
+   wait for every `packages` leg to pass. While the repository is private
+   the workflow builds four targets (there is no arm64 runner): the two
+   arm64 packages are built locally with the recipe below and attached to
+   the draft by hand (step 7). Once the repository is public the workflow
+   builds all six. To do it locally instead: each target
    builds in its own container and its packages are then installed and
    checked in a fresh one
    (offline after the install: version, unit, user and directories, a
@@ -83,21 +82,34 @@ version throughout.
    arm64 stands in for Raspberry Pi OS.
 
    **Do not tag the release until all six targets print `verify: OK`,
-   the two arm64 targets included.** Their builds need qemu-user-static
+   the two arm64 targets included** (from the workflow or from the local
+   builds). The local arm64 builds need qemu-user-static
    with binfmt handlers registered on the build host (check that
    `/proc/sys/fs/binfmt_misc/qemu-aarch64` exists). Without them the arm64
    targets cannot be built or verified, and the Raspberry Pi OS package
    would ship untested.
 
-6. **Install on a real Raspberry Pi once.** Before the tag is pushed,
+6. **Install on a real Raspberry Pi once.** Before the tag is pushed
+   (use the package from the local arm64 build while the repository is
+   private, otherwise the one from the workflow run),
    install `skycue_0.2.0-1~deb12u1_arm64.deb` on a Raspberry Pi running Raspberry Pi
    OS (64-bit) and follow [installing.md](installing.md) to the map: the
    emulated build cannot show what a real Pi does at boot, under its
    memory limits or with its own readsb.
 
-7. **Publish.** Push the commit and the tag. The draft release the workflow
-   created holds the files; write the notes into it and publish it. By hand,
-   attach to the release:
+7. **Tag and publish.** Tag the release commit and push the tag:
+
+   ```sh
+   git tag -a v0.2.0 -m "skycue 0.2.0"
+   git push origin v0.2.0
+   ```
+
+   The tag run rebuilds the packages and creates a draft release holding
+   the tarball, the packages and `SHA256SUMS`. Edit the notes in the draft,
+   then publish it. The workflow refuses to touch a release that is
+   already published. The manual path, for the arm64 packages while the
+   repository is private and for a release built entirely by hand: attach
+   to the draft:
 
    - `dist/skycue-0.2.0.tar.gz` (the source tarball)
    - from `dist/debian12-amd64/`, `dist/debian12-arm64/`,

@@ -519,7 +519,7 @@ BOOST_AUTO_TEST_CASE(outputs_rejects_non_object_body)
     Fx f;
     BOOST_TEST(f.call("POST", "/api/outputs", beastOut("bo", freeTcpPort())).status == 201u);
     for (const char* body : {"[]", "[1]", "\"x\""})
-        for (const char* route : {"PUT /api/outputs/bo", "POST /api/outputs/bo/disable", "POST /api/outputs/bo/enable"}) {
+        for (const char* route : {"PUT /api/outputs/bo", "POST /api/outputs/bo/disable", "POST /api/outputs/bo/enable", "POST /api/outputs"}) {
             const std::string r(route);
             const auto sp = r.find(' ');
             const auto reply = f.call(r.substr(0, sp), r.substr(sp + 1), body);

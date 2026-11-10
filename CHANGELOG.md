@@ -7,8 +7,7 @@ recorded in [docs/protocol.md](docs/protocol.md).
 
 Unreleased. The first public release.
 
-- Every write route answers 400 to a request body that is not a JSON object;
-  previously four routes read `[]` as `{}`.
+- Every write route answers 400 to a request body that is not a JSON object.
 - Inputs of six kinds (readsb JSON, Beast frames, 978 MHz UAT lines, dump978-fa,
   pingStation 3 as JSON or ASTERIX CAT021, and replay of recordings) over TCP
   or UDP, merged into one track table, with several of a kind at once.

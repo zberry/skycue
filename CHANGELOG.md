@@ -25,3 +25,6 @@ Unreleased. The first public release.
 - Recordings and statistics kept across restarts, and the command-line tools
   `skycue-dump`, `skycue-rawrec`, `skycue-rawplay`, `skycue-pingsim`,
   `skycue-stats`, `skycue-fisb` and `skycue-iqgen`.
+- TCP outputs write queued frames in contiguous blocks of up to 64 KiB, so a busy
+  hub drains its send queues far faster and no longer risks cutting a healthy
+  consumer under its own load.

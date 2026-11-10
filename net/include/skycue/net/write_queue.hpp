@@ -1,8 +1,10 @@
 #pragma once
 
 // WriteQueue: the send side of one TCP connection. It holds the Bufs waiting
-// to be written, writes them with gather writes (everything queued when a
-// write starts goes out in one async_write) and enforces a byte cap. Used by
+// to be written, writes them in contiguous blocks (what is queued when a
+// write starts, up to 64 KiB, is copied into one buffer and goes out in one
+// async_write; a larger single message is written alone) and enforces a byte
+// cap. Nothing waits for more data: a block holds only what is already queued. Used by
 // Dialer and Listener, one per connection. All members run on the
 // io_context's thread.
 //

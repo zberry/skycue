@@ -110,7 +110,8 @@ jobs:
             apt-get update
             apt-get install -y --no-install-recommends cmake make g++ git ca-certificates libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl
           else
-            dnf install -y gcc-c++ cmake make git boost-devel zlib-devel python3 curl diffutils tar gzip
+            # curl is not listed: the Rocky images ship curl or curl-minimal, and curl conflicts with curl-minimal on 9.
+            dnf install -y gcc-c++ cmake make git boost-devel zlib-devel python3 diffutils tar gzip
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Fetch web libraries

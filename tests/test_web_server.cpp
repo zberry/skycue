@@ -2173,7 +2173,7 @@ BOOST_AUTO_TEST_CASE(stats_decoder_object_only_with_decoding_inputs)
     const asio::ip::udp::endpoint to(asio::ip::make_address("127.0.0.1"), o.decode_port);
     BOOST_TEST(pollUntil([&] {
         sock.send_to(asio::buffer(frame(false) + frame(true)), to);
-        return parseJson(get(f.port, "/api/stats").body).get_child_optional("decoder").has_value();
+        return parseJson(get(f.port, "/api/stats").body).get_child_optional("decoder").is_initialized();
     }));
     BOOST_TEST(pollUntil([&] { return parseJson(get(f.port, "/api/stats").body).get<int>("decoder.observations", 0) > 0; }));
     const pt::ptree s = parseJson(get(f.port, "/api/stats").body);
@@ -2519,7 +2519,7 @@ BOOST_AUTO_TEST_CASE(api_track_acas_ra_expires_without_a_message)
     });
     {
         const pt::ptree s = parseJson(get(f.port, "/api/state").body);
-        BOOST_TEST(s.get_child("tracks").front().second.get_child_optional("acas_ra").has_value());
+        BOOST_TEST(s.get_child("tracks").front().second.get_child_optional("acas_ra").is_initialized());
     }
     // Another aircraft 40 s later moves the data clock; the silent one loses its advisory.
     f.fx->t.call([&] {
@@ -2534,7 +2534,7 @@ BOOST_AUTO_TEST_CASE(api_track_acas_ra_expires_without_a_message)
         if (kv.second.get<std::string>("hex") != "a1b2c3")
             continue;
         found = true;
-        BOOST_TEST(!kv.second.get_child_optional("acas_ra").has_value());
+        BOOST_TEST(!kv.second.get_child_optional("acas_ra").is_initialized());
     }
     BOOST_TEST(found);
 }

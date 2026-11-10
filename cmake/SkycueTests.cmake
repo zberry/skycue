@@ -7,7 +7,8 @@
 #   [TIMEOUT <seconds>] [SKIPPABLE] [LABELS <labels...>])
 #   A Boost.Test executable test_<name> (source test_<name>.cpp unless SOURCE
 #   is given), registered as ctest <name>. Links skycued_core unless LIBS is
-#   given, and always Boost::unit_test_framework. DATA_DIR defines
+#   given, and always Boost::unit_test_framework (plus stdc++fs on GCC older
+#   than 9, where std::filesystem is a separate library). DATA_DIR defines
 #   SKYCUE_TEST_DATA_DIR as <this directory>/data; NET_SUPPORT adds
 #   net/tests to the include path. SKIPPABLE: exit status 77 is a skip.
 #   Labels always include "unit".
@@ -51,7 +52,8 @@ function(skycue_add_unit_test name)
   endif()
   set(target test_${name})
   add_executable(${target} ${A_SOURCE} ${A_EXTRA_SOURCES})
-  target_link_libraries(${target} PRIVATE ${A_LIBS} Boost::unit_test_framework)
+  # GCC 8 (EL8) ships std::filesystem in a separate library.
+  target_link_libraries(${target} PRIVATE ${A_LIBS} Boost::unit_test_framework $<$<AND:$<CXX_COMPILER_ID:GNU>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,9>>:stdc++fs>)
   target_compile_definitions(${target} PRIVATE BOOST_TEST_DYN_LINK ${A_DEFS})
   if(A_DATA_DIR)
     target_compile_definitions(${target} PRIVATE

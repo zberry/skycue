@@ -7,7 +7,6 @@ recorded in [docs/protocol.md](docs/protocol.md).
 
 Unreleased. The first public release.
 
-- Every write route answers 400 to a request body that is not a JSON object.
 - Inputs of six kinds (readsb JSON, Beast frames, 978 MHz UAT lines, dump978-fa,
   pingStation 3 as JSON or ASTERIX CAT021, and replay of recordings) over TCP
   or UDP, merged into one track table, with several of a kind at once.
@@ -26,6 +25,8 @@ Unreleased. The first public release.
 - Recordings and statistics kept across restarts, and the command-line tools
   `skycue-dump`, `skycue-rawrec`, `skycue-rawplay`, `skycue-pingsim`,
   `skycue-stats`, `skycue-fisb` and `skycue-iqgen`.
-- TCP outputs write queued frames in contiguous blocks of up to 64 KiB, so a busy
-  hub drains its send queues far faster and no longer risks cutting a healthy
-  consumer under its own load.
+- TCP outputs write queued frames in contiguous blocks of up to 64 KiB, so a
+  busy hub drains its send queues quickly and a healthy consumer is never cut
+  for the hub's own backlog.
+- Every HTTP write route that reads a body answers 400 to anything that is not
+  a JSON object.

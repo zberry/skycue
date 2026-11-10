@@ -67,8 +67,8 @@ These are **[U]** in the reference: no sample contains them and the open
 decoders disagree, so skycued counts and drops them rather than guess.
 
 - **APDU time options 1 and 3** (seconds-resolution times). Counted in
-  `skipped_experimental`; decoded with `fisb.experimental = true`. Both
-  test data use options 0 and 2 only.
+  `skipped_experimental`; decoded with `fisb.experimental = true`.
+  Both samples use options 0 and 2 only.
 - **Raster blocks at or above 60° N** (the doubled block lattice). Counted in
   `blocks.high_lat_skipped`; decoded with `fisb.experimental = true`. Neither
   sample has data there.

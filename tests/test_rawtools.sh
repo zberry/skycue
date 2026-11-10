@@ -449,8 +449,8 @@ got=$(beast_sha "$tmp/pin.csv")
 if [ "$have_raw" = 1 ]; then
   zcat "$csv" > "$tmp/full.csv"
   got=$(beast_sha "$tmp/full.csv")
-  [ "$got" = "3243746 10d06a99941d59dd4df2e6a9e4f625b80caf02727a59a6dc7b43a45cd6e36aaa" ] || fail "(i2) test data stream changed: $got"
-  [ "$(wc -l < "$tmp/full.csv")" = 176612 ] || fail "(i2) test data line count"
+  [ "$got" = "3243746 10d06a99941d59dd4df2e6a9e4f625b80caf02727a59a6dc7b43a45cd6e36aaa" ] || fail "(i2) sample stream changed: $got"
+  [ "$(wc -l < "$tmp/full.csv")" = 176612 ] || fail "(i2) sample line count"
 fi
 echo "ok (i2) rawplay csv -> Beast stream byte-identical to the pinned values"
 

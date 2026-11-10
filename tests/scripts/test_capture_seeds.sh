@@ -18,7 +18,7 @@ set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 gen="$repo/scripts/test-data/gen-capture-seeds.py"
-fx=${SKYCUE_TEST_DATA:-$repo/tests/data}
+td=${SKYCUE_TEST_DATA:-$repo/tests/data}
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -44,9 +44,9 @@ rc=$?
 grep -q 'missing' "$tmp/empty.out" && ok "empty test data directory says what is missing" || bad "no 'missing' message"
 
 # ---- one capture missing: that target only is skipped ----
-if [ -f "$fx/fisb/tg30.978" ] && [ -f "$fx/raw/uat-sample.txt.gz" ]; then
+if [ -f "$td/fisb/tg30.978" ] && [ -f "$td/raw/uat-sample.txt.gz" ]; then
   mkdir -p "$tmp/partial/fisb"
-  cp "$fx/fisb/tg30.978" "$tmp/partial/fisb/"
+  cp "$td/fisb/tg30.978" "$tmp/partial/fisb/"
   python3 -I "$gen" "$tmp/partial" "$tmp/out-partial" > /dev/null 2>&1
   rc=$?
   [ "$rc" = 3 ] && ok "partial test data exit 3" || bad "partial test data exit $rc"
@@ -89,14 +89,14 @@ listed() { wc -l < "$tmp/$1.list.fuzz_$2"; }
 # SKIP line names each missing generated set. Counts after the capture-derived
 # seeds are gone: raw_formats 19-24, fisb_decoder one hand-made seed,
 # iqgen_coding 3-6, recording 7-10.
-runfuzz nofx "$tmp/empty"
+runfuzz notd "$tmp/empty"
 rc=$?
-[ "$rc" = 0 ] && ok "run-fuzz without captures exits 0" || { bad "run-fuzz without captures exit $rc"; cat "$tmp/nofx.out" >&2; }
+[ "$rc" = 0 ] && ok "run-fuzz without captures exits 0" || { bad "run-fuzz without captures exit $rc"; cat "$tmp/notd.out" >&2; }
 for p in raw_formats:6 fisb_decoder:1 iqgen_coding:4 recording:4; do
   t=${p%%:*} n=${p##*:}
-  [ "$(listed nofx "$t")" = "$n" ] && ok "no captures: $t starts with $n committed seeds" \
-    || bad "no captures: $t has $(listed nofx "$t") seeds, want $n"
-  grep -q "SKIP.*$t" "$tmp/nofx.out" && ok "no captures: SKIP line for $t" || bad "no captures: no SKIP line for $t"
+  [ "$(listed notd "$t")" = "$n" ] && ok "no captures: $t starts with $n committed seeds" \
+    || bad "no captures: $t has $(listed notd "$t") seeds, want $n"
+  grep -q "SKIP.*$t" "$tmp/notd.out" && ok "no captures: SKIP line for $t" || bad "no captures: no SKIP line for $t"
 done
 
 # A target with no committed seed is an error.
@@ -114,16 +114,16 @@ else
 fi
 
 # ---- with the captures ----
-if [ ! -f "$fx/raw/uat-sample.txt.gz" ] || [ ! -f "$fx/raw/stratux-uat-2015.log.gz" ] \
-  || [ ! -f "$fx/raw/modes-120s.csv.gz" ] || [ ! -f "$fx/fisb/tg30.978" ] \
-  || [ ! -f "$fx/fisb/received-with-uplinks.jsonl" ]; then
+if [ ! -f "$td/raw/uat-sample.txt.gz" ] || [ ! -f "$td/raw/stratux-uat-2015.log.gz" ] \
+  || [ ! -f "$td/raw/modes-120s.csv.gz" ] || [ ! -f "$td/fisb/tg30.978" ] \
+  || [ ! -f "$td/fisb/received-with-uplinks.jsonl" ]; then
   echo "SKIP: the captures are not fetched (run scripts/test-data/fetch-test-captures.sh); nothing to generate from" >&2
   [ "$fails" = 0 ] || exit 1
   exit 77
 fi
 
-python3 -I "$gen" "$fx" "$tmp/a" > /dev/null 2>&1 && ok "generator exits 0 with the captures" || bad "generator failed"
-python3 -I "$gen" "$fx" "$tmp/b" > /dev/null 2>&1
+python3 -I "$gen" "$td" "$tmp/a" > /dev/null 2>&1 && ok "generator exits 0 with the captures" || bad "generator failed"
+python3 -I "$gen" "$td" "$tmp/b" > /dev/null 2>&1
 check "two runs are byte-identical" diff -r "$tmp/a" "$tmp/b"
 for p in raw_formats:18 fisb_decoder:12 iqgen_coding:2 recording:6; do
   t=${p%%:*} n=${p##*:}
@@ -146,15 +146,15 @@ else
 fi
 
 # run-fuzz with captures: committed + generated beside each other.
-runfuzz withfx "$fx"
+runfuzz withtd "$td"
 rc=$?
-[ "$rc" = 0 ] && ok "run-fuzz with captures exits 0" || { bad "run-fuzz with captures exit $rc"; cat "$tmp/withfx.out" >&2; }
+[ "$rc" = 0 ] && ok "run-fuzz with captures exits 0" || { bad "run-fuzz with captures exit $rc"; cat "$tmp/withtd.out" >&2; }
 for p in raw_formats:24 fisb_decoder:13 iqgen_coding:6 recording:10; do
   t=${p%%:*} n=${p##*:}
-  [ "$(listed withfx "$t")" = "$n" ] && ok "captures: $t corpus starts with $n seeds" \
-    || bad "captures: $t has $(listed withfx "$t") seeds, want $n"
+  [ "$(listed withtd "$t")" = "$n" ] && ok "captures: $t corpus starts with $n seeds" \
+    || bad "captures: $t has $(listed withtd "$t") seeds, want $n"
 done
-grep -q SKIP "$tmp/withfx.out" && bad "SKIP line although the captures are present"
+grep -q SKIP "$tmp/withtd.out" && bad "SKIP line although the captures are present"
 
 [ "$fails" = 0 ] || { echo "$fails check(s) failed" >&2; exit 1; }
 echo "all checks passed"

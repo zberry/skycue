@@ -155,7 +155,7 @@ skycue_add_script_test(rawtools
 
 # The output hub end to end: a replayed capture through a beast_raw input to
 # TCP and multicast outputs, a stalled consumer cut, an output removed with a
-# backlog. Skips without data/raw (scripts/test-data/fetch-test-captures.sh).
+# backlog. Skips without tests/data/raw (scripts/test-data/fetch-test-captures.sh).
 skycue_add_script_test(hub
   SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_hub.sh
   ARGS $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/data
@@ -468,7 +468,7 @@ skycue_add_unit_test(geom_eval LIBS skycued_core ZLIB::ZLIB DATA_DIR TIMEOUT 120
 
 # skycued's own decoder against readsb, live: the 120 s capture replayed at speed 1
 # through a beast_raw input under inputs.decoder = "skycued", compared with the committed
-# golden and, with SKYCUE_READSB set, a fresh readsb run. Skips without data/raw.
+# golden and, with SKYCUE_READSB set, a fresh readsb run. Skips without tests/data/raw.
 skycue_add_script_test(decode_differential
   SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/test_decode_differential.sh
   ARGS $<TARGET_FILE:skycued> $<TARGET_FILE:skycue-rawplay> ${CMAKE_CURRENT_SOURCE_DIR}/data

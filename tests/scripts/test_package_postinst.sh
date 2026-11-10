@@ -65,7 +65,7 @@ check_untouched_conf() {  # NAME ROOT: the conf stays, the toml is as it was
   local n=$1 r=$2
   cmp -s "$r/etc/skycue/skycue.conf" "$work/old.conf" || fail "$n: old conf changed"
   [ -e "$r/etc/skycue/skycue.conf.converted" ] && fail "$n: .converted without a conversion"
-  ls "$r/etc/skycue" "$r/var/lib/skycue" | grep -q 'tmp' && fail "$n: temporary files left"
+  find "$r/etc/skycue" "$r/var/lib/skycue" -mindepth 1 -name '*tmp*' | grep -q . && fail "$n: temporary files left"
   return 0
 }
 

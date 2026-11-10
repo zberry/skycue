@@ -11,11 +11,14 @@
 # The install goes to a DESTDIR, since the config and the unit may have
 # absolute destinations (/etc, /usr/lib/systemd/system).
 # usage: test_install_layout.sh CMAKE BUILD_DIR WORK_DIR PREFIX BINDIR SYSCONFDIR
-#          SYSTEM_FILES(ON|OFF) PACKAGE_CONFIG(ON|OFF) UNITDIR
+#          SYSTEM_FILES(ON|OFF) PACKAGE_CONFIG(ON|OFF) PACKAGE_CONFIG_IN_ETC(ON|OFF) UNITDIR
+#   With PACKAGE_CONFIG and not IN_ETC nothing is installed under SYSCONFDIR/skycue
+#   (the packaged file is share/skycue/skycue.toml.example; the Debian postinst
+#   creates the toml from it).
 #   BINDIR, SYSCONFDIR: the full (absolute) directories; UNITDIR as cached,
 #   relative to PREFIX or absolute.
 set -u
-cmake=$1 build=$2 work=$3 prefix=$4 bindir=$5 sysconfdir=$6 system_files=$7 package_config=$8 unitdir=$9
+cmake=$1 build=$2 work=$3 prefix=$4 bindir=$5 sysconfdir=$6 system_files=$7 package_config=$8 in_etc=$9 unitdir=${10}
 fail() { echo "FAIL: $*"; exit 1; }
 is_on() { case "${1^^}" in ON|YES|TRUE|Y|1) return 0 ;; *) return 1 ;; esac; }
 
@@ -43,7 +46,10 @@ for d in tiles overlays; do
 done
 
 case $unitdir in /*) unit=$unitdir/skycued.service ;; *) unit=$prefix/$unitdir/skycued.service ;; esac
-if is_on "$package_config"; then
+shipped_only=0
+if is_on "$package_config" && ! is_on "$in_etc"; then
+  shipped_only=1 conf=$sysconfdir/skycue/skycue.toml other=$sysconfdir/skycue/skycue.toml.example
+elif is_on "$package_config"; then
   conf=$sysconfdir/skycue/skycue.toml other=$sysconfdir/skycue/skycue.toml.example
 else
   conf=$sysconfdir/skycue/skycue.toml.example other=$sysconfdir/skycue/skycue.toml
@@ -66,15 +72,24 @@ if is_on "$system_files"; then
     || fail "installed skycue-make-maps: overlays not for $work/maps/overlays: $mm"
   grep -q 'share/skycue/www' <<<"$mm" && fail "installed skycue-make-maps: a helper default leaked in: $mm"
   [ -e "$work/maps" ] && fail "installed skycue-make-maps --dry-run created the map dir"
-  [ -f "$root$conf" ] || fail "not installed: $conf"
-  [ -e "$root$other" ] && fail "installed $other as well as $conf"
-  grep -Eq '^lat = 0\.0( |$)' "$root$conf" || fail "$conf has no lat = 0.0"
-  if is_on "$package_config"; then
-    grep -qx 'state_dir = "/var/lib/skycue"' "$root$conf" || fail "$conf is not the packaged config"
-    cmp -s "$root$conf" "$p/share/skycue/skycue.toml.example" || fail "share/skycue/skycue.toml.example is not the packaged $conf"
+  if [ "$shipped_only" = 1 ]; then
+    [ -e "$root$sysconfdir/skycue" ] && [ -n "$(find "$root$sysconfdir/skycue" -mindepth 1 2>/dev/null)" ] \
+      && fail "installed under $sysconfdir/skycue with SKYCUE_PACKAGE_CONFIG_IN_ETC=OFF"
+    sh=$p/share/skycue/skycue.toml.example
+    [ -f "$sh" ] || fail "not installed: $prefix/share/skycue/skycue.toml.example"
+    grep -Eq '^lat = 0\.0( |$)' "$sh" || fail "$prefix/share/skycue/skycue.toml.example has no lat = 0.0"
+    grep -qx 'state_dir = "/var/lib/skycue"' "$sh" || fail "$prefix/share/skycue/skycue.toml.example is not the packaged config"
   else
-    cmp -s "$root$conf" "$(dirname "$0")/../packaging/skycue.toml.example" \
-      || fail "$conf is not the example as it is in etc/"
+    [ -f "$root$conf" ] || fail "not installed: $conf"
+    [ -e "$root$other" ] && fail "installed $other as well as $conf"
+    grep -Eq '^lat = 0\.0( |$)' "$root$conf" || fail "$conf has no lat = 0.0"
+    if is_on "$package_config"; then
+      grep -qx 'state_dir = "/var/lib/skycue"' "$root$conf" || fail "$conf is not the packaged config"
+      cmp -s "$root$conf" "$p/share/skycue/skycue.toml.example" || fail "share/skycue/skycue.toml.example is not the packaged $conf"
+    else
+      cmp -s "$root$conf" "$(dirname "$0")/../packaging/skycue.toml.example" \
+        || fail "$conf is not the example as it is in etc/"
+    fi
   fi
   [ -f "$root$unit" ] || fail "not installed: $unit"
   u=$root$unit
@@ -91,7 +106,7 @@ if is_on "$system_files"; then
     [ "$(grep -cxF -- "$line" "$u")" = 1 ] || fail "$unit: want exactly one line $line"
   done
   grep -q '^Requires=' "$u" && fail "$unit requires another unit"
-  allowed_outside=("$conf" "$unit")
+  if [ "$shipped_only" = 1 ]; then allowed_outside=("$unit"); else allowed_outside=("$conf" "$unit"); fi
 else
   for f in $scripts bin/skycue-make-maps; do
     [ -e "$p/$f" ] && fail "SKYCUE_INSTALL_SYSTEM_FILES=OFF installed $prefix/$f"

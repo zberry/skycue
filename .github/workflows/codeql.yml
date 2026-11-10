@@ -21,7 +21,9 @@ jobs:
         id: p
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "private=$(gh api repos/$GITHUB_REPOSITORY --jq .private)" >> "$GITHUB_OUTPUT"
+        run: |
+          p=$(gh api repos/"$GITHUB_REPOSITORY" --jq .private)
+          echo "private=$p" >> "$GITHUB_OUTPUT"
 
   analyze:
     needs: gate

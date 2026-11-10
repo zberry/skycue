@@ -28,7 +28,9 @@ jobs:
         id: p
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "private=$(gh api repos/$GITHUB_REPOSITORY --jq .private)" >> "$GITHUB_OUTPUT"
+        run: |
+          p=$(gh api repos/"$GITHUB_REPOSITORY" --jq .private)
+          echo "private=$p" >> "$GITHUB_OUTPUT"
 
   build-test:
     runs-on: ubuntu-latest
@@ -83,12 +85,15 @@ jobs:
           key: captures-${{ hashFiles('scripts/test-data/fetch-test-captures.sh', 'scripts/test-data/fetch-iq-samples.sh') }}
       - name: Fetch test captures
         run: SKYCUE_FETCH_IQ=1 scripts/test-data/fetch-test-captures.sh --cache build/test-captures
+      - name: Runner image id
+        id: image
+        run: echo "id=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
       - name: Cache reference decoders
         id: decoders
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/reference-decoders
-          key: decoders-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ hashFiles('scripts/dev/build-reference-decoders.sh') }}
+          key: decoders-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-${{ hashFiles('scripts/dev/build-reference-decoders.sh') }}
       - name: Build reference decoders
         if: steps.decoders.outputs.cache-hit != 'true'
         run: scripts/dev/build-reference-decoders.sh build/reference-decoders

@@ -119,6 +119,14 @@ version throughout.
    - from `dist/el8/` and `dist/el9/`: `skycue-0.2.0-1.el<N>.x86_64.rpm` and
      `skycue-devel-0.2.0-1.el<N>.x86_64.rpm`
 
+   When the two arm64 packages are attached by hand during the private
+   period, append their lines to `SHA256SUMS` and upload it again:
+
+   ```sh
+   sha256sum skycue_*arm64.deb libskycue-dev_*arm64.deb >> SHA256SUMS
+   gh release upload v0.2.0 SHA256SUMS --clobber
+   ```
+
    The Debian 12 and Debian 13 debs of one architecture are not
    interchangeable (each depends on its own release's Boost libraries); the
    `~deb12u1` / `~deb13u1` revision that `build-package.sh` gives them keeps

@@ -62,6 +62,7 @@ struct Events {
     std::condition_variable cv;
     std::vector<Track> updates;
     std::vector<std::pair<TrackId, DropReason>> drops;
+    std::vector<std::size_t> tracks_at_drop; // client.trackCount() seen inside each drop callback
     std::vector<bool> conns;
     std::vector<std::thread::id> threads;
 
@@ -73,9 +74,10 @@ struct Events {
             threads.push_back(std::this_thread::get_id());
             cv.notify_all();
         });
-        c.onTrackDropped([this](TrackId id, DropReason r) {
+        c.onTrackDropped([this, &c](TrackId id, DropReason r) {
             std::lock_guard<std::mutex> lk(m);
             drops.emplace_back(id, r);
+            tracks_at_drop.push_back(c.trackCount());
             threads.push_back(std::this_thread::get_id());
             cv.notify_all();
         });
@@ -441,13 +443,15 @@ BOOST_AUTO_TEST_CASE(udp_stale_after_missing_two_keyframes)
     BOOST_REQUIRE(bDropped);
     {
         std::lock_guard<std::mutex> lk(ev.m);
-        BOOST_REQUIRE(ev.drops.size() == 1u);
+        BOOST_REQUIRE(!ev.drops.empty());
         BOOST_TEST(ev.drops[0].first.address == 0xBu);
         BOOST_TEST(static_cast<int>(ev.drops[0].second) == static_cast<int>(DropReason::stale));
+        // A is still tracked at the moment B is dropped (a later read races A's own deadline).
+        BOOST_REQUIRE(!ev.tracks_at_drop.empty());
+        BOOST_TEST(ev.tracks_at_drop.at(0) == 1u);
     }
     // Not before two keyframe intervals have been missed.
     BOOST_TEST(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() >= 300);
-    BOOST_TEST(client.trackCount() == 1u);
 }
 
 BOOST_AUTO_TEST_CASE(udp_heartbeat_timeout_source_lost)

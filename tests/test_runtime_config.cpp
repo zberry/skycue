@@ -717,7 +717,9 @@ BOOST_AUTO_TEST_CASE(atomic_write_preserves_symlink)
     BOOST_TEST(S_ISLNK(st.st_mode));
     BOOST_TEST(has(readAll(real_overrides), "max_range_nm = 55.0\n"));
     BOOST_TEST(has(readAll(real_overrides), "min_elevation_deg = 1\n"));  // the keys it held stay
-    BOOST_TEST(!has(readAll(real_conf), "55"));
+    const std::string conf_after = readAll(real_conf);
+    BOOST_TEST(has(conf_after, "max_range_nm = 150\n"));  // the promoted range went to the overrides file
+    BOOST_TEST(!has(conf_after, "max_range_nm = 55"));
     BOOST_TEST(readAll(real_allow) == "a1b2c3\nc0ffee\n");
     BOOST_TEST(!fileExists(real_overrides + ".tmp"));
     BOOST_TEST(!fileExists(f.path("skycue.overrides.toml.tmp")));

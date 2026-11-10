@@ -93,3 +93,52 @@ jobs:
       - name: ccache statistics
         if: always()
         run: ccache -s
+
+  platforms:
+    name: platforms (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['debian:12', 'debian:13', 'rockylinux/rockylinux:8', 'rockylinux/rockylinux:9']
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install packages
+        run: |
+          if [ -f /etc/debian_version ]; then
+            apt-get update
+            apt-get install -y --no-install-recommends cmake make g++ git ca-certificates libboost-dev libboost-system-dev libboost-program-options-dev libboost-test-dev zlib1g-dev python3 curl
+          else
+            dnf install -y gcc-c++ cmake make git boost-devel zlib-devel python3 curl diffutils tar gzip
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Fetch web libraries
+        run: scripts/dev/fetch-web-libs.sh
+      - name: Configure
+        run: cmake -S . -B build -DSKYCUE_UI_TESTS=OFF
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|slow|needs-node'
+
+  arm64:
+    runs-on: ubuntu-24.04-arm
+    if: ${{ !github.event.repository.private }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-build
+        with:
+          ccache-key: gcc-arm64
+      - name: Node version
+        run: node --version
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DSKYCUE_UI_TESTS=OFF
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|slow'
+      - name: ccache statistics
+        if: always()
+        run: ccache -s

@@ -33,12 +33,13 @@ PY
     --net-json-port-include-noposition --quiet >"$tmp/readsb.log" 2>&1 &
 bg_pids+=($!)
 readsb_pid=$!
-# Wait (up to 10 s) for readsb to bind its JSON port.
+# Wait (up to 30 s, times SKYCUE_TEST_SLOW) for readsb to bind a port.
 wait_port() {
     python3 -I - "$1" <<'PY'
-import socket, sys, time
+import os, socket, sys, time
 port = int(sys.argv[1])
-end = time.time() + 10
+slow = float(os.environ.get("SKYCUE_TEST_SLOW", "1") or 1)
+end = time.time() + 30 * slow
 while time.time() < end:
     try:
         socket.create_connection(("127.0.0.1", port), timeout=0.5).close()

@@ -1,0 +1,114 @@
+name: weekly
+
+on:
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  slow-packaging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-build
+        with:
+          ccache-key: slow-packaging
+      - name: Install podman
+        run: sudo apt-get install -y podman
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DSKYCUE_UI_TESTS=OFF
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Test
+        # A skipped test (exit status 77) must fail the job.
+        run: |
+          set -o pipefail
+          ctest --test-dir build -L 'slow|packaging' -LE 'needs-node' --output-on-failure | tee build/ctest.log
+          grep -q ' Passed ' build/ctest.log
+          ! grep -q -i 'skipped' build/ctest.log
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-build
+        with:
+          packages: clang
+          ccache-key: clang-fuzz
+      - name: Configure
+        run: CC=clang CXX=clang++ cmake -S . -B build-fuzz -G Ninja -DSKYCUE_FUZZ=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - name: Build
+        run: cmake --build build-fuzz -j"$(nproc)"
+      - name: Test
+        # A skipped test (exit status 77) must fail the job.
+        run: |
+          set -o pipefail
+          ctest --test-dir build-fuzz -R '^fuzz_(build|smoke)$' --output-on-failure | tee build-fuzz/ctest.log
+          grep -q ' Passed ' build-fuzz/ctest.log
+          ! grep -q -i 'skipped' build-fuzz/ctest.log
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
+
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-build
+        with:
+          packages: clang clang-tidy cppcheck
+          ccache-key: clang-static
+      - name: Configure
+        run: CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DSKYCUE_STATIC_TESTS=ON
+      - name: Test
+        # A skipped test (exit status 77) must fail the job.
+        run: |
+          set -o pipefail
+          ctest --test-dir build -R '^static_analysis$' --output-on-failure | tee build/ctest.log
+          grep -q ' Passed ' build/ctest.log
+          ! grep -q -i 'skipped' build/ctest.log
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
+
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-build
+        with:
+          ccache-key: gcc-soak
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Cache fetched captures
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/test-captures
+          key: captures-${{ hashFiles('scripts/test-data/fetch-test-captures.sh', 'scripts/test-data/fetch-iq-samples.sh') }}
+      - name: Fetch test captures
+        run: scripts/test-data/fetch-test-captures.sh --cache build/test-captures
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DSKYCUE_SOAK_TESTS=ON -DSKYCUE_UI_TESTS=OFF
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Test
+        # A skipped test (exit status 77) must fail the job.
+        run: |
+          set -o pipefail
+          ctest --test-dir build -R '^soak_short$' --output-on-failure | tee build/ctest.log
+          grep -q ' Passed ' build/ctest.log
+          ! grep -q -i 'skipped' build/ctest.log
+      - name: ccache statistics
+        if: always()
+        run: ccache -s

@@ -5,7 +5,7 @@ recorded in [docs/protocol.md](docs/protocol.md).
 
 ## 0.1.0
 
-Unreleased. The first public release.
+Released 2026-11-10. The first public release.
 
 - Inputs of six kinds (readsb JSON, Beast frames, 978 MHz UAT lines, dump978-fa,
   pingStation 3 as JSON or ASTERIX CAT021, and replay of recordings) over TCP

@@ -4,8 +4,8 @@ How to run the sanitizer, fuzz, static-analysis and soak checks. None of the
 instrumentation here is in the default configure or any release; the shipped
 binaries are built exactly as before. The weekly workflow
 (`.github/workflows/weekly.yml`) runs the fuzz smoke, static analysis and short
-soak; the sanitizer suite runs on every push. Run output (logs, summaries, soak CSVs)
-is not kept in the repository.
+soak; the sanitizer suite runs on every push. Run output (logs, summaries,
+soak CSVs) is not kept in the repository.
 
 ## Skip rules and suppression formats
 

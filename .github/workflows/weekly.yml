@@ -97,7 +97,7 @@ jobs:
           path: build/test-captures
           key: captures-${{ hashFiles('scripts/test-data/fetch-test-captures.sh', 'scripts/test-data/fetch-iq-samples.sh') }}
       - name: Fetch test captures
-        run: scripts/test-data/fetch-test-captures.sh --cache build/test-captures
+        run: SKYCUE_FETCH_IQ=1 scripts/test-data/fetch-test-captures.sh --cache build/test-captures
       - name: Configure
         run: cmake -S . -B build -G Ninja -DSKYCUE_SOAK_TESTS=ON -DSKYCUE_UI_TESTS=OFF
       - name: Build

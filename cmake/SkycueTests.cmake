@@ -28,13 +28,20 @@
 
 include_guard(GLOBAL)
 
-# The project's warnings for a Boost.Test executable.
+# The project's warnings for a Boost.Test executable, minus -Wconversion
+# and (GCC only) -Wmaybe-uninitialized, which trip on test code; product
+# code keeps both.
 function(skycue_test_warnings target)
   skycue_set_warnings(${target})
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # Boost.Test 1.90's assertion_result conversion trips -Wconversion under
     # GCC 15 at every BOOST_TEST with a message; product code keeps it.
     target_compile_options(${target} PRIVATE -Wno-conversion)
+  endif()
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # GCC at -O2 reports a false "may be used uninitialized" when test code copies a
+    # record holding a disengaged std::optional (GCC 15, tests/test_stats.cpp).
+    target_compile_options(${target} PRIVATE -Wno-maybe-uninitialized)
   endif()
 endfunction()
 

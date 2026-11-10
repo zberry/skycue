@@ -21,8 +21,7 @@ variables that control them and why each test skips. The sanitizer, fuzzing,
 static-analysis and soak runs are in [docs/hardening.md](docs/hardening.md);
 build details are in [docs/installing.md](docs/installing.md#build).
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the code fits together.
-CI's build job runs `ctest -LE 'needs-test-data|needs-node|slow'`, the tests that need neither fetched data, node nor minutes;
-its sanitizers job runs the whole suite under ASan/UBSan; its node job runs `web_ui`.
+CI runs the offline tests, the sanitizer suite, the test-data tests with fresh reference decoders, four Linux containers and the Playwright suite on every push; `tests/README.md` has the table.
 
 ## Test first
 

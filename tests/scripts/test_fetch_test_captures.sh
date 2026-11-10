@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fetch-test-captures.sh: pinned third-party captures into git-ignored test data paths
+# fetch-test-captures.sh: pinned third-party captures into git-ignored test data
 # paths. Uses small synthetic captures served over file:// URLs through
 # SKYCUE_CAPTURE_URL_BASE and a pins file written here, so it needs neither the
 # network nor the real captures. (The real pins are checked by a real run.)

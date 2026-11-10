@@ -69,5 +69,18 @@ its node checks only when node is installed and passes without them.
 Unit tests that need a fetched sample for only some cases, such as `beast_raw` and `uat_raw_decode`, skip those
 cases (Boost.Test reports them as skipped) and run the rest.
 
-Any CI setup should include one job with the fetched test data and the external decoders set,
-or the differential tests never run. The `test-data` job in `.github/workflows/ci.yml` is that job: it fetches the captures, builds the decoders and runs `ctest -L needs-test-data`.
+## What CI runs
+
+The workflows are in `.github/workflows/`. The `needs-test-data` label marks the tests that need the fetched captures or the external decoders, so the first job leaves them out and the `test-data` job runs only them with fresh reference decoders; without that job the differential tests never run.
+
+| Job | What it runs | When |
+| --- | --- | --- |
+| build-test | the offline tests, `ctest -LE 'needs-test-data\|slow'` | push, pull request |
+| sanitizers | the whole suite under ASan and UBSan | push, pull request |
+| test-data | `ctest -L needs-test-data` with the fetched captures and freshly built reference decoders | push, pull request |
+| platforms | build and test in Debian 12, Debian 13, Rocky Linux 8 and 9 containers | push, pull request |
+| arm64 | the same build and test on an arm64 runner | public repository only |
+| playwright | the browser suite | push, pull request |
+| release | source tarball, packages and a draft release | tags `v*` |
+| weekly | the slow tests, packaging, fuzzing, static analysis and the soak run | weekly schedule |
+| codeql | CodeQL analysis of the C++ code | public repository only |

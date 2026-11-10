@@ -11,15 +11,15 @@
 namespace skycued {
 namespace webapi {
 
-std::optional<JsonObject> parseBodyObject(const std::string& body, bool strict)
+std::optional<JsonObject> parseBodyObject(const std::string& body)
 {
-    if (strict) {
-        const auto first = body.find_first_not_of(" \t\r\n");
-        if (first == std::string::npos || body[first] != '{')
-            return std::nullopt;
-    }
+    const auto first = body.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos || body[first] != '{')
+        return std::nullopt;
     return JsonObject::parse(body);
 }
+
+ApiResponse notObjectResponse() { return fail(400, kNotObjectMessage); }
 
 ApiResponse reply(unsigned status, std::string body)
 {

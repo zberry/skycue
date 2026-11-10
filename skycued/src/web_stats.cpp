@@ -721,9 +721,9 @@ ApiResponse handleStatsApi(const ApiRequest& request, Engine& engine, StatsApiSt
         return notAllowed("POST");
     if (auto rejected = rejectUnsafe(request))
         return *rejected;
-    const auto obj = parseBodyObject(request.body, true);
+    const auto obj = parseBodyObject(request.body);
     if (!obj)
-        return fail(400, "the body must be a JSON object");
+        return notObjectResponse();
     const auto keys = obj->keys();
     if (!keys.empty())
         return fail(400, "unknown key '" + keys.front() + "'");

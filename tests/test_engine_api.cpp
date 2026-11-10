@@ -724,15 +724,22 @@ BOOST_AUTO_TEST_CASE(inputs_error_ladder_status_and_exact_body)
     BOOST_TEST(w.body.find("Permission denied") != std::string::npos, w.body);
 }
 
-// An empty array reads as an empty object on the action routes, but not on PUT.
-BOOST_AUTO_TEST_CASE(inputs_empty_array_body_today)
+// A body that is not a JSON object is a 400 on every inputs write route.
+BOOST_AUTO_TEST_CASE(inputs_rejects_non_object_body)
 {
     ApiFx a;
     BOOST_TEST(a.call("POST", "/api/inputs", psJson("ps-a", freeUdpPort())).status == 201u);
-    BOOST_TEST(a.call("POST", "/api/inputs/ps-a/disable", "[]").status == 200u);
-    const auto r = a.call("PUT", "/api/inputs/ps-a", "[]");
-    BOOST_TEST(r.status == 400u);
-    BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+    for (const char* body : {"[]", "[1]", "\"x\""})
+        for (const char* route : {"PUT /api/inputs/ps-a", "POST /api/inputs/ps-a/disable",
+                                  "POST /api/inputs/ps-a/enable", "POST /api/inputs"}) {
+            const std::string r(route);
+            const auto sp = r.find(' ');
+            const auto reply = a.call(r.substr(0, sp), r.substr(sp + 1), body);
+            BOOST_TEST_CONTEXT(r + " " + body) {
+                BOOST_TEST(reply.status == 400u);
+                BOOST_TEST(reply.body == R"({"error":"the body must be a JSON object"})");
+            }
+        }
 }
 
 // The Allow text of each 405 the web_*.cpp routes produce.

@@ -321,20 +321,33 @@ BOOST_AUTO_TEST_CASE(put_config_error_ladder_exact_bodies)
     BOOST_TEST(r.body == R"({"error":"filters.min_elevation_deg is set by --set and cannot be changed here","key":"filters.min_elevation_deg","source":"set"})");
 }
 
-BOOST_AUTO_TEST_CASE(filters_and_lists_empty_array_body_today)
+BOOST_AUTO_TEST_CASE(filters_put_rejects_non_object_body)
 {
     ConfigFx f;
     const auto before = request(f.port, http::verb::get, "/api/filters").body;
-    auto r = request(f.port, http::verb::put, "/api/filters", "[]");
-    BOOST_TEST(r.status == 200u, r.body);
-    BOOST_TEST(r.body == before);
+    for (const char* body : {"[]", "[1]", "\"x\""}) {
+        const auto r = request(f.port, http::verb::put, "/api/filters", body);
+        BOOST_TEST_CONTEXT(body) {
+            BOOST_TEST(r.status == 400u, r.body);
+            BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+        }
+    }
+    BOOST_TEST(request(f.port, http::verb::get, "/api/filters").body == before);
+}
+
+BOOST_AUTO_TEST_CASE(lists_post_rejects_non_object_body)
+{
+    ConfigFx f;
     const auto lists = request(f.port, http::verb::get, "/api/lists").body;
-    r = request(f.port, http::verb::post, "/api/lists/allow", "[]");
-    BOOST_TEST(r.status == 200u, r.body);
-    BOOST_TEST(r.body == lists);
-    r = request(f.port, http::verb::post, "/api/lists/block", "[]");
-    BOOST_TEST(r.status == 200u, r.body);
-    BOOST_TEST(r.body == lists);
+    for (const char* path : {"/api/lists/allow", "/api/lists/block"})
+        for (const char* body : {"[]", "[1]", "\"x\""}) {
+            const auto r = request(f.port, http::verb::post, path, body);
+            BOOST_TEST_CONTEXT(std::string(path) + " " + body) {
+                BOOST_TEST(r.status == 400u, r.body);
+                BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+            }
+        }
+    BOOST_TEST(request(f.port, http::verb::get, "/api/lists").body == lists);
 }
 
 BOOST_AUTO_TEST_CASE(api_config_dotted_keys_and_sources)

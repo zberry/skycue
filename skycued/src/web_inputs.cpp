@@ -133,9 +133,9 @@ std::string entryJson(const InputEntry& e) { return inputJson(e, std::chrono::sy
 // The body as a JSON object; throws InputDefError when it is not one.
 JsonObject bodyObject(const std::string& body)
 {
-    auto o = parseBodyObject(body, false);
+    auto o = parseBodyObject(body);
     if (!o)
-        throw InputDefError("the body must be a JSON object");
+        throw InputDefError(kNotObjectMessage);
     return *o;
 }
 

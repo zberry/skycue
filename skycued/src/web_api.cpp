@@ -243,9 +243,9 @@ template <class Ok> ApiResponse apply(RuntimeConfig& rc, const Overlay& delta, O
 
 ApiResponse putFiltersRoute(const std::string& body, RuntimeConfig& rc)
 {
-    const auto obj = parseBodyObject(body, false);
+    const auto obj = parseBodyObject(body);
     if (!obj)
-        return fail(400, "the body must be a JSON object");
+        return notObjectResponse();
     for (const auto& k : obj->keys())
         if (k != "max_range_nm" && k != "min_elevation_deg")
             return fail(400, "unknown key '" + k + "'");
@@ -550,8 +550,8 @@ std::string leadingKey(const std::string& message)
 
 ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
 {
-    if (!parseBodyObject(body, true))
-        return fail(400, "the body must be a JSON object");
+    if (!parseBodyObject(body))
+        return notObjectResponse();
     std::vector<std::pair<std::string, JsonScalar>> raw;
     std::vector<std::string> clear_list;
     std::string problem;
@@ -612,9 +612,9 @@ ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
 
 ApiResponse postListRoute(ListKind kind, const std::string& body, const Engine& e, RuntimeConfig& rc)
 {
-    const auto obj = parseBodyObject(body, false);
+    const auto obj = parseBodyObject(body);
     if (!obj)
-        return fail(400, "the body must be a JSON object");
+        return notObjectResponse();
     for (const auto& k : obj->keys())
         if (k != "add" && k != "remove")
             return fail(400, "unknown key '" + k + "'");

@@ -514,14 +514,20 @@ BOOST_AUTO_TEST_CASE(outputs_error_ladder_status_and_exact_body)
     BOOST_TEST(w.body.find("Permission denied") != std::string::npos, w.body);
 }
 
-BOOST_AUTO_TEST_CASE(outputs_empty_array_body_today)
+BOOST_AUTO_TEST_CASE(outputs_rejects_non_object_body)
 {
     Fx f;
     BOOST_TEST(f.call("POST", "/api/outputs", beastOut("bo", freeTcpPort())).status == 201u);
-    BOOST_TEST(f.call("POST", "/api/outputs/bo/disable", "[]").status == 200u);
-    const auto r = f.call("PUT", "/api/outputs/bo", "[]");
-    BOOST_TEST(r.status == 400u);
-    BOOST_TEST(r.body == R"({"error":"the body must be a JSON object"})");
+    for (const char* body : {"[]", "[1]", "\"x\""})
+        for (const char* route : {"PUT /api/outputs/bo", "POST /api/outputs/bo/disable", "POST /api/outputs/bo/enable"}) {
+            const std::string r(route);
+            const auto sp = r.find(' ');
+            const auto reply = f.call(r.substr(0, sp), r.substr(sp + 1), body);
+            BOOST_TEST_CONTEXT(r + " " + body) {
+                BOOST_TEST(reply.status == 400u);
+                BOOST_TEST(reply.body == R"({"error":"the body must be a JSON object"})");
+            }
+        }
 }
 
 BOOST_AUTO_TEST_CASE(cues_clients_json_has_output_field)

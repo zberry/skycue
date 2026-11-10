@@ -27,11 +27,14 @@ ApiResponse notAllowed(const char* allow);
 // 409 {"error":<what>,"key":<key>,"source":<source>}: the key is pinned by --set or the environment.
 ApiResponse pinnedResponse(const PinnedKeyError& e);
 
-// The body as a JSON object, or nullopt when JsonObject::parse rejects it. `strict` also
-// requires the first non-whitespace character to be '{': the parser reads "[]" as an empty
-// object, so only the callers that already reject an array pass strict. The callers answer
-// "the body must be a JSON object" on nullopt.
-std::optional<JsonObject> parseBodyObject(const std::string& body, bool strict);
+// The body as a JSON object, or nullopt when it is not one. The first non-whitespace
+// character must be '{' (the parser alone reads "[]" as an empty object), and
+// JsonObject::parse must accept it. Every route that reads an object body answers
+// nullopt with 400 kNotObjectMessage (notObjectResponse()).
+std::optional<JsonObject> parseBodyObject(const std::string& body);
+inline constexpr const char* kNotObjectMessage = "the body must be a JSON object";
+// 400 {"error":"the body must be a JSON object"}.
+ApiResponse notObjectResponse();
 
 enum class ErrorFamily { resource, config };
 

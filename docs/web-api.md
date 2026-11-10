@@ -60,6 +60,7 @@ There is no authentication; see [Security](#security).
   and booleans are never quoted. A value that is not known is left out
   rather than sent as `null` (a track without an altitude has no
   `alt_baro_ft`; a range or elevation that cannot be computed is omitted).
+- A body that is not a JSON object is rejected with 400 on every write route.
 - Times are ISO-8601 UTC with milliseconds: `"2026-11-01T12:34:56.789Z"`.
 - Every JSON reply and every WebSocket item is valid UTF-8: a string from
   input that is not (a callsign or input name with stray bytes, say) has

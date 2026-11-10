@@ -10,7 +10,7 @@
 #   readsb=<absolute path>
 #   dump978=<absolute path>
 # The tests reach the decoders only through SKYCUE_READSB, SKYCUE_DUMP978 and (at
-# configure time) SKYCUE_TEST_READSB; nothing else in the tree uses them.
+# configure time) SKYCUE_TEST_READSB.
 #
 # Pins (tarball and SHA-256):
 #   readsb   https://github.com/wiedehopf/readsb/archive/refs/tags/v3.16.21.tar.gz
@@ -64,7 +64,7 @@ fetch() {
   if [ "${SKYCUE_REFERENCE_OFFLINE:-}" = 1 ]; then
     cp "${SKYCUE_REFERENCE_SRC_DIR:?SKYCUE_REFERENCE_SRC_DIR is required offline}/$name.tar.gz" "$tgz"
   else
-    curl -fsSL -o "$tgz" "$url"
+    curl -fsSL -o "$tgz.part" "$url" && mv "$tgz.part" "$tgz"
   fi
   got=$(sha256sum "$tgz" | cut -d' ' -f1)
   if [ "$got" != "$sha" ]; then

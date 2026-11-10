@@ -62,7 +62,6 @@ jobs:
           packages: libncurses-dev libzstd-dev libboost-regex-dev libboost-filesystem-dev libsoapysdr-dev
           ccache-key: gcc-testdata
       - name: Cache fetched captures
-        id: captures
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/test-captures
@@ -86,7 +85,7 @@ jobs:
         env:
           SKYCUE_READSB: ${{ github.workspace }}/build/reference-decoders/bin/readsb
           SKYCUE_DUMP978: ${{ github.workspace }}/build/reference-decoders/bin/dump978-fa
-        run: ctest --test-dir build -L needs-test-data --output-on-failure --output-log build/test-data.log
+        run: ctest --test-dir build -L needs-test-data -V --output-log build/test-data.log
       - name: Fresh references were used
         run: |
           grep -q 'run (b): fresh readsb golden made' build/test-data.log

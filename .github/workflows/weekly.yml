@@ -20,7 +20,7 @@ jobs:
       - name: Install podman
         run: sudo apt-get install -y podman
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DSKYCUE_UI_TESTS=OFF
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKYCUE_UI_TESTS=OFF
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
@@ -68,7 +68,7 @@ jobs:
           packages: clang clang-tidy cppcheck
           ccache-key: clang-static
       - name: Configure
-        run: CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DSKYCUE_STATIC_TESTS=ON
+        run: CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKYCUE_STATIC_TESTS=ON
       - name: Test
         # A skipped test (exit status 77) must fail the job.
         run: |
@@ -99,7 +99,7 @@ jobs:
       - name: Fetch test captures
         run: SKYCUE_FETCH_IQ=1 scripts/test-data/fetch-test-captures.sh --cache build/test-captures
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DSKYCUE_SOAK_TESTS=ON -DSKYCUE_UI_TESTS=OFF
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKYCUE_SOAK_TESTS=ON -DSKYCUE_UI_TESTS=OFF
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test

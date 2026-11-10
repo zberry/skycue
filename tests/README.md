@@ -84,3 +84,5 @@ The workflows are in `.github/workflows/`. The `needs-test-data` label marks the
 | release | source tarball, packages and a draft release | tags `v*` |
 | weekly | the slow tests, packaging, fuzzing, static analysis and the soak run | weekly schedule |
 | codeql | CodeQL analysis of the C++ code | public repository only |
+
+CI builds Release, the configuration the packages ship; the playwright job runs with slow factor 2.

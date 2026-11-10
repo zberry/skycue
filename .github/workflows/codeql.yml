@@ -31,7 +31,7 @@ jobs:
       - name: Configure
         # The empty launcher overrides the ccache one from setup-build: every file must be
         # compiled for real so that CodeQL's tracer sees it.
-        run: cmake -S . -B build -G Ninja -DSKYCUE_BUILD_TESTS=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=
+        run: cmake -S . -B build -G Ninja -DSKYCUE_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3

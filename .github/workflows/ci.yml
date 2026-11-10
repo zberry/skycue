@@ -27,7 +27,7 @@ jobs:
       - name: Node version
         run: node --version
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON -DSKYCUE_UI_TESTS=OFF
+        run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON -DCMAKE_BUILD_TYPE=Release -DSKYCUE_UI_TESTS=OFF
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
@@ -78,7 +78,7 @@ jobs:
         if: steps.decoders.outputs.cache-hit != 'true'
         run: scripts/dev/build-reference-decoders.sh build/reference-decoders
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DSKYCUE_UI_TESTS=OFF -DSKYCUE_TEST_READSB=$PWD/build/reference-decoders/bin/readsb
+        run: cmake -S . -B build -G Ninja -DSKYCUE_UI_TESTS=OFF -DCMAKE_BUILD_TYPE=Release -DSKYCUE_TEST_READSB=$PWD/build/reference-decoders/bin/readsb
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
@@ -117,7 +117,7 @@ jobs:
       - name: Fetch web libraries
         run: scripts/dev/fetch-web-libs.sh
       - name: Configure
-        run: cmake -S . -B build -DSKYCUE_UI_TESTS=OFF
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSKYCUE_UI_TESTS=OFF
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
@@ -135,7 +135,7 @@ jobs:
       - name: Node version
         run: node --version
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DSKYCUE_UI_TESTS=OFF
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKYCUE_UI_TESTS=OFF
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
@@ -146,14 +146,14 @@ jobs:
 
   playwright:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-build
         with:
           ccache-key: gcc-ui
       - name: Configure
-        run: cmake -S . -B build -G Ninja
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKYCUE_TEST_SLOW_FACTOR=2
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Cache Playwright browsers

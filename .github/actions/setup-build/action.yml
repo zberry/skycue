@@ -30,7 +30,7 @@ runs:
       run: |
         echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
         echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
-        ccache --max-size=500M
+        echo "CCACHE_MAXSIZE=500M" >> "$GITHUB_ENV"
     - name: Fetch web libraries
       shell: bash
       run: scripts/dev/fetch-web-libs.sh

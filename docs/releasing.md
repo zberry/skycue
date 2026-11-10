@@ -46,7 +46,10 @@ version throughout.
    packaging/make-source-tarball.sh          # -o DIR for another directory than dist/
    ```
 
-5. **Build and verify the six packages.** Each target builds in its own
+5. **Build and verify the six packages.** The release workflow
+   (`.github/workflows/release.yml`) does this on the tag push: it builds and
+   verifies the six targets and attaches the tarball, the packages and
+   `SHA256SUMS` to a draft release. To do it by hand instead: each target builds in its own
    container and its packages are then installed and checked in a fresh one
    (offline after the install: version, unit, user and directories, a
    replay served over HTTP, the map script's dry run, `--check-inputs`,
@@ -89,7 +92,9 @@ version throughout.
    emulated build cannot show what a real Pi does at boot, under its
    memory limits or with its own readsb.
 
-7. **Publish.** Push the commit and the tag, and attach to the release:
+7. **Publish.** Push the commit and the tag. The draft release the workflow
+   created holds the files; write the notes into it and publish it. By hand,
+   attach to the release:
 
    - `dist/skycue-0.2.0.tar.gz` (the source tarball)
    - from `dist/debian12-amd64/`, `dist/debian12-arm64/`,

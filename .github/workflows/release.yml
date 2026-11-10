@@ -1,0 +1,100 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tarball: ${{ steps.tar.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Make the source tarball
+        id: tar
+        run: |
+          packaging/make-source-tarball.sh -o dist
+          echo "tarball=$(ls dist/skycue-*.tar.gz)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: source
+          path: dist/skycue-*.tar.gz
+
+  packages:
+    needs: source
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    if: ${{ !matrix.arm || !github.event.repository.private }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: debian12-amd64, runner: ubuntu-latest, arm: false}
+          - {target: debian13-amd64, runner: ubuntu-latest, arm: false}
+          - {target: el8, runner: ubuntu-latest, arm: false}
+          - {target: el9, runner: ubuntu-latest, arm: false}
+          - {target: debian12-arm64, runner: ubuntu-24.04-arm, arm: true}
+          - {target: debian13-arm64, runner: ubuntu-24.04-arm, arm: true}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: source
+          path: dist
+      - name: Install podman
+        run: sudo apt-get update && sudo apt-get install -y podman
+      - name: Build the packages
+        run: packaging/build-package.sh "${{ matrix.target }}" --source dist/skycue-*.tar.gz
+      - name: Verify the packages
+        run: |
+          t="${{ matrix.target }}"
+          case "$t" in
+            debian*)
+              packaging/verify-package.sh "$t" dist/$t/skycue_*.deb dist/$t/libskycue-dev_*.deb --source dist/skycue-*.tar.gz | tee build-verify.log ;;
+            *)
+              packaging/verify-package.sh "$t" dist/$t/skycue-[0-9]*.rpm dist/$t/skycue-devel-*.rpm --source dist/skycue-*.tar.gz | tee build-verify.log ;;
+          esac
+          grep -q "verify: OK ${{ matrix.target }}" build-verify.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages-${{ matrix.target }}
+          path: |
+            dist/${{ matrix.target }}/*.deb
+            dist/${{ matrix.target }}/*.rpm
+            !dist/${{ matrix.target }}/*dbgsym*
+            !dist/${{ matrix.target }}/*.src.rpm
+
+  draft-release:
+    needs: [source, packages]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS
+      - name: Create or update the draft release
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" --notes "Release notes to follow." dist/*
+          fi
+      - name: Assert the release is a draft
+        run: '[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft -q .isDraft)" = true ]'

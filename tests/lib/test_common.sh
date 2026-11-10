@@ -45,6 +45,8 @@ s = socket.socket(socket.AF_INET, t); s.bind(("127.0.0.1", 0)); print(s.getsockn
 # scratch directory $tmp, an empty bg_pids array, and runs cleanup on exit.
 test_init() {
   TEST_NAME=$1
+  # a skycued the test starts must not inherit a supervisor from the caller's service
+  unset INVOCATION_ID JOURNAL_STREAM NOTIFY_SOCKET SKYCUE_LAUNCHER
   tmp=$(mktemp -d)
   bg_pids=()
   trap cleanup EXIT

@@ -23,6 +23,8 @@
 # Every process it starts is stopped on every way out: normal end, a
 # failure, or SIGINT/SIGTERM/SIGHUP (a ctest timeout, Ctrl-C).
 set -u
+# a skycued the test starts must not inherit a supervisor from the caller's service
+unset INVOCATION_ID JOURNAL_STREAM NOTIFY_SOCKET SKYCUE_LAUNCHER
 skycued=$1 data_dir=$2 www=$3 pingsim=$4
 shift 4
 here=$(cd "$(dirname "$0")" && pwd)

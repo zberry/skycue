@@ -20,7 +20,9 @@ inline bool fileExists(const std::string& p) { return ::access(p.c_str(), F_OK) 
 inline bool fileReadable(const std::string& p) { return std::ifstream(p).good(); }
 
 // The calling process's environment as "NAME=value" strings without any SKYCUE_* variable except the
-// names in `keep`. skycued reads every SKYCUE_* variable as a config override and logs a warning for
+// names in `keep`, and without the supervisor markers systemd and the launcher set (INVOCATION_ID,
+// JOURNAL_STREAM, NOTIFY_SOCKET, SKYCUE_LAUNCHER), so the daemon reports `supervisor: none`.
+// skycued reads every SKYCUE_* variable as a config override and logs a warning for
 // unknown names, so a test that spawns it and asserts on its output scrubs what the caller exported.
 inline std::vector<std::string> scrubbedEnv(std::initializer_list<const char*> keep = {})
 {
@@ -35,6 +37,10 @@ inline std::vector<std::string> scrubbedEnv(std::initializer_list<const char*> k
             if (!kept)
                 continue;
         }
+        const std::string name = entry.substr(0, entry.find('='));
+        if (name == "INVOCATION_ID" || name == "JOURNAL_STREAM" || name == "NOTIFY_SOCKET" ||
+            name == "SKYCUE_LAUNCHER")
+            continue;
         out.push_back(entry);
     }
     return out;

@@ -15,6 +15,10 @@ trap 'rm -rf "$out"' EXIT
   || die "test_init left no directory"
 [ -n "$(cat "$out/tmp1")" ] && [ ! -e "$(cat "$out/tmp1")" ] || die "tmp survived the subshell"
 
+# test_init drops the supervisor markers, so a skycued the test starts reports none.
+INVOCATION_ID=x SKYCUE_LAUNCHER=y bash -c ". '$common'; test_init probe; [ -z \"\${INVOCATION_ID:-}\" ] && [ -z \"\${SKYCUE_LAUNCHER:-}\" ]" \
+  || die "test_init left a supervisor marker in the environment"
+
 # bg registers the pid; cleanup stops it.
 ( . "$common"; test_init demo; bg sleep 30; echo "$!" >"$out/pid1"
   [ "${bg_pids[0]}" = "$!" ] || exit 1

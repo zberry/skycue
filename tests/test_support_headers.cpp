@@ -135,3 +135,16 @@ BOOST_AUTO_TEST_CASE(scrubbed_env_drops_skycue_variables_except_the_kept_ones)
     ::unsetenv("SKYCUE_SCRUB_NOT");
     ::unsetenv("SCRUB_OTHER");
 }
+
+BOOST_AUTO_TEST_CASE(scrubbed_env_drops_supervisor_markers)
+{
+    ::setenv("INVOCATION_ID", "x", 1);
+    ::setenv("JOURNAL_STREAM", "1:2", 1);
+    const auto env = skycue_test::scrubbedEnv();
+    for (const auto& e : env) {
+        BOOST_TEST(e.rfind("INVOCATION_ID=", 0) != 0);
+        BOOST_TEST(e.rfind("JOURNAL_STREAM=", 0) != 0);
+    }
+    ::unsetenv("INVOCATION_ID");
+    ::unsetenv("JOURNAL_STREAM");
+}

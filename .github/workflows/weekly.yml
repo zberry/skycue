@@ -27,9 +27,9 @@ jobs:
         # A skipped test (exit status 77) must fail the job.
         run: |
           set -o pipefail
-          ctest --test-dir build -L 'slow|packaging' -LE 'needs-node' --output-on-failure | tee build/ctest.log
+          ctest --test-dir build -L 'slow|packaging' -LE 'needs-node' -E '^(fuzz_build|fuzz_smoke|static_analysis|soak_short)$' --output-on-failure | tee build/ctest.log
           grep -q ' Passed ' build/ctest.log
-          ! grep -q -i 'skipped' build/ctest.log
+          if grep -q -i 'skipped' build/ctest.log; then exit 1; fi
       - name: ccache statistics
         if: always()
         run: ccache -s
@@ -53,7 +53,7 @@ jobs:
           set -o pipefail
           ctest --test-dir build-fuzz -R '^fuzz_(build|smoke)$' --output-on-failure | tee build-fuzz/ctest.log
           grep -q ' Passed ' build-fuzz/ctest.log
-          ! grep -q -i 'skipped' build-fuzz/ctest.log
+          if grep -q -i 'skipped' build-fuzz/ctest.log; then exit 1; fi
       - name: ccache statistics
         if: always()
         run: ccache -s
@@ -75,7 +75,7 @@ jobs:
           set -o pipefail
           ctest --test-dir build -R '^static_analysis$' --output-on-failure | tee build/ctest.log
           grep -q ' Passed ' build/ctest.log
-          ! grep -q -i 'skipped' build/ctest.log
+          if grep -q -i 'skipped' build/ctest.log; then exit 1; fi
       - name: ccache statistics
         if: always()
         run: ccache -s
@@ -108,7 +108,7 @@ jobs:
           set -o pipefail
           ctest --test-dir build -R '^soak_short$' --output-on-failure | tee build/ctest.log
           grep -q ' Passed ' build/ctest.log
-          ! grep -q -i 'skipped' build/ctest.log
+          if grep -q -i 'skipped' build/ctest.log; then exit 1; fi
       - name: ccache statistics
         if: always()
         run: ccache -s

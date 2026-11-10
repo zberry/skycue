@@ -11,9 +11,22 @@ permissions:
   contents: read
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      private: ${{ steps.p.outputs.private }}
+    steps:
+      - name: Read the repository visibility
+        id: p
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "private=$(gh api repos/$GITHUB_REPOSITORY --jq .private)" >> "$GITHUB_OUTPUT"
+
   analyze:
+    needs: gate
     # CodeQL is free only on public repositories.
-    if: ${{ !github.event.repository.private }}
+    if: needs.gate.outputs.private == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

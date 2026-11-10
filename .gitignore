@@ -38,5 +38,7 @@ skycue.runtime.json.rejected
 /tests/data/fisb/received-tg30.jsonl
 /tests/data/opensky/
 /tests/data/iq/
+# the test data's former location; old checkouts may still hold fetched files there
+/tests/fixtures/
 
 tests/ui/build/

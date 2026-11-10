@@ -13,9 +13,23 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The event payload of a scheduled run carries no repository object, so the privacy
+  # of the repository is read from the API for every event.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      private: ${{ steps.p.outputs.private }}
+    steps:
+      - name: Read the repository visibility
+        id: p
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "private=$(gh api repos/$GITHUB_REPOSITORY --jq .private)" >> "$GITHUB_OUTPUT"
+
   build-test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -27,6 +41,7 @@ jobs:
       - name: Node version
         run: node --version
       - name: Configure
+        # Release on purpose: `hub` fails in an unoptimised build (see "What CI runs" in tests/README.md).
         run: cmake -S . -B build -G Ninja -DSKYCUE_WERROR=ON -DCMAKE_BUILD_TYPE=Release -DSKYCUE_UI_TESTS=OFF
       - name: Build
         run: cmake --build build -j"$(nproc)"
@@ -73,7 +88,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/reference-decoders
-          key: decoders-${{ hashFiles('scripts/dev/build-reference-decoders.sh') }}
+          key: decoders-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ hashFiles('scripts/dev/build-reference-decoders.sh') }}
       - name: Build reference decoders
         if: steps.decoders.outputs.cache-hit != 'true'
         run: scripts/dev/build-reference-decoders.sh build/reference-decoders
@@ -85,11 +100,13 @@ jobs:
         env:
           SKYCUE_READSB: ${{ github.workspace }}/build/reference-decoders/bin/readsb
           SKYCUE_DUMP978: ${{ github.workspace }}/build/reference-decoders/bin/dump978-fa
-        run: ctest --test-dir build -L needs-test-data -V --output-log build/test-data.log
-      - name: Fresh references were used
+        # Everything but the slow and browser tests, with the captures and fresh references.
+        run: ctest --test-dir build -LE 'slow|needs-node' -V --output-log build/test-data.log
+      - name: Fresh references were used and nothing skipped
         run: |
           grep -q 'run (b): fresh readsb golden made' build/test-data.log
           grep -q 'run (b): fresh dump978-fa golden made' build/test-data.log
+          if grep -E '\*\*\*Skipped' build/test-data.log; then exit 1; fi
       - name: ccache statistics
         if: always()
         run: ccache -s
@@ -124,8 +141,10 @@ jobs:
         run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|slow|needs-node'
 
   arm64:
+    needs: gate
     runs-on: ubuntu-24.04-arm
-    if: ${{ !github.event.repository.private }}
+    # A skipped job does not fail the run.
+    if: needs.gate.outputs.private == 'false'
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

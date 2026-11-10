@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A re-pushed tag must not race a running draft-release job.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   source:
     runs-on: ubuntu-latest
@@ -18,6 +23,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Fetch web libraries
+        run: scripts/dev/fetch-web-libs.sh
       - name: Make the source tarball
         id: tar
         run: |
@@ -37,8 +44,9 @@ jobs:
       - name: Build the package matrix
         id: m
         env:
-          PRIVATE: ${{ github.event.repository.private }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          PRIVATE=$(gh api repos/$GITHUB_REPOSITORY --jq .private)
           x86='{"target":"debian12-amd64","runner":"ubuntu-latest"},{"target":"debian13-amd64","runner":"ubuntu-latest"},{"target":"el8","runner":"ubuntu-latest"},{"target":"el9","runner":"ubuntu-latest"}'
           arm='{"target":"debian12-arm64","runner":"ubuntu-24.04-arm"},{"target":"debian13-arm64","runner":"ubuntu-24.04-arm"}'
           if [ "$PRIVATE" = true ]; then
@@ -67,6 +75,7 @@ jobs:
         run: packaging/build-package.sh "${{ matrix.target }}" --source dist/skycue-*.tar.gz
       - name: Verify the packages
         run: |
+          set -o pipefail
           t="${{ matrix.target }}"
           case "$t" in
             debian*)
@@ -103,10 +112,14 @@ jobs:
         run: cd dist && sha256sum * > SHA256SUMS
       - name: Create or update the draft release
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          d=$(gh release view "$GITHUB_REF_NAME" --json isDraft -q .isDraft 2>/dev/null || echo none)
+          if [ "$d" = none ]; then
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" --notes "Release notes to follow." dist/*
+          elif [ "$d" = true ]; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" --notes "Release notes to follow." dist/*
+            echo "release $GITHUB_REF_NAME is published; refusing to touch it"
+            exit 1
           fi
       - name: Assert the release is a draft
         run: '[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft -q .isDraft)" = true ]'

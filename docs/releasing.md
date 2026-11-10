@@ -46,11 +46,14 @@ version throughout.
    packaging/make-source-tarball.sh          # -o DIR for another directory than dist/
    ```
 
-5. **Build and verify the six packages.** The release workflow
-   (`.github/workflows/release.yml`) does this on the tag push: it builds and
-   verifies the six targets and attaches the tarball, the packages and
-   `SHA256SUMS` to a draft release. To do it by hand instead: each target builds in its own
-   container and its packages are then installed and checked in a fresh one
+5. **Build and verify the six packages.** Run the release workflow
+   (`.github/workflows/release.yml`) by hand first (`workflow_dispatch` on
+   the release commit; its draft-release job is skipped without a tag) and
+   wait for all six `packages` legs to pass, then push the tag: the tag run
+   repeats the builds and creates a draft release holding the tarball, the
+   packages and `SHA256SUMS`. To do it locally instead: each target
+   builds in its own container and its packages are then installed and
+   checked in a fresh one
    (offline after the install: version, unit, user and directories, a
    replay served over HTTP, the map script's dry run, `--check-inputs`,
    and a build against `libskycue-dev`/`skycue-devel`). The package build

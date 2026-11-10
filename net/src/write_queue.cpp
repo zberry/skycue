@@ -21,20 +21,41 @@ struct WriteQueue::State {
     bool started = false;
     std::function<void(const boost::system::error_code&)> on_error;
 
+    // Messages are taken from the front of the queue while their total stays
+    // within this; a single larger message is written alone, whole.
+    static constexpr std::size_t kCoalesceBytes = 64 * 1024;
+
     static void writeLoop(const std::shared_ptr<State>& st)
     {
         if (!st->started || st->in_flight != 0 || st->queue.empty())
             return;
-        st->in_flight = st->queue.size();
-        // The handler owns the buffers it writes, so they outlive a clear().
-        auto keep = std::make_shared<std::vector<Buf>>(st->queue.begin(), st->queue.begin() + static_cast<std::ptrdiff_t>(st->in_flight));
-        std::vector<asio::const_buffer> bufs;
-        bufs.reserve(keep->size());
-        for (const auto& b : *keep)
-            bufs.emplace_back(b->data(), b->size());
+        std::size_t count = 1;
+        std::size_t bytes = st->queue.front()->size();
+        while (count < st->queue.size() && bytes + st->queue[count]->size() <= kCoalesceBytes) {
+            bytes += st->queue[count]->size();
+            ++count;
+        }
+        st->in_flight = count;
+        // The handler owns what it writes, so it outlives a clear().
+        std::shared_ptr<const void> keep;
+        asio::const_buffer buf;
+        if (count == 1) {
+            Buf one = st->queue.front();
+            buf = asio::const_buffer(one->data(), one->size());
+            keep = std::move(one);
+        } else {
+            auto block = std::make_shared<std::vector<unsigned char>>();
+            block->reserve(bytes);
+            for (std::size_t i = 0; i < count; ++i) {
+                const auto& b = *st->queue[i];
+                block->insert(block->end(), b.data(), b.data() + b.size());
+            }
+            buf = asio::const_buffer(block->data(), block->size());
+            keep = std::move(block);
+        }
         const uint64_t gen = st->gen;
         auto sock = st->sock;
-        asio::async_write(*sock, bufs, [st, keep, sock, gen](const boost::system::error_code& ec, std::size_t n) {
+        asio::async_write(*sock, buf, [st, keep, sock, gen](const boost::system::error_code& ec, std::size_t n) {
             if (gen != st->gen)
                 return;
             if (ec) {

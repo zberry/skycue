@@ -136,3 +136,76 @@ BOOST_AUTO_TEST_CASE(clear_drops_queue)
     });
     BOOST_CHECK(!eventually([&] { return errors.load() != 0; }, milliseconds(200)));
 }
+
+BOOST_AUTO_TEST_CASE(in_flight_accounting_releases_completed_blocks_while_the_peer_stalls)
+{
+    IoThread t;
+    Pair p(t.io);
+    constexpr std::size_t count = 400000, each = 18;
+    constexpr std::size_t total = count * each;
+    auto q = t.call([&] { return std::make_shared<WriteQueue>(p.server, 32u << 20); });
+    std::string want;
+    want.reserve(total);
+    t.call([&] {
+        for (std::size_t i = 0; i < count; ++i) {
+            std::string s(each, static_cast<char>('a' + i % 26));
+            want += s;
+            BOOST_REQUIRE(q->enqueue(makeBuf(s)));
+        }
+        BOOST_REQUIRE_EQUAL(q->queuedBytes(), total);
+        q->start([](const boost::system::error_code&) {});
+    });
+    // The peer reads nothing. Blocks the kernel has taken are released while the rest stays queued.
+    BOOST_CHECK(eventually([&] { return t.call([&] { return q->bytesWritten(); }) >= 65536u; }, slow(std::chrono::seconds(2))));
+    BOOST_CHECK_LE(t.call([&] { return q->queuedBytes(); }), total - 65536u);
+    BOOST_CHECK_GE(t.call([&] { return q->bytesWritten(); }), 65536u);
+
+    BOOST_CHECK(p.read(total, slow(std::chrono::seconds(20))) == want);
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return q->messagesWritten(); }) == count; }));
+    BOOST_CHECK_EQUAL(t.call([&] { return q->bytesWritten(); }), total);
+    BOOST_CHECK_EQUAL(t.call([&] { return q->queuedBytes(); }), 0u);
+    t.call([&] { q->clear(); });
+}
+
+BOOST_AUTO_TEST_CASE(single_large_message_is_written_whole)
+{
+    IoThread t;
+    Pair p(t.io);
+    auto q = t.call([&] { return std::make_shared<WriteQueue>(p.server, 1u << 20); });
+    std::string big(200000, '\0');
+    for (std::size_t i = 0; i < big.size(); ++i)
+        big[i] = static_cast<char>((i * 7 + 3) & 0xff);
+    t.call([&] {
+        q->start([](const boost::system::error_code&) {});
+        BOOST_REQUIRE(q->enqueue(makeBuf(big)));
+    });
+    BOOST_CHECK(p.read(big.size(), slow(std::chrono::seconds(5))) == big);
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return q->messagesWritten(); }) == 1u; }));
+    BOOST_CHECK_EQUAL(t.call([&] { return q->bytesWritten(); }), big.size());
+    BOOST_CHECK_EQUAL(t.call([&] { return q->queuedBytes(); }), 0u);
+    t.call([&] { q->clear(); });
+}
+
+BOOST_AUTO_TEST_CASE(blocks_preserve_order_and_byte_content)
+{
+    IoThread t;
+    Pair p(t.io);
+    auto q = t.call([&] { return std::make_shared<WriteQueue>(p.server, 8u << 20); });
+    std::string want;
+    t.call([&] {
+        for (std::size_t i = 0; i < 10000; ++i) {
+            std::string s(1 + (i * 37 + i / 3) % 300, '\0');
+            for (std::size_t k = 0; k < s.size(); ++k)
+                s[k] = static_cast<char>((i * 31 + k * 11) & 0xff);
+            want += s;
+            BOOST_REQUIRE(q->enqueue(makeBuf(s)));
+        }
+        BOOST_REQUIRE_GT(want.size(), 3u * 65536u);
+        q->start([](const boost::system::error_code&) {});
+    });
+    BOOST_CHECK(p.read(want.size(), slow(std::chrono::seconds(10))) == want);
+    BOOST_REQUIRE(eventually([&] { return t.call([&] { return q->messagesWritten(); }) == 10000u; }));
+    BOOST_CHECK_EQUAL(t.call([&] { return q->bytesWritten(); }), want.size());
+    BOOST_CHECK_EQUAL(t.call([&] { return q->queuedBytes(); }), 0u);
+    t.call([&] { q->clear(); });
+}

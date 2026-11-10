@@ -36,7 +36,7 @@ grep -q "^skycue-$v/skycue/" <<<"$list" && { echo "FAIL: stray skycue/ level"; e
   { echo "FAIL: sources/ members not 0644 0/0"; exit 1; }
 
 # Untracked files (a fetched capture) never reach the archive.
-for f in tests/data/raw/x tests/data/fisb/tg30.978; do
+for f in tests/data/raw/x tests/data/fisb/x; do
   if [ ! -e "$here/$f" ]; then
     mkdir -p "$(dirname "$here/$f")"; : >"$here/$f"; made+=("$here/$f")
   fi

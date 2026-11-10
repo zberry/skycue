@@ -25,7 +25,7 @@
 #include <vector>
 
 using namespace skycued;
-using Clock = std::chrono::system_clock;
+using SysClock = std::chrono::system_clock;
 
 namespace {
 
@@ -33,7 +33,7 @@ const ReceiverPosition kRx{38.9, -77.0, 100.0};
 // 2026-11-03T12:00:00Z, the start of a minute and of an hour.
 constexpr int64_t kT0 = 1793707200;
 
-Clock::time_point at(int64_t t_s) { return Clock::time_point(std::chrono::seconds(t_s)); }
+SysClock::time_point at(int64_t t_s) { return SysClock::time_point(std::chrono::seconds(t_s)); }
 
 skycue::TrackId icao(uint32_t addr) { return skycue::TrackId{addr, skycue::AddressType::icao}; }
 

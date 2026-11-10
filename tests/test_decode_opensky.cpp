@@ -189,7 +189,7 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
         dec.onObservation([&](const TrackObservation& o) { got.push_back(o); });
 
         Tally pos, surf, alt, gs, trk, cs;
-        int frames = 0, bad = 0, obs_total = 0;
+        int frames = 0, bad = 0;
         // OpenSky's latest velocity and identity rows before the observation being checked: the
         // decoder emits an observation only on a frame that gave a position (or a change with
         // none), carrying the other fields as state, so those fields are compared with the last
@@ -239,7 +239,6 @@ BOOST_AUTO_TEST_CASE(decoded_fields_match_opensky)
             }
             // The observation this frame produced (the last one, should there be several).
             const TrackObservation* o = got.empty() ? nullptr : &got.back();
-            if (o) ++obs_total;
 
             if (r.table == 0) {
                 const auto lat = num(r, "lat"), lon = num(r, "lon");

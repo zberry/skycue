@@ -48,7 +48,7 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
-        run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|slow'
+        run: ctest --test-dir build -j "$(nproc)" --output-on-failure -LE 'needs-test-data|slow'
       - name: ccache statistics
         if: always()
         run: ccache -s
@@ -106,7 +106,7 @@ jobs:
           SKYCUE_READSB: ${{ github.workspace }}/build/reference-decoders/bin/readsb
           SKYCUE_DUMP978: ${{ github.workspace }}/build/reference-decoders/bin/dump978-fa
         # Everything but the slow and browser tests, with the captures and fresh references.
-        run: ctest --test-dir build -LE 'slow|needs-node' -V --output-log build/test-data.log
+        run: ctest --test-dir build -j "$(nproc)" -LE 'slow|needs-node' -V --output-log build/test-data.log
       - name: Fresh references were used and nothing skipped
         run: |
           grep -q 'run (b): fresh readsb golden made' build/test-data.log
@@ -143,7 +143,7 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
-        run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|slow|needs-node'
+        run: ctest --test-dir build -j "$(nproc)" --output-on-failure -LE 'needs-test-data|slow|needs-node'
 
   arm64:
     needs: gate
@@ -163,7 +163,7 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
       - name: Test
-        run: ctest --test-dir build --output-on-failure -LE 'needs-test-data|slow'
+        run: ctest --test-dir build -j "$(nproc)" --output-on-failure -LE 'needs-test-data|slow'
       - name: ccache statistics
         if: always()
         run: ccache -s

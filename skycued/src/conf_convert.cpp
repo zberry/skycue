@@ -180,8 +180,9 @@ std::string convertOldConf(const std::string& old_text, const std::string& name,
     // old key -> literal; the dotted keys it lands on
     std::map<std::string, std::string> values;  // dotted key -> TOML literal
     for (const auto& [old_key, a] : last) {
+        const std::string& key = old_key;
         const auto m = std::find_if(mappings().begin(), mappings().end(),
-                                    [&](const Mapping& x) { return old_key == x.old_key; });
+                                    [&](const Mapping& x) { return key == x.old_key; });
         if (m == mappings().end())
             fail(name, a.line, "unknown key " + old_key);
         const std::string lit = literal(*m, a, name);
@@ -212,8 +213,9 @@ std::string convertOldConf(const std::string& old_text, const std::string& name,
     // template (empty position) has main-file keys and stays a main file.
     bool overrides_style = true;
     for (const auto& [old_key, a] : last) {
+        const std::string& key = old_key;
         const auto m = std::find_if(mappings().begin(), mappings().end(),
-                                    [&](const Mapping& x) { return old_key == x.old_key; });
+                                    [&](const Mapping& x) { return key == x.old_key; });
         if (std::find(live.begin(), live.end(), m->key) == live.end())
             overrides_style = false;
     }

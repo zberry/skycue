@@ -76,6 +76,12 @@ jobs:
           ctest --test-dir build -R '^static_analysis$' --output-on-failure | tee build/ctest.log
           grep -q ' Passed ' build/ctest.log
           if grep -q -i 'skipped' build/ctest.log; then exit 1; fi
+      - name: cppcheck
+        # The ctest entry runs clang-tidy alone; cppcheck uses the same configured tree.
+        run: |
+          set -o pipefail
+          scripts/dev/run-static.sh --cppcheck-only --build-dir build/tests/static-analysis | tee build/cppcheck.log
+          tail -n 1 build/cppcheck.log | grep -q 'cppcheck=0$'
       - name: ccache statistics
         if: always()
         run: ccache -s

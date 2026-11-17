@@ -25,8 +25,8 @@ a pass: ctest reports it with `SKIP_RETURN_CODE 77`, and a runner's exit 77
 is not 0.
 
 Suppressions, each with its reason beside it. Today there are the four
-cppcheck entries and 45 clang-tidy `NOLINT` comments in the source
-(`git grep -c NOLINT | awk -F: '{s+=$NF} END{print s}'`), plus the
+cppcheck entries and the clang-tidy `NOLINT` comments in the source (count them with
+`git grep -c NOLINT -- '*.cpp' '*.hpp' | awk -F: '{s+=$NF} END{print s}'`), plus the
 checks turned off in `.clang-tidy`; TSan, LSan and fuzzing need
 none:
 

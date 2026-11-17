@@ -216,7 +216,7 @@ std::string updateLine(bool json, const Track& t)
                   ",\"mte\":" + ((ra.flags & 0x20) ? "true" : "false") + "}",
               std::string("ra=") + (act ? "active" : "inactive") + ":0x" + [&] {
                   char buf[8];
-                  std::snprintf(buf, sizeof buf, "%04X", static_cast<unsigned>(ra.ara));
+                  (void)std::snprintf(buf, sizeof buf, "%04X", static_cast<unsigned>(ra.ara));
                   return std::string(buf);
               }());
     }

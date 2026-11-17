@@ -541,7 +541,7 @@ std::string leadingKey(const std::string& message)
     const auto end = message.find_first_of(": ");
     if (end == std::string::npos)
         return "";
-    const std::string head = message.substr(0, end);
+    std::string head = message.substr(0, end);
     for (const auto& spec : keySpecs())
         if (head == spec.key)
             return head;
@@ -589,9 +589,11 @@ ApiResponse putConfigRoute(const std::string& body, RuntimeConfig& rc)
     try {
         const ConfigApplyResult r = rc.applyConfig(set, clear, "ui");
         std::vector<std::string> applied;
+        applied.reserve(r.applied.size());
         for (const auto& k : r.applied)
             applied.push_back(jsonString(k));
         std::vector<std::string> external;
+        external.reserve(r.external.size());
         for (const auto& k : r.external)
             external.push_back(jsonString(k));
         return reply(200, JsonWriter()

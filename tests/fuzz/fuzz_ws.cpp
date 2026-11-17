@@ -13,7 +13,7 @@
 // -rss_limit_mb catches an allocation sized from a hostile length. Only the
 // ephemeral port the server was given is used.
 
-#include "../tests/test_slow.hpp"
+#include "test_slow.hpp"
 #include "api_stub.hpp"
 #include "fuzz_util.hpp"
 #include "web_server.hpp"

@@ -84,7 +84,8 @@ function(skycue_add_fuzzer name)
     message(FATAL_ERROR "skycue_add_fuzzer(${name}): SOURCES is required")
   endif()
   add_executable(fuzz_${name} ${_fz_SOURCES})
-  target_include_directories(fuzz_${name} PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
+  target_include_directories(fuzz_${name} PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz
+    ${PROJECT_SOURCE_DIR}/tests)  # test_slow.hpp, conf_support.hpp
   target_link_libraries(fuzz_${name} PRIVATE skycued_core ${_fz_LIBS})
   target_link_options(fuzz_${name} PRIVATE -fsanitize=fuzzer)
   set_target_properties(fuzz_${name} PROPERTIES

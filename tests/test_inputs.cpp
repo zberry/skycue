@@ -1355,10 +1355,11 @@ std::string fileWith(const std::vector<InputDef>& inputs, const std::vector<Outp
 
 // A Hub on the manager's io thread, fed the way main.cpp feeds it.
 struct HubWire {
+    IoThread& t;
     std::unique_ptr<Hub> hub;
     std::atomic<int> callbacks{0};
 
-    HubWire(Mgr& m, IoThread& t)
+    HubWire(Mgr& m, IoThread& thread) : t(thread)
     {
         t.call([&] { hub = std::make_unique<Hub>(t.io); });
         m.on([&](InputManager& im) {
@@ -1370,7 +1371,8 @@ struct HubWire {
             return 0;
         });
     }
-    ~HubWire() = default;
+    // Listeners and the fanout are io-thread objects: stopping them from this thread races an accept in progress.
+    ~HubWire() { t.call([this] { hub.reset(); }); }
     std::optional<skycued::OutputState> find(Mgr& m, const std::string& id)
     {
         return m.on([&](InputManager&) { return hub->find(id); });

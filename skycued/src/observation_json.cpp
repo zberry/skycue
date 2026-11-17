@@ -112,7 +112,7 @@ std::optional<AcasRaState> parseAcasRa(const JsonObject& o)
             auto h = a ? parseHexAddress(*a) : std::nullopt;
             if (!h)
                 return std::nullopt;
-            ra.threat_address = *h;
+            ra.threat_address = h;
         }
         if (t->has("alt_ft")) {
             auto v = t->getInt("alt_ft");

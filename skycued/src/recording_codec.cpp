@@ -179,7 +179,7 @@ bool getNavModes(const JsonObject& j, const char* k, Obs& o)
     auto v = parseNavModes(j, k);
     if (!v)
         return false;
-    o.*M = *v;
+    o.*M = v;
     return true;
 }
 

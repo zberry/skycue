@@ -451,7 +451,7 @@ How the clang-tidy and cppcheck findings were settled:
 | `bugprone-implicit-widening-of-multiplication-result` | 13 constants (option); 2 fixed: `device_time.cpp` hours and minutes multiplied in `int64_t` |
 | `performance-unnecessary-value-param` | 12 fixed (resolver results and strings by `const&`); 1 NOLINT, `ObservationSource::onUplink`'s default no-op; 2 more found once the listener `Impl`s took `const&`, fixed |
 | `performance-inefficient-vector-operation` | fixed: `reserve()` |
-| `bugprone-exception-escape` | 3 fixed: `skycued`, `skycue-rawrec` and `skycue-pingsim` `main()` catch what escapes (`io.run()` rethrows a handler's exception) and exit 1 with a message instead of `terminate()`; 5 NOLINT, the destructors of `Client`, `Forwarder`, `InputManager`, `StatusPoller` and `RuntimeConfig` (a throw from asio's cancel/close or a join there is a broken process, and terminate is right) |
+| `bugprone-exception-escape` | 3 fixed: `skycued`, `skycue-rawrec` and `skycue-pingsim` `main()` catch what escapes (`io.run()` rethrows a handler's exception) and exit 1 with a message instead of `terminate()`; 10 NOLINT, the destructors of `Client`, `Forwarder`, `InputManager`, `StatusPoller`, `RuntimeConfig`, `Engine`, `WebServer` and the `skycue-pingsim` and `skycue-rawplay` outputs (a throw from asio's cancel/close or a join there is a broken process, and terminate is right) |
 | `bugprone-assignment-in-if-condition` | fixed: `parseHostPort` assigned before the test |
 | `performance-inefficient-string-concatenation` | check off (error messages) |
 | `bugprone-optional-value-conversion` | fixed: the optional assigned, not `*opt` |

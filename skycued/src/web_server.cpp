@@ -712,6 +712,7 @@ WebServer::WebServer(boost::asio::io_context& io, Engine& engine, RuntimeConfig&
 {
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
 WebServer::~WebServer() { impl_->stop(); }
 
 void WebServer::start() { impl_->start(); }

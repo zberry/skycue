@@ -245,6 +245,7 @@ public:
             dialer_->onFailure([this](const std::string& why) { LOG_WARN(name_ << ": " << why << "; retrying"); });
         });
     }
+    // NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
     ~DialOut() override { shutdown(); }
 
     void open() override
@@ -337,6 +338,7 @@ public:
             listener_->start();
         });
     }
+    // NOLINTNEXTLINE(bugprone-exception-escape): a throw here is a broken process (asio's throwing cancel or close, a failed join), and terminate is the right end for it
     ~ListenOut() override { shutdown(); }
 
     void open() override

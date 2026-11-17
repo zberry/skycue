@@ -22,3 +22,8 @@ invalidFunctionArg:*/tools/iqgen/iq_writer.cpp
 # False positive: Destination::id is a std::string; cppcheck reads the cue library's
 # destination type as a pointer and the OutputDef id as an integer.
 AssignmentAddressToInteger:*/skycued/src/hub/hub.cpp
+
+# False positive (cppcheck 2.19): Reader::f32 copies sizeof(float) bytes between a
+# float and a uint32_t, which are both four bytes; cppcheck reports both
+# arguments of that memcpy as out of bounds.
+bufferAccessOutOfBounds:*/libskycue/src/protocol.cpp

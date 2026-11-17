@@ -24,7 +24,7 @@ Every runner and every ctest here tells a missing tool from a failure:
 a pass: ctest reports it with `SKIP_RETURN_CODE 77`, and a runner's exit 77
 is not 0.
 
-Suppressions, each with its reason beside it. Today there are the four
+Suppressions, each with its reason beside it. Today there are the
 cppcheck entries and the clang-tidy `NOLINT` comments in the source (count them with
 `git grep -c NOLINT -- '*.cpp' '*.hpp' | awk -F: '{s+=$NF} END{print s}'`), plus the
 checks turned off in `.clang-tidy`; TSan, LSan and fuzzing need
@@ -434,7 +434,7 @@ expressions such as `64 * 1024`.
 Suppressions: inline `// NOLINTNEXTLINE(<check>): <reason>` for clang-tidy,
 and an `<id>:<file>` entry under a `# <reason>` line in
 `.cppcheck-suppressions` for cppcheck (no inline cppcheck
-suppressions). The four cppcheck entries are structural false positives,
+suppressions). The cppcheck entries are structural false positives,
 so they name the file but no line, and do not go stale when the file is
 edited.
 

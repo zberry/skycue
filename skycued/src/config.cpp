@@ -939,7 +939,7 @@ std::map<std::string, std::string> exampleComments(const std::string& example_te
 {
     std::map<std::string, std::string> out;
     std::string table, block;
-    const auto trim = [](std::string t) {
+    const auto trim = [](const std::string& t) {
         const auto b = t.find_first_not_of(" \t\r");
         if (b == std::string::npos)
             return std::string();
